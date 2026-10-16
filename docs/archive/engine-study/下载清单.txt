@@ -1,0 +1,70 @@
+====================================================================
+GitHub 引擎渲染优化考察 · 代码下载直链清单 (2026-09-01 v3 终版, 10条全验证)
+====================================================================
+用法: 整行复制 -> 粘贴到 PCL2 新建下载任务即可, 无需打开 GitHub。
+      全部是 GitHub 官方 codeload 打包服务直链, 无需登录。
+      每条已实测 HTTP 200, 服务器下发文件名已列在各条后面。
+
+存放: D:\my-project\_engine_study\<仓库名>\ (每个仓库独立子目录)
+说明: 之前下载名乱/失败根因 = 本机 hosts 把 codeload/github API 映射到了
+      错误 IP (都指向网页层 .166), 已修正: codeload→.165, api→.168。
+      现在 PCL2 直接下即可, 正常应得到下列标准文件名。
+
+【下载直链 (按考察优先级排序)】
+
+1. Panda3D  (~300MB, 3D 引擎 Python API + C++ 内核: 剔除/状态排序/Geom合批)
+https://codeload.github.com/panda3d/panda3d/zip/refs/heads/master
+   正常文件名: panda3d-master.zip
+
+2. Arcade  (<50MB, 纯 Python SpriteList GPU 批处理/脏标志分类提交)
+https://codeload.github.com/pythonarcade/arcade/zip/refs/heads/master
+   正常文件名: arcade-master.zip
+
+3. Ren'Py  (~200MB, 纯 Python 渲染树缓存/每帧开销压制/差分状态缓存)
+https://codeload.github.com/renpy/renpy/zip/refs/heads/master
+   正常文件名: renpy-master.zip
+
+4. pyglet  (小, 域(domain)/顶点缓冲复用批处理, moderngl 同门)
+https://codeload.github.com/pyglet/pyglet/zip/refs/heads/master
+   正常文件名: pyglet-master.zip
+
+5. Kivy  (C 层指令组批处理/VBO 位标志脏标记)
+https://codeload.github.com/kivy/kivy/zip/refs/heads/master
+   正常文件名: kivy-master.zip
+
+6. moderngl  (小, Loom 在用 GL 包装库本体: buffer.write 零拷贝边界)
+https://codeload.github.com/moderngl/moderngl/zip/refs/heads/main
+   正常文件名: moderngl-main.zip   <- 注意此仓库分支是 main 不是 master
+
+7. moderngl-window  (小, 官方示例集: instancing/场景图教学)
+https://codeload.github.com/moderngl/moderngl-window/zip/refs/heads/master
+   正常文件名: moderngl-window-master.zip
+
+8. wasabi2d  (小, numpy 镜像缓冲直写+层级脏集合, 与 Loom 技术栈最同源)
+https://codeload.github.com/lordmauve/wasabi2d/zip/refs/heads/master
+   正常文件名: wasabi2d-master.zip
+
+9. Ursina  (小, Panda3D 之上 Python 生态: 懒更新/缓存设计)
+https://codeload.github.com/pokepetter/ursina/zip/refs/heads/master
+   正常文件名: ursina-master.zip   <- 注意是 pokepetter 不是 ursinaengine (旧名404)
+
+10. cocos  (小, 备选, 2D 老框架基本无可借鉴项)
+https://codeload.github.com/los-cocos/cocos/zip/refs/heads/master
+   正常文件名: cocos-master.zip    <- 注意是 los-cocos 不是 cocos2d (旧名404)
+
+====================================================================
+建议: 没时间全下就下 1/2/3 (Panda3D / Arcade / Ren'Py, 三种范式代表);
+      6/7/8 都很小 (每个几 MB), 顺手下了也好。
+下载后解压到 D:\my-project\_engine_study\<仓库名>\ , 告诉我一声,
+考察代理切读本地源码模式直接分析。
+====================================================================
+
+【附: 各仓库重点看的目录 (供参考, 不影响下载)】
+  Panda3D : panda/src/pgraph/ (剔除/场景图)  panda/src/gobj/ (Geom合批)
+            direct/src/showbase/ (Python层每帧调度)
+  Arcade  : arcade/gl/ + arcade/sprite_list/ (SpriteList GPU 缓冲/脏标记)
+  Ren'Py  : renpy/display/render.py + core.py (渲染树缓存/帧预算)  renpy/gl2/
+  pyglet  : pyglet/graphics/ (domain/顶点列表缓冲复用)
+  Kivy    : kivy/graphics/ (指令组批处理)
+  moderngl: src/moderngl/ (buffer.write 内部实现/zero-copy 边界)
+====================================================================

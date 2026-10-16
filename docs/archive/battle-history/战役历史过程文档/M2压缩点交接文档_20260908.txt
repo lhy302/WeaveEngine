@@ -1,0 +1,241 @@
+====================================================================
+Loom DLL 化战役 — 上下文压缩点交接文档 (2026-09-08 第 8 轮)
+====================================================================
+用途: 本文件是**压缩上下文前的完整状态快照**。恢复时先读本文, 再按 §6 动作执行。
+修订: 2026-09-09 (R3 数字统一回填) — 本文为历史快照, 修订处逐处标注
+      「（2026-09-09 R3 回填）」; 性能数字以产物 json 为唯一权威源,
+      权威值见 M2_权威数字表_20260908.md。§0 审计原文按快照保留, 未回填。
+配套文档(按需读):
+  · M2设计文档_pipeline_20260908.txt        接口契约与架构裁决
+  · M2验收报告_pipeline_20260908.txt        验收状态与实测数据
+  · M2验收2判定依据与M2b范围裁决_20260908.txt  ★验收② 不可达的论证
+  · M2b可行性评估_culverin_ABI_20260908.txt   ★物理侧三方案评估(推翻旧假设)
+  · M2b编译版重编调研_20260908.txt          打包链路与重编步骤
+  · M2暂停点交接文档_20260908.txt           上一暂停点(部分内容已被本文更新)
+
+====================================================================
+0. ★★ 重启后优先修复 (第 11 轮审计发现, 见 M2交付审计_20260908.txt) ★★
+====================================================================
+审计结论: 结构完整性通过(交付物齐备 / registry↔DLL 一致 4/4 / 编译版投放达标),
+但**证据链有 17 处问题(4 严重)**。四项严重问题如下, 重启后**先修这些再谈收口**:
+
+P1 [严重] ② 的 A/B 证据链断裂 —— ★已被产物反证
+   tests\_tmp 只有 editor_core_on.json, **无 editor_core_off.json**(被清理);
+   而该 ON 产物实测值 = **核0 65.37% / 主线程 65.02% / 8.128 ms/帧 / FPS 80 /
+   total_core 211.59%**(editor_core_on.json:4-89, mtime 20:54:15)
+   与五份文档共用的 A/B 行 (66.2 / 62.7 / 8.038 / 78 / **379%**) **全部不符**;
+   且 211.59% **低于基线 227%** → 「并行度翻倍(379% vs 227%)」这一结论
+   **无物证且被产物反证**, 必须作废。
+   修复: 重跑 `py -3.12 tests\_tmp\editor_core_check.py --both --secs 12`
+   (生成 editor_core_on.json + editor_core_off.json, **不要再删**);
+   以 json 为唯一权威源回填全部文档; 并重新评估"并行度"结论是否成立。
+
+P2 [严重] ③ 的 ON 档无物证
+   compiled_verify.py:19,110-111 固定写同一 json 且无 LOOM_NO_PIPELINE 分支
+   → 现存产物只对应 **OFF 档 (66.5/62)**; "ON 72.0/min 67 (+8.3%)"不可复现。
+   且 ③ 编译版 FPS **无任何探针覆盖**。
+   修复: 跑两次并分别保存(_on.json / _off.json), 或把 ON/OFF 对比做成探针。
+
+P3 [严重] 报告仍引用已作废数字
+   M2验收报告:99 与 M2设计文档:149 仍列「主线程 6.64→5.20 / -21.7%」,
+   台账已判定该口径为采样噪声作废。另: M2验收报告:43 帧时间方向写反。
+   修复: 删除/改写这些处, 统一用 editor_core json 的权威数字。
+
+P4 [严重] ② 无判定闸
+   percore_check.py:236-242 / editor_core_check.py:99-101 **均无 核0≤45% 断言**
+   → 全仓无自动判定 ② 的机制, 却按"经论证不可达"收口。
+   修复: 把 editor_core_check --both 升级为带判据的探针(输出 PASS/FAIL), 纳入 build_all。
+
+★另有两处必须一并修正的数字错误:
+  · registry.json 哈希: 文档写 fc9167404e5f9de3, **实测 E04C68A71ACB5E2C**;
+  · 探针数: 文档 15 vs 实际 17(启用)+1(注释); D 缺陷编号 5 vs 7(D6/D7 在
+    验收报告中缺失)。
+  （2026-09-09 R3 回填: 两处均已闭合 —— registry.json 现行实测
+    A95BED16169495D0FE8EC2217646CBAA8433028853DB1FED21030729BC486E3E
+    (2091 B, E04C68A7… 为 1819 B 旧产物); 探针数定为 **19**;
+    缺陷 D1-D7 **共 7 个**。见 M2_权威数字表_20260908.md §四/§五。）
+
+中等/轻微问题(8 + 5 处)见 M2交付审计_20260908.txt §三; 主要是同一指标在
+5 份文档里有 4 套数字 → 需以**产物 json** 为唯一权威源做一次数字统一。
+
+另外两条建议(审计 §四):
+  · registry.json 三条目 sha256 仍为空串 → 填实可获得真实完整性校验;
+  · 投放校验建议改用"导出符号+关键字符串+大小"而非仅哈希。
+
+--------------------------------------------------------------------
+1. 一句话状态
+--------------------------------------------------------------------
+M2 (pipeline.dll) 交付面**已完成并全绿**: 5 DLL + 19 探针 build_all EXIT=0。
+（2026-09-09 R3 回填: 探针数 17→19, 见 M2_权威数字表_20260908.md §五。）
+验收 ①③④⑤ 达成; ② (核0 ≤45%) **经论证在当前架构不可达**(非 M2 搬移范围)。
+D5 缺陷已修复。编译版**正在重编**(子代理 477795ab-7a8c-4f37-92da-54f5827fb5bd)。
+
+--------------------------------------------------------------------
+2. M2 交付物 (全部落盘, 已实测)
+--------------------------------------------------------------------
+[C 侧] core_components\loom_pipeline.h        契约 (LOOM_LIGHT / 6 函数)
+       core_components\pipeline\loom_pipeline.c  实现
+       core_components\pipeline\build_pipeline.bat
+       core_components\pipeline\pipeline.dll    产物
+       ★提供 4 接口: pipeline.light_vps / scene_bounds / aabbs / world_matrices
+         （2026-09-09 R3 回填, P12: 与 DLL 导出 6 个 pipeline_ 前缀符号的差额
+          —— `shadow_prep` / `mat4_mul_ref` —— 为内部/参考导出, 不按接口名寻址;
+          物证 tests\_tmp\verify_release.py 导出符号 13/8/10 明细。）
+[基座] pipeline_glue.py (句柄缓存/数据搬运/逃生门/静默降级)
+       engine.py: _pipeline_light_vps() + _compute_light_vps 优先走 DLL;
+                  compute_world_matrices 静止缓存未命中时优先走 DLL
+[注册表] core_components\registry.json — 3 官方条目 (module_ref/ckernels/pipeline)
+         自身哈希 2091 B / A95BED16169495D0FE8EC2217646CBAA8433028853DB1FED21030729BC486E3E
+         （2026-09-09 R3 回填: 旧值 1819 B / E04C68A71ACB5E2C… 已作废, 见 §0 注与
+           M2_权威数字表_20260908.md §四。）
+[对拍网 tests\_tmp — 17 个, 全 ALL PASS]
+  （2026-09-09 R3 回填: 当前 build_all 活跃探针 **19** 个 = 17 原有 +
+    editor_core_check.py --both + compiled_verify.py --both;
+    见 M2_权威数字表_20260908.md §五。）
+  M1 期: ckernels_val / ckernels_e2e / collide_val / aabb_f32 / accept1_e2e(6) /
+         module_contract(29) / module_registry(36) / module_fuzz(20) /
+         pipeline_prep(60) / crash_reporter(9)
+  M2 期: pipeline_val(15) / pipeline_base(15) / engine_pipeline(8) /
+         pipeline_fuzz(33) / pipeline_world(7) / pipeline_e2e(11) / percore(4)
+  可选(较重): editor_core_check.py --both --secs 12  (2026-09-09 R4 更正: 已纳入 build_all 第 19 个活跃探针, 非「注释」状态)
+[构建] build_all.bat: 5 DLL 编译 + 19 探针 (EXIT=0 才算过)
+       （2026-09-09 R3 回填: 17→19, 见 M2_权威数字表_20260908.md §五。）
+
+--------------------------------------------------------------------
+3. 验收状态 (总纲 §六 M2 五条)
+--------------------------------------------------------------------
+[√] ① 端到端 100 逻辑帧对拍 — pipeline_e2e_check 11/11
+      501 模型双光源, 两模式进程隔离; AABB/碰撞对逐帧一致(碰撞对逐位),
+      光源 VP 数值摘要 worst_rel=0
+[✗] ② 每核负载 (核0 67%→≤45%) — **不可达, 已定量论证**
+      同基线口径实测 (editor_core_check.py --both --secs 12, 混合500 稳态 12s,
+      n=3 均值): ON 最高核 71.45% / 主线程 65.32% / 主线程 8.753 ms/帧 / FPS 74.67 /
+      total_core 241.65%; OFF 最高核 66.61% / 主线程 64.17% / 9.532 ms/帧 /
+      FPS 67.67 / total_core 264.46%。
+      `[GATE-ACCEPT2]` 三轮全 FAIL (66.06/68.64/79.66); `[GATE-REGRESSION]` 三轮全 PASS。
+      产物: tests\_tmp\editor_core_{on,off,verdict}_r{1,2,3}.json
+      硬账 (按权威均值重算): 最高核 71.45% = 71.45 × (1000/74.67) = 9.569 ms/帧;
+      目标 45% = 45 × (1000/74.67) = 6.027 ms/帧 → 需降 3.542 ms/帧;
+      而主线程自身 8.753 ms/帧已超目标 6.027 ms/帧 → 主线程至少需降 3.542 ms/帧
+      (8.753 → ≤5.211; 该核其余负载 = 9.569 − 8.753 = 0.816 ms/帧)。
+      （2026-09-09 R3 回填: 原 ON 核0=66.2% / 主线程 62.7% / 8.038 ms/帧 / FPS 78
+        与 OFF 核2=67.9% / 65.7% / 8.762 ms/帧 / FPS 75, 及其派生硬账
+        8.487 / 5.769 / 2.718 / ≈5.0 ms/帧, **全部作废** —— 三轮无一复现,
+        见 M2_权威数字表_20260908.md §一。原换算口径亦为「核0」, 权威口径为
+        「最高核 busy%」。）
+      culverin 评估: 方案 A(重编 Jolt+C ABI) 收益 ≈0-0.2ms(物理三段早已在
+      子线程); B(外包主线程残余) -0.6~-2.0ms → 最高核 约 56-67% (2026-09-09 R4 更正: 原「核0 51-62%」由作废锚点 66.2% 外推, 按权威锚点 71.45% 重算)
+      (口径: M2b可行性评估_culverin_ABI_20260908.txt 三方案推算, 非实测);
+      C(IPC) ≈0-0.3ms。
+      **三案单独或组合都到不了 45%**; 杠杆在 Qt 事件循环+GL 提交+Python 胶水
+      (~7.4ms/帧, 口径: 旧 8.038 ms 主线程账反推, 已随该行作废, 仅存方向性结论),
+      属 M3 渲染层。
+[√] ③ FPS — 编辑器口径 (editor_core_check.py --both --secs 12, 混合500 稳态 12s,
+      n=3 均值) ON 74.67 vs OFF 67.67; PlayerApp 口径 (percore_check.py 300 帧)
+      ON 53.1 vs OFF 49.9; 编译版口径 (compiled_verify.py --both, TPS20 混合500)
+      ON 74.1 vs OFF 69.1 (+7.2%, `[GATE-FPS]` PASS)。
+      （2026-09-09 R3 回填: 原「编辑器口径 78 vs 75 (+4%)」与「PlayerApp 52.2 vs 50.7」
+        无物证/未标口径 → 已作废; 物证 editor_core_verdict_r{1,2,3}.json /
+        percore_console_crosscheck.log / compiled_verify_ab.json。
+        三口径样本量/场景不同, **不得并列成同一 A/B 结论**。）
+[√] ④ 全量回归 EXIT=0 — 5 DLL + 19 探针（2026-09-09 R3 回填: 17→19）
+[√] ⑤ 坏注入自愈 — pipeline_fuzz_check 33/33
+
+--------------------------------------------------------------------
+4. 本轮(第 5-8 轮)新完成的事
+--------------------------------------------------------------------
+· D5 修复 (vis_idx 越界): loom_pipeline.c 越界下标如实返回 LOOM_ERR_PARAM(-2),
+  不再吞成 rc=0/kind=-1; 退化方向语义保持 rc=0/kind=-1。实测:
+  合法[0,2,4]→rc=0/kind=0; 越界[0,2,99]→rc=-2; 负[-1,2]→rc=-2; 退化→rc=0/kind=-1。
+  pipeline_fuzz_check 断言收紧为必须 rc==ERR_PARAM; 5 个 pipeline 探针全 EXIT=0。
+· 验收② 判定依据固化 (M2验收2判定依据与M2b范围裁决_20260908.txt)
+· culverin 三方案评估 (M2b可行性评估_culverin_ABI_20260908.txt) — 关键发现:
+  物理 pre/step/post 早已在物理子线程(physics_pipe.py:63-69), 主线程只剩
+  投递/wait(不占 CPU)/prep 编排 → 推翻"物理 ABI 包装能降 1-2ms"的旧假设。
+· 编译版重编调研 (M2b编译版重编调研_20260908.txt) — 打包命令/重投清单/靶排除/
+  S1-S5 步骤; 发现旧产物缺 module.pipeline_glue.c, 需 --include-module。
+· 编译版重编**执行中**(见 §5)。
+
+--------------------------------------------------------------------
+5. 编译版重编 — **已完成** (第 9 轮)
+--------------------------------------------------------------------
+★第 9 轮纠错: 子代理(477795ab)的 Nuitka 命令**缺少 --nofollow-import-to=numba**
+  → 实测编译目录生成 module.numba.*.obj (11 分钟未出 dist), 命中风险 R2。
+  已中断该子代理 + 杀进程, 主线程用正确命令重跑, 成功。
+★第 9 轮二次纠错: `--include-module=module_registry` 报
+  "failed to locate module"(它在 core_components 子目录, 非源码根)
+  → 去掉 --include-module, 让 Nuitka 跟随 engine.py 的 import 自动编译
+  (实测产物含 module.pipeline_glue.c, 已生效)。
+
+最终命令 (可复现):
+  cd "D:\my-project\Loom(py源代码-工作区)\Loom"
+  py -3.12 -m nuitka --standalone --msvc=latest --assume-yes-for-downloads \
+    --windows-console-mode=disable --output-dir=Loom_build \
+    --output-filename=Loom.exe --nofollow-import-to=numba build_entry.py
+
+产物与投放:
+  · dist\Loom.exe = 27504640 B (20:41:56); dist 112 文件; **无 numba/llvmlite**
+  · 组装: py -3.12 tests\_tmp\assemble_release_0906.py (已加 pipeline_glue.py 投放)
+  · 编译版: 233 文件; core_components 7 文件
+    （2026-09-09 R3 回填, P14: 7 文件中 **实质交付 5 个**, 另 2 个为
+      `__pycache__` 缓存（.pyc）; 见 M2_权威数字表_20260908.md §四。）
+  · 可复现构建（/Brepro）下哈希稳定 + 导出符号/关键字符串/大小校验:
+    - 命令: `cl /nologo /utf-8 /O2 /Brepro /LD /MD`（已加入 5 个 build bat）;
+      连续两轮重编 5 DLL 的 SHA256 全一致（无 /Brepro 时两次不同）。
+    - 可复现构建 5 DLL 的 SHA256（物证 M2_权威数字表_20260908.md §四）:
+      pipeline.dll 20480 B `902D5F29E2B952F4D05B280C4BE2F7CCC57336D786474F85AAD7BE8C18433329`;
+      module_ref.dll 10240 B `3CF5FC9CFC1CABE97306ED308035B358FE9A11E5D43EA6F578A2C5262734B793`;
+      loom_kernels.dll 16896 B `DF810FC5652EE238D020C448B2C6E06DCE745A2B59ACB2542F37A26D1D45D37B`;
+      registry.json 2091 B `A95BED16169495D0FE8EC2217646CBAA8433028853DB1FED21030729BC486E3E`。
+    - 投放判据: `py -3.12 tests\_tmp\verify_release.py` → **7 PASS / 0 FAIL**
+      （导出符号 13/8/10 + module_id 字符串 + 大小; DLL SHA256 降为 INFO）。
+    - 物证: tests\_tmp\verify_release.py 输出、M2b_Brepro落地与registry钉扎_20260908.txt、
+      M2_权威数字表_20260908.md §四。
+    （2026-09-09 R3 回填: 原「SHA256 一致性 5/5 PASS」按可复现构建 + 导出符号
+      口径改写, 见 _R3改写规则包_20260909.md §二。）
+  · 靶排除自检 PASS (无 badvector.dll / ambiguous.dll)
+  · LoomHub 保留未动; 备份在 D:\my-project\Loom(编译版)_备份_20260908 (225 文件)
+
+★编译版内 pipeline 生效实证 (compiled_verify.py --both, TPS20 混合500;
+  产物 tests\_tmp\compiled_verify_{on,off,ab}.json):
+  pipeline ON : FPS mean **74.1** / min 54 / tps_mean 20.11 / jit_std_mean 10.75
+  pipeline OFF: FPS mean **69.1** / min 62 / tps_mean 20.14 / jit_std_mean 11.52
+                (LOOM_NO_PIPELINE=1)
+  ⇒ **+5.0 FPS (+7.2%)**, `[GATE-FPS]` PASS (ON ≥ OFF), both_valid=true, exit 0。
+  硬旁证 (stage_times): ON 档**无** `shadow_matmul`(OFF 1140.58 ms)/
+  `shadow_cornerfill`(OFF 477.86 ms); `shadow_prep` 3100.35 → 2105.29 ms (-32.1%)。
+  偏差如实记录: ON `fps_min` 54 < OFF 62 (第 12 采样点单点离群); `compiled_play_*.png` 未生成。
+  （2026-09-09 R3 回填, P2: 原「ON 72.0 / min 67 vs OFF 66.5 / min 62 (+8.3%)」
+    无物证 —— 旧产物只有 OFF 档 66.5/62 —— **已作废**, 以本行为准;
+    见 M2_权威数字表_20260908.md §三。）
+
+--------------------------------------------------------------------
+6. 恢复动作 (压缩后第一步)
+--------------------------------------------------------------------
+1. 读本文 §2-§5。编译版重编**已完成**(见 §5), 无进行中的后台任务。
+2. 跑 `build_all.bat` 确认 D5 修复后全量仍 EXIT=0 (5 DLL + 19 探针)。
+   （2026-09-09 R3 回填: 17→19。）
+3. 向用户汇报并请决策验收② 的定标(三选一):
+   a) 重新定标为「主线程每帧 CPU ≤6.027ms」(2026-09-09 R4 更正: 原「≤5.8ms」基于作废 1000/78=12.821; 权威 45% × 13.392 = 6.027) 或「进程并行度 ≥N 核当量」
+      （2026-09-09 R3 回填: 原「ON 档 379% vs 基线 227%」**已作废** ——
+        实测反证: ON total 均值 241.65% < OFF 264.46%, 且 ON 自身 s=53.69pt,
+        「并行度翻倍」不成立; 见 M2_权威数字表_20260908.md §一。）
+   b) 保持 45% 目标 → 转 M3 渲染层立项(Qt/GL 提交外包)
+   c) 接受当前状态, M2 按「①③④⑤ 达成 + ② 书面转出」收口
+4. 可选下一步(M2b 方案 B 第一步): 主线程 8.753ms 逐段归因 —
+   （2026-09-09 R3 回填: 原 8.038ms 已作废, 权威值 ON n=3 均值 8.753 ms/帧,
+     editor_core_check.py --both --secs 12 口径。）
+   用 LOOM_PROFILE/_stage_times + 在 Qt 事件循环/GL 提交处补点, 并同采样
+   loom-physics 线程 ms/帧; 判据: 已 nogil 且非 Qt/GL 锁死段 ≥1.5ms 才按 B 外包。
+
+--------------------------------------------------------------------
+7. 复现命令
+--------------------------------------------------------------------
+全量: cd /d "D:\my-project\Loom(py源代码-工作区)\Loom" && build_all.bat
+单探针: py -3.12 "tests\_tmp\<探针>.py"
+编辑器口径每核: py -3.12 "tests\_tmp\editor_core_check.py" --both --secs 12
+逃生门: set LOOM_NO_PIPELINE=1 / set LOOM_NO_DLL=pipeline
+编译版重编: 见 M2b编译版重编调研_20260908.txt §四
+====================================================================
+(压缩点交接文档完)
+====================================================================

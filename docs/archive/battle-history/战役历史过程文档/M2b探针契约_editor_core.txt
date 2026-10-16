@@ -1,0 +1,155 @@
+# M2b 探针契约 — editor_core_check.py (M2 验收② 判定闸)
+生成时间: 2026-09-08  (UTF-8, 无 BOM)
+探针路径: tests\_tmp\editor_core_check.py
+解释器:   py -3.12     工作目录 ROOT = Loom 引擎根 (含 Loom.py / tests\)
+口径:     Loom.py --open 混合500 --agent → play on → 稳态 12s 采样
+          (每核 busy% = parallel.measure_core_busy; 每线程 CPU = GetThreadTimes 增量;
+           FPS = agent engine_metrics) —— 与历史版本逐行一致, 本版只加"证据链 + 判定闸"。
+
+====================================================================
+1. 命令行用法
+====================================================================
+# ① A/B 验收模式 (推荐给 build_all / 验收判定)
+py -3.12 tests\_tmp\editor_core_check.py --both [--secs 12] [--strict-accept2]
+
+# ② 单档测量 (--both 的子进程就是用它; 也可单独跑)
+py -3.12 tests\_tmp\editor_core_check.py [--off] [--secs 12]
+
+参数:
+  --both            依次跑 on / off 两档子进程, 落盘 3 个 json, 打印判定行
+  --off             单档模式: 子进程设 LOOM_NO_PIPELINE=1 (Python 路径基线)
+  --secs N          采样窗秒数, 默认 12.0 (窗口语义不变)
+  --strict-accept2  仅 --both 生效: 验收② 未达标时退出码 1
+  --target N        验收② 上限, 默认 45.0 (build_all 不要传, 用默认)
+  --timeout N       单档子进程上限秒, 默认 600
+  -h / --help       打印用法
+未知参数只 WARN 忽略, 不中断 (避免接线方传参把回归打断)。
+
+====================================================================
+2. 落盘文件清单 (全部 ensure_ascii=False, indent=2, UTF-8)
+====================================================================
+tests\_tmp\editor_core_on.json        ON  档原始产物  (由 ON  子进程落盘)
+tests\_tmp\editor_core_off.json       OFF 档原始产物  (由 OFF 子进程落盘)
+tests\_tmp\editor_core_verdict.json   两档汇总 + 两项闸门判定 (仅 --both 落盘)
+tests\_tmp\editor_core_<mode>_loom.log  Loom.py 控制台输出 (诊断用; 不再用不读的 PIPE,
+                                      避免管道写满阻塞 Loom 主线程污染测量)
+
+★ 证据链保证 (修 P1):
+  · on/off 各自文件名带 mode, 互不覆盖; 探针全程不删除任何产物文件。
+  · 父进程在每档子进程结束后立刻校验: 文件存在 + json 可读 + mode 字段 == 该档 +
+    per_core 非空 + main_ms_per_frame/total_core/main_pct 为数值且 ms/帧 > 0。
+  · 陈旧文件保护: 产物 mtime 早于本次运行起点 (>5s) 判为陈旧文件 → FATAL 退出 1,
+    杜绝"拿上一轮 ON 产物当本轮证据"。
+  · 子进程即使测量失败也落盘 (带 "error" 字段) 并退 1, 不留"文件凭空消失"的坑。
+
+2.1 单档产物 editor_core_on.json / editor_core_off.json
+  mode               "on" | "off"
+  secs               采样窗秒数
+  ts                 该档落盘时间 ISO8601 本地时间
+  per_core           float[]  每核 busy% (顺序 = 核索引)
+  threads            [{tid, cpu_s, pct_of_core}] 前 12 个线程
+  fps                int|null
+  total_core         float    进程总核当量 × 100 (= sum(per_core))
+  main_pct           float    主线程(最大线程) 单核 %
+  main_ms_per_frame  float    主线程 ms/帧
+  top_core_index     int      实测最高核索引 (空数据 = -1)
+  top_core_pct       float    实测最高核 busy%
+  wall               float    实际采样墙钟秒
+  error              仅失败时存在, 字符串
+
+2.2 汇总产物 editor_core_verdict.json
+{
+  "ts": "2026-09-08T15:04:05",          // ISO8601 本地时间
+  "secs": 12.0,
+  "on":  { "mode":"on",  "fps":.., "per_core":[..], "total_core":..,
+           "main_pct":.., "main_ms_per_frame":..,
+           "top_core_index":.., "top_core_pct":.. },
+  "off": { "mode":"off", "fps":.., "per_core":[..], "total_core":..,
+           "main_pct":.., "main_ms_per_frame":..,
+           "top_core_index":.., "top_core_pct":.. },
+  "accept2":     { "metric":"core0_busy_pct", "target_max":45.0,
+                   "measured":<ON 档最高核 busy%>, "pass":<bool>, "note":".." },
+  "regression":  { "metric":"main_ms_per_frame", "on":.., "off":.., "pass":<bool> },
+  "parallelism": { "on_total_core":.., "off_total_core":..,
+                   "on_core_equiv":.., "off_core_equiv":.. },
+  // ---- 附加字段 (只增不改, 供审计) ----
+  "sampling_valid": <bool>,
+  "artifacts": { "on":"..", "off":"..", "verdict":".." },
+  "exit_policy": { "default":"regression", "strict_accept2":<bool> }
+}
+  · top_core_index / top_core_pct 一律由 per_core 数组如实算出, 不硬编码"核0";
+    若最高核不是 0, accept2.note 会点名"实测最高核为核N (非核0)"并附核0 实测值。
+  · accept2.measured 恒为 ON 档的最高核 busy% (保守判据: 最高核 ≥ 核0)。
+  · core_equiv = total_core / 100 (进程总核当量)。
+
+2.3 控制台可机读判定行 (前缀固定, 不得改动)
+[GATE-ACCEPT2] core0_busy=xx.xx%  target<=45.0%  -> PASS|FAIL
+[GATE-REGRESSION] main_ms_per_frame on=.. off=.. -> PASS|FAIL
+[SUMMARY] top_core=#N xx.xx%  total_core on=.. off=..  core_equiv on=.. off=..  fps on=.. off=..
+[SUMMARY-OFF] top_core=#N xx.xx%  main_ms_per_frame on=.. off=..
+[EXIT] policy=regression|regression+accept2  strict_accept2=on|off  exit_code=0|1
+末尾仍打印 "ALL PASS" / "FAILED" (兼容旧日志习惯)。
+
+====================================================================
+3. 两项闸门判据与退出码语义
+====================================================================
+闸门 A — 验收② (accept2)
+  判据: ON 档实测最高核 busy% ≤ 45.0   → accept2.pass
+  意义: M2 验收② 目标 (核0 busy% 从 67% 降到 ≤45%) 的唯一机读断言。
+
+闸门 B — 回归 (regression)
+  判据: 采样有效 且 ON 主线程 ms/帧 ≤ OFF 主线程 ms/帧 → regression.pass
+  意义: DLL 路径不得比 Python 路径的主线程每帧开销更差。
+
+采样有效 (sampling_valid) = 两档 per_core 非空 且 main_ms_per_frame > 0
+                            且 total_core ≥ 0 (缺文件/坏 json/字段缺失 → 直接 FATAL 1)。
+
+退出码 (--both):
+  0  采样有效 且 闸门 B PASS
+  1  子进程非 0 / 子进程超时 / 产物缺失或陈旧 / json 读取失败 / 字段缺失 / 闸门 B FAIL
+  加 --strict-accept2 时: 闸门 A 未达标也退 1 (仅供验收判定单独调用)。
+★ 默认(--both 无 --strict-accept2)退出码**只由闸门 B 决定**, 验收② 未达标**不会**让
+  build_all.bat 变 1 —— 保护验收④ "全量回归 EXIT=0"。
+★ 单档模式 (无 --both) 退出码: 测量成功 0, 失败 1。
+
+====================================================================
+4. 纳入 build_all.bat
+====================================================================
+4.1 应插入的调用行 (放在 [对拍清单] 末尾, 它最慢: 启动编辑器两次 ≈ 60~90s)
+
+REM ---- 编辑器基线口径每核 A/B + 验收② 闸门 (较重: 启动编辑器两次, 约 60~90s) ----
+call :run_check editor_core_check.py --both
+
+4.2 必须的配套改动: 现有 :run_check 只转发 %~1, 会丢掉 --both, 请改为转发 %2 %3
+   (单行, 无括号块, 不触发路径含括号的 bat 解析坑):
+
+:run_check
+echo.
+echo [build_all] ---- check %~1 %2 %3 ----
+py -3.12 "tests\_tmp\%~1" %2 %3
+if errorlevel 1 echo [build_all] CHECK FAILED: %~1 %2 %3
+if errorlevel 1 set CHECK_FAIL=1
+exit /b 0
+
+4.3 若不想动 :run_check, 用专用子例程 (等效):
+
+REM 清单里写:  call :run_editor_ab
+:run_editor_ab
+echo.
+echo [build_all] ---- check editor_core_check.py --both ----
+py -3.12 "tests\_tmp\editor_core_check.py" --both
+if errorlevel 1 echo [build_all] CHECK FAILED: editor_core_check.py --both
+if errorlevel 1 set CHECK_FAIL=1
+exit /b 0
+
+4.4 注意事项
+  · build_all 里**不要**传 --strict-accept2 (否则验收② 未达标会让全量回归 EXIT≠0)。
+  · 不要传 --target / --timeout, 用默认 45.0 / 600s。
+  · 判据若需变更, 只改探针顶部 ACCEPT2_TARGET 常量, 不要在 bat 里改。
+  · 运行完 _tmp 下应同时存在 editor_core_on.json / editor_core_off.json /
+    editor_core_verdict.json 三个文件; 缺任一 → 探针已自行 FATAL 退 1。
+
+====================================================================
+5. 自检 (只做静态检查, 不跑探针)
+====================================================================
+在 ROOT 下: py -3.12 -m py_compile "tests\_tmp\editor_core_check.py"   → 退出码 0

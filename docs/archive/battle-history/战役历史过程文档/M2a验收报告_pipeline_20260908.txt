@@ -1,0 +1,115 @@
+====================================================================
+Loom 引擎 DLL 化战役 — M2a 验收报告 (pipeline.dll: 逻辑帧 prep 链 C 化)
+====================================================================
+日期: 2026-09-08 (第四棒, DSH 主线程 + 2 子代理)
+设计依据: D:\my-project\M2设计文档_pipeline_20260908.txt
+前置: M1 已验收 (契约层/对拍网/模糊测试全绿, build_all EXIT=0)
+
+--------------------------------------------------------------------
+一、验收结论 — M2a 全部达成
+--------------------------------------------------------------------
+[√] ① 数值等价: pipeline.dll 与 engine 现行 Python 实现
+    · 纯逐元素运算 (view/ortho 组装、场景包围盒、AABB 归约、点光 6 面)
+      **逐位 maxdiff == 0.0**
+    · 矩阵乘法 view@ortho 为唯一例外 (numpy 走 BLAS/SIMD 求和序):
+      abs ≤ 1.4e-14 (scale 归一化后 1.5e-15 rel), 已由 C3/C1b 钉死该界
+    · engine 真实方法体接线后 DLL 路径 vs Python 路径 worst maxdiff = 3.55e-15
+[√] ② 性能: 光源 VP 批量计算 DLL **0.0783 ms/帧 vs Python 1.1015 ms/帧
+    (≈14.07×)**, n=501 行表 + 3 光源 50 次 median (两探针独立复测一致)
+[√] ③ 逃生门双口径: LOOM_NO_PIPELINE=1 (接线层) / LOOM_NO_DLL='pipeline'
+    (注册表层) 均可即时回退 Python 路径, 且结果与 DLL 路径一致
+[√] ④ 全量回归: build_all.bat **EXIT=0** — 5 DLL 编译 + 14 探针全 ALL PASS
+    (14 = M2a 阶段值; M2 最终 19 探针, 见 M2验收报告 §一④ / §二[集成])
+[√] ⑤ 坏注入自愈: 非法 PE / sha 错 / 声明不符 → 弹出 + enabled=false 回写 +
+    官方顶回; 官方坏 → AssemblyError (绝不静默降级); 运行期崩溃自愈链实证
+
+全量构建: build_all.bat EXIT=0
+真实 registry.json 哈希: A95BED16169495D0FE8EC2217646CBAA8433028853DB1FED21030729BC486E3E
+  (2091 B, core_components\registry.json; 全部探针前后未变 — 审计 P7)
+
+--------------------------------------------------------------------
+二、交付物清单
+--------------------------------------------------------------------
+[C 侧]
+  core_components\loom_pipeline.h         108 行  组件接口契约 (LOOM_LIGHT/4 函数)
+  core_components\pipeline\loom_pipeline.c 372 行 实现 (scene_bounds/light_vps/aabbs)
+  core_components\pipeline\build_pipeline.bat 15 行 编译脚本
+  core_components\pipeline\pipeline.dll  10752 B  产物 (零警告)
+[基座侧]
+  pipeline_glue.py                        基座↔DLL 接线层 (句柄缓存/数据搬运/逃生门)
+  engine.py +_pipeline_light_vps()        接线: _compute_light_vps 优先走 DLL
+[注册表]
+  registry.json +pipeline 条目 (official=1, provides 3 接口; M2 最终为 4 接口,
+    另有 shadow_prep / mat4_mul_ref 为内部/参考导出, 不按接口名寻址 — 审计 P12)
+[对拍网 tests\_tmp, 新增 4 个]
+  pipeline_val_check.py        15 项  ALL PASS  DLL 数值对拍 (逐位/ULP)
+  pipeline_base_check.py       15 项  ALL PASS  经注册表句柄数值+性能+逃生门
+  engine_pipeline_check.py      8 项  ALL PASS  engine 真实方法体接线验证
+  pipeline_fuzz_check.py       33 项  ALL PASS  坏注入自愈 + 畸形输入
+[集成]
+  build_all.bat: [DLL 清单] +1 (pipeline); [对拍清单] +4 → 共 14 探针
+    (14 = M2a 阶段值; M2 最终 19 探针, 见 M2验收报告 §二[集成])
+
+--------------------------------------------------------------------
+三、实测数据 (可复现)
+--------------------------------------------------------------------
+构建: 5 DLL 全 BUILD_OK (ckernels/module_ref/badvector/ambiguous/pipeline)
+探针: 14/14 ALL PASS —
+  既有 10 个 (M1 及以前) 全不回归;
+  pipeline_val_check 15/15 · pipeline_base_check 15/15 ·
+  engine_pipeline_check 8/8 · pipeline_fuzz_check 33/33
+
+关键数值:
+  sizeof(LOOM_LIGHT) = 72 B (4 int32 + 3×3 double + 1 double, 对齐后)
+  平行光 full/beam: worst_abs 1.33e-15 (n=1/64/501)
+  点光 6 面:        worst_abs 0.0
+  场景包围盒:        标量 oracle 逐位 0.0; vs numpy matmul 1.42e-14 (§4 例外)
+  AABB 归约:        逐位 0.0 (含 n=0)
+  engine 接线:      worst maxdiff 3.55e-15
+性能 (n=501 行表 + 3 光源, median):
+  pipeline_base_check:  DLL 0.0783 ms/帧  Python 1.1015 ms/帧  ≈14.07×
+  engine_pipeline_check: DLL 0.184 ms/帧   Python 1.201 ms/帧   ≈6.52×
+    (后者含 engine 方法体开销与 ndarray 转换, 更接近真实调用口径)
+
+--------------------------------------------------------------------
+四、本阶段发现并修复的真实缺陷
+--------------------------------------------------------------------
+D1 C 侧 scene_bounds 把行主序矩阵乘写成列优先索引
+   (view[0]*cx + view[1]*cy + ... 应为 view[0]*cx + view[4]*cy + ...)
+   → 场景包围盒 maxdiff 31.97, 被 pipeline_val_check B 子项逐位对拍当场拦下。
+   ★这是「先建对拍网再动代码」的直接价值实证。
+D2 热路径函数缺 __declspec(dllexport) (只在契约导出上加)
+   → ctypes get_fn 找不到符号; 修复: 头文件引入 LOOM_PIPE_API 宏, 声明与定义同链接属性。
+D3 mat4_perspective 初版与 matlib 逐元素不一致 (m[11] 符号/m[14] 表达式)
+   → 修正为与 matlib.mat4_perspective 完全同式。
+D4 pipeline_glue 缺 core_components 入 sys.path → ModuleNotFoundError 静默降级
+   → 修复: 显式插入 CC 与引擎根两个路径。
+[子代理发现的观察项, 留 M2b] → 已于第 9 轮修复 (见 M2验收报告 D5)
+D5 越界 vis_idx 未返回 LOOM_ERR_PARAM 而是 rc=0/out_kind=-1
+   (DLL 无入参范围校验但未崩) → M2b 补边界检查。  （2026-09-09 R4: D5 已于第 9 轮修复, 见 M2验收报告 D5 条目）
+
+--------------------------------------------------------------------
+五、与总纲 M2 的差异说明 (重要, 已写入设计文档 §2)
+--------------------------------------------------------------------
+总纲 M2 原文含「物理子步调度」入 DLL。本阶段裁决 **暂留基座 Python**:
+  · culverin (Jolt) 是 pybind11 绑定, 非 C ABI, pipeline.dll 无法直接链接
+    (规格原文亦写明"需小改 culverin 包装为 C 接口, 两案实施时选");
+  · 物理子步调度本身在 Python 侧只占 ~µs, 真正耗时是 Jolt 步进 (C++ 内部, 不占 GIL);
+  · prep 链 33.52ms/帧 才是 GIL 热点 → 先吃收益最大、风险最小的一块。
+⇒ M2a (本阶段) = prep 链 C 化; M2b (后续) = culverin C ABI 包装 + 物理子步入 DLL,
+  并完成「核0 67%→≤45%」的每核负载验收。
+
+--------------------------------------------------------------------
+六、遗留与下一步
+--------------------------------------------------------------------
+1. M2a 未做「真实场景 100 逻辑帧端到端对拍」与「每核负载」实测 — 需真实图形
+   环境跑混合500 场景 (引擎依赖 moderngl/pygame); 已用 engine 真实方法体探针
+   覆盖数值等价, 端到端与负载测量留 M2b。（2026-09-09 R4: M2b 已完成 —— 端到端 11/11、每核负载探针已落地并留档）
+2. 编译版: engine.py 已改 → **编译版需重编** (M2b 完成时一并)。
+   → 已于第 9 轮完成 (见 M2验收报告 §六.4; 投放校验见该报告审计 P9 条目)。
+3. badvector/ambiguous 仍为探针专用靶, 打包同步必须排除。
+4. M2b 任务: culverin C ABI 包装 / 物理子步入 DLL / vis_idx 边界校验 /
+   真实场景端到端 + 每核负载验收 / 编译版重编。
+====================================================================
+(M2a 验收报告完)
+====================================================================

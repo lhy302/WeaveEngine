@@ -1,0 +1,171 @@
+====================================================================
+Loom M2 续作 — 恢复交接文档（2026-09-08 深夜，模型切换点）
+====================================================================
+用途: 本会话因模型(BUG)切换, 现做状态快照。恢复时: 先读本文件, 再读
+      §§引用文档, 然后按 §八 恢复动作执行。
+=====
+
+【恢复必读的先行文档】(按顺序)
+  1. M2压缩点交接文档_20260908.txt        ← 原始压缩点(审计问题与背景)
+  2. M2交付审计_20260908.txt              ← 17 处问题清单(4严重/8中/5轻)
+  3. M2_审计问题关闭清单_20260908.md      ← 本轮写: 逐条修法+修改位置
+  4. M2_权威数字表_20260908.md            ← 本轮写: 唯一权威数字(②③构建投放)
+  5. M2b_Brepro可行性_20260908.txt        ← /Brepro 实验报告
+  6. M2b_Brepro落地与registry钉扎_20260908.txt ← 构建链改造报告
+  7. M2b编译版同步与验收3取证_20260908.txt ← ③ 取证报告
+  8. M2b验收2取证_20260908.txt            ← ② 取证报告(3轮+交叉对照)
+
+--------------------------------------------------------------------
+一、总体目标(不变)
+--------------------------------------------------------------------
+Loom DLL 化战役 M2 (pipeline.dll) 交付面已完成; 当前目标 = 关闭审计
+17 处证据链问题(P1-P4 严重), 以产物 json 为唯一权威源统一文档数字,
+跑通全量回归 EXIT=0, 复核, 收口, 并向用户汇报验收②定标决策。
+【用户新增需求(最高优先级)】: 播放模式下用任务管理器定向截图, 目视
+确认 (a) DLL 模块化是否把负载真正拆到多核 (b) GPU 是否吃满/有无瓶颈。
+
+--------------------------------------------------------------------
+二、已完成项(均为实测/已落盘, 非计划)
+--------------------------------------------------------------------
+[S1] /Brepro 可行性: 隔离实验证实加 /Brepro 后同源码两次重编
+     逐字节相同(无则差2字节, 即PE时间戳); 扩散到 5 个 DLL 全部验证。
+     报告 M2b_Brepro可行性_20260908.txt; 产物 D:\my-project\_diag_brepro\
+[S2] editor_core_check.py 升级完成 (tests\_tmp\, 20869B, 21:05):
+     --both 分档落盘 editor_core_on/off.json + editor_core_verdict.json,
+     打印 [GATE-ACCEPT2](核0/最高核≤45%)/[GATE-REGRESSION](ON主线程ms/帧≤OFF),
+     默认退出码仅由回归闸决定(--strict-accept2 才硬闸验收②)。
+     契约: M2b探针契约_editor_core.txt
+[S3] compiled_verify.py 升级完成 (13325B, 21:05):
+     --on/--off/--both 分档落盘 compiled_verify_on/off/ab.json,
+     [GATE-FPS](ON fps_mean≥OFF), 编译版缺失→SKIP+exit0。
+     契约: M2b探针契约_compiled_verify.txt
+[S4b] verify_release.py 新建 (22644B): 自研 PE 导出表解析,
+     硬判据=存在性+大小+导出符号+module_id字符串; DLL 的 SHA256 降为
+     INFO(PE时间戳差异标注预期)。测试 7/7 PASS。报告 M2b投放校验设计_20260908.txt
+[S4] /Brepro 落地 + registry 钉扎 + build_all 接线 (报告 M2b_Brepro落地...txt):
+     - 5 个 build bat 的 cl 行均加 /Brepro (cl /nologo /utf-8 /O2 /Brepro /LD /MD)
+     - 5 DLL 连续两轮重编 SHA256 全部一致(可复现构建生效):
+         loom_kernels.dll 16896B DF810FC5652EE238D020C448B2C6E06DCE745A2B59ACB2542F37A26D1D45D37B
+         module_ref.dll   10240B 3CF5FC9CFC1CABE97306ED308035B358FE9A11E5D43EA6F578A2C5262734B793
+         badvector.dll     9728B 4416599D321D7950E5CA4FF75E2D4A2C9B610588AF0048F29D633BE2C9C767A0
+         ambiguous.dll     9728B F0CDB51037D2BE8B17A03A3F8CB536B16A4DC4B23C5154943B910F67F770A700
+         pipeline.dll     20480B 902D5F29E2B952F4D05B280C4BE2F7CCC57336D786474F85AAD7BE8C18433329
+     - refresh_registry_sha.py 新建(6371B); 源侧 registry.json 三条目
+       sha256 已钉实(自洽3/3), 自身哈希 1819B E04C68A7... → 2091B A95BED16...
+     - build_all.bat 接线: [DLL清单]后插 refresh_registry_sha 回填步骤
+       (skip_checks 之前); :run_check 改为 `py -3.12 "tests\_tmp\%~1" %2 %3`;
+       [对拍清单]末尾追加 editor_core_check.py --both + compiled_verify.py --both;
+       探针总数 19 活跃(17原有+2新增); build_all.bat skip_checks EXIT=0。
+     - assemble_release_0906.py 追加: 步骤8 refresh --root 编译版 + 步骤9
+       verify_release --snapshot(失败 fail-fast)。未实际执行过(风险高)。
+[S5a] 编译版投放面同步 + 验收③ 取证 (报告 M2b编译版同步与验收3取证...txt):
+     - 7 文件(3 DLL+registry.json+module_loader.py+module_registry.py+pipeline_glue.py)
+       从源侧复制到 D:\my-project\Loom(编译版)\Loom, 7/7 逐字节一致(旧构建不再混存)
+     - verify_release.py → 7 PASS / 0 FAIL, exit 0
+     - 编译版 registry.json 已回填(A95BED16...), 与源侧一致
+     - 验收③ 权威数据: ON fps_mean 74.1 / fps_min 54 / tps 20.11 / jit_std 10.75
+                         OFF fps_mean 69.1 / fps_min 62 / tps 20.14 / jit_std 11.52
+       [GATE-FPS] PASS (+7.2%); 硬旁证: ON 档 stage_times 无 shadow_matmul/
+       shadow_cornerfill(OFF 有), shadow_prep 3100.35→2105.29ms
+       物证: tests\_tmp\compiled_verify_{on,off,ab}.json
+       旧数字「ON 72.0/min67 vs OFF 66.5/min62 (+8.3%)」无物证, 已作废
+     - 备份: D:\my-project\Loom(编译版)_备份_20260908b (1261文件, 可回滚)
+[S5b] 验收② 权威取证 (报告 M2b验收2取证...txt):
+     - 3 轮 editor_core_check --both --secs 12(每轮62.4s), 退出码全0
+       ON : 最高核 66.06 / 68.64 / 79.66 %; 主线程 8.634 / 9.138 / 8.487 ms/帧;
+            FPS 75 / 73 / 76; total_core 212.33 / 209.01 / 303.62 % (均值241.65, s=53.69)
+       OFF: 最高核 66.02 / 67.25 / 66.57 %; 主线程 9.647 / 10.299 / 8.651 ms/帧;
+            FPS 67 / 62 / 74; total_core 221.21 / 276.15 / 296.01 % (均值264.46)
+     - accept2 三轮全 FAIL(目标≤45%); regression 三轮全 PASS
+     - 旧 A/B 行「66.2/62.7/8.038/78/379%」无法复现 → 作废;
+       基线 227% 无物证(09-07 实测 total=194.8%);「并行度翻倍」作废
+       (ON total 均值 241.65% < OFF 264.46%, 且离散 s=53.69pt)
+     - 历史物证保全: editor_core_on_pre_batch_20260908.json(旧ON档, 65.37/65.02/8.128/80/211.59)
+     - 交叉口径(percore_check 300帧 PlayerApp, 27.6s, 4/4 PASS):
+       ON 主线程4.323/物理1.250/池10.990/合计17.552ms/帧, FPS53.1, shadow_bounds 0.584
+       OFF 主线程4.948/物理1.458/池11.198/合计20.000ms/帧, FPS49.9, shadow_bounds 2.502
+     - 物证: tests\_tmp\editor_core_{on,off,verdict}_r{1,2,3}.json + ab_r{1,2,3}_console.log
+       + percore_console_crosscheck.log
+[TM脚本] tm_shot.ps1 已写好并实测可用(18550B):
+     - 定位任务管理器窗口→SetForegroundWindow→GetWindowRect→CopyFromScreen
+       裁剪出窗口区域; 已实测导航成功: VIEW=cpu(logical) 与 VIEW=gpu
+     - 已产出测试截图: tests\_tmp\tm_cpu_probe_now_*.png / tm_gpu_probe_now_*.png
+     - DPI 方案: SetProcessDPIAware + 物理/逻辑缩放比兜底, 1920x1080 150%下 ratio=1.0
+     - 说明文件: M2b任务管理器截图脚本_说明.txt(未生成? 待查—子代理被中断, 脚本本身已落盘)
+[TM播放截图-未完成] 调试子代理曾在播放模式截图(21:23): 产出
+     tm_cpu_play_src_20260908_212317.png(113KB) / tm_gpu_play_src_20260908_212320.png(33KB),
+     但 ON 档数字采集/汇总/OFF 档截图/报告 M2b播放模式多核与GPU取证_20260908.txt
+     均未完成(子代理被中断)。→ 见 §八 恢复动作3
+[BUG反馈材料] V4.1 模型思维链疯狂循环已定位并导出:
+     - 证据: 主对话 turn2 思维链全长 147,657 字符, 最频短语「好。」出现 8996 次;
+       turn3 30,773字符重复率2.14; turn5/6 亦异常(10,761/20,140字符);
+       正常 turn 仅几百-几千字符。即循环发生在模型推理阶段。
+     - 导出文件:
+         D:\my-project\对话报告_V4.1思维链循环BUG反馈_20260908.txt
+         D:\my-project\对话原始思维链导出_20260908.txt
+         D:\my-project\对话原始chunk级导出_20260908.txt
+       (生成脚本: D:\my-project\_export_report.py, 可改路径复用;
+        会话源: C:\Users\<USER>\.dsh\sessions\--D-my-project--\session-625c2b9a-...)
+     - 报告含: 各 turn 长度/重复率表 + 疑似循环 turn 证据片段。
+
+--------------------------------------------------------------------
+三、关键事实(恢复必知, 防再犯错)
+--------------------------------------------------------------------
+1. build_all.bat / 5 个 build bat 均为 **UTF-8 无 BOM**(不是GBK! 改时保持UTF-8)
+2. 性能探针(editor_core/percore/compiled_verify)必须**串行独占**, 期间不得
+   并行启动其他 GUI/重负载, 否则每核采样被污染 → 不要并发跑
+3. editor_core_check 新版 accept2 判据 = ON 档**最高核**busy%(top_core_index
+   实算, R3 最高核是核1 非核0, verdict.note 会说明)
+4. 长命令必须 run_in_background(默认120s超时会打断); 子代理内部也需如此
+5. registry.json sha256 非空=强校验(加载器), /Brepro 保证重编不变;
+   若未来去掉 /Brepro 或改工具链 → 必须重新回填
+6. Loom.exe 27,504,640B mtime 20:41:56 SHA256 ED022449AC7C1BC0135A327C228B897E6F812BC8E8DBDAD136B16D4D6EF6C3B0
+7. 源侧引擎根: D:\my-project\Loom(py源代码-工作区)\Loom (含 tests\_tmp 探针)
+   编译版: D:\my-project\Loom(编译版)\Loom
+8. 用户机器长驻任务管理器(PID 会变, 勿杀); 场景文件 保存\压测500混合.json
+
+--------------------------------------------------------------------
+四、未完成/挂起(按顺序恢复)
+--------------------------------------------------------------------
+R1. [截图取证收尾] 播放模式 ON 档截图已有(pre_src), 缺:
+     - OFF 档(LOOM_NO_PIPELINE=1) 截图+数字
+     - ON/OFF 数字采集(每核busy% 12s + GPU引擎利用率 Get-Counter
+       '\GPU Engine(*)\Utilization Percentage' + FPS/TPS)
+     - 汇总报告 M2b播放模式多核与GPU取证_20260908.txt
+     方法复用: tests\_tmp\tm_shot.ps1 -View both -Tag play_off
+R2. [回归] 全量 build_all.bat EXIT=0 验证(19探针, 约15分钟, 独占).
+     ★若先做此步, build_all 内的 editor_core/compiled_verify 会各自再跑一轮,
+     属"回归验证", 不破坏已留档的 r1-r3/on/off 物证(文件名不同)。
+R3. [文档统一] 以 M2_权威数字表_20260908.md + M2_审计问题关闭清单_20260908.md
+     为输入, 修 8 份文档: M2设计文档/验收报告/M2验收2判定依据/M2b可行性评估/
+     M2b主线程归因/M2a验收报告/M2暂停点交接/M2压缩点交接; 以及台账
+     bench_result_对比台账.txt 追加本轮条目。规则: 删除或标注作废数字
+     (379%/227%/21.7%/6.64→5.20/72.0-66.5等), 统一探针数19, D1-D7(7个),
+     registry 哈希 A95BED16..., 帧时间方向, P12 provides4 vs 导出13说明。
+R4. [复核] 只读复核审计(独立重算关键数字, 逐条验证17处问题关闭状态)。
+R5. [收口] 更新压缩点交接文档 + 向用户汇报:
+     - 验收② 定标三选一: (a) 改口径(主线程ms/帧 或 并行度核当量)
+       (b) 转 M3 渲染层(Qt/GL提交外包) (c) 接受现状 ①③④⑤达成+②书面转出
+     - 建议口径: ON 主线程 8.487-8.753 ms/帧(编辑器口径); 并行度
+       ON 2.12-3.04 核当量 vs OFF 2.21-2.96, 无显著提升 → 定标建议 a 需谨慎
+R6. [DSH 标记-待用户确认] settings.yaml (C:\Users\<USER>\.dsh\):
+     llm-deepseek.models 里 deepseek-v4.1-flash-expires-on-0910 条目
+     缺 inputModalities(默认["text"]), 同文件 vision-exp 条目已写
+     ["text","image"] + imagePixelBudget/imageMaxBytes → 补上即可启用识图。
+     *(用户已知晓, 未动手; 修改后可能需重启 DSH)*
+R7. [清理] D:\my-project\_diag_brepro 实验残留(约几MB)可留作证据或删除;
+     _export_report.py 可留。编译版备份 _备份_20260908b 待最终确认后保留。
+
+--------------------------------------------------------------------
+五、恢复动作(下一步第一步)
+--------------------------------------------------------------------
+1. 读本文 + M2_权威数字表_20260908.md + M2_审计问题关闭清单_20260908.md
+2. 若 GUI 环境可用: 先补 R1(截图取证, ~10分钟, 独占)——用户对原目标
+   (多核分摊+GPU吃满)最关心, 且截图物证已有部分
+3. 然后 R2 全量回归(EXIT=0 才算过关) → R3 文档统一 → R4 复核 → R5 汇报
+   (汇报时必须请用户决策验收②定标, 并说明 ② 在当前架构不可达的定量结论:
+    主线程 8.5-8.8ms/帧 自身已超 45%目标换算(5.77ms), 杠杆在Qt/GL/Python胶水)
+4. 任何一步失败: 保留失败现场(控制台输出/日志), 报告探针名+输出尾部。
+====================================================================
+(交接文档完 — 本会话最终输出, 后续会话据此恢复)
+====================================================================

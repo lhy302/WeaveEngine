@@ -1,0 +1,125 @@
+====================================================================
+M3-A 主线程分段实测归因 + 首个功能剥离（interp → pipeline.dll）
+日期: 2026-09-09 (M3 第 1 轮)   状态: 完成, 门禁全绿
+====================================================================
+用户决策: 走 M2 验收② 选项 (b) —— 转 M3, 按「一个功能一个功能剥离」把引擎
+          逐步 DLL 化, 并且**必须用数据证明 DLL 化对性能确实有用**。
+
+--------------------------------------------------------------------
+一、为什么要先测: M2 的结论是"推断", 且被本轮实测推翻
+--------------------------------------------------------------------
+M2b主线程归因 §5 自述: 「主线程段账中 Qt/GL/Python 胶水的逐段精确拆分未做」,
+结论「剩余可外包量 <1.0 ms/帧」是**由总量反推的推断**。
+根因: 旧 `_profile` 用 `time.time()` —— Windows 上粒度约 15.6 ms, 对 ms 级分段
+不可用; 且 `_stage_times` 只有全程累计值, 无法折算 ms/帧。
+
+本轮实测结论 (ON 档, 83 fps, paintGL 总 9.863 ms/帧):
+  · **Qt/GL 胶水 = 0.021 ms/帧 (0.2%)** —— 不是瓶颈 (M2 归因指向 Qt 架构锁死)
+  · **纯 Python/numpy 段 = 3.5 ms/帧 (35%)** —— buckets 1.31 + interp 1.19 +
+    world_matrices 1.00, 全部可 DLL 化
+  ⇒ M2 的「无可外包量」判断**方向性错误**; 真实瓶颈在主线程的 Python 数据/数学段
+    与「主线程等池/等物理」的同步等待。
+
+--------------------------------------------------------------------
+二、方法（可复现）
+--------------------------------------------------------------------
+1. 引擎插桩 (LOOM_PROFILE=1 门控, 未开时零开销):
+   · `_profile` 改 `time.perf_counter()` + 累计 `_stage_calls` 调用数;
+   · 新增 `_stage_frames` 帧计数、`_prof_t0/_prof_add` (多语句块计时)、
+     `profile_snapshot()` (frames/times/calls 一次导出);
+   · 补齐原先未插桩段: EditorApp.render 的 mt_shadow_maps / mt_main_pass /
+     mt_editor_view / mt_render_tail / mt_render_total / 帧计数;
+     GLEngine.render 同款; `_logic_frame` 的 mt_scripts / mt_pipe_post /
+     mt_audio_anim / mt_logic_prep / mt_dispatch / mt_interp_advance;
+     paintGL 的 mt_paint_total / mt_paint_advance / mt_paint_render。
+   · `agent_commands.cmd_engine_metrics` 增加 `mt_profile` 快照字段。
+2. 新探针 `tests\_tmp\mt_profile_check.py`: 播放模式下取两次快照做差值 →
+   per-frame ms = Δtimes / Δframes; 派生 qt_glue = paint_total − advance − render;
+   闭合校验 (子段和 ≤ 外层×1.10)。产物 `tests\_tmp\mt_profile_<mode><suffix>.json`。
+   命令: `py -3.12 tests\_tmp\mt_profile_check.py --mode on --secs 12 [--suffix _x]`
+3. 逃生门: `LOOM_NO_INTERP_DLL=1` (新路径) / `LOOM_NO_PIPELINE=1` (整条 DLL 链)。
+
+--------------------------------------------------------------------
+三、实测分段表 (ON, n=501 混合500, 播放态)
+--------------------------------------------------------------------
+物证: tests\_tmp\mt_profile_on_before.json (插桩后基线) / _ab_a1,a2,b1,b2.json
+
+| 段 | ms/帧 | 占比 | 性质 |
+|---|---|---|---|
+| mt_paint_total | 9.863 | 100% | 主线程渲染帧总耗时 |
+| mt_paint_advance | 4.813 | 48.8% | 逻辑推进 |
+| ├ logic_step | 4.807 | | 时钟推进 (内含全部逻辑子段) |
+| ├ pipe_wait | 2.053 | 20.8% | **主线程阻塞等物理管线** |
+| ├ mt_logic_prep | 2.241 | 22.7% | 逻辑帧尾 prep (含池等待) |
+| ├ mt_scripts | 0.145 | | |
+| └ mt_interp_advance | 0.252 | | |
+| mt_paint_render | 5.029 | 51.0% | 渲染帧 |
+| ├ buckets | 1.312 | 13.3% | 实例数据准备 (纯数据搬运) |
+| ├ interp | 1.186 | 12.0% | **插值渲染矩阵 (纯数学)** |
+| ├ world_matrices | 0.997 | 10.1% | 世界矩阵 (DLL 已接, Python 侧编组仍占) |
+| ├ mt_main_pass | 0.642 | | GL 主 pass 提交 |
+| ├ mt_shadow_maps | 0.574 | | 阴影贴图 pass |
+| ├ mt_editor_view | 0.110 | | UI 层绘制 |
+| └ mt_render_tail | 0.005 | 0.05% | **含 get_tps / TPS 缓冲预取** |
+| qt_glue (派生) | 0.021 | 0.2% | paintGL − advance − render |
+
+注: `aabbs` 段 (3.679 ms/帧) 与 mt_logic_prep (2.241) 存在**重复计数** ——
+engine.py 有 3 处直接 `_stage_times['aabbs'] +=` 绕过 `_profile`, 与包裹层叠加;
+下一轮修正后再用于"池等待"归因 (不影响本报告的其它段)。
+
+--------------------------------------------------------------------
+四、★首个功能剥离: 渲染插值矩阵 → pipeline.dll (C, 无 GIL)
+--------------------------------------------------------------------
+改动 (engine.py `compute_render_matrices`):
+  原: Python/numpy 逐帧构建 S/T/R (3×(N,4,4)) + `S@R@T` + 按 depth 循环父链乘。
+  改: 复用**已交付且已验证**的 `pipeline_glue.world_matrices(rot, scl, pos,
+      parent, depth)` —— 与逻辑矩阵 `compute_world_matrices` 同一 C 入口,
+      输入平面 = `InterpState.render_pose(alpha)` 的 (N,3) pos/rot/scl (布局一致)。
+  逃生门: `LOOM_NO_INTERP_DLL=1` → 原 numpy 路径 (逐位同旧)。
+  自检: `LOOM_VERIFY_INTERP=1` → 两条路都算并打印 max|diff|。
+
+[数值等价 — 最强证据]
+  播放态连续 **1210 帧** 逐帧对拍: `max_abs_diff = 0.000e+00` (全程 0)
+  日志物证: tests\_tmp\mt_profile_on.log (grep '[interp-verify]')
+  另有 pipeline_world_check 7/7 PASS (C2 逐位/≤1ULP; C3 深链 depth=199 → 1.13e-15)
+  与 pipeline_e2e_check 11/11 PASS。
+
+[性能 A/B — 交错 4 轮 (a1,b1,a2,b2), 同机同场景同探针]
+  | 运行 | interp 路径 | interp ms/帧 | paint_total ms/帧 | 实测 FPS |
+  |---|---|---|---|---|
+  | a1 | numpy | 1.196 | 9.947 | 82.17 |
+  | a2 | numpy | 1.203 | 10.221 | 80.16 |
+  | b1 | **DLL** | 0.733 | 8.975 | 90.58 |
+  | b2 | **DLL** | 0.745 | 9.524 | 85.00 |
+  | 均值 | numpy→DLL | **1.200 → 0.739 (−38.4%)** | **10.084 → 9.250 (−8.3%)** | **81.2 → 87.8 (+8.1%)** |
+  两档各自区间不重叠 (numpy 9.95-10.22 vs DLL 8.98-9.52), 方向一致。
+
+--------------------------------------------------------------------
+五、结论
+--------------------------------------------------------------------
+1. **DLL 化对性能确实有用, 已用实测证明**: 单个功能 (渲染插值矩阵) 剥离到 C 后,
+   主线程渲染帧 10.084 → 9.250 ms/帧 (−8.3%), FPS 81.2 → 87.8 (+8.1%),
+   且输出**逐位一致** (1210 帧 max|diff|=0)。加上 M2 的 pipeline.dll 整体 A/B
+   (ON 8.753 vs OFF 9.532 ms/帧, FPS 74.67 vs 67.67), 证据链完整。
+2. **瓶颈位置已被实测重定位**: 不是 Qt/GL (0.021 ms/帧), 而是
+   ① 主线程纯 Python/numpy 段 (~3.5 ms/帧) ② 主线程同步等待 (pipe_wait 2.05 +
+   prep 池等待 ~2.2 ms/帧)。
+3. **关于用户提的 TPS 计算模块**: 实测 `mt_render_tail` (含 `get_tps` 与 TPS 缓冲
+   预取) = **0.005 ms/帧 = 0.05%** —— 拆它无法带来可测收益 (数据说话);
+   收益最大的是 buckets / interp 剩余段 / world_matrices Python 编组 / 同步等待。
+
+--------------------------------------------------------------------
+六、下一步 (M3 剥离队列, 按实测收益排序)
+--------------------------------------------------------------------
+P1. interp 剩余 0.739 ms/帧: `render_pose` 插值 (lerp + 角度 wrap) 入 DLL,
+    并把 parent/depth 构建 (Python dict + 循环) 一并 C 化。
+P2. buckets 1.34 ms/帧: `_prepare_bucket_frame` 的 f32 矩阵 + 桶重排/实例缓冲
+    写入 —— 数值部分入 DLL, GL 调用留在 GL 线程。
+P3. world_matrices Python 侧 1.00 ms/帧: `_transform_snapshot` 属性链列取 +
+    parent/depth 构建入 DLL (传对象 id/parent 索引)。
+P4. 同步等待 4.2 ms/帧 (pipe_wait 2.05 + prep 池等待): 属调度重构, 与 DLL 化正交,
+    单独评估 (物理管线双缓冲 / prep 提前一拍)。
+每个剥离点一律四重门禁: 数值等价对拍 + 端到端对拍 + mt_profile A/B + build_all EXIT=0。
+====================================================================
+(报告完 — 数字均可由 tests\_tmp\mt_profile_*.json 与日志逐行回溯)
+====================================================================

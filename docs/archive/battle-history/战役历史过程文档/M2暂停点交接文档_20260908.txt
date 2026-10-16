@@ -1,0 +1,139 @@
+====================================================================
+Loom 引擎 DLL 化战役 — M2 暂停点交接文档 (2026-09-08 第四棒收尾)
+====================================================================
+日期: 2026-09-08
+修订: 2026-09-09 (R3 数字统一回填) — 本文为历史快照, 修订处逐处标注
+      「（2026-09-09 R3 回填）」; 性能数字以产物 json 为唯一权威源,
+      权威值见 M2_权威数字表_20260908.md。
+暂停原因: 用户 API 额度用尽, 主动暂停 (非阻塞)。
+前置文档 (按阅读序):
+  1. M1交接文档_DLL化战役_20260908.txt (首棒)
+  2. M1交接文档_续_20260908.txt (第二棒)
+  3. M1交接文档_第三棒_20260908.txt (M1 收尾)
+  4. M2设计文档_pipeline_20260908.txt (★M2 架构与接口契约)
+  5. M2验收报告_pipeline_20260908.txt (★M2 验收状态与实测数据)
+
+★状态一句话: M2 验收 ①③④⑤ 达成; ② 未达标 (瓶颈已定量定位)。
+  build_all.bat EXIT=0 (5 DLL + 19 探针全 ALL PASS)。（探针数 17→19, 2026-09-09 R3 回填）
+  下一步 = M2b: culverin C ABI 包装 (物理调度离主线程) + 编译版重编。
+
+--------------------------------------------------------------------
+1. 已交付并实测 (重启后可直接依赖)
+--------------------------------------------------------------------
+[C 侧] core_components\loom_pipeline.h (LOOM_LIGHT / 6 函数 / LOOM_PIPE_API)
+       core_components\pipeline\loom_pipeline.c
+       core_components\pipeline\build_pipeline.bat
+       core_components\pipeline\pipeline.dll (5 次增量编译, 零警告)
+       ★提供 4 接口: pipeline.light_vps / scene_bounds / aabbs / world_matrices
+         （2026-09-09 R3 回填, P12: 与 DLL 导出 6 个 pipeline_ 前缀符号的差额
+          —— `shadow_prep` / `mat4_mul_ref` —— 为内部/参考导出, 不按接口名寻址;
+          物证 tests\_tmp\verify_release.py 导出符号 13/8/10 明细）
+[基座侧] pipeline_glue.py (适配层: 句柄缓存/数据搬运/逃生门/静默降级)
+        engine.py: _pipeline_light_vps() + _compute_light_vps 优先走 DLL
+                   compute_world_matrices 静止缓存未命中时优先走 DLL
+[注册表] registry.json: 3 官方条目 (module_ref / ckernels / pipeline)
+         ★当前哈希 A95BED16169495D0FE8EC2217646CBAA8433028853DB1FED21030729BC486E3E
+           (2091 B, 三条目 sha256 已钉实)
+           （2026-09-09 R3 回填: 旧值 E04C68A71ACB5E2C… 为 1819 B/sha256 空串的
+            旧产物, 与 fc9167404e5f9de3… 同属过时; 实测见
+            tests\_tmp\verify_release.py 输出与 M2_权威数字表_20260908.md §四）
+[对拍网 tests\_tmp, 新增 7 个]
+  （2026-09-09 R3 回填: 本清单为 M2a 新增项; 当前 build_all 活跃探针 **19** 个,
+    详见 M2_权威数字表_20260908.md §五）
+  pipeline_val_check.py     15 项  DLL 数值对拍 (逐位/1ULP)
+  pipeline_base_check.py    15 项  经注册表句柄数值+性能+逃生门
+  engine_pipeline_check.py   8 项  engine 真实方法体接线
+  pipeline_fuzz_check.py    33 项  坏注入自愈 + 畸形输入
+  pipeline_world_check.py    7 项  世界矩阵对拍 (M2 续)
+  pipeline_e2e_check.py     11 项  端到端 100 逻辑帧对拍
+  percore_check.py           4 项  进程内每线程 ms/帧 + 每核
+  editor_core_check.py      --both  编辑器基线口径每核 A/B (较重, 可选)
+[集成] build_all.bat: 5 DLL 编译 + 19 探针全量对拍 (EXIT=0)（17→19, 2026-09-09 R3 回填）
+
+--------------------------------------------------------------------
+2. 验收状态 (对照总纲 §六 M2 五条)
+--------------------------------------------------------------------
+[√] ① 端到端 100 逻辑帧对拍 — pipeline_e2e_check 11/11 ALL PASS
+      501 模型双光源, 两模式进程隔离; AABB/碰撞对逐帧一致 (碰撞对逐位),
+      光源 VP 数值摘要 worst_rel=0。
+[△] ② 每核负载 (核0 67%→≤45%) — **未达标, 已定量定位**
+      同基线口径 (editor_core_check.py --both --secs 12, 混合500 稳态 12s, n=3 均值):
+      ON 档 最高核 71.45% / 主线程 65.32% / 主线程 8.753 ms/帧 / FPS 74.67 /
+      total_core 241.65%; OFF 档 最高核 66.61% / 主线程 64.17% / 9.532 ms/帧 /
+      FPS 67.67 / total_core 264.46%。
+      `[GATE-ACCEPT2]` 三轮全 FAIL (66.06/68.64/79.66); `[GATE-REGRESSION]` 三轮全 PASS。
+      产物: tests\_tmp\editor_core_{on,off,verdict}_r{1,2,3}.json
+      （2026-09-09 R3 回填: 原 ON 档 核0=66.2% / 主线程 62.7% / 8.038 ms/帧
+        与 OFF 档 67.9% / 65.7% / 8.762 ms/帧 **已作废** —— 三轮无一复现
+        (主线程 ms 三轮全 > 8.038), 见 M2_权威数字表_20260908.md §一。）
+      主线程每帧 8.75ms (ON n=3 均值 8.753 ms/帧, editor_core_check 口径) 中
+      prep 链 ON 档只占 ~0.6ms, 其余 = Qt 事件循环 + GL 提交 + Python 胶水
+      (interp/脚本/dispatch) → 搬 prep 链撼不动。
+      （2026-09-09 R3 回填: 原 8.04ms 属已作废的 8.038 ms/帧 旧行。）
+      需 M2b: culverin C ABI 包装 + 渲染提交/胶水段外包。
+[√] ③ FPS — 编辑器口径 (editor_core_check.py --both --secs 12, 混合500 稳态 12s,
+      n=3 均值) ON 74.67 vs OFF 67.67; PlayerApp 口径 (percore_check.py 300 帧)
+      ON 53.1 vs OFF 49.9; 编译版口径 (compiled_verify.py --both, TPS20 混合500)
+      ON 74.1 vs OFF 69.1 (+7.2%, `[GATE-FPS]` PASS)。
+      （2026-09-09 R3 回填: 原「编辑器口径 78 vs 75 (+4%)」与「PlayerApp 口径
+        52.2 vs 50.7」两套值无物证/未标口径 → 已作废, 以本行为准;
+        物证 tests\_tmp\editor_core_verdict_r{1,2,3}.json /
+        percore_console_crosscheck.log / compiled_verify_ab.json。
+        三个口径样本量/场景不同, **不得并列成同一 A/B 结论**。）
+[√] ④ 全量回归 EXIT=0 — 5 DLL + 19 探针（17→19, 2026-09-09 R3 回填）
+[√] ⑤ 坏注入自愈 — pipeline_fuzz_check 33/33
+
+--------------------------------------------------------------------
+3. ★数值口径 (M2 设计文档 §4, 已三次校正, 重启后勿再走弯路)
+--------------------------------------------------------------------
+  · 纯逐元素运算 (view/ortho 组装、场景包围盒、AABB 归约、点光 6 面、
+    世界矩阵局部段) → **逐位 0**
+  · 矩阵乘法 (numpy BLAS/SIMD 求和序) → ≤1 ULP; 世界矩阵乘法链 → 全局缩放
+    误差 ≤ depth×1e-15 (实测 n=501 链长 12 = 7.4e-16; 深链 199 = 1.1e-15)
+  · 逐元素相对误差会被趋零元素放大 (不是精度问题) → 用**全局缩放**口径
+  · world_matrices 入 DLL 后 AABB 输入带 1ULP 级差 → 端到端 AABB 由「逐位」
+    改为「数值摘要相对 ≤1e-12」; 碰撞对仍逐位一致 (阈值判定吸收微差)
+  · 逃生门双层: LOOM_NO_PIPELINE=1 (接线层) / LOOM_NO_DLL='pipeline' (注册表层)
+
+--------------------------------------------------------------------
+4. 本棒修复的真实缺陷 (共 7 个, 全部被对拍网拦下)
+--------------------------------------------------------------------
+D1 C 侧 scene_bounds 行主序矩阵乘写成列优先索引 (包围盒 maxdiff 31.97)
+D2 热路径缺 __declspec(dllexport) → get_fn 找不到符号
+D3 mat4_perspective 与 matlib 逐元素不一致
+D4 pipeline_glue 缺 core_components 入 sys.path → 静默降级
+D5 (子代理发现) 越界 vis_idx 未返 LOOM_ERR_PARAM → **已修复（第 9 轮）**
+   （2026-09-09 R3 回填: 原「待 M2b 补」已过时, 与验收报告 L141 一致;
+    修复实证 pipeline_fuzz_check 33/33, 见 M2压缩点交接文档 §4。）
+D6 ★glue 调 world_matrices 参数顺序错 (pos/scl/rot 写成 pos,scl,rot)
+   → AABB 相对误差 3.2 / collide_pairs 71ms/帧; 端到端对拍当场拦下
+   （产物 tests\_tmp\pipeline_e2e_check.py 输出, 修正后 11/11 全绿;
+    2026-09-09 R3 回填 —— 与 M2_权威数字表_20260908.md §五 缺陷口径一致）
+D7 探针 provides 硬编码 3 接口 → 新增第 4 后 6 处断言失败 (已同步)
+   （已同步 val/base/fuzz/prep/accept1/registry_check 六处;
+    2026-09-09 R3 回填）
+（缺陷总数 D1-D7 **共 7 个**, 口径标签: 本棒对拍网实测, 见
+  M2_权威数字表_20260908.md §五「缺陷编号」。）
+
+--------------------------------------------------------------------
+5. 下一步 (M2b) — 按优先级
+--------------------------------------------------------------------
+1. culverin C ABI 包装: 把 Jolt 物理调度/回读移出主线程 (攻验收②)。
+   现状: 物理已在 loom-physics 子线程, 但 culverin 是 pybind11 绑定,
+   pipeline.dll 无法直接链接 → 需包装 C 接口或保留 pybind 桥由基座调。
+2. vis_idx 入参边界校验 (D5)。（2026-09-09 R3 回填: D5 **已修复（第 9 轮）**,
+   本项已闭合, 保留原行仅示当时计划。）
+3. 编译版重编 (engine.py / pipeline_glue.py 已改) + 端到端收口。
+4. 可选: 渲染提交/胶水段外包 (需 Qt/Vulkan 层改动, 超出 M2 范围)。
+
+--------------------------------------------------------------------
+6. 复现命令
+--------------------------------------------------------------------
+全量构建+对拍:  cd /d "D:\my-project\Loom(py源代码-工作区)\Loom" && build_all.bat
+只编译:        build_all.bat skip_checks
+单探针:        py -3.12 "tests\_tmp\<探针>.py"   (exit 0 = ALL PASS)
+编辑器口径 A/B: py -3.12 "tests\_tmp\editor_core_check.py" --both --secs 12
+逃生门:        set LOOM_NO_PIPELINE=1   (接线层) / set LOOM_NO_DLL=pipeline (注册表层)
+====================================================================
+(暂停点交接文档完 — 恢复时先读本文 §2 验收状态 + §5 下一步)
+====================================================================

@@ -1,0 +1,105 @@
+====================================================================
+Loom 引擎 DLL 化战役 — 第三棒交接文档 (M1 完成 / M2 待开工)
+====================================================================
+日期: 2026-09-08 (第三棒, DSH 主线程)
+前棒文档 (必读):
+  1. M1交接文档_DLL化战役_20260908.txt   (首棒: 定案/纪律/坑/盘点)
+  2. M1交接文档_续_20260908.txt           (第二棒: 批次1 战果 + §4 规格)
+  3. M1验收报告_DLL化战役_20260908.txt    (★本棒: M1 三条验收全过 + 实测数据)
+★状态一句话: M1 全部交付物已落盘并实测全绿 (build_all.bat EXIT=0, 9 探针全 PASS),
+  M1 三条验收达成; 下一步 = M2 (pipeline.dll) 搬 _logic_frame 链。
+双夹规则不变: 稳定区 (Loom(py源代码-稳定版本备份区)) 只读, 改动全在工作区。
+
+--------------------------------------------------------------------
+1. 本棒完成 (全部实测, 可直接依赖)
+--------------------------------------------------------------------
+[√] M1-3 module_loader.py (393 行, 主线程亲写)
+    core_components\module_loader.py + tests\_tmp\module_contract_check.py (29/29)
+[√] M1-2 module_registry.py (474 行, 主线程接管)
+    core_components\module_registry.py + tests\_tmp\module_registry_check.py (36/36)
+[√] M1-4 tests\_tmp\pipeline_prep_check.py (56/56, 对拍网 MVP)
+[√] M1-5 badvector.c + build_badvector.bat + module_fuzz_check.py (20/20)
+    另新增 ambiguous.c + build_ambiguous.bat (校6 歧义注入靶)
+[√] M1-8 build_all.bat 接线 + 全量 EXIT=0 + 验收报告 + 报告 §四/§六/§八
+    + 代码架构.txt 同步 + 台账登记
+
+--------------------------------------------------------------------
+2. 实测基线 (重启后可直接复跑核对)
+--------------------------------------------------------------------
+build_all.bat EXIT=0: 4 DLL 编译 (ckernels/ref/badvector/ambiguous, 零警告)
+  + 10 探针全 ALL PASS (既有 5 + M1 新增 5: accept1_e2e/module_contract/
+  module_registry/pipeline_prep/module_fuzz)。
+关键数值:
+  sizeof(LoomModuleInfo)=104 / sizeof(LoomTensor)=48 / ABI 双口 0x00010000
+  对拍逐位 maxdiff=0.0 (echo 三形状 + aabbs 四用例 + hot_reload 后复跑)
+  坏靶 AV → OSError('exception: access violation writing 0x0')
+  registry.json sha256 = 8B07BC12EC0611A0D246BE7FAAAF9278A04CF3695E43EFC2569264399FDEAB14
+    (验收前后未变 — 探针只写临时目录, 不污染真实注册表)
+
+--------------------------------------------------------------------
+3. ★本棒修复的真实缺陷 (module_registry.py, 全部已修并复验)
+--------------------------------------------------------------------
+F1 官方条目 sha256 未比对 (校0 官方分支缺失) → 官方坏 DLL 可进进程。
+F2 sha 前置闸弹出未记账 (report 漏 'popped', 回退链不可审计)。
+F3 校6 冲突排序方向反了 → 合法"保官方弃歧义"被误判为"双官方 = AssemblyError"。
+F4 provides_map 悬空/误删 → 弹出注入方会删掉仍存活官方接口 (新增 _reindex())。
+探针侧: module_fuzz_check GBK 崩溃 (字节截断切多字节) + 子进程 stdout 编码不匹配。
+
+--------------------------------------------------------------------
+4. 子代理经验 (第三棒, 供 M2 派发参考)
+--------------------------------------------------------------------
+- D (module_registry.py): 长时间零产出 → 主线程中断并接管 (与前两棒同型失败)。
+  结论: **关键路径 (契约/加载器/组装器) 一律主线程亲写**, 子代理只做探针/靶件。
+- E (badvector + fuzz harness): 交付 3 文件, 编译零警告, 坏靶有效; 但探针有
+  GBK 崩溃 + 报告语义问题, 一轮修复指令后修好。
+- F (pipeline_prep_check): 一次交付全绿 (56 项), 自查时已修掉 aabbs 误用;
+  主动做了"待集成降级路径"验证 (44 项, EXIT=0)。
+- 有效做法: 任务书瘦身 (必读 2-3 文件 + 规格直接粘贴) + 写优先 + 主线程跑探针复核。
+
+--------------------------------------------------------------------
+5. M2 入口 (pipeline.dll — 搬 _logic_frame 链)
+--------------------------------------------------------------------
+总纲 §六 M2: 搬物理子步/碰撞/prep (AABB/光源VP/碰撞对) → pipeline.dll。
+  验收: 播放态数值逐位对拍 (旧 Python vs DLL, 混合500 100 逻辑帧 maxdiff=0) /
+  每核负载 (核0 67%→≤45%) / compiled_verify 同口径 FPS / 全量回归 EXIT=0 /
+  坏注入自愈 (注入坏 DLL → 崩溃/校验失败 → 弹出 → 回退官方 DLL, 引擎不死);
+  搬移完成后删旧 Python 实现 (绞杀者模式)。
+起步动作建议:
+  1) 先读 M1 三份文档 + 本文件 §1-§4; 契约/规则权威 = loom_module.h +
+     注册表格式与契约设计说明.txt (已冻结, 不要重新发明)。
+  2) pipeline.dll 脚手架照抄 core_components\loom_module_ref.c, 用 build_ref.bat
+     同款编译脚本; 在 registry.json 追加一条官方条目 (official=true)。
+  3) 基座接线 (engine.py 调 assemble() + get_fn) 属 M2 首个动作 —
+     M1 只交付契约/组装器/对拍网, **尚未接进引擎**。
+  4) 对拍网先建: 新探针照抄 pipeline_prep_check.py 的口径 (逐位 maxdiff=0,
+     基准用旧 Python 实现, 不要用 numpy 近似路径)。
+  5) build_all.bat [DLL 清单] 加一行 + [对拍清单] 加一行即可。
+
+--------------------------------------------------------------------
+6. 环境/纪律速记 (前棒全有效, 本棒新增)
+--------------------------------------------------------------------
+- py 一律 -3.12; MSVC 2022 Community vcvars64; cl /nologo /utf-8 /O2 /LD /MD;
+  禁 /fp:fast (保求和序)。
+- .bat 必须 CRLF; .py/.c 用 LF; UTF-8 无 BOM。
+- 引擎根路径含括号 → bat 里 pushd 后用 .\ 前缀, 勿把含括号变量塞进 if (...)。
+- 探针惯例: BASE 三层 dirname + sys.path.insert(core_components) + os.chdir;
+  结尾 ALL PASS/exit 0; 可能硬崩的调用一律子进程+超时。
+- ★新: 子进程捕获输出时给子进程传 PYTHONIOENCODING=utf-8, 否则 GBK 输出按
+  UTF-8 解码会丢中文标记; 探针 print detail 前做编码兜底 (见 module_fuzz_check
+  的 _safe())。
+- crash_reporter.write_dump 限流同分钟 2 个; 探针产生的 .dmp 堆积在 崩溃日志\
+  (本棒清理过一次, 保留最近 3 个作证据)。
+- build_all.bat skip_checks 有一条无害 stderr 噪音 ('nels.bat' is not recognized,
+  疑与 build_ckernels.bat 的 LF 行尾解析有关, EXIT 仍 0) — 留待 M2 统一处理。
+
+--------------------------------------------------------------------
+7. 目标状态与重启动作
+--------------------------------------------------------------------
+本会话目标 (DSH): goal-9740fc47-891e-48fe-921b-dc98614dc983
+  目标: 完成 M1 剩余 (M1-2/3/4/5/8), 达成 M1 三条验收 → **已达成**。
+重启后动作: 用户说"继续/接着干" → 先 get_goal 取 id/revision →
+  update_goal resume 重新武装 → 若要开工 M2 则新建目标
+  ("M2 pipeline.dll 搬 _logic_frame 链 + 验收") → 按 §5 起步动作执行。
+====================================================================
+(第三棒交接文档完 — M1 已收尾, M2 入口见 §5)
+====================================================================

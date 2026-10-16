@@ -1,0 +1,78 @@
+====================================================================
+M2b 全量回归验收报告（R2）
+生成: 2026-09-09 19:55
+====================================================================
+命令: cd "D:\my-project\Loom(py源代码-工作区)\Loom" && build_all.bat
+开始: 2026-09-09 19:31 前后 | 结果: **BUILD_ALL_EXIT=0**
+日志: tests\_tmp\build_all_run_20260909.log (605 行)
+
+--------------------------------------------------------------------
+一、结论
+--------------------------------------------------------------------
+· 构建链: MSVC 工具链 OK → 5 个 DLL 全部重编 OK → registry.json sha256 回填 OK
+          (「OK refresh_registry_sha: 3 条目已钉扎」)
+· 对拍网: **19 个探针全部执行, 全部 PASS**, 末尾打印「======== ALL PASS ========」
+· 闸门:  [GATE-ACCEPT2] core0_busy=69.53% target<=45.0% → **FAIL**（预期内, 不决定退出码）
+          [GATE-REGRESSION] main_ms_per_frame on=7.630 off=8.699 → **PASS**
+          [GATE-FPS] compiled ON fps_mean=71.7 / OFF fps_mean=66.3  delta=+8.1% → **PASS**
+          [EXIT] policy=regression strict_accept2=off exit_code=0
+· 投放校验: `py -3.12 tests\_tmp\verify_release.py` → **7 项 PASS / 0 项 FAIL**, EXIT=0
+            (含 pipeline.dll 导出符号 PASS, 三个文本文件 SHA256 硬判据一致)
+
+--------------------------------------------------------------------
+二、/Brepro 可复现构建 —— 第三轮独立复现证据
+--------------------------------------------------------------------
+本次回归重新编译了全部 5 个 DLL, 编译后哈希与 2026-09-08 权威值**逐字节一致**:
+
+loom_kernels.dll  16896B  DF810FC5652EE238D020C448B2C6E06DCE745A2B59ACB2542F37A26D1D45D37B
+module_ref.dll    10240B  3CF5FC9CFC1CABE97306ED308035B358FE9A11E5D43EA6F578A2C5262734B793
+badvector.dll      9728B  4416599D321D7950E5CA4FF75E2D4A2C9B610588AF0048F29D633BE2C9C767A0
+ambiguous.dll      9728B  F0CDB51037D2BE8B17A03A3F8CB536B16A4DC4B23C5154943B910F67F770A700
+pipeline.dll      20480B  902D5F29E2B952F4D05B280C4BE2F7CCC57336D786474F85AAD7BE8C18433329
+registry.json      2091B  A95BED16169495D0FE8EC2217646CBAA8433028853DB1FED21030729BC486E3E
+
+即: /Brepro 落地后, 跨"不同批次重编"仍逐字节相同 → 审计 P9/P13 的
+「投放哈希不稳定」问题在可复现构建下已闭合 (DLL SHA 仍按 INFO 处理, 硬判据为
+导出符号 + 大小 + 文本文件哈希)。
+
+--------------------------------------------------------------------
+三、19 个活跃探针执行清单（全部 PASS）
+--------------------------------------------------------------------
+ 1 ckernels_val_check.py            11 ckernels_e2e_check.py
+ 2 collide_val_check.py            12 aabb_f32_check.py
+ 3 accept1_e2e_check.py            13 module_contract_check.py
+ 4 module_registry_check.py        14 module_fuzz_check.py
+ 5 pipeline_prep_check.py          15 crash_reporter_check.py
+ 6 pipeline_val_check.py           16 pipeline_base_check.py
+ 7 engine_pipeline_check.py        17 pipeline_fuzz_check.py
+ 8 pipeline_world_check.py         18 pipeline_e2e_check.py
+ 9 percore_check.py                19 editor_core_check.py --both
+10 compiled_verify.py --both
+（编号为清点用, 实际执行顺序见日志；探针总数 = 19, 与 M2_权威数字表 §五 一致）
+
+--------------------------------------------------------------------
+四、本次回归的性能数字（第 4 轮交叉核对, 非权威源）
+--------------------------------------------------------------------
+editor_core_check --both:  ON 最高核 69.53% / 主线程 7.630 ms/帧 / total 203.55% / fps 88
+                           OFF 最高核 65.47% / 主线程 8.699 ms/帧 / total 200.46% / fps 73
+compiled_verify --both:    ON fps_mean 71.7 (min 47) / tps 20.12 / jit_std 11.53
+                           OFF fps_mean 66.3 (min 61) / tps 20.13 / jit_std 11.95
+
+口径说明: **权威源仍为 2026-09-08 的 editor_core_{on,off,verdict}_r{1,2,3}.json
+与 compiled_verify_{on,off,ab}.json**（已备份并在回归后恢复原名）。
+本次回归产物另存为 tests\_tmp\*_regression_20260909.json, 仅作交叉核对:
+  · 方向一致: regression PASS (ON ms/帧 ≤ OFF)、FPS PASS (ON ≥ OFF, +8.1%)
+  · 与 09-08 权威值差异: editor_core ON 主线程 7.630 vs 8.753 ms/帧;
+    compiled fps ON 71.7 vs 74.1 / OFF 66.3 vs 69.1 → 属批次波动, 不替换权威值。
+
+--------------------------------------------------------------------
+五、产物归档
+--------------------------------------------------------------------
+tests\_tmp\build_all_run_20260909.log                      全量回归日志 (605 行)
+tests\_tmp\editor_core_{on,off,verdict}_regression_20260909.json
+tests\_tmp\compiled_verify_{on,off,ab}_regression_20260909.json
+tests\_tmp\_pre_regression_20260909\                        回归前权威产物备份
+    (editor_core_* / compiled_verify_* / registry_source.json / registry_compiled.json)
+====================================================================
+(报告完 — EXIT=0 与 ALL PASS 均可在日志中逐行回溯)
+====================================================================

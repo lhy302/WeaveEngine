@@ -1,0 +1,86 @@
+
+## ★M2 验收② 三轮复测 — 编辑器基线口径 (2026-09-08, editor_core_check.py --both --secs 12)
+- **口径**: `py -3.12 tests\_tmp\editor_core_check.py --both --secs 12`
+  (`Loom.py --open 保存\压测500混合.json --agent` → play on → 稳态 12s 采样;
+  与上条「★M2 验收② 同口径实测」同口径, 由单轮升为三轮 + 自动判定)
+- **产物**: `tests\_tmp\editor_core_{on,off,verdict}_r{1,2,3}.json`
+  (历史物证: `tests\_tmp\editor_core_on_pre_batch_20260908.json`)
+- **三轮实测 (最高核 busy% / 主线程 ms/帧 / FPS / total_core%)**:
+    | 轮 | 档 | 最高核 | busy% | 主线程 ms/帧 | FPS | total_core% |
+    | R1 | ON | #0 | 66.06 | 8.634 | 75 | 212.33 |
+    | R1 | OFF | #4 | 66.02 | 9.647 | 67 | 221.21 |
+    | R2 | ON | #0 | 68.64 | 9.138 | 73 | 209.01 |
+    | R2 | OFF | #0 | 67.25 | 10.299 | 62 | 276.15 |
+    | R3 | ON | #1 | 79.66 | 8.487 | 76 | 303.62 |
+    | R3 | OFF | #3 | 66.57 | 8.651 | 74 | 296.01 |
+- **统计 (n=3)**: ON 均值 最高核 **71.45%** / 主线程 65.32% / **8.753 ms/帧** /
+  FPS **74.67** / total **241.65%** (极差 94.61, s=53.69);
+  OFF 均值 最高核 66.61% / 主线程 64.17% / **9.532 ms/帧** / FPS 67.67 /
+  total 264.46% (s=38.75)。
+- **★判定 (三轮完全一致)**: `[GATE-ACCEPT2]` (ON 最高核 busy% ≤ 45.0%) →
+  **三轮全 FAIL**; `[GATE-REGRESSION]` (ON 主线程 ms/帧 ≤ OFF) → **三轮全 PASS**;
+  退出码全 0。
+- **口径声明**: 本节 n=3 与下条「★M2b 播放模式多核与 GPU 取证 (2026-09-09)」节
+  n=6/5 为**不同批次/不同样本量**, 禁止拼成同一 A/B 结论
+  (M2_权威数字表_20260908.md §1.1)。
+
+## ★M2 验收③ 编译版 FPS 定案 (2026-09-08, compiled_verify.py --both)
+- **口径**: `compiled_verify.py --both` (编译版
+  `D:\my-project\Loom(编译版)\Loom\Loom.exe`, TPS20 混合500)
+- **产物**: `tests\_tmp\compiled_verify_{on,off,ab}.json`
+- **实测**:
+    | 指标 | ON | OFF |
+    | fps_mean | 74.1 | 69.1 |
+    | fps_min | 54 | 62 |
+    | tps_mean | 20.11 | 20.14 |
+    | jit_std_mean | 10.75 | 11.52 |
+- **★判定**: `[GATE-FPS]` → **PASS** (ON ≥ OFF, **+7.2%**), `both_valid=true`,
+  exit 0。
+- **偏差如实记录**: ON `fps_min` 54 < OFF 62 (单点离群)。
+- **口径声明**: 本节与「★M2 收口全量回归 (2026-09-09)」节的 `[GATE-FPS]`
+  (ON 71.7 / OFF 66.3, +8.1%) 为**不同批次/不同样本量**, 不得互替。
+
+## ★M2b 播放模式多核与 GPU 取证 (2026-09-09, m2b_play_forensics.py)
+- **口径**: 探针 `tests\_tmp\m2b_play_forensics.py` (播放模式每核 busy + 主线程
+  ms/帧 + GPU 3D 占用 + 显存取证)
+- **产物**: `tests\_tmp\m2b_play_forensics_{on,off}{,_r2,_r3}.json` +
+  `tests\_tmp\m2b_play_forensics_agg_summary.json`; 报告
+  `D:\my-project\M2b播放模式多核与GPU取证_20260909.txt`
+- **实测 (与验收② 同口径, 不同批次/不同样本量)**:
+    | 档 | n | total_core% | 核当量 | 最高核 busy% | FPS | 主线程 ms/帧 | GPU 3D% |
+    | ON | 6 | 240.83 | 2.41 | 69.13 | 75.5 | 8.68 | 46.73 |
+    | OFF | 5 | 242.31 | 2.42 | 67.11 | 67.6 | 9.57 | 42.76 |
+- **★结论**: 多核分摊存在但与 DLL 化无关; GPU 未吃满 (3D 峰值 55.41%, 显存
+  0.6/4.0 GB)。
+- **口径声明**: 本节 n=6/5 与「★M2 验收② 三轮复测 (2026-09-08)」节 n=3 为
+  不同批次/不同样本量, 禁止拼成同一 A/B 结论。
+
+## ★M2 收口全量回归 + /Brepro 第三轮复现 (2026-09-09, build_all.bat)
+- **全量回归**: `build_all.bat` **EXIT=0** — **19 探针全 PASS**; 日志
+  `tests\_tmp\build_all_run_20260909.log`
+- **闸门**: `[GATE-REGRESSION]` **PASS** / `[GATE-FPS]` **PASS** (ON 71.7 /
+  OFF 66.3, **+8.1%**) / `[GATE-ACCEPT2]` **FAIL** (预期)
+- **投放校验**: `verify_release.py` **7 PASS / 0 FAIL**
+- **★可复现构建 (/Brepro 第三轮复现)**: 重编后 5 DLL 与 registry.json 的 SHA256
+  与 09-08 权威值**逐字节一致** (M2_权威数字表_20260908.md §1.4) —
+  loom_kernels `DF810FC5652EE238D020C448B2C6E06DCE745A2B59ACB2542F37A26D1D45D37B` /
+  module_ref `3CF5FC9CFC1CABE97306ED308035B358FE9A11E5D43EA6F578A2C5262734B793` /
+  badvector `4416599D321D7950E5CA4FF75E2D4A2C9B610588AF0048F29D633BE2C9C767A0` /
+  ambiguous `F0CDB51037D2BE8B17A03A3F8CB536B16A4DC4B23C5154943B910F67F770A700` /
+  pipeline `902D5F29E2B952F4D05B280C4BE2F7CCC57336D786474F85AAD7BE8C18433329` /
+  registry.json `A95BED16169495D0FE8EC2217646CBAA8433028853DB1FED21030729BC486E3E`
+- **口径声明**: 本条 `[GATE-FPS]` (ON 71.7 / OFF 66.3) 为 09-09 回归批次, 与
+  「★M2 验收③ 编译版 FPS 定案 (2026-09-08)」节 (ON 74.1 / OFF 69.1) 为
+  **不同批次/不同样本量**, 不得互替。
+
+## ★作废项标注汇总 (2026-09-09 R3 台账回填, 依据 _R3改写规则包_20260909.md §二)
+- **作废值**: `379%` (并行度) / `基线 227%` / `+195 点` / 「并行度翻倍」
+- **出现位置 (本台账)**: 「★M2 验收② 同口径实测 — 每核负载基线对齐 (2026-09-08
+  第 4 轮)」条内 —— `379%` 与 `+195 点` 在「进程合计」行; `基线 227%` 与第二个
+  `379%` 在「基线 (2026-09-07)」行; 「并行度翻倍」在「★结论」段。
+  四处 (其中 `379%` 两见) 均已在原条目内就地加「⚠作废标注」。
+- **作废原因 (实测反证)**: ON total 均值 241.65% < OFF 264.46%, 且 ON 自身
+  s=53.69pt; 09-07 产物 `tests\_tmp\tps_fps_core_result.json` 实测 total=194.8%、
+  核0=63.8%。
+- **处置**: 原值仅作历史物证保留 (不删改原文), 一律以本台账「★M2 验收② 三轮复测
+  (2026-09-08)」节 + M2_权威数字表_20260908.md §1.1 为准。

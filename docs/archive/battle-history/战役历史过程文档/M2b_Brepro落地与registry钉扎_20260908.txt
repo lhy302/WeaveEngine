@@ -1,0 +1,326 @@
+================================================================================
+M2b 落地报告 — /Brepro 可复现构建 + registry.json sha256 钉扎
+生成时间: 2026-09-08
+执行者: 构建链子代理 (M2b)
+工作根:   D:\my-project\Loom(py源代码-工作区)\Loom   (下称 ROOT)
+解释器:   py -3.12.10 (MSC v.1943 64bit)
+================================================================================
+
+0. 结论速览
+--------------------------------------------------------------------------------
+A. /Brepro 已加入 5 个 build bat 的 cl 步骤; 连续两次 build_all skip_checks 后
+   5 个 DLL 的 SHA256 两两完全相同 (5/5 SAME) —— 可复现构建实证成立。
+B. registry.json 三条目 sha256 已由空串钉实为真实 DLL 哈希; 脚本幂等 (第二次
+   0 变更); 短探针 3/3 全绿 (36/36 + 33/33 + ALL PASS)。
+C. build_all.bat 已接线: 回填步骤 + :run_check 转发 %2 %3 + 2 个新探针;
+   活跃探针 19 个 + 注释 0 个; skip_checks 路径 EXIT=0。
+D. assemble_release_0906.py 已接入 refresh_registry_sha.py + verify_release.py
+   (fail-fast); 仅 py_compile 静态检查, 未执行 (遵守禁令)。
+★ 两处必须上报的偏差/风险:
+   ① 6 个 .bat 的真实编码是 UTF-8(无BOM), 不是 GBK —— 按 UTF-8 保持 (见 §1.1)。
+   ② refresh 使源侧/编译版 registry.json 哈希必然不同 → verify_release.py 把
+      registry.json 当硬判据 (文本 SHA256) → 投放校验现在会 FAIL (见 §5)。
+
+
+================================================================================
+1. 任务 A — 5 个构建脚本加 /Brepro
+================================================================================
+1.1 编码实测 (重要: 与任务书假设不同)
+    对 6 个 bat 逐个做字节级解码试验 (build_ckernels / build_ref / build_badvector
+    / build_ambiguous / build_pipeline / build_all):
+      · cp936(gbk) 解码 → 全部抛 UnicodeDecodeError (illegal multibyte sequence)
+      · utf-8 解码   → 全部成功
+      · 无 BOM; 行尾: build_ckernels.bat = LF, 其余 5 个 = CRLF
+      · 证据 (build_ref.bat 第 2 行原始字节):
+        52 45 4d 20 ... 2d 20 e7 bc 96 e8 af 91 ...   ← e7bc96 = '编' 的 UTF-8
+    结论: 这 6 个文件本来就是 UTF-8 无 BOM。任务书要求的「保持原编码」= 保持
+    UTF-8; 若强行改写成 GBK 反而会让既有中文注释与全部文本变乱码。
+    本次改动一律: 读/写 UTF-8 无 BOM + 保留原行尾 (LF/CRLF 各自不变)。
+    复核 (改后): 5 个文件仍 utf8=True / gbk=False / bom=False, 行尾字节计数不变。
+
+1.2 改动位置与内容 (每个脚本都是「一步到位」的 cl 调用: cl /LD 内部自己调 link,
+    因此 /Brepro 直接加在 cl 参数里; /Brepro 对 cl 与 link 均合法, cl 会转给 link)
+    文件                                       加在哪一行  加了什么
+    ----------------------------------------- ---------- -----------------------------
+    ckernels\build_ckernels.bat                L6         cl 参数中 /O2 之后插入 /Brepro
+      (新增注释行 L5)
+      改后: cl /nologo /utf-8 /O2 /Brepro /LD /MD loom_kernels.c /Fe:loom_kernels.dll /Fo:loom_kernels.obj
+    core_components\build_ref.bat              L7         cl 参数中 /O2 之后插入 /Brepro
+      (新增注释行 L6)
+      改后: cl /nologo /utf-8 /O2 /Brepro /LD /MD loom_module_ref.c /Fe:module_ref.dll /Fo:loom_module_ref.obj /I.
+    core_components\build_badvector.bat        L7         cl 参数中 /O2 之后插入 /Brepro
+      (新增注释行 L6)
+      改后: cl /nologo /utf-8 /O2 /Brepro /LD /MD .\badvector.c /Fe:.\badvector.dll /Fo:.\badvector.obj /I.
+    core_components\build_ambiguous.bat        L7         cl 参数中 /O2 之后插入 /Brepro
+      (新增注释行 L6)
+      改后: cl /nologo /utf-8 /O2 /Brepro /LD /MD .\ambiguous.c /Fe:.\ambiguous.dll /Fo:.\ambiguous.obj /I.
+    core_components\pipeline\build_pipeline.bat L9        cl 参数中 /O2 之后插入 /Brepro
+      (新增注释行 L8)
+      改后: cl /nologo /utf-8 /O2 /Brepro /LD /MD .\core_components\pipeline\loom_pipeline.c
+            /Fe:.\core_components\pipeline\pipeline.dll /Fo:.\core_components\pipeline\loom_pipeline.obj /I.\core_components
+    新增注释行统一为:
+      REM /Brepro: 链接器可复现构建 (PE 时间戳/校验和/调试路径确定化) — 同一源码重编产物逐字节相同
+
+1.3 改动前后 5 个 DLL 的大小与 SHA256
+    (「改动前」= 未加 /Brepro 的现有产物; 「改动后」= 加 /Brepro 首次重编)
+    DLL                     大小(前/后)      SHA256 改动前                                                  SHA256 改动后
+    ----------------------- --------------- --------------------------------------------------------------- ---------------------------------------------------------------
+    ckernels\loom_kernels.dll   16896 / 16896  5DB416E55B53E686CCB9BCA9E5ED4EA0D7FFD8CD65F3888BDEDD89F8B4743440  DF810FC5652EE238D020C448B2C6E06DCE745A2B59ACB2542F37A26D1D45D37B
+    core_components\module_ref.dll 10240 / 10240 2411AAEDABBFF50AE86632634A9FC97B66B6073F136F40CAB9188974A10C0588  3CF5FC9CFC1CABE97306ED308035B358FE9A11E5D43EA6F578A2C5262734B793
+    core_components\badvector.dll  9728 / 9728   A778FC6805E39713A2DADDFF6B4DAD3EC2E537656E04C49B7B7E9BD3E8E4E51F  4416599D321D7950E5CA4FF75E2D4A2C9B610588AF0048F29D633BE2C9C767A0
+    core_components\ambiguous.dll  9728 / 9728   1C5CFD9E9DA9753C85AB4C01F9B7B0222F63FC1D265FB24797C5F5A23D874DDF  F0CDB51037D2BE8B17A03A3F8CB536B16A4DC4B23C5154943B910F67F770A700
+    core_components\pipeline\pipeline.dll 20480 / 20480 06F583A9AB9EF0757B22C41BFEAC1E13AD76D7FECC43896CA4258F35B56F1A87 902D5F29E2B952F4D05B280C4BE2F7CCC57336D786474F85AAD7BE8C18433329
+    · 大小全部不变 (说明 /Brepro 不改变代码生成, 只确定化 PE 元数据)。
+    · 哈希全部变化属预期 (时间戳/校验和被确定化)。
+    · 交叉验证: pipeline.dll 新哈希 902D5F29E2B9… 与隔离实验 _diag_brepro 的
+      B 组 (/Brepro) 结果完全一致, 独立复现成立。
+
+1.4 可复现性实证 (核心判据)
+    命令: cmd /c "cd /d ROOT && build_all.bat skip_checks"   连续执行 2 次
+    DLL                      大小    ROUND1 SHA256                                                    ROUND2 SHA256                                                    判定
+    ------------------------ ------- ---------------------------------------------------------------- ---------------------------------------------------------------- ----
+    loom_kernels.dll          16896   DF810FC5652EE238D020C448B2C6E06DCE745A2B59ACB2542F37A26D1D45D37B DF810FC5652EE238D020C448B2C6E06DCE745A2B59ACB2542F37A26D1D45D37B SAME
+    module_ref.dll            10240   3CF5FC9CFC1CABE97306ED308035B358FE9A11E5D43EA6F578A2C5262734B793 3CF5FC9CFC1CABE97306ED308035B358FE9A11E5D43EA6F578A2C5262734B793 SAME
+    badvector.dll              9728   4416599D321D7950E5CA4FF75E2D4A2C9B610588AF0048F29D633BE2C9C767A0 4416599D321D7950E5CA4FF75E2D4A2C9B610588AF0048F29D633BE2C9C767A0 SAME
+    ambiguous.dll              9728   F0CDB51037D2BE8B17A03A3F8CB536B16A4DC4B23C5154943B910F67F770A700 F0CDB51037D2BE8B17A03A3F8CB536B16A4DC4B23C5154943B910F67F770A700 SAME
+    pipeline.dll              20480   902D5F29E2B952F4D05B280C4BE2F7CCC57336D786474F85AAD7BE8C18433329 902D5F29E2B952F4D05B280C4BE2F7CCC57336D786474F85AAD7BE8C18433329 SAME
+    结果: 5/5 SAME, 两次 build 均 EXIT=0。第 3 次 (接线后的 skip_checks 验证) 也
+    产出同一组哈希 (见 §3.2), 即连续 3 次重编 5/5 逐字节相同。
+
+
+================================================================================
+2. 任务 B — registry.json sha256 回填机制
+================================================================================
+2.1 新增脚本 ROOT\tests\_tmp\refresh_registry_sha.py (UTF-8 无 BOM, py_compile 0)
+    · 参数: --root <引擎根>, 默认 = 脚本上两级目录 (tests\_tmp → tests → ROOT)。
+    · 逐条目计算 path 所指文件 SHA256 (小写十六进制) 并写回 sha256 字段。
+    · 文件不存在 → 打印 ERROR 并退出码 1 (不写回半截结果)。
+    · 保持结构/键顺序 (object_pairs_hook=OrderedDict)/其他字段不变;
+      写回 json.dumps(indent=2, ensure_ascii=False) + 末尾单个 '\n'。
+    · 打印每条 module_id / path / 旧 sha256 / 新 sha256, 末尾打印 registry.json
+      自身 SHA256 (写回前 + 写回后)。
+    · 幂等: 连续运行两次, 第二次变更条目数 = 0。
+
+    ★path 基准实测校准 (实现偏差, 已按加载器语义修正):
+      任务书写「以 registry.json 所在目录为基准解析 path」, 但实测该口径会得到
+      core_components\core_components\module_ref.dll (不存在) → 首轮运行直接 ERROR。
+      原因: module_registry.py::assemble(base_dir=None) → base_dir=_ENGINE_ROOT,
+      _load_entry/_sha_gate 都是 os.path.join(self.base_dir, entry['path']),
+      即真实 registry.json 里的 "core_components/module_ref.dll" 是**引擎根相对**。
+      因此脚本采用「先 registry.json 目录、再引擎根」的双基准解析, 并在每条输出
+      标注实际命中的基准 ([基准=引擎根]); 两种布局都能正确回填, 且与加载器一致。
+
+2.2 回填结果 (源侧 ROOT\core_components\registry.json)
+    条目           path                                   旧 sha256   新 sha256 (钉扎值)
+    ------------ --------------------------------------- ----------- ----------------------------------------------------------------
+    module_ref   core_components/module_ref.dll          (空)        3cf5fc9cfc1cabe97306ed308035b358fe9a11e5d43ea6f578a2c5262734b793
+    ckernels     ckernels/loom_kernels.dll               (空)        df810fc5652ee238d020c448b2c6e06dce745a2b59acb2542f37a26d1d45d37b
+    pipeline     core_components/pipeline/pipeline.dll    (空)        902d5f29e2b952f4d05b280c4be2f7ccc57336d786474f85aad7be8c18433329
+    变更条目数: 3 / 3
+
+    registry.json 自身:
+      回填前: size=1819  SHA256=E04C68A71ACB5E2C358836A87856D58C805F647E15AFF201195BB3B23982978D
+      回填后: size=2091  SHA256=A95BED16169495D0FE8EC2217646CBAA8433028853DB1FED21030729BC486E3E
+      格式复核: UTF-8 无 BOM / 末尾 0x0A (保留换行) / indent=2 / 键顺序未变
+                (module_id, path, official, enabled, provides, depends, sha256, note)
+      注: provides 数组由单行 ["module_ref.echo"] 变为多行 (json.dumps 标准行为,
+          内容等价); 除此之外无非预期结构变化。
+
+    幂等验证 (第二次运行):
+      变更条目数: 0 / 3
+      写回前/写回后 registry.json SHA256 均为 A95BED16…486E3E (完全相同)
+
+2.3 短探针验证 (全部在 ROOT 下执行, 均为短任务)
+    ① py -3.12 tests\_tmp\module_registry_check.py  → EXIT=0
+       --- 36 项: PASS 36 / FAILED 0 ---   ALL PASS
+       关键: Z 真实 registry.json 哈希未变 a95bed16169495d0; A1 modules==3;
+             A2 provides_map 齐全 (7); 校0 sha 闸 B1/B2/B2b/B3 全 PASS
+             (即「官方 sha 非空 → 强制比对」链路在填实后依然按契约工作)。
+    ② py -3.12 tests\_tmp\pipeline_fuzz_check.py    → EXIT=0
+       ALL PASS (33/33)
+       关键: E 官方 pipeline sha 错 → AssemblyError, 报错文本实测为
+             「官方条目 sha256 校验失败: sha256 不符: 实测 902d5f29…3329 !=
+               声明 0000…0000 (path=…\pipeline\pipeline.dll)」
+             F 真实 registry 组装成功 (3 组件全绿, pipeline official=1 inited=True)
+             A/E/F 三处「真实 registry.json 哈希未变 a95bed16169495d0」
+    ③ py -3.12 tests\_tmp\ckernels_val_check.py      → EXIT=0
+       ALL PASS (500 实例/单元/多顶点/多索引/极端值/零面积/逃生门 全 PASS)
+    结论: 三条短探针均未因 sha256 填实而失败, 无探针断言被放宽。
+
+2.4 稳定性验证 (重编 + 回填 后的 registry.json 一致性)
+    步骤: 记录 registry.json 哈希 → cmd /c "… build_all.bat skip_checks" →
+          回填步骤自动执行 → 再记录哈希
+      运行前: A95BED16169495D0FE8EC2217646CBAA8433028853DB1FED21030729BC486E3E
+      运行后: A95BED16169495D0FE8EC2217646CBAA8433028853DB1FED21030729BC486E3E
+      STABLE = YES (两次内容完全相同)
+    同轮 5 个 DLL 哈希与 §1.4 完全一致 → 「重编 → 回填」全链路幂等闭环成立。
+    这正是 /Brepro 带来的收益: 没有它, 每次重编都会让 registry.json 哈希变化,
+    从而无法钉扎。
+
+
+================================================================================
+3. 任务 C — build_all.bat 接线
+================================================================================
+3.1 改动摘要 (编码: 保持 UTF-8 无 BOM + CRLF; 见 §1.1 实测)
+    #  位置                     改动
+    -- ------------------------ ------------------------------------------------
+    1  L8-L13 文件头 REM 说明    探针总数更新为「当前活跃 19 个 + 0 注释」,
+                                并新增编码说明 (UTF-8 无 BOM, 不要用 GBK 另存)
+    2  L58-L63 (DLL 清单之后,   新增 registry.json sha256 回填步骤:
+       skip_checks 判断之前)      echo [build_all] ---- refresh registry.json sha256 ----
+                                 py -3.12 "tests\_tmp\refresh_registry_sha.py"
+                                 if errorlevel 1 goto :fail
+                                (放在 skip_checks 之前 → 只编译也回填)
+    3  L92-L96 [对拍清单] 末尾    percore_check.py 之后追加两项 (editor_core 在前):
+                                 REM ---- M2 验收②: 编辑器基线口径 A/B (较重: 启动编辑器两次,
+                                     约 2 分钟; 判据 [GATE-ACCEPT2]/[GATE-REGRESSION]) ----
+                                 call :run_check editor_core_check.py --both
+                                 REM ---- M2 验收③: 编译版 pipeline ON/OFF FPS A/B (较重: 启动
+                                     编译版两次, 约 2.5 分钟; 无编译版自动 SKIP) ----
+                                 call :run_check compiled_verify.py --both
+    4  原 L79-L80 (已删除)      删除旧注释行「REM ---- 编辑器基线口径每核 A/B …」+
+                                「REM call :run_check editor_core_check.py」(注释探针归零)
+    5  L138-L148 :run_check     py -3.12 "tests\_tmp\%~1" → … %~2 %~3
+                                 并加注释说明「否则 --both 会被吞掉, 只剩单档」
+                                 同时 echo 行与失败行都带上 %2 %3 便于定位
+
+3.2 skip_checks 路径验证 (未跑全量 build_all, 遵守禁令)
+    命令: cmd /c "cd /d ROOT && build_all.bat skip_checks"
+    输出尾部:
+      [build_all] all DLL builds OK
+      [build_all] ---- refresh registry.json sha256 ----
+      … refresh_registry_sha 输出 (3 条目, 变更 0) …
+      OK refresh_registry_sha: 3 条目已钉扎
+      [build_all] skip_checks=1, 对拍网跳过
+    EXIT=0 → 语法路径可走通, 回填步骤确实执行。
+
+3.3 接线后完整探针清单 (按执行顺序, 共 19 个活跃 + 0 注释)
+    #   探针                              参数        阶段
+    --- --------------------------------- ----------- --------------------------
+    1   ckernels_val_check.py               -          M1 内核数值
+    2   ckernels_e2e_check.py               -          M1 内核端到端
+    3   collide_val_check.py                -          M1 碰撞数值
+    4   aabb_f32_check.py                   -          M1 AABB f32
+    5   accept1_e2e_check.py                -          M1 验收①
+    6   module_contract_check.py            -          M1 DLL 契约
+    7   module_registry_check.py            -          M1 注册表验证器
+    8   module_fuzz_check.py                -          M1 注册表 fuzz
+    9   pipeline_prep_check.py              -          M1 pipeline 契约
+    10  crash_reporter_check.py             -          M1 崩溃上报
+    11  pipeline_val_check.py               -          M2 pipeline 数值
+    12  pipeline_base_check.py              -          M2 pipeline 基线
+    13  engine_pipeline_check.py            -          M2 引擎接线
+    14  pipeline_fuzz_check.py              -          M2 pipeline fuzz
+    15  pipeline_world_check.py             -          M2 世界矩阵
+    16  pipeline_e2e_check.py               -          M2 端到端
+    17  percore_check.py                    -          M2 每核口径
+    18  editor_core_check.py                --both     M2 验收② (新增)
+    19  compiled_verify.py                  --both     M2 验收③ (新增)
+    最终探针数: 19 个活跃 + 0 注释 (改前 17 活跃 + 1 注释)
+
+
+================================================================================
+4. 任务 D — 投放脚本接入 (只改代码, 未执行)
+================================================================================
+4.1 assemble_release_0906.py 改动
+    · L13-L17 import 区: 补 import subprocess
+    · L170-L180 新增步骤 8 (在 print("完成: …") 之后):
+        _tmp_dir = os.path.join(SRC_WS, "Loom", "tests", "_tmp")
+        print("8) 编译版 registry.json sha256 回填 (refresh_registry_sha.py) ...")
+        _rf = os.path.join(_tmp_dir, "refresh_registry_sha.py")
+        _rc = subprocess.call([sys.executable, _rf, "--root", loom_dst])
+        if _rc != 0:
+            raise SystemExit("编译版 registry.json sha256 回填失败 (rc=%d): %s" % (_rc, _rf))
+        print("   编译版 registry.json 已与其 DLL 自洽")
+      (loom_dst = D:\my-project\Loom(编译版)\Loom, 与任务书指定 --root 一致;
+       用 sys.executable 而非硬编码 py -3.12, 与设计 §5.2 一致)
+    · L182-L193 新增步骤 9 (照 M2b投放校验设计 §5.2):
+        _vr = os.path.join(_tmp_dir, "verify_release.py")
+        _rc = subprocess.call([sys.executable, _vr,
+                               "--src", os.path.join(SRC_WS, "Loom"),
+                               "--dst", loom_dst,
+                               "--snapshot"])
+        if _rc != 0:
+            raise SystemExit("投放校验 FAIL (rc=%d): 见上方明细; 禁止发布" % _rc)
+        print("   投放校验 PASS (硬判据全过; DLL SHA256 差异为 PE 时间戳, 预期)")
+    · 静态检查: py -3.12 -m py_compile → EXIT=0
+    · ★未执行 assemble_release_0906.py (禁令遵守), 编译版目录未做任何写入。
+
+4.2 refresh 路径的沙盒实证 (不动真实编译版)
+    把编译版 3 个 DLL + registry.json 复制到 %TEMP%\loom_dryrun_*\Loom 后运行:
+      py -3.12 tests\_tmp\refresh_registry_sha.py --root <sandbox>\Loom   → rc=0
+      module_ref pinned=4103d98a96bd57d8  match=True
+      ckernels   pinned=7305c1bbbd7b7093  match=True
+      pipeline   pinned=d7b8954b55359f32  match=True
+      sandbox registry.json SHA256 e238c963ee39d7f4… (原 e04c68a71acb5e2c…)
+    沙盒已删除; 复核真实编译版 registry.json 仍为 e04c68a71acb5e2c… (未被触碰)。
+    → 步骤 8 的调用路径与 --root 语义已验证可用。
+
+4.3 ★风险 (必须上报, 未擅自修改定稿脚本)
+    verify_release.py 对 TEXT 文件把 SHA256 当**硬判据**。步骤 8 让编译版
+    registry.json 钉的是编译版自身 DLL 的哈希, 而源侧钉的是源侧 DLL 的哈希;
+    两侧 DLL 因 PE 时间戳不同 (编译版未用 /Brepro 重编) → 两份 registry.json
+    必然不同 → 投放校验必然 FAIL。
+    实测证据 (只读运行 verify_release.py, 未改任何文件):
+      --- [4/7] core_components/registry.json (TEXT) ---
+        SHA256 : FAIL 文本文件不一致 → 内容已漂移 (src=a95bed16169495d0 dst=e04c68a71acb5e2c)
+        判定   : FAIL
+      === 汇总: 6 项 PASS / 1 项 FAIL ===   退出码 1
+      (运行前编译版 registry.json 三条目 sha256 仍为空串; 3 个 DLL 硬判据 PASS)
+    修复建议 (按推荐度排序, 均需主线程决策, 本次未实施):
+      a) 用 /Brepro 重编编译版并重新组装: 两侧 DLL 逐字节相同 → 两侧 registry.json
+         内容相同 → 校验恢复 7/7 PASS。这是与 A 任务同源的根治方案, 推荐。
+      b) 若暂不重编编译版: 把 registry.json 从 verify_release.py 的硬判据中豁免
+         (或改为「两侧各自与自身 DLL 自洽」的新判据) —— 需改定稿脚本, 本次未做。
+      c) 过渡做法: 步骤 8 之后、步骤 9 之前对 registry.json 做「按侧校验」,
+         但同样属于改判据, 需主线程批准。
+
+
+================================================================================
+5. 交付物清单
+================================================================================
+  修改 (6): ROOT\ckernels\build_ckernels.bat
+            ROOT\core_components\build_ref.bat
+            ROOT\core_components\build_badvector.bat
+            ROOT\core_components\build_ambiguous.bat
+            ROOT\core_components\pipeline\build_pipeline.bat
+            ROOT\build_all.bat
+            ROOT\tests\_tmp\assemble_release_0906.py
+  新增 (2): ROOT\tests\_tmp\refresh_registry_sha.py
+            本报告 D:\my-project\M2b_Brepro落地与registry钉扎_20260908.txt
+  未触碰:   loom_pipeline.c / editor_core_check.py / compiled_verify.py /
+            verify_release.py / 编译版目录 D:\my-project\Loom(编译版)\ 下任何文件
+            / 未执行 assemble_release_0906.py / 未跑全量 build_all.bat /
+            未跑 editor_core_check.py --both / compiled_verify.py --both /
+            percore_check.py / 未启动任何 Loom GUI 或 Loom.exe
+
+6. 异常与偏差汇总
+--------------------------------------------------------------------------------
+  #  事项                                处理
+  -- ----------------------------------- ------------------------------------------
+  1  6 个 bat 实为 UTF-8(无BOM), 非 GBK  保持 UTF-8; 未改编码; 报告中说明证据
+  2  任务书 path 基准口径与加载器不符     双基准解析 (先注册表目录, 再引擎根), 已标注
+  3  源侧/编译版 registry.json 哈希必然  上报; 建议 /Brepro 重编编译版 (未擅自改判据)
+     不同 → verify_release.py 现会 FAIL
+  4  skip_checks 分支 return /b 0        未改动 (超出任务范围), 供主线程决策
+
+7. 禁止项遵守声明
+--------------------------------------------------------------------------------
+  未执行 / 未触碰:
+    · 全量 build_all.bat (无参数)              —— 未执行
+    · editor_core_check.py --both              —— 未执行
+    · compiled_verify.py --both                —— 未执行
+    · percore_check.py                         —— 未执行
+    · assemble_release_0906.py                 —— 未执行 (仅 py_compile)
+    · 未启动 Loom GUI (Loom.py) / 编译版 Loom.exe
+    · 未修改 loom_pipeline.c / editor_core_check.py / compiled_verify.py /
+      verify_release.py (对 verify_release.py 只做了只读运行与读取)
+    · 未对 D:\my-project\Loom(编译版)\ 下任何文件做写入 (仅只读检查 + %TEMP% 沙盒)
+  实际执行过的重任务:
+    · build_all.bat skip_checks 共 4 次 (2 次可复现性对拍 + 1 次接线验证 + 1 次
+      最终复核), 每次 EXIT=0
+    · 3 个短探针各 1 次 (module_registry_check / pipeline_fuzz_check /
+      ckernels_val_check), 全 EXIT=0
+    · verify_release.py 只读运行 1 次 (未加 --snapshot, 未写任何文件)
+    · refresh_registry_sha.py: 源侧 2 次 + 沙盒 1 次
+================================================================================

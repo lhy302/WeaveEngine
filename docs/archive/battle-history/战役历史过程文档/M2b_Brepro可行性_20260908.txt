@@ -1,0 +1,365 @@
+================================================================================
+Loom DLL 化战役 M2b — MSVC /Brepro 可复现构建可行性报告
+================================================================================
+审计编号   : R-5（编译版投放副本与源侧 DLL 逐字节不一致，文档「SHA256 一致」声明不成立）
+报告生成   : 2026-09-08 21:10（本地）
+执行者     : C 构建工程师（子代理）
+引擎根目录 : D:\my-project\Loom(py源代码-工作区)\Loom          （下称 ROOT）
+实验隔离区 : D:\my-project\_diag_brepro                          （下称 DIAG）
+平台       : Windows / Windows PowerShell 5.1.19041.5737
+工具链     : Visual Studio 2022 Community, x64 Native Tools
+             cl.exe  19.44.35228（Microsoft (R) C/C++ 优化编译器，x64）
+             link.exe 14.44.35228.0（Incremental Linker）
+             系统日期 : 2026-09-08（本次实验所有「无 /Brepro」构建的 PE 时间戳均取自该墙钟）
+
+================================================================================
+0. 结论摘要（TL;DR）
+================================================================================
+1) 任务 1（注释修复）：已完成。loom_pipeline.c 第 183-186 行注释已改为与第 194 行
+   代码一致的「返回 LOOM_ERR_PARAM(-2)」，文件仍为 UTF-8 无 BOM、LF 换行；
+   未改动任何一行代码逻辑。
+
+2) 任务 2（/Brepro 可行性）：**结论 = 可行，且已充分验证。**
+   - 对照组 A（生产 cl 参数，无 /Brepro）：同一源码连续两次编译 → SHA256 不同，
+     逐字节差异仅 2 字节（pipeline.dll 在 0xF8 与 0x3974）。
+   - 实验组 B（生产 cl 参数 + /Brepro）：同一源码连续两次编译 → SHA256 **完全相同**，
+     0 个差异字节。
+   - 交叉验证：本次在 DIAG 目录用 /Brepro 重建的 pipeline.dll 与
+     loom_kernels.dll，与另一进程（接线子代理）在 ROOT 目录、不同时间重建的
+     同名生产 DLL **逐字节完全相同**。即「不同目录、不同时刻、独立两次构建」
+     产出同一份字节 → /Brepro 的确定性在本机工具链下成立。
+   - 审计 R-5 的「各差 6 字节」已精确复现并定性：差异就是同一份 4 字节
+     PE TimeDateStamp 的两处副本（COFF 头 + Debug 目录）中不同的低 3 字节，
+     与代码/优化无关。
+
+3) 推广性：/Brepro 是**链接器级**开关（cl 会转发给 link），对 5 个 DLL 同构适用。
+   除在 pipeline.dll 与 loom_kernels.dll 两个目标上做双编译实测外，
+   更在**生产路径**上观测到 5 个 DLL 连续两轮重编的 SHA256 全部一致（§4.6），
+   即 5 个 DLL 均已实测通过。
+
+4) 一个必须注意的副作用：/Brepro 构建与旧的非 /Brepro 构建之间，除时间戳外还有
+   约 2260 字节差异（Debug 目录新增 type=16 IMAGE_DEBUG_TYPE_REPRO 条目，
+   引起 .rdata 及其后续偏移/重定位级联变化）。因此**切换后必须重编一次并回填
+   registry.json 的 sha256**，不能沿用旧哈希，也不能让两种构建混存。
+
+================================================================================
+1. 任务 1：loom_pipeline.c 注释与代码一致性修复（已完成）
+================================================================================
+位置：ROOT\core_components\pipeline\loom_pipeline.c
+
+修复前（第 184-185 行，与代码不符）：
+     * ★越界下标 = 调用方参数错误 → 返回 LOOM_ERR_INTERNAL 作为"硬错误"标记,
+     *   由 loom_pipeline_light_vps 如实上抛 (不吞成 out_kind=-1; D5 修复)。
+
+修复后（第 184-186 行，与第 194 行代码一致）：
+     * ★越界下标 = 调用方参数错误 → 返回 LOOM_ERR_PARAM(-2) 作为"硬错误"标记,
+     *   由 loom_pipeline_light_vps 置 out_kind=-1 后原样返回 rc 如实上抛
+     *   (不吞成 rc=LOOM_OK / out_kind=-1; D5 修复)。
+
+依据（已 read 核对，未改动）：
+  - 第 194 行：if (si < 0 || (int64_t)si >= n) { free(sub); return LOOM_ERR_PARAM; }
+  - loom_module.h 第 82 行：#define LOOM_ERR_PARAM (-2)  /* 参数非法 */
+  - 调用方 loom_pipeline_light_vps 第 262-265 行：rc == LOOM_ERR_PARAM 时
+    置 out_kind[i] = -1 后 return rc（如实上抛）；其它错误才吞成 out_kind=-1。
+  - 第 190 行 sub==NULL 仍是 LOOM_ERR_INTERNAL（内部错误），与注释无关，未触碰。
+
+文件属性复核：UTF-8 无 BOM（首 3 字节 2F 2A 20）、CR=0 / LF=485、无 U+FFFD，
+              与同项目其它 .c/.h 一致（全项目 C 源码均为 LF）。
+
+「仅改注释、不动二进制」的可证明性：
+  实验 B3 在源码中额外插入一行纯注释后重编（/Brepro），产物与 B1 **逐字节相同**
+  （见 §4.4）。证明注释改动对生成代码零影响。
+
+================================================================================
+2. 五个构建脚本的 cl / link 参数清单
+================================================================================
+说明一：5 个 .bat 实测为 **UTF-8 无 BOM**（不是 GBK）；用 GBK 读取会出现乱码，
+        本报告数据以 UTF-8 读取为准。
+说明二：5 个脚本**都没有显式 link 行**——均用 cl 的 /LD 直接驱动链接器。
+        故「link 参数」等价于 cl 隐含转交：/LD → /DLL，/MD → /DEFAULTLIB:msvcrt，
+        /Fe:xxx.dll → /OUT:xxx.dll，/Fo:xxx.obj 为编译产物路径。
+        5 个脚本均**未使用 /Zi /DEBUG /FC**（这正是 /Brepro 能完全确定化的前提）。
+说明三：脚本首行都先 call vcvars64.bat（x64 工具链），成功后再删除 .obj。
+
+2.1 ROOT\ckernels\build_ckernels.bat
+    call "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat"
+    cd /d "%~dp0"
+    cl /nologo /utf-8 /O2 /LD /MD loom_kernels.c /Fe:loom_kernels.dll /Fo:loom_kernels.obj
+    附加开关：无（/I 未用；loom_kernels.c 用引号相对 include "../core_components/loom_module.h"）
+
+2.2 ROOT\core_components\build_ref.bat
+    call ...\vcvars64.bat
+    cd /d "%~dp0"
+    cl /nologo /utf-8 /O2 /LD /MD loom_module_ref.c /Fe:module_ref.dll /Fo:loom_module_ref.obj /I.
+
+2.3 ROOT\core_components\build_badvector.bat
+    call ...\vcvars64.bat
+    pushd "%~dp0"
+    cl /nologo /utf-8 /O2 /LD /MD .\badvector.c /Fe:.\badvector.dll /Fo:.\badvector.obj /I.
+
+2.4 ROOT\core_components\build_ambiguous.bat
+    call ...\vcvars64.bat
+    pushd "%~dp0"
+    cl /nologo /utf-8 /O2 /LD /MD .\ambiguous.c /Fe:.\ambiguous.dll /Fo:.\ambiguous.obj /I.
+
+2.5 ROOT\core_components\pipeline\build_pipeline.bat
+    call ...\vcvars64.bat
+    pushd "%~dp0..\.."      ← 必须先切到引擎根，因源码用 "../core_components/loom_module.h"
+    cl /nologo /utf-8 /O2 /LD /MD .\core_components\pipeline\loom_pipeline.c
+       /Fe:.\core_components\pipeline\pipeline.dll
+       /Fo:.\core_components\pipeline\loom_pipeline.obj
+       /I.\core_components
+
+2.6 实验开始时的公共参数集（5 个脚本完全一致的部分）
+    /nologo /utf-8 /O2 /LD /MD   ——  差异仅在于源文件、输出名与 /I 路径。
+    /O2 生效，**无 /fp:fast**（保求和序/比较序，与 pipeline.h 的数值纪律一致）。
+    无 /Brepro（这是 R-5 的根因）。
+
+2.7 当前脚本状态（并发观测，非本次实验所做改动）
+    21:08:29 时点，5 个 .bat 的 cl 行已被另一进程（接线子代理）改为：
+      cl /nologo /utf-8 /O2 /Brepro /LD /MD ...
+    即 /Brepro 已插入 /O2 之后。本次实验**未修改任何 .bat**（严格遵守禁令）。
+    ROOT\build_all.bat 当时仍为 mtime 2026-09-08 19:38:07，未含 Brepro 字样。
+
+================================================================================
+3. 实验环境与方法
+================================================================================
+3.1 隔离措施（生产 DLL 全程只读）
+    - 在 DIAG 下重建与生产同构的相对目录：
+        DIAG\core_components\loom_module.h      （自 ROOT 复制）
+        DIAG\core_components\loom_pipeline.h    （自 ROOT 复制）
+        DIAG\core_components\pipeline\loom_pipeline.c（自 ROOT 复制）
+        DIAG\ckernels\loom_kernels.c            （自 ROOT 复制，用于第二组验证）
+    - 每次构建均 `cd /d DIAG`（或 DIAG\ckernels）后执行与生产**完全相同**的
+      相对路径 cl 命令，输出全部落在 DIAG 内。
+    - 构建后立即把产物快照到 DIAG\artifacts\<Tag>.dll 再做哈希，避免相互覆盖。
+    - 全程未向 ROOT 下任何路径写入。ROOT 的 5 个生产 DLL 未被本实验改动
+      （ROOT 侧哈希在实验期间发生变化，系另一子代理在 21:08 重编所致，见 §6.3）。
+
+3.2 对照组 / 实验组设计（在**同一输出路径**上就地重编，完全复刻生产脚本行为）
+    组 A（对照，无 /Brepro）：A1 → A2（连续两次）
+    组 B（实验，加 /Brepro）：B1 → B2（连续两次）
+    注释位移测试：A3（无 /Brepro）/ B3（/Brepro）——源码插入一行纯注释后重编
+    第二目标 loom_kernels：K1/K2（无 /Brepro）、KB1/KB2（/Brepro）
+
+3.3 记录项：每条 cl 命令行、产物字节数、SHA256、编译耗时（Stopwatch 实测）。
+
+================================================================================
+4. 实验结果（SHA256 对比表）
+================================================================================
+4.1 主目标 pipeline.dll（cl 行与 build_pipeline.bat 逐字相同，仅 cwd 不同）
+
+  Tag  参数       耗时      大小      SHA256
+  ---- ---------- --------- --------- ----------------------------------------------------------------
+  A1   无 /Brepro  2559 ms   20480 B   6320D3CAD4A44BF8DF96DA47B22EA7549112A0AD3BE0DD3D979DC2C01957DE2D
+  A2   无 /Brepro  2236 ms   20480 B   70F3496FFA37A4AA57E827EB2AF3CB9D7F55F8D099EC1CF9BBEC1F28402C1DE1
+  B1   /Brepro    2221 ms   20480 B   902D5F29E2B952F4D05B280C4BE2F7CCC57336D786474F85AAD7BE8C18433329
+  B2   /Brepro    2200 ms   20480 B   902D5F29E2B952F4D05B280C4BE2F7CCC57336D786474F85AAD7BE8C18433329
+
+  两两对比：
+    A1 vs A2 ：**不同**，差异字节数 = 2，偏移 0xF8、0x3974（低字节 +3，即相隔约 3 秒）
+    B1 vs B2 ：**完全相同**（0 个差异字节）
+    A1 vs B1 ：差异 2260 字节（见 §5.3，/Brepro 引入 REPRO 调试条目导致的级联）
+
+4.2 第二目标 loom_kernels.dll（cl 行与 build_ckernels.bat 逐字相同）
+
+  Tag  参数       耗时      大小      SHA256
+  ---- ---------- --------- --------- ----------------------------------------------------------------
+  K1   无 /Brepro  2548 ms   16896 B   8E37B155C3DA2822ADB97C952EC7C657D29EF69CAE05E39A85F3D3300FB47077
+  K2   无 /Brepro  2494 ms   16896 B   DA045AD3F52022D01F912384BB3146BCD184CFB710BF10A936436391511BB9AC
+  KB1  /Brepro    2471 ms   16896 B   DF810FC5652EE238D020C448B2C6E06DCE745A2B59ACB2542F37A26D1D45D37B
+  KB2  /Brepro    2438 ms   16896 B   DF810FC5652EE238D020C448B2C6E06DCE745A2B59ACB2542F37A26D1D45D37B
+
+  两两对比：
+    K1 vs K2 ：**不同**，差异字节数 = 2，偏移 0x100、0x2BB4（同样是时间戳的两处副本）
+    KB1 vs KB2：**完全相同**
+    K1 vs KB1：差异 2013 字节（REPRO 条目级联）
+
+4.3 中间产物 .obj（补充证据：/Brepro 对编译器侧同样有效）
+    A1.loom_pipeline.obj  D39D227E44EDE813BFFD04BFBA90673462770F2D25A4939420114A9B842BE4EE
+    A2.loom_pipeline.obj  365D0509A4B2BADD449DD5717F24A58F9BC5E6EFD53A2001AEB30F8790E3D008
+    B1.loom_pipeline.obj  56F78F186BB732AA0625D72731AFC691EDC4BC5691C5ED3DB06E78639035055A
+    B2.loom_pipeline.obj  56F78F186BB732AA0625D72731AFC691EDC4BC5691C5ED3DB06E78639035055A
+    → A1.obj vs A2.obj 差异 1 字节（偏移 0x4，即 COFF 目标文件头的 TimeDateStamp 低字节）；
+      B1.obj 与 B2.obj 完全相同。可见非确定性**同时存在于编译与链接两个阶段**，
+      /Brepro 对两者都生效。
+    另外 A1.exp 与 A2.exp、B1.exp 与 B2.exp 均完全相同（导入库/导出表本身确定）。
+
+4.4 注释位移测试（判断是否「内容确定化」）
+    A3（无 /Brepro，源码多一行纯注释）：1C59975EB6A45906ED94423CE2808366A84B62EC1FE647812A7A0B580950E1BB
+      A1 vs A3 → 差异仅 2 字节（0xF8、0x3974），即**除时间戳外完全一致**。
+    B3（/Brepro，源码多一行纯注释）：902D5F29E2B952F4D05B280C4BE2F7CCC57336D786474F85AAD7BE8C18433329
+      B1 vs B3 → **完全相同**。
+    → 结论：/Brepro 下的产物是**内容寻址**的，注释等不影响代码生成的改动
+      不会改变 DLL 字节；非 /Brepro 下则连这种改动也被墙钟时间戳污染。
+
+4.5 跨目录 / 跨时刻独立复现（最强证据）
+    生产 pipeline.dll（ROOT，21:08:59 由另一进程重建）
+      = 902D5F29E2B952F4D05B280C4BE2F7CCC57336D786474F85AAD7BE8C18433329
+    本次 DIAG 的 B1（约 21:05，独立目录、独立 .obj 路径）
+      = 902D5F29E2B952F4D05B280C4BE2F7CCC57336D786474F85AAD7BE8C18433329
+    → **逐字节完全相同**（差异 0 字节）。
+    生产 loom_kernels.dll（ROOT，21:08:50）
+      = DF810FC5652EE238D020C448B2C6E06DCE745A2B59ACB2542F37A26D1D45D37B
+    本次 DIAG 的 KB1 = DF810FC5652EE238D020C448B2C6E06DCE745A2B59ACB2542F37A26D1D45D37B
+    → **逐字节完全相同**。
+    这同时证明：当前参数未把绝对源码路径/输出路径嵌入产物，
+    因此「同工具链 + 同命令行 + 同相对布局」下，换目录、换时刻仍可复现。
+
+4.6 生产路径 5 个 DLL 的跨轮重编一致性（真实构建路径，最强推广证据）
+    实验期间，接线子代理在生产路径上连续跑了两轮构建。两轮产物的 SHA256 逐一比对：
+    5 个 DLL **全部逐字节相同**（第二轮 mtime 21:09:44–53，第一轮 21:08:50–59）：
+
+      文件              大小      21:08 轮 SHA256                                                与 21:09 轮
+      ---------------- --------- ---------------------------------------------------------------- ----------
+      loom_kernels.dll   16896 B  DF810FC5652EE238D020C448B2C6E06DCE745A2B59ACB2542F37A26D1D45D37B  相同
+      module_ref.dll     10240 B  3CF5FC9CFC1CABE97306ED308035B358FE9A11E5D43EA6F578A2C5262734B793  相同
+      badvector.dll       9728 B  4416599D321D7950E5CA4FF75E2D4A2C9B610588AF0048F29D633BE2C9C767A0  相同
+      ambiguous.dll       9728 B  F0CDB51037D2BE8B17A03A3F8CB536B16A4DC4B23C5154943B910F67F770A700  相同
+      pipeline.dll       20480 B  902D5F29E2B952F4D05B280C4BE2F7CCC57336D786474F85AAD7BE8C18433329  相同
+
+    → 这直接证明 /Brepro 在**全部 5 个 DLL 的真实构建脚本**下都成立，
+      而不只是在 pipeline.dll / loom_kernels.dll 的实验副本上成立。
+      并且 pipeline.dll 与 loom_kernels.dll 的生产产物还与本次 DIAG 实验副本
+      逐字节相同（§4.5），即「不同目录 + 不同进程 + 不同时刻」三重独立复现。
+
+================================================================================
+5. 差异字节偏移分析
+================================================================================
+5.1 pipeline.dll 的 PE 布局（实测解析）
+    e_lfanew        = 0x000000F0
+    COFF.TimeDateStamp          @ 文件偏移 0x0000F8（4 字节）
+    DataDir[6] DEBUG            RVA=0x00004570, size=0x1C（无 /Brepro）/ 0x38（/Brepro）
+    Debug 目录文件偏移          = 0x00003970
+    DebugDir[0].TimeDateStamp   @ 文件偏移 0x00003974（4 字节，与 COFF 头同一个值）
+
+5.2 非 /Brepro 的两次构建（A1 vs A2）差异定位
+    仅 2 个字节：
+      0x0000F8: 74 → 77
+      0x003974: 74 → 77
+    即**同一个 4 字节时间戳的两处副本**，且只有低字节变化（两次构建相隔约 3 秒）。
+    该值取自墙钟：A1 为 0x6AA00874 = 1788872820 → 2026-09-08 13:07:00 UTC
+    （本机 UTC+8，即本地 21:07）。
+
+5.3 加 /Brepro 后（B1）
+    COFF.TimeDateStamp = 0x6E1EAA36（1847503414，解析成 2028-07-18 —— 显然不是真实
+    时间，而是**内容哈希**）。该值在文件中出现于 5 处：
+      0xF8、0x3974、0x3990、0x3CBC、0x4134
+    Debug 目录条目由 1 条变为 2 条（已 dump 原始 28 字节结构核对）：
+      entry[0] type=13（0x0D，无 /Brepro 时已存在；payload 为 .text$mn / .text$mn$00 等
+                段/函数名表，SizeOfData=560，PointerToRawData=0x3A6C）
+      entry[1] type=16（0x10，IMAGE_DEBUG_TYPE_REPRO，**/Brepro 新增**；
+                SizeOfData=36，PointerToRawData=0x3C9C；
+                payload = 4 字节长度/版本 0x20 + 32 字节内容哈希，末尾 4 字节
+                36 AA 1E 6E 即与 COFF 头同值的 0x6E1EAA36）
+    → 多出的 28 字节条目使 Debug 目录从 0x1C 扩到 0x38，进而使 .rdata 及其后续
+      数据/重定位偏移整体位移，造成 A1 vs B1 约 2260 字节的「级联差异」。
+      这是**结构性差异，不是随机性**，不影响 /Brepro 的确定性（B1==B2 已证明）。
+
+5.4 loom_kernels.dll 的对应偏移
+    COFF.TimeDateStamp @ 0x100；Debug 目录内的同一时间戳 @ 0x2BB4。
+    K1 vs K2 差异即这两处的低字节。
+
+================================================================================
+6. 审计 R-5「各差 6 字节」的根因复现
+================================================================================
+6.1 复现结果（编译版投放副本 vs 源侧重编）
+    投放副本 D:\my-project\Loom(编译版)\Loom\core_components\pipeline\pipeline.dll
+      SHA256 = D7B8954B55359F326CF1159B7E3DFFC4A1B46903ACF2F9A30DCC1E22E513DC7F
+      Debug 条目 = 1 条（type 13），**即该副本是非 /Brepro 构建**
+    本次无 /Brepro 重编 A1 / A2 与该投放副本的差异：
+      **恰好 6 个字节**，偏移 0xF8、0xF9、0xFA 与 0x3974、0x3975、0x3976
+    → 与审计描述「各差 6 字节」**完全吻合**。
+
+6.2 根因定性
+    这 6 个字节 = 同一份 PE TimeDateStamp 的**两处副本**（COFF 头 + Debug 目录）
+    中各自不同的**低 3 字节**（高字节相同，说明两次构建相隔不足约 194 天）。
+    与源码、编译选项、优化、浮点顺序**均无关**，纯粹是 MSVC 默认在链接时写入
+    墙钟时间戳所致。因此：
+      - 文档中「源侧重编后 SHA256 一致」的声明在无 /Brepro 时**必然不成立**；
+      - 加 /Brepro 后该字段被内容哈希替代，重编即逐字节一致，声明才成立。
+
+6.3 并发观测（重要，需知悉）
+    本次实验期间，另一进程（负责 build_all 接线的子代理）在 21:08:29 修改了 5 个
+    .bat（加入 /Brepro），并先后在 21:08:50–59 与 21:09:44–53 两轮重编 ROOT 下
+    5 个生产 DLL（第二轮与第一轮逐字节相同，见 §4.6）。
+    因此 ROOT 侧 DLL 的哈希在实验期间发生变化（例如 pipeline.dll 由
+    06F583A9AB9EF0757B22C41BFEAC1E13AD76D7FECC43896CA4258F35B56F1A87
+    变为 902D5F29E2B952F4D05B280C4BE2F7CCC57336D786474F85AAD7BE8C18433329）。
+    **这不是本次实验造成的**：本实验所有构建均在 DIAG 内、使用相对输出路径；
+    且 loom_kernels.dll 也发生了变化，而本实验对 ROOT 侧的 loom_kernels 从未构建。
+    当前 5 个生产 DLL 均已带 type=16 REPRO 条目（即已是 /Brepro 构建）：
+      loom_kernels.dll  16896 B  DF810FC5652EE238D020C448B2C6E06DCE745A2B59ACB2542F37A26D1D45D37B
+      module_ref.dll    10240 B  3CF5FC9CFC1CABE97306ED308035B358FE9A11E5D43EA6F578A2C5262734B793
+      badvector.dll      9728 B  4416599D321D7950E5CA4FF75E2D4A2C9B610588AF0048F29D633BE2C9C767A0
+      ambiguous.dll      9728 B  F0CDB51037D2BE8B17A03A3F8CB536B16A4DC4B23C5154943B910F67F770A700
+      pipeline.dll      20480 B  902D5F29E2B952F4D05B280C4BE2F7CCC57336D786474F85AAD7BE8C18433329
+    ROOT\build_all.bat 当时（mtime 19:38:07）仍不含 /Brepro。
+
+================================================================================
+7. 结论与建议
+================================================================================
+7.1 明确结论
+    **/Brepro 可行。** 在 VS 2022 (cl 19.44.35228 / link 14.44.35228.0) 下，
+    给现有 cl 行追加 /Brepro 后，同一源码的重复构建产出**逐字节相同**的 DLL；
+    且跨目录、跨时刻、独立进程的两次构建也逐字节相同；生产路径上 5 个 DLL
+    连续两轮重编的 SHA256 亦全部一致（§4.6）。审计 R-5 的 6 字节差异
+    100% 由 PE 时间戳的两处副本造成，/Brepro 正是针对该字段的标准解法。
+
+7.2 具体建议（应给哪些 bat 加什么参数）
+    (1) 5 个 bat 的 cl 行统一追加 `/Brepro`，位置建议紧跟 /O2：
+          cl /nologo /utf-8 /O2 /Brepro /LD /MD ...
+        —— /Brepro 由 cl 转发给 link，**无需**再写 /link /Brepro，
+        也无需其它链接器开关。（当前 5 个 bat 已是此形态，与建议一致。）
+    (2) 不要引入 /Zi 或 /DEBUG（会嵌入 PDB 路径与调试 GUID，破坏可复现性）；
+        不要引入 /FC（会嵌入绝对源码路径）。当前 5 个脚本均未使用，保持现状即可。
+    (3) 保持「相对路径 + 固定 cwd」的构建方式（build_pipeline.bat 的 pushd 到引擎根
+        是必需的，勿改成绝对路径）。
+    (4) **切换后必须一次性重新基线化哈希**：/Brepro 构建与旧的非 /Brepro 构建
+        除时间戳外还差约 2260 / 2013 字节（REPRO 调试条目及其级联）。因此：
+          - 重编全部 5 个 DLL；
+          - 用新产物重新回填 registry.json 的 sha256（以及任何文档中的哈希表）；
+          - 禁止新旧两种构建混存于同一投放目录。
+    (5) build_all.bat 若只是顺序调用这 5 个 bat，则自身无需加 /Brepro；若其中含
+        内联 cl/link 命令，同样必须加 /Brepro（当前 build_all.bat 未含 Brepro，
+        由接线子代理负责，本次未改动）。
+    (6) 建议在 CI/验收脚本里加一条**可复现性门禁**：连续编译两次并比对 SHA256
+        （或直接比对上面两处时间戳偏移），非零差异即失败。这是防止未来有人误加
+        /Zi、/FC 或更换工具链后哈希声明再次失效的最低成本护栏。
+
+7.3 替代方案要点（仅当 /Brepro 不可用时才需要；本例不需要）
+    若某工具链不支持 /Brepro 或需跨 MSVC 版本复现，则退回「哈希自动回填」方案：
+      - 由 build_all 在每次重编后自动计算 5 个 DLL 的 SHA256 并回填 registry.json
+        与文档哈希表，避免「文档声明与产物脱钩」；
+      - 文档中的「SHA256 一致」改为「同工具链同参数下重编一致」并附工具链版本；
+      - 需要跨版本逐字节一致则不可行（MSVC 版本变更必然改变代码生成），
+        只能做「功能等价 + 数值逐位对拍」验收，而不是哈希比对。
+
+7.4 可复现性的边界（务必写进文档）
+    /Brepro 保证的是「同一工具链版本 + 同一命令行 + 同一相对目录布局」下的
+    逐字节一致；跨 MSVC 版本、跨架构、跨不同 /O 组合**不保证**。
+    本次实验已证明当前参数下不存在绝对路径泄漏（DIAG 与 ROOT 两处不同绝对路径
+    产出同一字节）。
+
+================================================================================
+8. 附：产物、脚本与可复核信息
+================================================================================
+8.1 本次实验产物（全部位于隔离区，可复核）
+    D:\my-project\_diag_brepro\artifacts\A1.dll  A2.dll  A3.dll
+    D:\my-project\_diag_brepro\artifacts\B1.dll  B2.dll  B3.dll
+    D:\my-project\_diag_brepro\artifacts\K1.dll  K2.dll  KB1.dll  KB2.dll
+    以及 A1/A2/B1/B2 的 .pipeline.exp / .pipeline.lib / .loom_pipeline.obj 快照
+8.2 实验驱动脚本（可重跑）
+    D:\my-project\_diag_brepro\run_brepro_experiment.ps1   （A/B 组 + 字节比对）
+    D:\my-project\_diag_brepro\run_pe_analysis.ps1         （PE 头/注释位移）
+    D:\my-project\_diag_brepro\run_prod_compare3.ps1       （生产 vs 重编 vs 投放副本）
+    D:\my-project\_diag_brepro\run_state_check.ps1         （DLL/脚本现状盘点）
+    D:\my-project\_diag_brepro\run_kernels_test.ps1        （第二目标验证）
+8.3 未执行项（遵守禁令）
+    未运行 editor_core_check.py / percore_check.py / compiled_verify.py / build_all.bat；
+    未启动 Loom GUI 或编译版 Loom.exe；未修改任何生产 DLL；未修改 build_all.bat；
+    未改动除 loom_pipeline.c 注释外的任何生产源码。
+8.4 交付物
+    1) ROOT\core_components\pipeline\loom_pipeline.c （仅注释，UTF-8 无 BOM）
+    2) 本报告 D:\my-project\M2b_Brepro可行性_20260908.txt （UTF-8）
+================================================================================

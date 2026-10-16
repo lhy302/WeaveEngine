@@ -1,0 +1,197 @@
+====================================================================
+Loom 引擎 M2b 可行性评估 — culverin C ABI 包装 / 物理离核路线
+====================================================================
+日期: 2026-09-08  性质: 只读评估 (未改既有文件, 未编译, 未跑长任务)
+评估对象: M2 验收②「每核负载 核0 67%→≤45%」的达成路径
+取证: 工作区代码 + site-packages\culverin\ + 既有报告 (结论逐条标行号)
+
+--------------------------------------------------------------------
+零、结论先给账
+--------------------------------------------------------------------
+· 物理三段 pre/step/post **已在物理子线程** (physics_pipe.py:63-80), 主线程只剩
+  "投递+等待+prep 编排" —— 背景所述「调度与回读仍在主线程」与代码不符 (§1.1/§1.4),
+  故 culverin C ABI 包装对核0 的直接收益远小于既有报告估计。
+· 硬账 (editor_core_check 12s 播放口径; 每帧 CPU ms = busy% × 1000/FPS; 产物
+  tests\_tmp\editor_core_verdict_r{1,2,3}.json): ON 均值 (n=3) 最高核 71.45% × 13.392 ms
+  = 9.569 ms/帧, 目标 45% = 6.027 ⇒ 需降 3.542 ms/帧 (三轮 2.808 / 3.239 / 4.561);
+  而主线程自身 8.753 ms/帧, **已超目标本身**。
+· 已作废: 旧「核0 66.2% = 8.487 ms/帧, 目标 45% = 5.769 ⇒ 需降 2.718 ms/帧; 而主线程
+  自身 62.7% = 8.038 ms/帧」——实测反证: ON total 均值 241.65% < OFF 264.46%, 且 ON 自身
+  s=53.69pt; 09-07 产物 tests\_tmp\tps_fps_core_result.json 实测 total=194.8%、核0=63.8%,
+  见 M2_权威数字表_20260908.md。
+· A/B/C 单独或组合**都到不了 45%**: 三案能动的都是物理/胶水侧 (≤2 ms), 而 45%
+  按硬账外推需砍主线程 3.5 ms 量级 (§3; 旧「按实测弹性 5 ms 量级」已作废)。
+· 推荐 B; A 暂缓 (成本/收益不匹配); C 否掉。坚持原口径则唯一杠杆是渲染提交/
+  Qt 层 (M3), 或重新定标 ②。
+
+--------------------------------------------------------------------
+一、现状取证 (代码事实)
+--------------------------------------------------------------------
+1.1 线程模型 (physics_pipe.py:20-115; engine.py:3994-4008, 4859-4873)
+  · 建线程: _ensure_phys_pipe → PhysicsPipeThread(br, mask=pool_mask)
+    (engine.py:3994-4004); 名 loom-physics, 线程内先 pin_current_thread
+    (physics_pipe.py:41-51)。
+  · 物理线程: ensure_models(批次首子步) → pre_step → step → post_step
+    (physics_pipe.py:63-69); step 期间 C 层释放 GIL (:68)。
+  · 主线程: 连发 N 子步 pipe.post (engine.py:4863-4864, 4890-4893; 实现
+    physics_pipe.py:82-88, 含 list(models) 拷贝) → 音频/动画 (4865-4866) →
+    S1 wait_pending (4868; 实现 90-98, Event.wait 阻塞**不占 CPU**) →
+    _logic_prep (4873)。
+  · ⇒ 桥的调度与回读**都已离主线程**; engine.py:3944-3947 的
+    phys_bridge_pre/step/post 打点只存在于无管线直跑分支。
+
+1.2 physics_bridge.py 热路径的 culverin 使用面 (调用点行号)
+  · 入口: import culverin as cv (:46-51); cv.PhysicsWorld(settings=...) (:649);
+    常量 cv.MOTION_* (:991, 1002, 1043, 1099, 1120)。
+  · 结构变更 (ensure_models :820-860, 每逻辑帧首批一次): destroy_body
+    (:832, 852) / step(0.0) 冲刷 (:814, 838, 859) / _build_one。
+  · pre_step (:956-1080) 每子步: set_position/set_rotation 逐体 (:1011-1012)
+    + 批量段 (:1034-1037) / set_linear_velocity (:1054, 1062, 1078) /
+    activate (:1073) / is_active (:1058 经 _active_ok :950-954)。
+  · step (:1082-1087): 单次 w.step(dt), C 层释放 GIL, Jolt 内部线程池。
+  · post_step (:1089-1212) 每子步: count (:1104) / user_data+positions+
+    rotations+velocities 四组 memoryview → numpy (:1107-1110) /
+    angular_velocities (:1134) / argsort 映射 (:1114-1123) / is_active 逐体
+    (:1130) / 滚动摩擦 set_angular+set_linear_velocity (:1155-1161) / 残速清零
+    (:1177-1178) / 逐体写回模型 (:1202-1212)。
+  · 版本强耦合实证 (重编/换绑定的风险点): 0.14.0 无原生滚动摩擦 → Python 衰减
+    (:61-72); set_motion_type(STATIC→KINEMATIC) 原生崩溃 → 销毁重建 (:993-1002);
+    建体后查询须先 step(0.0) 冲刷 (:809-814)。
+  · 热点性质: pre/post = 逐体 Python 循环 + numpy 批量读 (500 体 × 3 子步), 持
+    GIL, 跑在物理线程上 —— 这才是 C ABI 化能真正省下的部分。
+
+1.3 culverin 包结构 (site-packages\culverin\; 未反编译 .pyd)
+  · __init__.py: delvewheel DLL 补丁 (:1-10); x86-64-v3 AVX2/FMA 自检 (:18-40);
+    运行期找 clang/LLVM DLL 目录 (:44-78); 载入 _culverin_c + _culverin (:82-96);
+    用 memoryview 挂 get_position/rotation/velocity 助手 (:112-166) 并 patch 到 C
+    类 (:174-178); PhysicsWorld = _culverin_c.PhysicsWorld (:182); 再导出常量与
+    Character/Vehicle/Ragdoll/MathService/Registry 等 (:185-221)。
+  · _culverin.py: 纯 Python 常量 (MOTION_*/SHAPE_*/CONSTRAINT_*, __all__ :7-39) +
+    validate_settings/validate_constraint/euler_to_quat/bake_scene/parse_urdf/load_urdf。
+  · _culverin_c.pyd (3.33MB): 真实现。只读指纹: PyInit__culverin_c ×1 (CPython
+    扩展入口), JPH:: ×286 (Jolt 静态链接), "clang version" ×13 (clang 构建),
+    依赖 python312.dll ⇒ **无 C ABI 导出**, 现有二进制不可被 pipeline.dll 链接或
+    "包一层"。
+  · _culverin_c.pyi: PhysicsWorld 的 positions/rotations/velocities/
+    angular_velocities/user_data 是 memoryview (:199-208), count (:210), step
+    (:232), create_body (:235-251), set_position/set_rotation/set_linear_velocity
+    (:418-421), is_active (:439) ⇒ 回读面是连续裸缓冲, 对共享内存/跨进程天然友好。
+  · CulverinCPP/CulverinSpan/CulverinLoop/CulverinPrefetch: **C++ 头文件** (非
+    Python 模块; namespace CPH: 类型别名/RestrictSpan/Unroll/Prefetch, 见
+    CulverinSpan:1-12), 随 wheel 分发供 C++ 嵌入 —— 上游设计支持被 C++ 链接。
+  · culverin.libs 仅 msvcp140 运行时 DLL; 包内无 Jolt 源码/无 .lib。
+  · METADATA: MIT, Homepage github.com/Evilpasture/culverin; 自述 "releases the
+    GIL during physics updates / Thread-Safe API / Shadow Buffers / 64-bit 代际句柄"。
+
+1.4 ★前提校正 (本评估最重要一条)
+  背景「调度与回读仍在主线程」与代码不符: 调度 (pre/step/post) 与桥回读
+  (post_step 写模型属性) 都在物理线程 (physics_pipe.py:63-69); 主线程只做投递
+  (engine.py:4863-4864)、等待 (4868)、消费模型属性 (interp/render) 与 prep 编排
+  (4873)。⇒ 既有文档「物理回读/调度可再降 1-2ms」(M2验收2判定依据…txt §二; 2026-09-09 R4 更正行号)
+  不成立, A 的主线程收益应按 §3 下调为 ≈0。
+
+--------------------------------------------------------------------
+二、三方案对比
+--------------------------------------------------------------------
+A. 重编 Jolt + 写 C ABI 包装 (pipeline.dll 直接调物理)
+  可行性: 低-中。上游 MIT 源在 GitHub (METADATA Project-URL), 但本机 D: 全盘无
+    culverin/Jolt 源, 包内只给 .pyd + 4 个 C++ 头; .pyd 无 C ABI 导出 ⇒ 不能
+    "包装现有二进制", 只能重编。工具链缺口: PATH 无 clang/clang-cl, 无
+    LLVM_INSTALL_DIR, 而 culverin 要求 x86-64-v3 且自身按 clang 构建
+    (__init__.py:18-38, 44-78; 二进制含 clang version 串)。需: 装 LLVM + 拉
+    culverin 源 + Jolt 子模块 + 写 ≈15 函数 C ABI 导出层 (建/销/建体/设位姿/
+    设速度/step/is_active/count/5 组数组读取) + 错误码 + 句柄表。
+  工作量: 大 (数周级: 拉源/建链/ABI 层/19 探针 + 物理专项对拍全量重跑)。
+  风险: 高。① 换编译产物 = 物理行为可能变, 桥已实证三处版本强耦合 (§1.2);
+    ② R1-R4 数值红线全量重验; ③ 长期跟随上游, 每次升级重做。
+  预期收益 (§1.1 依据): 主线程 -0 至 -0.2 ms/帧 (只剩 pipe.post 的 list 拷贝,
+    physics_pipe.py:85); 最高核 71.45% → 约 70-71% (ON 均值 n=3, editor_core_check 12s 播放
+    口径; -0.2 ms/帧 = -1.5 点, 1 ms/帧 = 100/13.392 = 7.47 点)。物理线程 ms/帧会明显下降, 但那是
+    别的核的账, 只改善帧时间/FPS 与 GIL 竞争。
+
+B. 保留 pybind 桥, 由基座 Python 调 (现状优化: 调度/回读继续外移)
+  可行性: 高。纯 Python 层, 无重编; 逃生门现成 (LOOM_NO_PIPE/LOOM_NO_PIPELINE);
+    对拍网现成可逐位复验。注: 调度/回读**已外移完毕** (§1.1), 残余搬移面 =
+    ① prep 编排调用 (~0.6 ms/帧, 已 C 化但仍在主线程发起) ② Python 胶水
+    (interp/脚本/dispatch/桶准备) 中**已 nogil** 的部分 (TPS_FPS分核取证报告
+    _20260907.txt:38-46: 全量搬 TPS 不可行(GIL), 只有已 nogil 段可真并行)。
+  工作量: 小-中 (≤1 周)。风险: 低 (不动数值路径, 每步可对拍)。
+  预期收益: 主线程 -0.6 至 -2.0 ms/帧 → 最高核 71.45% → 约 56-67% (ON 均值 n=3,
+    editor_core_check 12s 播放口径; 下界=搬走 2ms 且帧率不变 = -14.9 点, 上界=只搬 prep
+    编排 0.6ms = -4.5 点, 1 ms/帧 = 7.47 点)。仍不达标, 但性价比最高、可立刻验证。
+
+C. 进程间/共享内存 (物理独立进程)
+  可行性: 中。回读面是连续裸缓冲 (_culverin_c.pyi:199-208) 技术上可行, 但 Loom
+    全仓**无任何 IPC 基础设施** (仅 guiloader.py:68-70 用 cpu_count;
+    plugin_sandbox.py:43, 49 反把 mmap/multiprocessing 列为插件禁项), 需从零建:
+    共享内存环 + 双缓冲翻页 + 句柄/代际号映射 + 生命周期/崩溃重启 + 事件时序。
+  工作量: 大 (≥A 的 Python 侧, 58KB 桥 + 全部探针改造)。
+  风险: 高 (R1-R4 全量重验; 帧对齐/延迟抖动; 500 体 × 12 float ≈ 24KB/帧 搬运与
+    同步)。崩溃隔离是唯一强收益。
+  预期收益: 主线程 -0 至 -0.3 ms/帧 (物理本就不在主线程); 最高核 约 69-71% (ON 均值 71.45% − 0~2.2 点, editor_core_check 12s 播放口径)。不达标。
+
+--------------------------------------------------------------------
+三、对验收② 的预期影响 (硬账 + 实测弹性)
+--------------------------------------------------------------------
+基线 (权威值: M2_权威数字表_20260908.md §1.1; 探针 editor_core_check.py --both --secs 12,
+      播放稳态 12s; 产物 tests\_tmp\editor_core_{on,off,verdict}_r{1,2,3}.json):
+  ON 均值 (n=3): 帧时间 = 1000/74.67 = 13.392 ms/帧; 最高核 71.45% = 9.569 ms/帧; 目标 45% = 6.027
+  ⇒ 需降 **3.542 ms/帧** (三轮 2.808 / 3.239 / 4.561); 主线程 8.753 ms/帧, 已超目标。最高核 与主线程差
+  6.13 点 = 非主线程在该核的占用 (物理线程 + worker 池) 上限 0.821 ms/帧 (6.13% × 13.392) ——
+  **这是 A/C 能碰到的天花板**。
+  已作废: 旧「帧时间 = 1000/78 = 12.821 / 核0 66.2% = 8.487 / 目标 45% = 5.769 / 需降 2.718;
+   主线程 62.7% = 8.038 / 差 3.5 点 / 上限 0.449 ms/帧」(三轮无一复现), 见 M2_权威数字表_20260908.md。
+方案→最高核: A 约 70-71% (只能削非主线程份额) / B 约 56-67% (主线程 -0.6~-2.0ms 换算, 7.47 点/ms) /
+  C 约 69-71% (同 A + GIL 竞争消失)。达标 (≤45%): **A 否 / B 否 / C 否**。
+★实测弹性 (为何"降 ms"≠"降 %"): 已作废 (旧推导基于作废 ON 档「主线程 8.762→8.038 ms
+  (-0.72 ms, -8.3%), 65.7→62.7 (-3.0 点), FPS 75→78 ⇒ 每 1 ms 换 ≈4.2 点」; 实测反证:
+  ON total 均值 241.65% < OFF 264.46%, 且 ON 自身 s=53.69pt; 09-07 产物
+  tests\_tmp\tps_fps_core_result.json 实测 total=194.8%、核0=63.8%), 见 M2_权威数字表_20260908.md。
+  按 §1.1 权威值 (editor_core_check 12s 播放口径, n=3): ON 主线程 8.753 ms/帧 低于 OFF 9.532
+  (-0.779 ms), 但 ON 最高核 71.45% 反高于 OFF 66.61% (+4.84 点) ⇒ "降 ms" 与 "降 %" 实测并不同向,
+  不能据旧弹性外推。硬账外推 (帧率不变, 1 ms/帧 = 100/13.392 = 7.47 点): 到 45% 需从 71.45%
+  降 26.45 点 ⇒ **≈3.54 ms/帧** —— 而主线程总账仅 8.753 ms, 其中 Qt 事件循环 + GL 提交 +
+  Python 胶水 ~8.15 ms (M2验收报告 §一 ★结论段; 见 M2验收2判定依据…txt §二; 2026-09-09 R4 更正行号) 搬不动。
+  乐观界 (三轮最小差额, R1) 也需砍 2.808 ms/帧, 而 A/B/C 上限是 2.0ms(B) / 0.82ms(A、C)。
+  ⇒ **② 原口径无法由 A/B/C 达成**; 与 M2验收2判定依据…txt:35-39 的裁决方向一致,
+  但定量依据更新为"物理已不在主线程", A 的预期从"再降 1-2ms"下调为"≈0"。
+
+--------------------------------------------------------------------
+四、建议
+--------------------------------------------------------------------
+推荐: **方案 B** (保留 pybind 桥, 继续把主线程残余工作外包)。理由:
+  1) 唯一能立刻动、不碰数值红线与编译链 (工作量小-中, 风险低);
+  2) A 的收益被 §1.1 代码事实否掉 (物理已离主线程), 却要付出"装 LLVM + 拉源 +
+     重编 Jolt + ≈15 函数 ABI + 全量重验 + 长期跟随上游"的代价 —— 暂缓, 仅当
+     "物理行为完全自控/彻底免 GIL"成为独立目标再启动;
+  3) C 的收益 (≤0.3 ms 主线程) 与工作量/风险 (从零建 IPC + 全量重验) 不匹配 ——
+     否掉 (崩溃隔离价值可在 M3+ 单独论证);
+  4) 同时建议重新定标 ②: 杠杆不在物理侧。可替代口径「主线程每帧 CPU ≤6.0 ms」
+     (45% × 1000/74.67 = 6.027; 旧「≤5.8 ms」基于作废 78 FPS) 或「进程并行度 ≥N 核当量」
+     (ON total 均值 241.65% = 2.42 核当量, OFF 264.46% = 2.64; editor_core_check 12s 播放口径,
+     tests\_tmp\editor_core_verdict_r{1,2,3}.json)。已作废: 旧「ON 档 379% vs 基线 227%」
+     (实测反证: ON total 均值 241.65% < OFF 264.46%, 且 ON 自身 s=53.69pt; 09-07 产物
+     tests\_tmp\tps_fps_core_result.json 实测 total=194.8%、核0=63.8%), 见 M2_权威数字表_20260908.md。
+     若坚持 45%, 唯一剩余
+     路径是渲染提交/Qt 层外包 (M3), 需单独立项。
+第一步动作 (B 的前置, 先别写代码): 做一次**主线程 8.753 ms 逐段归因** (ON 均值 n=3, editor_core_check 12s 播放口径; 旧「8.038 ms」已作废):
+  a) 用现成 LOOM_PROFILE 打点 (engine.py:5080-5087 的 _stage_times) 覆盖已有段
+     (logic_step/world_matrices/interp/shadow_prep/buckets/dispatch/pipe_wait),
+     并在 Qt 事件循环 + GL 提交处补点 (ui/loom_gui.py:191-208, engine.py:5325-5331),
+     产出主线程 ms/帧 段账;
+  b) 同一次采样记录 **loom-physics 线程 ms/帧** (percore_check.py:134-140 已实现
+     分类, 直接跑), 标定 A/C 的真实上限;
+  c) 判据: "已 nogil 且非 Qt/GL 锁死"的段合计 ≥1.5 ms → 按 B 逐段外包; <1.0 ms
+     → 进入"重定标 ②"或 M3 渲染层立项, 不在物理侧继续投入。
+
+--------------------------------------------------------------------
+五、边界
+--------------------------------------------------------------------
+· 只读: 读了 physics_bridge.py/physics_pipe.py/engine.py/parallel.py/
+  percore_check.py/editor_core_check.py + culverin 包 (.pyd 仅只读字符串指纹, 未
+  反编译) + 既有报告; **未改任何既有文件**, 未编译, 未跑长任务。
+· 未实测项 (需第一步动作补齐): 物理线程 ms/帧、主线程 8.753ms 逐段分解 (ON 均值 n=3, editor_core_check 12s 播放口径; 旧「8.038ms」已作废)、B 各段
+  可外包量。核0 区间均为由实测锚点外推的估计 (依据行号已标)。
+· 唯一新增文件: 本报告。
+====================================================================
+(报告完)

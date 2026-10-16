@@ -1,0 +1,324 @@
+================================================================================
+M2b 投放校验设计说明 (2026-09-08)
+—— 回应第三方审计 R-5 / P9: 「投放 SHA256 5/5 一致」声明不成立
+================================================================================
+
+交付物
+  脚本  : D:\my-project\Loom(py源代码-工作区)\Loom\tests\_tmp\verify_release.py
+  快照  : D:\my-project\Loom(py源代码-工作区)\Loom\tests\_tmp\release_snapshot_20260908.json
+  报告  : D:\my-project\M2b投放校验设计_20260908.txt (本文件)
+
+约束遵守声明
+  - 未修改 assemble_release_0906.py / build_all.bat / 任何 DLL / 任何生产源码
+    (assemble_release_0906.py 的 mtime 仍为 2026-09-08 20:37:10, 未触碰)
+  - 未编译、未启动 Loom GUI / Loom.exe、未跑性能探针、未执行 build_all.bat
+  - 脚本纯 Python 3.12 标准库, 不依赖 pefile; 只读文件, 唯一写操作是 --snapshot 的 json
+
+
+================================================================================
+1. 问题定性: 为什么哈希不能当投放判据
+================================================================================
+审计事实 (本次复测逐字节确认, 与本脚本输出一致):
+
+  文件                                大小      SHA256    差异字节  差异偏移
+  pipeline.dll                        20480 B   不同      6         248-250, 14708-14710
+  module_ref.dll                      10240 B   不同      6         256-258, 5956-5958
+  loom_kernels.dll                    16896 B   不同      6         256-258, 11188-11190
+  registry.json / module_loader.py /
+  module_registry.py / pipeline_glue.py  --      相同      0         -
+
+  差异全在 PE 头部: COFF 头 TimeDateStamp (偏移 248-258 区) + OptionalHeader
+  CheckSum (靠后的 6 字节块)。源侧 20:47:26-34 重编 → 时间戳必然变 → SHA256
+  必然不同。这不是缺陷, 是 PE 的固有属性。
+
+  结论: 「投放 SHA256 5/5 一致」是一条**不可复现的声明**, 必须废弃。
+        改用「导出符号集合 + 关键字符串 + 大小」作硬判据, SHA256 降为软信息。
+
+
+================================================================================
+2. 设计说明
+================================================================================
+2.1 PE 导出表解析 (标准库自研, 不引入 pefile)
+  路径: DOS header (e_lfanew @0x3C)
+        -> NT headers (签名 "PE\0\0")
+        -> COFF header (Machine / NumberOfSections / TimeDateStamp /
+                        SizeOfOptionalHeader)
+        -> OptionalHeader (Magic 0x10B=PE32 / 0x20B=PE32+)
+        -> DataDirectory[0] (Export Table: VirtualAddress + Size)
+        -> 节表 RVA->文件偏移映射
+        -> IMAGE_EXPORT_DIRECTORY (NumberOfNames / AddressOfNames / AddressOfNameOrdinals)
+        -> 逐名读 ASCII 字符串 -> 排序去重 -> 导出符号集合
+
+  实现要点
+    - DataDirectory 起点按 Magic 分支: PE32 = OptionalHeader+96, PE32+ = +112
+    - RVA->偏移用节表 (VirtualAddress, max(VirtualSize,SizeOfRawData), PointerToRawData)
+    - 无导出表 (DataDirectory[0] 全 0) 返回空集合, 由调用方判 FAIL, 不抛异常
+    - 越界/签名缺失一律抛 PEFormatError, 被采集层捕获成 FAIL 说明, 不崩脚本
+    - 同时取出 TimeDateStamp 与导出符号个数, 供报告与快照引用
+
+2.2 校验对象 (7 项, 源侧 vs 编译版逐项对比)
+  #  相对路径                                   类型   module_id 字面量
+  1  core_components/pipeline/pipeline.dll       DLL    pipeline
+  2  core_components/module_ref.dll              DLL    module_ref
+  3  ckernels/loom_kernels.dll                   DLL    ckernels
+  4  core_components/registry.json               TEXT   -
+  5  core_components/module_loader.py            TEXT   -
+  6  core_components/module_registry.py          TEXT   -
+  7  pipeline_glue.py                            TEXT   -
+
+  默认根
+    源侧  : D:\my-project\Loom(py源代码-工作区)\Loom
+    编译版: D:\my-project\Loom(编译版)\Loom
+  --src / --dst 可覆盖 (负例测试即靠它构造)。
+
+2.3 关键字符串检查
+  对 3 个 DLL 在二进制中查找其 module_id 字面量 (来自 registry.json 的
+  module_id 字段: pipeline / module_ref / ckernels)。命中位置同时打印, 便于
+  人工确认命中的不是巧合字节。未命中 → FAIL, 并提示「可能被编译器优化/改名,
+  需人工确认」。该判据防的是「导出符号对但装错模块/符号被改名」这类功能性错配。
+
+2.4 输出与退出码
+  逐项输出: 存在性 / 大小 / 导出符号 / 关键字符串 / SHA256(软) / PE 时间戳(软)
+            / 字节差异(软) / 判定
+  末尾输出四列汇总表 (存在性 / 大小 / SHA256 / 导出符号) + 计数行:
+      === 汇总: N 项 PASS / M 项 FAIL ===
+  退出码: 0 = 全 PASS, 1 = 存在 FAIL (编译版缺失同样计 FAIL)。
+  编译版缺失时额外打印:  SKIP: 编译版不存在 <绝对路径>
+  编码: 交互式控制台沿用本机编码 (中文 Windows = cp936), 重定向/管道时强制
+        UTF-8, 便于审计日志采集不出现乱码。
+
+
+================================================================================
+3. 判据表
+================================================================================
+3.1 硬/软判据总表
+  项目类型 | 存在性 | 大小 | 导出符号集合 | module_id 字符串 | SHA256
+  ---------|--------|------|--------------|------------------|--------
+  DLL      | 硬     | 硬   | 硬           | 硬               | 软(INFO)
+  TEXT     | 硬     | 硬   | -            | -                | 硬
+
+  硬判据任一不满足 -> 该项 FAIL (退出码 1)。
+  软判据仅作 INFO 打印, 永不导致 FAIL。
+
+3.2 DLL 判定规则
+  条件                                          结果
+  源侧/编译版任一不存在                          FAIL
+  大小不一致                                     FAIL
+  PE 解析失败 / 源侧无导出表                     FAIL
+  导出符号集合不一致 (打印仅源侧/仅编译版差集)   FAIL
+  module_id 字面量任一未命中                     FAIL
+  SHA256 不一致                                   INFO 「PE 时间戳差异（预期）」
+  以上硬判据全满足                               PASS
+
+3.3 文本文件判定规则
+  条件                                          结果
+  源侧/编译版任一不存在                          FAIL
+  大小不一致                                     FAIL
+  SHA256 不一致 (文本应逐字节相同)               FAIL
+  全一致                                         PASS
+
+3.4 软信息 (仅打印, 不影响判定)
+  - SHA256 两侧值
+  - PE TimeDateStamp (UTC) 两侧值
+  - 字节差异总数 + 偏移示例 (直接复现审计的「各差 6 字节」)
+
+
+================================================================================
+4. 冒烟运行结果 (2026-09-08 21:05, 源侧目录下执行)
+================================================================================
+命令:
+  cd "D:\my-project\Loom(py源代码-工作区)\Loom"
+  py -3.12 tests\_tmp\verify_release.py
+  → 退出码 0
+
+关键输出 (逐项明细, 摘录 3 个 DLL + 汇总表):
+
+--- [1/7] core_components/pipeline/pipeline.dll (DLL) ---
+  存在性      : PASS 源侧=有, 编译版=有
+  大小        : PASS 20480 B == 20480 B
+  导出符号    : PASS 13 个完全一致: loom_module_abi, loom_module_deinit,
+                loom_module_depend, loom_module_has, loom_module_info,
+                loom_module_init, loom_module_provide, loom_pipeline_aabbs,
+                loom_pipeline_light_vps, loom_pipeline_mat4_mul_ref,
+                loom_pipeline_scene_bounds, loom_pipeline_shadow_prep,
+                loom_pipeline_world_matrices
+  关键字符串  : PASS 'pipeline' 命中 (src@0x36E8, dst@0x36E8)
+  SHA256      : INFO 不一致 → PE 时间戳差异（预期）
+                       src=06f583a9ab9ef0757b22c41bfeac1e13ad76d7fecc43896ca4258f35b56f1a87
+                       dst=d7b8954b55359f326cf1159b7e3dffc4a1b46903acf2f9a30dcc1e22e513dc7f
+  PE 时间戳   : INFO src=2026-09-08 12:47:34 UTC / dst=2026-09-08 12:22:31 UTC
+  字节差异    : INFO 6 字节 偏移示例=248, 249, 250, 14708, 14709, 14710
+  判定        : PASS
+
+--- [2/7] core_components/module_ref.dll (DLL) ---
+  存在性      : PASS 源侧=有, 编译版=有
+  大小        : PASS 10240 B == 10240 B
+  导出符号    : PASS 8 个完全一致: loom_module_abi, loom_module_deinit,
+                loom_module_depend, loom_module_has, loom_module_info,
+                loom_module_init, loom_module_provide, module_ref_echo
+  关键字符串  : PASS 'module_ref' 命中 (src@0x1578, dst@0x1578)
+  SHA256      : INFO 不一致 → PE 时间戳差异（预期）
+  PE 时间戳   : INFO src=2026-09-08 12:47:28 UTC / dst=2026-09-08 12:22:25 UTC
+  字节差异    : INFO 6 字节 偏移示例=256, 257, 258, 5956, 5957, 5958
+  判定        : PASS
+
+--- [3/7] ckernels/loom_kernels.dll (DLL) ---
+  存在性      : PASS 源侧=有, 编译版=有
+  大小        : PASS 16896 B == 16896 B
+  导出符号    : PASS 10 个完全一致: loom_aabbs_minmax, loom_aabbs_minmax_par,
+                loom_collide_pairs, loom_module_abi, loom_module_deinit,
+                loom_module_depend, loom_module_has, loom_module_info,
+                loom_module_init, loom_module_provide
+  关键字符串  : PASS 'ckernels' 命中 (src@0x29A8, dst@0x29A8)
+  SHA256      : INFO 不一致 → PE 时间戳差异（预期）
+  PE 时间戳   : INFO src=2026-09-08 12:47:26 UTC / dst=2026-09-08 12:22:23 UTC
+  字节差异    : INFO 6 字节 偏移示例=256, 257, 258, 11188, 11189, 11190
+  判定        : PASS
+
+--- [4/7] core_components/registry.json (TEXT) ---
+  存在性 PASS / 大小 PASS 1819 B / SHA256 PASS 一致 e04c68a71acb5e2c... / 判定 PASS
+--- [5/7] core_components/module_loader.py (TEXT) ---
+  存在性 PASS / 大小 PASS 16093 B / SHA256 PASS 一致 e27160ab8650759a... / 判定 PASS
+--- [6/7] core_components/module_registry.py (TEXT) ---
+  存在性 PASS / 大小 PASS 20409 B / SHA256 PASS 一致 ba34882353f88a43... / 判定 PASS
+--- [7/7] pipeline_glue.py (TEXT) ---
+  存在性 PASS / 大小 PASS 10629 B / SHA256 PASS 一致 d0aadc517b43c5b2... / 判定 PASS
+
+=== 明细汇总 (存在性 / 大小 / SHA256 / 导出符号) ===
+#   项目                                           存在性   大小     SHA256   导出符号   判定
+----------------------------------------------------------------------------------------------
+1   core_components/pipeline/pipeline.dll          PASS     PASS     INFO     PASS       PASS
+2   core_components/module_ref.dll                 PASS     PASS     INFO     PASS       PASS
+3   ckernels/loom_kernels.dll                      PASS     PASS     INFO     PASS       PASS
+4   core_components/registry.json                  PASS     PASS     PASS     -          PASS
+5   core_components/module_loader.py               PASS     PASS     PASS     -          PASS
+6   core_components/module_registry.py             PASS     PASS     PASS     -          PASS
+7   pipeline_glue.py                               PASS     PASS     PASS     -          PASS
+----------------------------------------------------------------------------------------------
+注: DLL 的 SHA256 列为软信息 (PE 时间戳差异属预期, 不判 FAIL); 文本文件 SHA256 为硬判据。
+
+=== 汇总: 7 项 PASS / 0 项 FAIL ===
+退出码 0
+
+--- 快照模式 ---
+命令:
+  py -3.12 tests\_tmp\verify_release.py --snapshot
+输出末行:
+  快照已写入: D:\my-project\Loom(py源代码-工作区)\Loom\tests\_tmp\release_snapshot_20260908.json
+  退出码 0, 文件 8739 B, 2026-09-08 21:05:56
+JSON 结构 (UTF-8, indent=2, ensure_ascii=False):
+  { _format, _doc, generated_at, generated_by, src_root, dst_root,
+    items: [ { rel, kind, module_id,
+               src: {path, exists, size, sha256, mtime, exports[]},
+               dst: {path, exists, size, sha256, mtime, exports[]},
+               size_equal, exports_equal, sha256_equal, verdict } ],
+    summary: {total, pass, fail} }
+
+--- 负例测试 (证明判据会真的 FAIL, 非「永远 PASS」) ---
+  A) 编译版 registry.json 内容漂移 + pipeline.dll 缺失
+     → 打印 "SKIP: 编译版不存在 ...\pipeline.dll"
+     → registry.json 大小/SHA256 FAIL, pipeline.dll 存在性 FAIL
+     → "=== 汇总: 5 项 PASS / 2 项 FAIL ===", 退出码 1
+  B) 用 loom_kernels.dll 冒充 module_ref.dll
+     → 大小 FAIL (10240 B != 16896 B), 导出符号 FAIL
+       (仅源侧=['module_ref_echo'] 仅编译版=['loom_aabbs_minmax',
+        'loom_aabbs_minmax_par', 'loom_collide_pairs'])
+     → 退出码 1
+  C) 编译版整体不存在 (空目录)
+     → 7 行 "SKIP: 编译版不存在 ..."
+     → "=== 汇总: 0 项 PASS / 7 项 FAIL ===", 退出码 1
+
+  负例目录建在 %TEMP%, 测试后已清理, 未污染仓库。
+
+
+================================================================================
+5. 接入投放流程的建议 (不真改 assemble_release_0906.py)
+================================================================================
+5.1 建议的接入点
+  在 assemble_release_0906.py 的 main() 末尾、最终统计 print 之前接入
+  (当前文件第 166 行 `n_loom = sum(...)` 之前, 即步骤 7 之后作为新步骤 8)。
+  理由: 此时 dist 替换、ckernels、core_components 白名单、pipeline_glue.py、
+  设置.json / 解释器.json 全部落地完毕, 校验的就是最终投放态。
+
+5.2 建议追加的调用代码片段 (请人工粘贴, 本任务未改动该文件)
+
+    # ---- 以下为建议片段, 未写入 assemble_release_0906.py ----
+    # 顶部 import 区需补: import subprocess
+    print("8) 投放校验 (verify_release.py: 导出符号+关键字符串+大小) ...")
+    _vr = os.path.join(SRC_WS, "Loom", "tests", "_tmp", "verify_release.py")
+    _rc = subprocess.call([sys.executable, _vr,
+                           "--src", os.path.join(SRC_WS, "Loom"),
+                           "--dst", loom_dst,
+                           "--snapshot"])
+    if _rc != 0:
+        raise SystemExit("投放校验 FAIL (rc=%d): 见上方明细; 禁止发布" % _rc)
+    print("   投放校验 PASS (硬判据全过; SHA256 差异为 PE 时间戳, 预期)")
+    # ---- 片段结束 ----
+
+  说明
+    - 用 subprocess 而非 import: 脚本可独立跑、退出码即判定、避免污染组装
+      进程的 sys.path / stdout。
+    - sys.executable 即运行 assemble 脚本的 py -3.12 解释器, 无需硬编码。
+    - --snapshot 让每次投放自动留一份 release_snapshot_<YYYYMMDD>.json 存档,
+      作为「投放时刻」的文档引用依据。
+    - 校验失败即 raise SystemExit, 让组装流程在发布前硬停 (fail-fast),
+      而不是「投了但没人知道对不对」。
+    - 若希望校验不阻塞组装 (只告警), 把 raise 换成 print 即可; 不推荐。
+
+5.3 前置/补充建议
+  a) 投放前先跑一次 `py -3.12 tests\_tmp\verify_release.py` 看基线, 投放后
+     再跑一次; 两次都 PASS 才算可发布。
+  b) 建议把 registry.json 里三个组件的 "sha256" 字段保持为空 (当前即为空),
+     不要改填投放副本哈希 —— 填了必然与源侧重编后的哈希不符, 会重现同类问题。
+     若要填, 只能填「导出符号+大小」的稳定指纹, 不能填文件哈希。
+  c) 建议在文档中把「投放 SHA256 5/5 一致」的旧表述, 统一替换为:
+     「投放校验以导出符号集合 + 大小 + 关键字符串为硬判据, 7/7 PASS;
+       DLL 因 PE 时间戳 SHA256 不同属预期, 以 release_snapshot_<日期>.json
+       记录投放时刻两侧快照」。
+  d) 新增/修改 DLL 后, 记得同步更新本脚本 ITEMS 里的白名单与 module_id。
+
+
+================================================================================
+6. 「SHA256 快照」vs「硬判据」用法说明
+================================================================================
+  两个东西用途不同, 不要混用:
+
+  硬判据 (大小 + 导出符号集合 + module_id 字符串; 文本另加 SHA256)
+      用途: 判定「投放副本与源侧是否功能等价」——即发布门禁 (gate)。
+      特性: 对 PE 时间戳/校验和这类元数据差异免疫, 可复现。
+      用法: 直接看退出码。0 = 可发布; 1 = 禁止发布, 必须查明细。
+
+  SHA256 快照 (--snapshot 产出的 release_snapshot_<YYYYMMDD>.json)
+      用途: 事后追溯与文档引用 —— 回答「当时投的到底是哪一版」。
+      特性: 记录两侧 path/size/sha256/exports/mtime 的**时刻值**, 是历史证据,
+            不是判据。
+      用法:
+        - 文档写「投放时刻快照见 release_snapshot_20260908.json」;
+        - 事后排查「这份副本来自哪次组装」时, 比对 mtime + sha256;
+        - 想复现某次投放, 用快照里的 sha256 去源侧/构建产物里找同一文件。
+      注意:
+        - DLL 的 sha256 在快照里两侧通常不同 (PE 时间戳), 这**不是异常**,
+          快照同时给出 sha256_equal 字段并已在 _doc 里写明预期;
+        - 不要用快照的 sha256 反向作为「投放一致性」的判据, 那正是 R-5/P9
+          指出的错误做法;
+        - 文本文件的 sha256 两侧相同, 快照里可直接当「未漂移」的证据。
+
+  一句话: 硬判据管「能不能发」, 快照管「发的是哪一版」。
+
+
+================================================================================
+7. 本次校验结论
+================================================================================
+  7 项 PASS / 0 项 FAIL, 退出码 0。
+
+  当前投放的编译版与源侧**功能等价**:
+    - 3 个 DLL 大小一致, 导出符号集合逐名一致 (13 / 8 / 10 个),
+      module_id 字面量 (pipeline / module_ref / ckernels) 两侧均命中;
+    - 4 个文本文件 (registry.json / module_loader.py / module_registry.py /
+      pipeline_glue.py) 逐字节一致;
+    - DLL 的 SHA256 差异共 6+6+6 字节, 全部落在 PE 头部时间戳/校验和区,
+      与审计 R-5/P9 的描述完全吻合 —— 属预期, 非缺陷。
+
+  需要纠正的是**声明口径**, 不是代码: 停止使用「投放 SHA256 5/5 一致」,
+  改用本脚本的硬判据 + 快照。
+================================================================================

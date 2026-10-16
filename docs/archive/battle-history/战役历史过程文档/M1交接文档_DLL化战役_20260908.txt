@@ -1,0 +1,249 @@
+====================================================================
+Loom 引擎 DLL 化战役 — M1 交接文档 (给 DSH 接手开发)
+====================================================================
+日期: 2026-09-08
+交接方: Claude Code (主线程)  →  接手方: DSH (DeepSeek, 127.0.0.1:3080)
+交接原因: Claude 环境反复 API 流错误 (Stream error: error decoding
+  response body — 经查为 cc-switch 链路间歇性超时, 与 09-03 分类器误拦
+  同源), 不稳定无法开发; 用户拍板换 DSH 继续。工作区 = 代码试验区,
+  随便改 (用户原话)。
+
+--------------------------------------------------------------------
+0. 开工前必读 (优先级从高到低)
+--------------------------------------------------------------------
+1. D:\my-project\DLL化改造可行性方案与执行路径报告.txt  (v1.3, 施工总纲)
+   ★第一章=用户构想九点 / §3=接口契约 / §6=里程碑 / §10=北极星三问 /
+   §11=用户原话存档。所有架构决策以它为准, 修订走"修订头 + 改正文"。
+2. D:\my-project\Loom(py源代码-工作区)\Loom\core_components\loom_module.h
+   (本战役新契约头 v1.0 — 已经写完并编译验证, 见 §3)
+3. D:\my-project\Loom(py源代码-工作区)\Loom\ckernels\loom_kernels.c
+   (既有 C ABI 实战范本: dllexport / int64 错误码 / 调用方工作区 /
+   容量不足返回 -1 — 新代码风格必须与它同源)
+
+--------------------------------------------------------------------
+1. 战役一句话 + 关键定案 (v1.3 纯 DLL 架构 — 最重要, 别搞错)
+--------------------------------------------------------------------
+引擎 = Python 基座 (只写挂载/调度/编辑/场景IO/插件加载/注册表组装)
++ 功能全部拆成 DLL (C ABI 接口)。"DLL 本身就是最好的模块化"。
+
+★v1.3 定案 (用户拍板, 推翻了 v1.1 备胎铁律 — 勿再引入 Python 冗余):
+  - 核心组件 = 官方 DLL 唯一实现, 不做 Python 冗余。Python 基座永不
+    实现核心功能 (调度/UI/IO 除外)。
+  - 兜底只对准用户注入的 DLL: 校验失败 = 弹出; 运行崩溃 = Minidump
+    落盘 + 弹出 → 回退官方 DLL。绝不回退到 Python 实现。
+  - 搬移 = 绞杀者模式: 对拍逐位 → 验收 → 删旧 Python 实现 (不长期留两份)。
+  - M4 脚本 = Lua 5.4 (用户拍板, 弃嵌入式 CPython)。
+  - M2→M3 串行; M5 (gui+editor.dll) 置后至 M6 之后; CMake 待 DLL≥4 再迁。
+
+★北极星 (§10.3 三问, 每个架构决策的最终判据):
+  ① 让"注入创意"更容易?  ② 让"Agent 操作"更容易?  ③ 坏注入下存活概率更高?
+  三问不过不放行; 与性能冲突时方向优先, 但 M2/M3 对拍逐位与 FPS 验收不降。
+
+备份状态 (恢复必核): 用户已于 09-07 手动备份稳定区 = 含相机修复批 +
+批1-3 战果; 不含批4A 闸门与期1 NgilPool (工作区已绿, 待用户实测)。
+双夹规则: 稳定区 (Loom(py源代码-稳定版本备份区)) 只读, 改动全在
+工作区 (Loom(py源代码-工作区)), 验收后用户手动复制。
+
+--------------------------------------------------------------------
+2. M1 里程碑验收标准 (报告 §六, v1.3 口径)
+--------------------------------------------------------------------
+M1 = 设计定稿+开发脚手架, 验收:
+  [√] 注册表+加载器在无用户 DLL 时完整运行 (全用官方 DLL)
+  [ ] 对拍网 MVP 全 PASS
+  [ ] 模糊测试全拦+自愈 (坏 DLL 弹出/回退官方)
+
+--------------------------------------------------------------------
+3. 已完成工作盘点 (主线程已落盘, DSH 接手时全部在此)
+--------------------------------------------------------------------
+目录: D:\my-project\Loom(py源代码-工作区)\Loom\core_components\ (已建)
+
+[√] 3.1 loom_module.h — 契约头 v1.0 (376 行, 中文注释齐全)
+    内容: LOOM_MODULE_MAGIC 0x4D4F4F4C ('LOOM' 内存序) /
+    ABI 版本编码 (高16主/低16次, LOOM_ABI_MAKE/MAJOR/MINOR) /
+    LOOM_MODULE_INFO (magic,abi_version,module_id[64],version[16],
+      official(uint32: 1=官方 0=用户注入+信任闸), provides_count,
+      depends_count, reserved) / LOOM_TENSOR (data,shape[4],ndim,dtype;
+      LOOM_DTYPE_F32/F64/I32/I64/U8) / 错误码 (0=-1容量-2参数-3内部
+      -4ABI-5未init-6不支持) / 7 最小导出函数集:
+      loom_module_info() / loop_module_provide(i) / module_depend(i) /
+      loom_module_init() / loom_module_deinit() / loom_module_abi() /
+      loom_module_has(iface) — 均 extern "C", 后三者 typedef 已定义
+      (loom_module_info_fn 等 6 个 typedef 供 Python 侧 ctypes 用)。
+    铁律已写入注释: 帧内存=基座 arena 预分配 grow-only (DLL 不 malloc);
+    热重载=无跨帧隐藏状态 (deinit→FreeLibrary→LoadLibrary→init 零迁移);
+    init 可重入 (同一 DLL deinit 后再 init 必须干净重建)。
+
+[√] 3.2 loom_module_ref.c + build_ref.bat — 契约参考实现+编译闸门
+    module_ref.dll 已编出 (10KB)。用途: ①头文件 MSVC 合法性的编译闸门
+    ②新 DLL 脚手架模板 ③M1 探针的无害靶 (导出 module_ref_echo: 校验
+    LOOM_TENSOR 形状/dtype 后 src 逐位拷 dst — 示例热路径最小形态)。
+    编出命令已在 build_ref.bat 里: cl /nologo /utf-8 /O2 /LD /MD
+    (★/utf-8 是本次加的: 中文注释在 GBK 代码页下触发 C4819 警告)。
+    实证: BUILD_OK, dll 10KB, 0 警告。
+
+[√] 3.3 registry.json — 注册表初始格式 v1.0 (模板)
+    结构: {"_format":"loom-core-registry/1.0","_doc":...,
+      "registry_version":"1.0","components":[{module_id, path,
+      official(bool), enabled(bool), provides[], depends[], sha256,
+      note}]}。首个条目 = module_ref。★enabled=false 的组件不加载
+      (回退=官方版), official=true 才算官方组件。实际字段语义细节
+      DSH 定 (reg 验证器在 M1-2 写, 见 §4)。
+
+[√] 3.4 crash_reporter.py — 崩溃落盘 (M1-6 验收通过, 9/9)
+    切根: Loom(py源代码-工作区)\Loom\crash_reporter.py + 探针
+    tests\_tmp\crash_reporter_check.py (自报告 ALL PASS 9/9, 复跑核实)。
+    要点 (写进了模块 docstring, DSH 接读):
+      - 不上 Breakpad: 单机开发+MSVC 在场, dbghelp 一次 ctypes 调用即可
+      - dump 级别 MiniDumpNormal|WithHandleData(0x4) 手动路径;
+        崩溃上下文 (unhandled filter 内进程已损坏) 下加 0x40
+        (IndirectlyReferencedMemory) 否则 0x800703E6 被拒, 再降级裸
+        Normal(0x0) 重试 — 留证据 > 证据完美
+      - filter 回调只做两件事 (备份+Dump, 全包 try/except) 立即返回
+        EXCEPTION_EXECUTE_HANDLER; 不在崩溃回调里做复杂事 (再崩=死循环);
+        不碰锁 (崩溃时锁可能被别的线程持有→死等)
+      - 手动 write_dump(reason) 给 ctypes OSError 路径 (ctypes 把 DLL 内
+        0xC0000005 转 OSError 抛给基座 → 基座捕到后调它落盘, 再走弹出
+        坏 DLL→回退官方)
+      - register_scene_backup(fn) 场景备份闭包; 限流同分钟最多 2 个;
+        LOOM_NO_CRASHDUMP=1 逃生门; ctypes 回调持模块级全局引用防 GC
+      - ★py3.12 真崩坑 (探针实测): ctypes.string_at(0,4) 被空指针守卫
+        静默拦截 (不崩不抛); 裸崩要用 ctypes.c_int.from_address(0).value
+
+[√] 3.5 build_all.bat — 统一构建 (M1-7, 全链验收 EXIT=0)
+    位置: Loom(py源代码-工作区)\Loom\build_all.bat
+    职责: 锁 MSVC 工具链 → 一键重编全部 DLL (当前: ckernels) → 跑全量
+    对拍网 (tests\_tmp 下 *_check.py)。用法: build_all.bat [skip_checks]。
+    ★已加 ckernels + 4 个既有对拍探针调用, 实测 ALL PASS EXIT=0。
+    【核心坑已写进文件头注释】bat 解析括号坑: 项目路径含括号
+    "Loom(py源代码-工作区)", 含括号变量在 if (...) 块内展开会提前闭合
+    块结构, 报错 "\Loom\ckernels\build_ckernels.bat was unexpected at
+    this time" — 对策: cd /d "%~dp0" 定位后全相对路径; 错误分支用单行
+    if ... goto; 不建含括号变量的二次展开。★另一个坑: pushd 后 call
+    必须 .\ 前缀 (call "裸名" 在 pushd 上下文不解析)。
+    新增 DLL 时: [DLL 清单] 段加 call :build_dll <子目录> <bat名>;
+    新增探针: [对拍清单] 段加一行。
+
+[√] 3.6 进度台账 (主线程工作时已写):
+    tests\_tmp\ 下已有既有对拍探针: ckernels_val_check.py /
+    ckernels_e2e_check.py / collide_val_check.py / aabb_f32_check.py
+    (这 4 个在 build_all.bat 里被调用; 别的探针不管)。
+
+--------------------------------------------------------------------
+4. 下一步待做 (按序, DSH 从这接着干)
+--------------------------------------------------------------------
+[M1-2] 核心组件注册表验证器 module_registry.py + 格式说明文档:
+    D:\my-project\Loom(py源代码-工作区)\Loom\core_components\
+    - 职责: 读 registry.json → 校验每组件 (magic/abi 主版本须相等/
+      provides from json 契合同名 DLL 导出的枚举一致/depends 必须被
+      其他 enabled 模块的 provides 满足/同接口提供两次冲突→弹出一方/
+      sha256 信任闸: official=false 且 sha256 不一致→弹出 / 依赖环→
+      AssemblyError) → 输出组装报告 (按序: 先核心后插件; 插件层
+      不在本文件, 走 plugin_loader.py 已有机制)
+    - 失败=弹出该组件不崩引擎 (用户构想第6点: 接口非法自动去掉插件
+      提示"此插件加载失败", 保住整个引擎不崩)
+    - 用法: py -3.12 (系统绑定 3.12.10)
+    - 回退官方规则: 用户注入 (official=false) 坏 → 自动把该槽位的
+      enabled 置回 false (回退官方 DLL); 官方 DLL 自身坏 (理论不可达,
+      官方随引擎发行) → AssemblyError 让基座报错。
+
+[M1-3] 加载器骨架 module_loader.py:
+    - ctypes WinDLL 封装 LoadLibraryW/GetProcAddress/FreeLibrary,
+      逐函数 GetProcAddress 映射到契约 7 函数 typedef
+      (loom_module.h 里 6 个 typedef 已备)
+    - lo_module_info() 读回 LOOM_MODULE_INFO (ctypes Structure 镜像
+      LoomModuleInfo, 字段顺序/长度与 .h 严格一致: 4+4+65+16+4+4+4+4)
+    - 热重载: FreeLibrary → LoadLibrary (换 DLL 不重启, 场景状态留基座):
+      先 deinit 再 unload, 状态全在基座
+    - LOOM_NO_DLL 族逃生门: LOOM_NO_DLL=ckernels,render_prep → 这些
+      模块加载器跳过 (get 抛); LOOM_NO_DLL=* → 全盖
+    - 加载失败/校验失败: 抛 ModuleValidationFailed, 基座 catch → 弹出
+    - 兜底只对准用户注入 (v1.3): 官方组件加载失败不静默降级, 报
+      AssemblyError
+
+[M1-4] 对拍网 MVP tests\_tmp\pipeline_prep_check.py:
+    - 首个被测模块 = ckernels 契约化 (loom_kernels.dll 是现成 C ABI 资产,
+      已在 fastpath.py 被 ctypes 直调)
+    - 对拍口径 (v1.3 改): 搬移期"旧 Python 实现 vs 新 DLL"逐位
+      (maxdiff=0); 验收通过后删旧 Python 实现 (绞杀者模式, 不长期留两份)
+    - ★MVP 先做: 用 module_ref.dll 验证整条链路 (加载→取 info→取
+      provides/depends→init→调 module_ref_echo→对拍通过); 再在 ckernels
+      契约化 (给它加 loom_module_info 导出, 无侵入) 后做对拍
+    - 参考现成探针: ckernels_val_check.py (BASE 推导+sys.path 插
+      base+os.chdir(BASE)+import fastpath)
+
+[M1-5] DLL 模糊测试 harness tests\_tmp\module_fuzz_check.py:
+    - 随机/定向畸形输入: 越界指针/空指针/超大数组 → 验证基座捕获
+      OSError (ctypes 的 SEH 包裹把 0xC0000005 转 OSError) + 自动弹出
+      + 流程不死
+    - 坏靶: 造一个故意崩的 DLL (badvector.dll: 导出合法 info + 调用时
+      解引用空指针) → 注入注册表 → 首调即 AV → 验证弹出+回退官方
+    - 注意: 直接对 ctypes 调 DLL 内 AV = OSError 被捕获, 直接崩不了
+      基座 — 这是 ctypes 的 SEH 行为 (Windows 上)
+    - 探针运行一致惯例: 子进程+超时 (参考 fs_probe.py/crash_reporter_
+      check.py)
+
+[M1-8] M1 验收+文档落款:
+    - 验收: 无用户 DLL 完整运行 (全用官方 DLL) / 对拍 MVP 全 PASS /
+      模糊测试全拦+自愈
+    - 报告 §四/§六/§八 状态更新; 记忆同步; 代码架构.txt 同步
+
+--------------------------------------------------------------------
+5. 施工纪律+坑速查 (所有探针/开发一律遵守)
+--------------------------------------------------------------------
+- 探针惯例 (tests\_tmp 下既有): BASE = dirname(dirname(dirname(
+  abspath(__file__)))); sys.path.insert(0, BASE); os.chdir(BASE)
+- py 一律 -3.12 (系统绑定 3.12.10; 探针用 py -3.12)
+- 编 DLL: MSVC 2022 Community vcvars64 + cl /nologo /utf-8 /O2 /LD /MD,
+  禁 /fp:fast (保求和序); 新组件 own build.bat 照抄 build_ref.bat
+- 对拍逐位 maxdiff=0 是铁律 (不是相对误差); 报 D6 标准 1e-7 只允许
+  在明确论证处
+- .bat 必须 CRLF (用 [System.IO.File]::WriteAllText 写: $raw = $raw
+  -replace "`n","`r`n"; UTF8Encoding($false))
+- C 注释中文在 GBK 代码页有 C4819 警告 → 加 /utf-8
+- 引擎根路径带括号, 切勿把含括号变量塞进 bat 的 if (...) 块
+- api_key / 服务: llama-server 等已有本地服务 (127.0.0.1), 别乱动;
+  测完服务必须关 (记忆)
+- LOOM_NO_* 逃生门族: LOOM_NO_CKERNELS=1 / LOOM_NO_PARALLEL /
+  LOOM_NO_CRASHDUMP=1 / LOOM_NO_DLL (新加); 探针验证逃生门时注意
+  清干净环境 (P3 池开路须 pop LOOM_NO_PARALLEL)
+
+--------------------------------------------------------------------
+6. 现场环境速记 (DSH 可能用得到)
+--------------------------------------------------------------------
+- 机器: Windows 10 Pro 10.0.19045, 18 核 Xeon E5-2696 v3 同质核,
+  GPU 1050Ti 4GB (卡内存带宽瓶颈, 有效 12GB/s)
+- 引擎根: D:\my-project\Loom(py源代码-工作区)\Loom\
+  ★32 个 py / 17225 行; engine.py 5191 行 (GameObject:754 /
+  _logic_frame:4756 / _logic_prep:4819 / render:5166 /
+  compute_world_matrices:3126)
+- 既有 DLL 资产: ckernels\loom_kernels.dll (aabbs/collide, 逐位对拍网
+  全套) / culverin (Jolt 物理 pyd) / game-audio (miniaudio pyd)
+- 可对位搬移 (M2+): physics_bridge(1066)/physics_pipe(98)/
+  core_clock(160)/interp_state(174)/matlib(251)/mesh(346)/
+  fastpath(491)/parallel(453)
+- 封装链: build_game.py→游戏包.lsc (LOOMSC1)→PlayerApp(runtime.py)
+- 插件体系: plugin_loader.py (plugins/+core_plugins/manifest+信任闸
+  +SHA256+_EDITOR_BUTTONS) — 注册表机制雏形已有
+- GUI: guiloader.load_gui + IEditorView 契约 (LoomGUI Qt/minimal
+  双实现); 渲染后端: render_api 设置 (opengl/vulkan/auto)+scene_driver
+- 脚本层: scripts.py (SCRIPTS 注册表+Script/子类+player_scripts)/
+  plugin_sandbox.py (AST+白名单) — M4 的对象
+- 性能基线 (09-08 夜): 播放态混合500 TPS20 源码 76FPS/GPU54%/主线程
+  65%+60线程<3%/2.3核当量; 编辑态 161/97%; 编译版 55.7@TPS20
+- 游戏单脚本: game_pack.py (lsc)/build_game.py (发行)/runtime.py
+  (PlayerApp) 早已分离 (无编辑器运行时)
+
+--------------------------------------------------------------------
+7. 已知环境坑 (Claude 实测, DSH 规避)
+--------------------------------------------------------------------
+- ★API 流错误: "Stream error: error decoding response body" =
+  cc-switch->基元律动链间歇超时 (09-03 分类器误拦同源)。规避: 单次
+  输出体量控制 / 长任务拆小步 + 重试 / 遇错误跳过后从断点续 (参考
+  09-03 记忆: 等 10-30s 重试; 只读工具不走分类器)
+- 断言/批处理在含括号路径的 bat 里会挂 (§3.5 坑)
+- py3.12 空指针守卫坑 (crash_reporter_check.py 里注了)
+- Nuitka 常量折叠双坑 (fastpath.py 头注): 模块级 if 被静态折叠 →
+  DLL 句柄存 dict 容器 (运行时键访问真实发生) 而非全局
+====================================================================
+(交接完 — DSH 从 §4 下一步开始)
+====================================================================

@@ -1,0 +1,184 @@
+====================================================================
+Loom 引擎 DLL 化战役 — M2 (pipeline.dll) 设计与执行路径
+====================================================================
+日期: 2026-09-08 (第四棒, DSH 主线程)
+修订: 2026-09-09 (R3 数字统一回填) — 本文性能数字一律以产物 json 为唯一权威源,
+      权威值见 M2_权威数字表_20260908.md; 作废值见 _R3改写规则包_20260909.md §二。
+      修订处逐处标注「（2026-09-09 R3 回填）」。
+依据: DLL化改造可行性方案与执行路径报告.txt v1.4 §四/§六 M2
+前置: M1 已验收 (契约/加载器/验证器/对拍网/模糊测试全绿, build_all EXIT=0)
+
+--------------------------------------------------------------------
+0. 一句话定案
+--------------------------------------------------------------------
+M2 第一交付 = **逻辑帧 prep 链 C 化**: 把 `_logic_frame` 尾段的
+  AABB / 光源 VP / 碰撞对 三段搬进 pipeline.dll (无 GIL、多核),
+  物理子步调度**暂留基座 Python** (理由见 §2), 以"逐位对拍 + 可回退"
+  两把锁保数值与稳定性。
+
+--------------------------------------------------------------------
+1. 现状取证 (2026-09-08 实测基线, 混合500 TPS20 源码)
+--------------------------------------------------------------------
+_logic_frame(fixed_dt) 段序 (engine.py:4756):
+  [脚本 _run_scripts] → [物理子步 ×nsub (pipe 或串行)] → [音频]
+  → [动画] → [逻辑帧 prep: AABB/光源VP/碰撞对] → [碰撞事件派发]
+  → [插值翻页]
+实测耗时 (stress 500 球, 组6 报告):
+  physics        22.84 ms/帧  ← Jolt 步进 + ensure_models + 碰撞对 triu
+  shadow_prep    33.52 ms/帧  ← 其中 aabbs 11.02ms + 光源 VP/角点 ~22ms
+  world_matrices  2.34 ms/帧
+  GL 段          ~8 ms/帧
+  ⇒ prep 链 (AABB+光源VP+碰撞对) 是仅次于 Jolt 的 GIL 热点, 且**纯计算无状态**,
+    是 C 化的最佳第一目标。
+
+三段现状实现 (engine.py):
+  _model_aabbs_par (2360) → fastpath._aabbs_batched → **已有 C 内核**
+    loom_aabbs_minmax (ckernels\loom_kernels.dll), fastpath 三级分派
+    C>numba>numpy 已在线; 本阶段把它接入 pipeline 出口 (复用, 不重写)。
+  _compute_light_vps (2863) → _dir_light_vp (2775) / _point_light_vp (2902)
+    → _scene_light_bounds_par (2720, 角点 (n*8,4) @ view + min/max)
+    → matlib.mat4_view_forward / mat4_ortho / mat4_perspective
+    ⇒ **纯 numpy + 标量数学, 无状态, 可直接 C 化** (本阶段主交付)。
+  _collision_pairs_parallel (4088) → **已有 C 内核** loom_collide_pairs
+    (SAP 排序+扫描+yz+ancestry+精判一体) ⇒ 复用。
+
+--------------------------------------------------------------------
+2. ★架构边界裁决 (为什么物理子步调度暂留 Python)
+--------------------------------------------------------------------
+总纲 M2 原文含"物理子步调度"入 DLL。本阶段裁决**暂留基座**, 依据:
+  a) 物理 = culverin (Jolt) 的 **pybind11 绑定**, 非 C ABI; pipeline.dll
+     无法直接链接 (规格原文也写明"需要小改 culverin 包装为 C 接口, 或
+     保留 pybind 桥但由 pipeline 调 — 两案, 实施时选")。
+  b) 物理子步**调度**本身在 Python 侧只占 ~µs (post/wait 两次调用),
+     真正的耗时是 Jolt 步进 (C++ 内部, 本来就不吃 GIL)。
+  c) 拆 culverin 属独立工程 (重编 Jolt + C ABI 包装), 风险高、收益低;
+     而 prep 链 33.52ms/帧 才是 GIL 热点 —— 先吃收益最大、风险最小的一块。
+  ⇒ **M2a (本阶段)**: prep 链 C 化 + 物理调度留在基座;
+     **M2b (后续)**: culverin C ABI 包装 + 物理子步入 DLL (独立验收)。
+  裁决理由写进台账与报告 §六, 不静默偏离总纲。
+
+--------------------------------------------------------------------
+3. pipeline.dll 接口契约 (v1.0, 新增 loom_pipeline.h)
+--------------------------------------------------------------------
+沿用 M1 契约 (loom_module.h 7 导出 + LOOM_TENSOR), 新增本组件专属头:
+
+  /* 光源描述 (与 engine.Light 字段一一对应) */
+  typedef struct LOOM_LIGHT {
+      int32_t  kind;        /* 0=directional 1=point (engine: 'directional'/其他) */
+      int32_t  shadow;      /* 1=投影 */
+      int32_t  mode;        /* 0=full 1=beam (仅 directional 有意义) */
+      double   position[3]; /* 世界位置 */
+      double   direction[3];/* 行进方向 (directional; 内部归一化) */
+      double   up[3];       /* roll 倾斜 (light.up_vector()) */
+      double   size;        /* beam 截面半宽 */
+  } LOOM_LIGHT;
+
+  /* AABB 行表: (n,6) f64 [mn.x,mn.y,mn.z, mx.x,mx.y,mx.z] — 与 engine
+     _aabb_shadow_rows 同口径同序 */
+  #define LOOM_PIPE_AABB_STRIDE 6
+
+  /* ① 平行光/点光 view-proj 批量计算 (逐位对齐 engine 现行实现)
+     参数: aabb_rows (n,6) f64 全量对齐行表; vis_idx (可选) 可见行下标;
+           lights (m); out_vp (m, 4, 4) f64 行主序; out_kind (m) 0=单矩阵 1=6面
+     返回: LOOM_OK / LOOM_ERR_PARAM */
+  int32_t loom_pipeline_light_vps(const double *aabb_rows, int64_t n,
+                                  const int32_t *vis_idx, int64_t n_vis,
+                                  const LOOM_LIGHT *lights, int64_t n_lights,
+                                  double *out_vp, int32_t *out_kind);
+
+  /* ② 场景光照包围盒: AABB 行表 8 角变换到 view 空间取 min/max
+     out_mn/out_mx 各 3 个 f64 */
+  int32_t loom_pipeline_scene_bounds(const double *view_4x4,
+                                     const double *aabb_rows, int64_t n,
+                                     double *out_mn, double *out_mx);
+
+  /* ③ AABB 批量归约 (薄包装既有内核, 供基座统一入口)
+     vh (n,V,4) f64 + m3 (n,4,3) f64 → out_mn/out_mx (n,3) f64 */
+  int32_t loom_pipeline_aabbs(const double *vh, const double *m3,
+                              double *out_mn, double *out_mx,
+                              int64_t n, int64_t V);
+
+  契约导出 (7): loom_module_info/provide/depend/init/deinit/abi/has
+    module_id = "pipeline"  official = 1  provides =
+      ["pipeline.light_vps","pipeline.scene_bounds","pipeline.aabbs"]
+    depends = []  (本阶段不依赖其他模块; collide_pairs 仍走 ckernels)
+    ★口径说明 (2026-09-09 R3 回填, P12): registry.json 登记 provides **4 接口**
+      (light_vps / scene_bounds / aabbs / world_matrices), 而 pipeline.dll 实测
+      **6 个 pipeline_ 前缀导出符号**; 差额的 `shadow_prep` / `mat4_mul_ref`
+      为内部/参考导出, 不按接口名寻址 (前者供基座直接调用, 后者钉死 matmul 误差界)。
+      物证: tests\_tmp\verify_release.py 导出符号 13/8/10 明细
+      (见 M2b投放校验设计_20260908.txt L139-144)。
+
+--------------------------------------------------------------------
+4. 逐位对拍口径 (M2 验收① 的锁)
+--------------------------------------------------------------------
+新探针 tests\_tmp\pipeline_val_check.py (照 pipeline_prep_check.py 惯例):
+  A 光源 VP 对拍: 随机光源 (directional full/beam + point) × 随机 AABB 行表
+    (n = 1/64/501, 含零尺寸/极端 up) → DLL vs engine 现行 Python 实现
+    **逐位 maxdiff == 0.0** (view/ortho/perspective 全 f64 同一运算序)。
+  B 场景包围盒对拍: 同 AABB 表 + 随机 view → (mn, mx) 逐位 0.0。
+  C AABB 归约对拍: 复用 fastpath._aabbs_minmax_impl 基准 (非 numpy 路径)。
+  D 边界: n=0 / 无光源 / 非归一化方向 / up 平行 forward (退化) → 不崩且口径一致。
+  E 对拍网回归: 既有 10 探针全绿 + build_all EXIT=0。
+    （2026-09-09 R3 回填: 探针数口径已更新 —— 当前 build_all 活跃探针 **19**
+      (17 原有 + editor_core_check --both + compiled_verify --both),
+      见 M2_权威数字表_20260908.md §五; 本行 10 为 M2a 开工时的存量。）
+
+数值纪律: C 侧必须复刻 Python 的**运算顺序**(角点填充序、matmul 求和序、
+  min/max 比较序), 禁 /fp:fast; 矩阵按行主序 f64 逐元素同序计算。
+
+★实测口径细化 (2026-09-08, pipeline_val_check 15/15 PASS):
+  · **纯逐元素运算逐位为 0**: view/ortho/perspective 组装、场景包围盒
+    (角点变换 + min/max)、AABB 归约、点光 6 面 —— 全部 maxdiff == 0.0。
+  · **矩阵乘法 view@ortho 是唯一例外**: numpy 的 `@` 走 BLAS/SIMD, 求和序
+    与 C 的 k 升序循环不同 → 实测 worst_abs ≤ 1.8e-15 / worst_rel ≤ 2.4e-13
+    (300 组随机 4x4 取证, 见 C3)。C 侧已导出 `loom_pipeline_mat4_mul_ref`
+    钉死该界。此项**不影响**阴影数值 (VP 矩阵 1 ULP 级差异远低于深度精度)。
+  · 故对拍口径: 逐元素运算 = 逐位 0; 矩阵乘法 = abs ≤ 1e-14 且 rel ≤ 1e-12。
+  · 修复记录: 初版 C 侧 scene_bounds 把行主序矩阵乘写成了列优先索引
+    (view[0]*cx + view[1]*cy + ... 应为 view[0]*cx + view[4]*cy + ...),
+    被 B 子项逐位对拍当场拦下 (worst maxdiff=31.97) —— 这正是"先建对拍网
+    再动代码"的价值实证。
+
+--------------------------------------------------------------------
+5. 分阶段执行 (本阶段 = M2a)
+--------------------------------------------------------------------
+M2a-1 [本棒] pipeline.dll 脚手架 + loom_pipeline.h + 三个 C 函数 + 契约导出
+        + build_pipeline.bat + registry.json 追加条目 + build_all 接线。
+        [√ 完成] 5 DLL 编译 EXIT=0; pipeline.dll 10752 B 零警告。
+M2a-2 [本棒] pipeline_val_check.py 逐位对拍 (A/B/C/D) 全 PASS。
+        [√ 完成] 15/15 ALL PASS; 纯逐元素运算逐位 0, 矩阵乘法 ≤1 ULP。
+M2a-3 [本棒] 基座接线: engine.py `_compute_light_vps` 在 LOOM_NO_PIPELINE!=1
+        时优先走 pipeline.dll (逃生门回退现行 Python 路径), A/B 同口径。
+        [√ 完成] pipeline_glue.py + engine._pipeline_light_vps;
+        pipeline_base_check 15/15 + engine_pipeline_check 8/8;
+        **实测 DLL 0.0783 ms/帧 vs Python 1.1015 ms/帧 (≈14.07×)**
+        （口径: pipeline_base_check 15/15, 微基准逐调用口径, 非整机帧率;
+          2026-09-09 R3 回填 —— 不与 editor_core_check 整机口径并列成 A/B）。
+M2a-4 [本棒] 混合500 100 逻辑帧对拍 (maxdiff=0) + 每核负载 + 回归 EXIT=0
+        + 坏注入自愈 (复用 M1 自愈链, 注入坏 pipeline.dll → 弹出回退官方)。
+        [√ 端到端完成] pipeline_e2e_check.py 11/11 ALL PASS:
+          AABB 逐帧逐位 0 / 碰撞对逐帧逐位 0 / 光源 VP 摘要一致 (worst_rel=0);
+          真实场景 shadow_bounds 2.564 → 0.768 ms/帧 (3.34×);
+          FPS 57.3 → 60.1 (+4.9%)。
+          （口径: pipeline_e2e_check.py 11/11, 混合500 100 逻辑帧端到端对拍,
+            产物 tests\_tmp\pipeline_e2e_*.json; 2026-09-09 R3 回填。）
+          「主线程每帧 CPU 6.64 → 5.20 ms (-21.7%)」→ **已作废（台账判定为采样
+          噪声, 三轮无一复现）, 见 tests\_tmp\editor_core_verdict.json**
+          （2026-09-09 R3 回填; 主线程权威值见 M2_权威数字表_20260908.md §一）。
+        [△ 每核负载未达标] 主线程仍承载 Jolt 物理 + world_matrices + GL 提交,
+          核0 ≤45% 属 M2b (culverin C ABI 包装) 范围, 本阶段不声称达成。
+M2b   [后续] culverin C ABI 包装 → 物理子步入 DLL; 每核负载达标 (核0 ≤45%);
+        vis_idx 入参边界校验 (D5); 每核负载专用 CPU 采样探针; 编译版重编。  （2026-09-09 R4: D5 已于第 9 轮修复, 编译版已于第 9 轮重编）
+        注: 验收② "核0 67%→≤45%" 主要在此达成 (Jolt 与 prep 全部离核)。
+
+--------------------------------------------------------------------
+6. 风险与回退
+--------------------------------------------------------------------
+- 数值不一致 → 逐位对拍拦在合入前 (M2a-2), 不一致即改 C 运算序, 不改 Python。
+- 性能无收益 → LOOM_NO_PIPELINE=1 逃生门即时回退现行路径 (零风险)。
+- 基座接线出错 → 探针 + 全量回归双闸; 坏注入自愈链已有 M1 实证。
+- 稳定区不动; 编译版待 M2a 全绿后由用户决定是否重编 (engine.py 会改)。
+====================================================================
+(本设计文档完 — 施工以本文件 §3 接口与 §4 对拍口径为准)
+====================================================================

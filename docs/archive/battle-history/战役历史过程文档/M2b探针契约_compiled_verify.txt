@@ -1,0 +1,138 @@
+================================================================================
+M2 验收③ 探针契约 — compiled_verify.py (编译版 pipeline ON/OFF FPS A/B)
+================================================================================
+探针路径 : Loom(py源代码-工作区)\Loom\tests\_tmp\compiled_verify.py
+契约版本 : 2026-09-08 (P2 审计整改: 分档落盘 + A/B 闸门 + SKIP 不阻塞)
+目标产物 : D:\my-project\Loom(编译版)\Loom\Loom.exe
+场景文件 : D:\my-project\Loom(编译版)\Loom\保存\压测500混合.json
+运行环境 : Windows / PowerShell / py -3.12 / 无第三方依赖
+说明     : 本文件为接线与审计用契约。参数名、文件名、打印行格式均不得改动。
+
+--------------------------------------------------------------------------------
+1. 命令行用法
+--------------------------------------------------------------------------------
+  py -3.12 tests\_tmp\compiled_verify.py                     # 默认 = --on
+  py -3.12 tests\_tmp\compiled_verify.py --on
+  py -3.12 tests\_tmp\compiled_verify.py --off
+  py -3.12 tests\_tmp\compiled_verify.py --both
+  py -3.12 tests\_tmp\compiled_verify.py --both --strict-fps
+  py -3.12 tests\_tmp\compiled_verify.py --help
+
+参数语义 (固定):
+  --on    (默认) 启动目标进程前执行 env.pop('LOOM_NO_PIPELINE', None)
+                 → 走 pipeline (native) 档
+  --off           env['LOOM_NO_PIPELINE'] = '1' → 走 Python 路径 (逃生门)
+  --both          依次跑 on 与 off (两次独立启动编译版), 落盘两份分档 json,
+                  再落盘 ab 汇总 json 并打印 [GATE-FPS] 判据行
+  --strict-fps    判据不通过 → 退出码 1 (硬闸门); 缺省为软闸门 (仅打印 FAIL, 退出码仍 0)
+
+等价环境变量入口 (argv 优先; 用于 build_all.bat 的 :run_check 只转发 %~1 的现状):
+  LOOM_CV_MODE   = on | off | both      (未给档位参数时生效, 非法值回落 on)
+  LOOM_CV_STRICT = 1 | 0                (未给 --strict-fps 时生效)
+  探针自身另外固定注入: LOOM_PROFILE=1  (stage_times 插桩)
+
+--------------------------------------------------------------------------------
+2. 落盘文件与字段 (UTF-8 / ensure_ascii=False / indent=2)
+--------------------------------------------------------------------------------
+  tests\_tmp\compiled_verify_on.json    (--on / --both 的 ON 档)
+  tests\_tmp\compiled_verify_off.json   (--off / --both 的 OFF 档)
+  tests\_tmp\compiled_verify_ab.json    (仅 --both: 两侧 summary + 差值 + 判据)
+  tests\_tmp\compiled_play_on.png       (ON 档全屏截图)
+  tests\_tmp\compiled_play_off.png      (OFF 档全屏截图)
+  → 三份 json / 两张截图均按档位分文件, 两次运行不再互相覆盖。
+
+分档 json 字段 (至少含以下字段):
+  mode                  "on" | "off"
+  ts                    ISO8601 时间戳, 带本地时区偏移
+  exe                   编译版 exe 绝对路径
+  exe_size              exe 字节数
+  exe_mtime             exe mtime (ISO8601) —— 产物指纹, 用于证明物证对应哪个 exe
+  env_LOOM_NO_PIPELINE  bool (on=false / off=true) —— 该档实际生效的档位
+  scene                 场景文件绝对路径
+  agent_port            本次采集的 agent 端口 (附加)
+  edit_models           编辑器态模型数
+  edit_fps_samples      编辑器态 fps 采样 (6 点, 间隔 2s)
+  play_samples          播放态采样 [{fps,tps,std,max,fb_hits,fb_pref} × ~15 点]
+  play_summary          {fps_mean, fps_min, tps_mean, jit_std_mean, fb_prefetch_max}
+  stage_times           最后一次 engine_metrics 的累计阶段耗时 (ms)
+
+ab json 字段:
+  gate, ts, mode="both", exe, exe_size, exe_mtime, scene
+  on  = {json: <on json 路径>, valid: bool, env_LOOM_NO_PIPELINE: false, summary: {...}}
+  off = {json: <off json 路径>, valid: bool, env_LOOM_NO_PIPELINE: true,  summary: {...}}
+  fps_mean_on, fps_mean_off
+  delta_pct             (ON-OFF)/OFF*100, 保留 1 位小数 (n/a 表示无法计算)
+  criterion             "on_fps_mean >= off_fps_mean"
+  pass                  bool —— 判据结果
+  both_valid            bool —— 两次采集是否均有效
+  strict_fps            bool —— 是否启用硬闸门
+  exit_code             本次运行最终退出码
+
+历史物证 (只读保留, 严禁再写入):
+  tests\_tmp\compiled_verify_result.json
+  现存内容 = OFF 档 (fps_mean 66.5 / fps_min 62, mtime 2026-09-08 20:47:06)。
+  本探针代码中不再存在任何指向该文件的写入路径。
+
+--------------------------------------------------------------------------------
+3. 闸门判据与打印行
+--------------------------------------------------------------------------------
+判据 : ON 的 play_summary.fps_mean >= OFF 的 play_summary.fps_mean (含等号通过)
+打印 (格式固定, 供 grep / 审计引用, 两个空格分隔):
+  [GATE-FPS] compiled ON fps_mean=72.0 / OFF fps_mean=66.5  delta=+8.3%  -> PASS
+  delta = (ON - OFF) / OFF * 100, 带符号保留 1 位; 任一档无样本 → delta=n/a, 结果 FAIL
+
+--------------------------------------------------------------------------------
+4. 退出码语义 (build_all.bat 以 exit 0 = PASS)
+--------------------------------------------------------------------------------
+  0   采集有效。--on / --off 单档有效; --both 两次采集均有效。
+      默认 (软闸门): 判据不通过仍返回 0, 只在 stdout 打印 ... -> FAIL。
+      特例 SKIP: 编译版产物缺失, 见下。
+  1   存在但采集失败 (FAILED): Popen 启动异常 / 端口文件 40s 未就绪 / 进程提前退出 /
+      采集过程中异常; --both 时任一档无效 → 1;
+      加 --strict-fps (或 LOOM_CV_STRICT=1) 且判据不通过 → 1。
+  2   命令行参数错误 (未知参数)。
+
+  SKIP 语义 (不阻塞构建):
+      exe 或场景文件不存在 → 打印
+        SKIP compiled_verify: 编译版产物缺失 (<路径>)
+      并退出码 0 (build_all 视为 PASS, 不做性能取证)。
+      区分: 产物缺失 = SKIP(0); 产物存在但采集失败 = FAILED(1)。
+      采集无效时不写该档 json (保留上一次物证), 仅以 stdout 与 ab json 的
+      valid / pass / exit_code 记录失败, 避免产出误导性物证。
+
+--------------------------------------------------------------------------------
+5. 如何纳入 build_all.bat
+--------------------------------------------------------------------------------
+插入位置建议: 紧随 `call :run_check percore_check.py` (现第 78 行) 之后。
+
+方式 A —— 推荐 (无需修改 :run_check, 走 LOOM_CV_MODE 入口), 应插入文本:
+
+REM ---- M2 验收③: 编译版 pipeline ON/OFF FPS A/B (较重: 启动编译版两次, 约 2.5 分钟) ----
+set "LOOM_CV_MODE=both" & call :run_check compiled_verify.py
+set "LOOM_CV_MODE="
+
+硬闸门变体 (判据不通过即 build 失败; FPS 有噪声, 基线稳定后再启用):
+
+set "LOOM_CV_MODE=both" & set "LOOM_CV_STRICT=1" & call :run_check compiled_verify.py
+set "LOOM_CV_MODE=" & set "LOOM_CV_STRICT="
+
+方式 B —— 需先把 :run_check 第 126 行改为转发额外参数:
+  py -3.12 "tests\_tmp\%~1" %~2 %~3
+  之后可写:
+
+call :run_check compiled_verify.py --both
+call :run_check compiled_verify.py --both --strict-fps
+
+⚠ 注意: 现有 :run_check 只取 %~1 (即 `py -3.12 "tests\_tmp\%~1"`)。
+  在未修改 :run_check 的情况下直接写 `call :run_check compiled_verify.py --both`,
+  `--both` 会被吞掉 → 只跑 --on, 得到 ON 单档物证但无 A/B 与闸门行。
+  因此方式 A 是当前 build_all.bat 下的稳妥接线。
+
+--------------------------------------------------------------------------------
+6. 静态校验 (本探针自身)
+--------------------------------------------------------------------------------
+  在 ROOT (Loom 源码工作区) 下执行:
+    py -3.12 -m py_compile "tests\_tmp\compiled_verify.py"
+  通过 = 无输出 + 退出码 0。
+  禁止在接线阶段反复跑 --both 做性能测量 (单次约 2.5 分钟, 且会占用编译版 exe)。
+================================================================================

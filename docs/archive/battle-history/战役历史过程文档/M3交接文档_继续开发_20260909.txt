@@ -1,0 +1,131 @@
+====================================================================
+M3 继续开发交接文档 (第 7 轮收尾, 2026-09-09 晚)
+用途: 明天继续开发时先读本文 §一/§二, 再按 §五 队列执行。
+      数字一律以 M2_权威数字表_20260908.md (§八 M3 系列) 为唯一权威源。
+====================================================================
+
+--------------------------------------------------------------------
+一、当前状态 (本轮结束时)
+--------------------------------------------------------------------
+【性能】(播放态同口径, 混合500, 探针 mt_profile_check / m2b_play_forensics)
+  · FPS: M3 起点 69 → **158-160** (+129%); GPU 3D **97-98% 饱和**
+  · 主线程 paint_total: 9.863 → **2.78 ms/帧** (−72%)
+  · 主线程 ms/帧 (forensics 口径): 9.705 → **4.89**
+  · 帧抖动: 11.04 → 3.15
+  · **CPU 墙已拆掉**: GPU 97-98% 饱和, FPS 恰好等于用户实测的 GPU 上限
+    (155 fps @97%), 说明现在是 GPU 受限, 不再是 CPU 受限 (用户确认可接受)。
+
+【正确性】本轮全部改动过四重门禁:
+  · 数值等价: interp_pose_check **53/53 逐位一致** (含合并路径 vs 两步路径)、
+    pipeline_world_check 7/7、aabb_par_check、shadow_val_check、collide_val_check、
+    aabb_f32_check、pipeline_val_check 15/15、pipeline_fuzz_check 33/33
+  · 端到端: pipeline_e2e_check 11/11、engine_pipeline_check、module_registry_check
+  · 全量回归: build_all.bat **EXIT=0, 21 探针 ALL PASS** (每日日志见 tests\_tmp\)
+
+--------------------------------------------------------------------
+二、M3 已完成的优化清单 (按轮次)
+--------------------------------------------------------------------
+[P0] 渲染插值矩阵 → pipeline.dll (compute_render_matrices)
+[P1] argsort 缓存 + 父链/深度缓存 (_render_parent_depth)
+[P2] 桶分组缓存 (_prepare_bucket_frame, 按结构/外观 stamp)
+[P3] 变换快照 _xform_gen 快速路径 (_transform_snapshot)
+[P3c] compute_world_matrices 复用父链缓存
+[P4] 每实例材质列缓存 + 向量化
+[N2] **AABB 脏行路径不走池** (池 16 块 × 每块重分组 = 50 次小 kernel 调用,
+     in-situ 202ns/顶点 vs 微基准 4.6ns → 慢 44×); 主线程串行 0.21 ms/帧
+     就能完成。`_AABB_DIRTY_POOL_MIN=2048` (env 可覆盖)
+[N3] **逻辑帧移出主线程** (专用 _logic_loop 线程, 默认开;
+     逃生门 LOOM_LOGIC_SYNC=1)。单点发布 (logic_gen, prep_pairs, light_vps)。
+     实测: paint_total 4.95→3.47, FPS 134→155, 帧抖动 6.50→3.15
+[N4] render_pose 整段入 C (`loom_pipeline_interp_pose`, 导出 14)
+[N5] **修掉"关阴影即崩速"悬崖**: _upload_lights 对平行光无条件兜底
+     _dir_light_vp (全场景 AABB) → 无阴影光源时每帧重算 18 ms。
+     现仅 light.shadow or mode=='beam' 才算。关阴影 37.5 → **214.4 fps**
+[N6] **interp_pose + world_matrices 合并为一次 C 调用**
+     (`loom_pipeline_interp_world`, 导出 15): 中间 pos/rot/scl 平面不出 C。
+     interp 段 0.819 → 0.626 ms/帧 (−23.6%), paint_total 3.258 → 2.878 (−11.7%)
+[测量] _profile 改 perf_counter + 帧计数 + 单点发布快照 + draw/脏行计数器;
+     修掉 aabbs 三处重复计数 (3.3 虚报 → 真实 1.5)
+
+--------------------------------------------------------------------
+三、当前 DLL/注册表状态 (M3 末, 权威)
+--------------------------------------------------------------------
+· pipeline.dll **23552 B** (导出 **15**: 原 13 + interp_pose + interp_world)
+· registry.json **2091 B** SHA256 `9a0a13868162f3db55888fc1c6f4171b6ab4c57c1329b11d5e58a93eda182cc7`
+  (M2 文档中的 A95BED16…/1577618E… 为历史快照; registry 三条目 sha256 已重钉)
+· 已同步编译版: pipeline.dll / registry.json / pipeline_glue.py / interp_state.py
+  → verify_release **7 PASS / 0 FAIL**
+· /Brepro 复现: 重编 pipeline.dll 哈希与首建逐字节一致 ✓
+· 逃生门开关 (全部 env): LOOM_NO_PIPELINE / LOOM_NO_INTERP_DLL /
+  LOOM_NO_INTERP_POSE_DLL / LOOM_NO_INTERP_WORLD_DLL / LOOM_LOGIC_SYNC /
+  LOOM_AABB_POOL_THRESHOLD / LOOM_AABB_DIRTY_POOL_MIN / LOOM_AABB_PAR_MIN_WORK /
+  LOOM_SWITCH_INTERVAL / LOOM_VERIFY_INTERP / LOOM_PROFILE_POSE
+
+--------------------------------------------------------------------
+三.5、★收尾时抓到并修掉的回归 (重要, 防复发)
+--------------------------------------------------------------------
+全量回归曾 FAIL: `collide_val_check.py` IndexError + 物理管线
+"逻辑线程同步超时 (1.0s) → 主线程直跑"。
+根因: N3 的异步逻辑线程在**无头探针**里也被启动 (探针直驱 advance_logic →
+线程启动 → 与探针双驱逻辑帧 + 物理管线)。
+**修复**: 异步逻辑线程仅在 Qt 宿主编辑器 (`_external_ctx=True`) 激活;
+无头探针/测试一律走同步旧路径 (engine.advance_logic 的 async 分支加
+`_external_ctx` 判定)。
+修复后: collide_val_check / e2e / aabb_par / world / interp_pose 全部恢复
+ALL PASS; 编辑器性能不受影响 (仍 160 fps / paint_total 2.78 ms/帧);
+**全量回归重跑 EXIT=0, 21 探针 ALL PASS** (`build_all_run_m3n6_final2_20260909.log`;
+[GATE-REGRESSION] on 5.011/off 5.234 PASS; [GATE-FPS] 编译版 +8.9% PASS)。
+★教训: 新增后台线程类优化, 必须在"无头探针"与"GUI 宿主"两种形态下都过
+全量回归 —— 探针直驱引擎与 Qt 宿主驱动是两条不同的代码路径。
+
+--------------------------------------------------------------------
+四、当前主线程分段 (默认档, paint_total ≈ 2.88 ms/帧)
+--------------------------------------------------------------------
+  mt_paint_render        2.84
+  ├ mt_main_pass         0.64   ← 大部分是 GPU 反压 (35 次 draw, 14µs/次)
+  ├ mt_shadow_maps       0.62   ← 同上 (1 平行光 × 35 桶)
+  ├ interp               0.63   ← mt_interp_world_dll 单次 C 调用 (含 ctypes/GIL)
+  ├ buckets              0.47   ← gather + 实例缓冲写 (GL upload)
+  ├ world_matrices       0.23   ← 逻辑矩阵 DLL 调用 (compute_world_matrices)
+  └ view/uniform/...     0.30
+  mt_paint_advance       0.004  ← 逻辑帧已移到专用线程 (N3)
+  mt_qt_tick             0.22   ← QCursor/mapFromGlobal/_update_camera/update()
+  mt_paint_event−paintGL 0.82   ← 缓冲交换/驱动阻塞 (随 GPU 饱和度涨)
+  非 paintGL 其余        ~0.9   ← Qt 事件循环 / agent 4ms 轮询 / 状态栏刷新
+  ★注意: async 逻辑线程会与渲染线程**争 GIL**, 渲染侧 Python/ctypes 段
+  实测比 sync 模式慢 ~2× (interp 0.53→1.09) —— 这是 N3 的已知代价,
+  但总帧时间仍大幅领先。若明天想消除, 见 §五 Q1。
+
+--------------------------------------------------------------------
+五、继续开发队列 (按预期收益排序)
+--------------------------------------------------------------------
+Q1. **降低逻辑线程的 GIL 占用** (预期渲染段整体回到 sync 水平, 省 ~0.5-1.0 ms/帧):
+    · InterpState.advance 的 _grab (501×3 property 读) —— 可让引擎把
+      _transform_snapshot 的平面直接喂给它 (同值, 省一次全量抓取)
+    · _aabbs_batched 脏行路径的逐行 Python (m3 gather / Point3D 构造 1002 个/步)
+      → 出口改返回 numpy 行表, 碰撞消费者同步改读行表
+    · _transform_snapshot 慢路 (逻辑帧必走): 501×3 property 读 + 3 次 numpy 建
+      → 评估 "TransformComponent 直接持 SoA 平面" 的重构
+Q2. **ctypes 调用摊薄**: interp_world 单次 0.608 ms (C 本体 ~0.17) ——
+    差额是 GIL 等待+13 次数组编组。可 (a) 把 loc/parent/depth 等稳定数组
+    的指针缓存起来; (b) 评估直接持 CDLL 函数对象 (绕过 get_fn 的 tuple key)。
+Q3. **GPU 侧** (需画质取舍, 用户已说 GPU 弱可接受, 优先级降低):
+    PCF 3×3=9 taps → 4 taps (视觉略噪); 阴影 1024→512 (可感知)。
+    已测算: 阴影 pass 占帧时间 ~26%; 无光源 633 fps。
+Q4. **逻辑线程竞态收敛** (N3 已知代价): it.advance 与 render_pose 并发读写
+    prev/curr 平面 → 建议改 swap 而非拷贝 (单引用替换, 无撕裂)。
+Q5. 权威表 §8.6-8.9 已记录到 N6; 明天的新数字继续追加 §8.10+。
+
+--------------------------------------------------------------------
+六、明日恢复动作
+--------------------------------------------------------------------
+1. 读本文 + M2_权威数字表_20260908.md §八 (8.1-8.9)。
+2. 跑基线: `py -3.12 tests\_tmp\mt_profile_check.py --mode on --secs 12`
+   (应 ~158 fps / paint_total ~2.9 ms/帧; 若明显偏离, 先查环境)。
+3. 跑回归: `build_all.bat` (应 EXIT=0, 21 探针 ALL PASS)。
+4. 按 §五 队列继续; 每个功能四重门禁 + 更新权威表。
+5. 若做 Q1/Q2, 注意 **.ps1 必须 UTF-8 带 BOM、.py/.bat/.c 必须 UTF-8 无 BOM**
+   (PS 5.1 无 BOM 会按 GBK 解析中文注释 → 语法错, 本轮实际踩过)。
+====================================================================
+(交接文档完 —— 明天见)
+====================================================================

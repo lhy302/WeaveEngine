@@ -1,0 +1,370 @@
+====================================================================
+Loom 性能优化 · 分组任务清单 (2026-08-30 建卡, 用户拍板 "1、2先进行")
+====================================================================
+配套文档:
+  《库性能优化堵点清单.txt》 = 堵点判定与代码位置 (本清单的依据)
+  《GPU性能优化-Vulkan双后端方案.txt》 = GPU 阶段 (已完成 P0-P5)
+  AI工作排查笔记\ = 各组实施报告归档
+  _engine_study\考察报告\ = 2026-09-01 三路考察+设计报告归档 (10 份,
+    抢救自炸掉会话; 组7/8/9 设计/GC批规格/多物体批规格/GPU专项/
+    Panda3D/批处理缓冲/Ren'Py/GitHub初步)
+
+====================================================================
+★★★ 下一阶段主攻 = 逻辑帧/渲染帧分离 + 插值渲染 + 帧内流水线
+  (2026-09-04 用户定调; 方案全文 = _engine_study\考察报告\
+  报告_逻辑帧渲染帧分离设计.md, 考据 Unity 官方设计 + 10 引擎源码)
+  要点:
+  - FixedStepClock accumulator (Unity FixedUpdate 对齐): 逻辑帧固定
+    30Hz 可调 ('logic_fps' 设置) + 物理 60Hz 独立 accumulator +
+    maximum_logic_delta 死亡螺旋保险 + time_scale
+  - 渲染帧位置 = prev/curr 两逻辑帧快照 numpy 插值 (alpha, ursina
+    club_bear 模式), 插值只喂渲染矩阵不回写逻辑状态
+  - 脚本 dt 语义已核实安全 (scripts.py 全 dt 驱动, 30Hz 转速不减半)
+  - 三条路径全接: 播放器 pygame run() / 编辑器 Qt paintGL /
+    Vulkan scene_driver (interp_state.py 单实现双端共享)
+  - 帧内流水线 (第二阶段): 物理线程化优先 (Jolt step 释放 GIL,
+    Panda3D 任务链三件套对齐), 纯 Python 段靠重叠不靠并行
+  - 分批: 分离批1 (core_clock+播放器) → 分离批2 (插值层+vk) →
+    分离批3 (编辑器 Qt) → 分离批4 (物理线程化 P-A) → 分批5+
+  - 逃生门: LOOM_NO_SPLIT=1 / 'logic_fps'<=0 = 回退旧绑死模式
+  - 红线 R1-R9 全适用; R3 逐位=逻辑状态零改动, 新增插值对拍
+====================================================================
+
+【流程铁律 (每组必守, 用户 2026-08-30 定)】
+  1. 一组 = 一个改动单位: 改前全量测试绿 + 基线探针 → 只动工作区 →
+     改后全量测试 + A/B 截图 + 探针对照 → 汇报待用户实测。
+  2. 用户实测确认 + 手动复制到稳定版本备份区后, 才开下一组。
+  3. 工作区写毁 → 用户从稳定版回滚重开本组 (视锥剔除那次的模式)。
+  4. 设计/实施多开子代理并行, 主线程只做管理+验收 (省上下文保质量)。
+  5. 编译/打包只在用户明确指令时做。
+
+====================================================================
+★当前进行中: 多物体批 7 步 + 可移植件批 4 件 = 已落地待用户备份;
+  编译版对比实测已完成 (2026-09-02 夜间自主批, 见组7 节与
+  Loom\bench_result_对比台账.txt)
+  ★下阶段统一落地路线表 (批A-批F) = 《下阶段优化工作引导.txt》 (项目根),
+  新会话开工以它为准; 本清单保留分组历史与验收记录
+====================================================================
+(2026-09-01 会话; 该会话上下文炸掉, 本节=抢救重写。详细设计报告全在
+ _engine_study\考察报告\, 下文只列要点)
+
+--------------------------------------------------------------------
+插桩批 (第 0 步, 已完成) + 500 球实测改写嫌疑榜
+--------------------------------------------------------------------
+  状态: 【完成, 含在待备份改动里】
+  内容: physics 桥 4 段针 (phys_bridge_ensure/pre_step/step/post) +
+    buckets 针 + shadow_prep 内 3 针 (shadow_bounds/collide_pairs/
+    shadow_jobs+dispatch) + 角点 vs matmul 细分。LOOM_PROFILE 关闭零开销。
+  500 球实测新口径 (300 帧):
+    physics 23.37 = ensure 7.09 + pre_step 15.71 + step 0.31 + post 0.24
+      → ★pre_step 是 physics 最大单项 (原估 0.5ms, 严重低估, 每体 ~31µs
+        线性); Jolt C step 仅 0.31 → physics 慢全在 Python 侧
+    shadow_prep 34.61 = aabbs 10.86 + 双任务墙钟 23.02 (collide_pairs
+      19.52 + shadow_bounds 5.20 = 角点 2.80 + matmul 2.04)
+    其他: world_matrices 2.51 / buckets 1.22 / dispatch 0.55
+    未插桩残段仅 ~2.4ms (旧口径"GL 段 8ms"= aabbs 双重计数假象)
+  坑备案: _scene_light_bounds_par 是 staticmethod 无 self → 计时 times
+    参数由调用方传入; 测试桩 GLEngine.__new__ 无 _stage_times → getattr 防御。
+
+--------------------------------------------------------------------
+GC 批 (流畅度批, 已完成+验收, ★待用户备份)
+--------------------------------------------------------------------
+  状态: 【完成+全量回归 EXIT=0; 用户实测 500 球 40→50FPS 确认; 待备份】
+  内容 (全部按 GC 批设计规格落地, 报告=_engine_study\考察报告\报告_GC批实施规格.md):
+    - A0 engine.py 模块级 helper: gc_play_enter/exit + 播放态阈值
+      (50000,50,200) + LOOM_GC_LEGACY=1 逃生门 (秒回退+A/B) +
+      ★禁 gc.disable 铁律注释 (脚本实例天然成环, disable=内存单调上涨,
+      自定义脚本生态硬要求)
+    - A1 runtime.py: PlayerApp 场景加载后 freeze + load_scene 包裹
+      (防脚本切关卡钉死旧场景)
+    - A2 stress_probe.py: 预热后 freeze + LOOM_GC_PROBE 对账探针
+      (分代统计/直方图/尖刺帧-GC 对账)
+    - A3 editor.py: toggle_play 进/出播放 freeze/unfreeze
+    - C 项 engine.py: _fw32 持久容量缓冲 + gather 缓冲复用 (消 ~3.4MB/帧
+      临时分配), 逐位同字节上传
+  验收 (500 球 A/B 300 帧): LEGACY 基线 gen2 全收集 2 次单次 78ms, 尖刺帧
+    135/140ms 落 GC 比例 100% = ★1% low 元凶实锤; 修复后 GC 事件 0 /
+    尖刺帧 0 / p99-max 差 77ms→11ms; 50 球守护 169.3FPS (≥167.1 基线)。
+  探针资产: LOOM_GC_PROBE=1 / LOOM_GC_LEGACY=1 (常驻可复跑)。
+
+--------------------------------------------------------------------
+组7 = 多物体批 7 步 + 可移植件批 4 件 (★已落地+编译对比实测完成,
+  2026-09-02 夜间自主批; 待用户实测+备份)
+--------------------------------------------------------------------
+  ★用户授权 (2026-09-02 夜): 工作区已备份稳定版, 大胆修改当优化实验;
+    设计给子代理、主线程只落地; 自行测试记录; 早晨验收给具体帧数。
+  状态: 【全部落地+验收+编译对比完成, 待用户实测备份】
+  验收数据 (500球 stress, 300 帧, 台账=Loom\bench_result_对比台账.txt):
+    - 源码版: 稳定区 17.2 FPS (58.3ms) → 工作区 26.4/26.8/25.9 FPS
+      (37.9ms) = **1.54× (+9.4 FPS)**
+    - 编译版: 稳定区 build6 13.4 FPS (74.8ms) → 工作区 ws_build2 18.1 FPS
+      (55.2ms) ×2 复现 = **1.35×**; 编译源 MD5 逐字节核验公平
+    - 50球守护: 183.7 FPS ≥ 163.8 (167.1×0.98) ✓; 50球编译 75.4 vs 67.0 带内
+    - 全量回归 tests/run_all.py 绿 ×3 / aabb 对拍 ALL PASS / SAP 对拍
+      50+500球 集合一致 (305 对) / LOOM_NO_SAP=1 逃生门复测可回旧路
+  落地实录 (多物体批 7 步, 规格=报告_多物体批实施规格.md):
+    - 项D 角点向量化: engine._scene_light_bounds_par numpy 展开 n×8 角点
+      (tile/repeat), 数学对拍逐位一致; shadow_bounds 5.10→带内
+    - 项E1 post_step 早退: physics_bridge post_step 全动态判定前移
+      (非动态场景四数组读取前 return)
+    - 项A ensure 查找表: physics_bridge.ensure_models by_model dict
+      (O(n²)→O(n)); 7.28→0.90ms (源码) / 4.27→0.70 (编译) ★8倍
+    - 项C SAP 剪枝: engine._collision_pairs_parallel x轴 sweep-and-prune
+      物体级粗筛 (12.4万对→305 候选); collide_pairs 17.08→5.01 (源码) /
+      19.62→5.24 (编译) ★3.4-3.7倍; ★真超集论证: sphere 粗筛盒=[c−r,c+r]³
+      包住球体; 候选**重过 ancestry** tin/tout (修复首版漏网); LOOM_NO_SAP=1
+      逃生门 + _SAP_FALLBACK_PAIRS=50000 熔断回退旧路
+    - 项B1 staging 容量复用: _aabbs_batched 缓冲键 (gi,n,V)→(gi,V)
+      grow-only 容量 (cap≥n 切片视图); shadow_jobs 20.47→6.53 (源码) /
+      23.22→6.72 (编译) ★3.1-3.5倍
+    - 项B2 矩阵指纹缓存 = 可移植件件4 同物 (见下)
+    - 项B3 _pick 批量读: editor._pick 改 _frame_world+_model_aabbs_par
+      批量读 (500球点击 ~30ms→~1ms)
+  落地实录 (可移植件批 4 件, 规格=落地_B_可移植件实施.md):
+    - 件1 桶 _dirty 总闸: GameObject._appearance_gen 类级计数器
+      (Material.color/saturation + mesh/visible setter bump) +
+      _prepare_bucket_frame 签名闸 (struct_gen+appearance_gen+keys);
+      静止帧整桶跳过
+    - 件2 零拷贝留档: moderngl Buffer.write numpy 直取 (不改代码, 记录)
+    - 件3 uniform 句柄+值差分: _u 句柄缓存 + _u_last 值差分 (灯光/VP/
+      相机同值跳过 GL 调用); draw_lines 句柄化消 tobytes
+    - 件4 world_matrices 静止缓存: _fw_cache (stamp,keys,parent) 四元组
+      命中返回同一对象; 失效面按构造穷尽 (结构/变换/父链变更全破键)
+  ★编译四连坑定案 (numba×Nuitka, 证据链完整记录台账): 冻结环境根本不
+    import numba (坑1 disable-jit / 坑2 no locator / 坑3 无字节码 /
+    坑4 llvmlite 死锁), fastpath numpy 批量内核 (threading.local 缓冲
+    复用) 顶上; build5 起配方 --nofollow-import-to=numba
+  ★冒烟链配方 (build4/5 "卡死"真根因): 编译版运行必须带 --bench 旗标
+    (不带落 Qt 编辑器路径: 缺插件秒退/拷入插件空转窗口); dist 手动补
+    tests\_tmp\stress_*.json + assets
+  产物: 稳定区编译 _bench_stable\bench_build6\build_entry.dist\LoomBench.exe
+    / 工作区编译 _bench_ws\ws_build2\build_entry.dist\LoomBench.exe
+  备注: 设计代理 A 三次死于 API 流错误 (SendMessage 复活两次后弃),
+    多物体批由主线程直接按原规格落地; B 代理第三次重开成功交付可移植件
+    实施 (保活 cron 全程在岗, 全收齐后撤岗)
+
+--------------------------------------------------------------------
+GPU 压榨路线 (GPU 专项报告已出待拍板; 报告=_engine_study\考察报告\
+  报告_GPU专项排查.md)
+--------------------------------------------------------------------
+  归因: GPU 锁 50% = CPU 喂不饱 ~50-60% + GPU 真实工作 ~35-45% (阴影
+    pass 不剔背面填充翻倍 + 9-tap PCF + MSAA 4x + Qt 合成) + 驱动提交
+    <3% (60-90 GL 调用/帧远够不着驱动墙)。
+  架构地板: Python+moderngl 编辑器态天花板 ~100-130FPS (关 MSAA 再抬
+    20-30%); 再往上=换后端 (已冻结)。
+  P0 低风险四件套 (CPU 侧, 预期 40-50→85-110FPS, GPU% →65-80%):
+    ① 静止世界矩阵/AABB 缓存 (与多物体批步6 同源, 合并做)
+    ② shadow_bounds 下池 + 角点向量化 (与多物体批步1 同源, 合并做)
+    ③ buckets 材质行 SoA 化 (1.22→0.3)
+    ④ 网格线零上传 (shader uniform 传淡出, 消 6×13KB/帧)
+  P1 中风险 (需用户逐项拍板): 法线矩阵逐顶点 inverse() 挪 CPU 预算
+    (每帧省 100 万次 3×3 求逆) / 阴影 pass 恢复背面剔除 (历史 acne
+    决策需靶场验证) / MSAA 4x 去留 (视觉决策, 关掉省 4x 带宽+resolve) /
+    ortho 阴影盒被 104×104 地面撑大 2.7x 收紧。
+
+--------------------------------------------------------------------
+引擎考察落地路线 (三份考察报告已到, 统一落地表未汇总给用户审)
+--------------------------------------------------------------------
+  报告: 报告A_Panda3D剔除合批范式 / 报告B_纯Python批处理缓冲 /
+    报告C_RenPy帧缓存与差分状态 / 报告_GitHub考察初步 (全部在
+    _engine_study\考察报告\)
+  核心可移植件 (待与多物体批/GPU P0 合并排序):
+    - B 报告 A2 桶 "镜像+脏区间合并提交" (pyglet 模式): 桶加 _dirty
+      总闸让编辑器静止帧整桶跳过上传 = 零风险最大收益 (与 P0① 同源)
+    - C 报告 Ren'Py 整帧缓存三件套 (键设计/单点失效向上冒泡/mark-sweep
+      手动回收) — 编辑器态整帧缓存模板; GLStateCache 差分模板 (Qt scope
+      坑用"脏栅栏"接入)
+    - moderngl Buffer.write Python 侧零拷贝实锤 (numpy 直取首地址进
+      glBufferSubData; 传 tobytes()/list 会多拷)
+    - A 报告 Panda3D 状态排序桶四键 (RenderState→顶点格式→顶点缓冲→
+      transform) + UpdateSeq 序号对惰性失效协议 ("重建前先问序号变了吗")
+    - 反面教材: Ursina 每帧 hasattr 反射扫描 (Loom 脚本调度保持显式
+      注册); moderngl-window 有缓存无脏传播
+
+--------------------------------------------------------------------
+组2 = 微堵点批 + draw_lines 复用 (卡6+D9 + D10)
+--------------------------------------------------------------------
+  状态: 【实施+验收完成, 待用户实测】(2026-08-30)
+  验收: 全量回归 EXIT=0 绿 / A/B 截图 NCC 1.000 双端逐位一致 /
+    D10 探针改前改后 61/61 全 PASS / stress 138.1FPS (vs 组1 140.0,
+    ±2% 抖动带内 —— 本组为微堵点, 收益在事件多/层级深/光源多场景)
+  实施实录:
+    - _dispatch_collision_events: id2m dict 一次建 (每事件 next() O(n) 扫消除)
+    - _update_collision_events: 同款 (惰性 — 确有增减事件才建 dict)
+    - get_collisions: models.index 消除 (物序循环顺带定 mi, 语义等价)
+    - _ancestry_ranges: 类级缓存 (id(models)+_ANCESTRY_GEN 双键); 失效点
+      = add_model/attach_model/remove_model/clear_scene/set_parent/
+      remove_camera + GameObject.parent setter 旁路; 契约: 脚本直改
+      parent.children 列表不置脏 (引擎契约外操作, 验收记录在案)
+    - Light.direction: (角度元组, d) 自校验缓存; up_vector 复用缓存消重复 trig
+    - update_scripts list(m.scripts) → 引用迭代 (engine + scene_driver 同改;
+      契约: update 不增删本物体脚本组件 —— 与旧代码实际行为一致)
+    - D10 draw_lines: 持久 VBO (4KB 起 2x 生长, dynamic) + VAO 缓存
+      (换缓冲才重建); render(vertices=N) 只读前 N 顶点, 余量旧字节无害;
+      字节布局/着色器/uniform 逐位同旧
+  探针资产: tests/_tmp/probe_draw_lines_reuse.py (61 断言: 计数收缩/
+    数据更换/旧区残留/未画区黑 —— D10 复用实现回归网, 常驻可复跑)
+
+--------------------------------------------------------------------
+组3 = 公共算法层 + SoA (卡5: A15+D5+D6, 并入 A6 动画采样)
+  ★方向重述 (用户 2026-08-30 确认): ① Nuitka 编译后仍动态执行的部分
+    换静态编译库 (numba njit) 直接跑 ② nogil 释放 GIL + parallel.py
+    线程池真并行突破单核。层1 SoA 是前置 (numba 吃不了对象属性链)。
+  状态: 【三层全部实施+验收完成, 待用户实测】(2026-08-31)
+  验收: stress 146.6FPS (vs 组1基线 140.0, +4.7%) / shadow_prep 4.10→3.18ms
+    (-22%) / 主线程 74.9→72.6% / 18 个 prange 线程 87-96% 多核铺开 /
+    A/B 截图 NCC 1.000 双端 / 全量回归 EXIT=0 / 对拍网全 PASS
+    (详见 tests/_tmp/组3验收报告.txt)
+  实施实录:
+    - 层1 SoA: _transform_snapshot 硬化快照 (三件 id 键+对象钉住) + 消
+      9 属性链/帧; 采集段 1.25x (层数越深收益越大, 链10层 1.65x)
+    - 层2 numba: fastpath.py (depths 深度DP / ancestry_dfs DFS+CSR /
+      aabbs_minmax AABB) @njit(cache=True,nogil=True), 未装 numba 自动降级
+      纯 Python 同源直译; D1 ancestry 接线 (DSH 编码+主线程验收,
+      wire_check 6 树形全 PASS); D2 动画采样 A6 快/慢双路径 (DSH 编码崩在
+      验证, 主线程接管验收; 资格闸门 None/np数/str/nan/乱序全挡慢路径,
+      大int通道实证无差); 对拍网 numba_par_check 全逐位
+    - 层3 prange: aabbs_minmax njit+prange(parallel) 模型维并行 nogil +
+      _aabbs_batched 按 V 分组; ★弯路: 纯 numpy 堆叠/预分配批量化全负
+      收益 (0.23-0.99x, aabb_bench.py 拆解实证), numba 标量循环 23.8x
+      正解 —— "轻计算重调用"负载别用 numpy 批量化; 数值 vs dgemm 4ULP
+      (8.9e-16), D6 标准 1e-7 内合格
+  探针资产: soa_val_check/soa_bench/numba_par_check/ancestry_wire_check/
+    anim_np_check/aabb_par_check/aabb_bench (tests/_tmp/, 全常驻可复跑)
+  ★用户实测 (2026-08-31, 已备份): CPU 多核调度大提升, 帧率 +20 至 170
+    (编辑器真实场景), GPU 降到 ~25%。评价"调度还是有问题不过有进步"。
+  ★spin-wait 判读已实锤+治理完成 -> 见组6 (2026-08-31 方案B 治本:
+    AABB 帧路径改串行 njit, 18 worker 空烧归零, stress 167.1FPS)。
+
+--------------------------------------------------------------------
+组4 = 视锥剔除 A11 (独立, 用户已回退过一次, 重新拍板后做)
+--------------------------------------------------------------------
+  - 主 pass 6 平面 (从 _vp 解析) × 世界 AABB 8 角点批量判定, 保守无假
+    阴性; <32 物体闸门; 阴影 pass 不剔 (防后景投影丢失)
+  - GL+Vk 共享工具函数 (组3 公共层之上)
+  - ★用户备注: 写烂了可从组开工前状态回退重写 (回退到组4 开工前版本)
+  - A/B 截图逐位一致 (剔除是保守判定, 画面不变, 只省 draw)
+
+--------------------------------------------------------------------
+组6 = numba spin-wait 治理 (2026-08-31, 用户拍板方案B 治本)
+--------------------------------------------------------------------
+  背景: 用户实测/组3 自我纠错 —— 18 个 numba 线程 85-93% CPU 但 AABB 每
+  帧真实工作仅 ~54µs, 99.96% CPU 是 prange 线程池 busy-wait 空烧 (18 倍
+  核心占用只换 +20 帧; 探针 numba_spin_probe.py 实锤: 60 次调用窗内 CPU
+  消耗 8969ms ≈ 21 核全程, 真实工作 3.2ms)。
+  状态: 【实施+验收+用户实测完成, 已备份稳定版】(2026-08-31 组6; 2026-09-01
+    用户确认 50 球 195FPS 实测通过并随 500 球状态一并复制稳定版)
+  验收: stress 153.5 -> 167.1FPS (+8.9%, 帧时间 6.513 -> 5.983ms) /
+    ★18 worker 线程 CPU% 全部归零 (85-93% -> 最高 13.9%, 线程池再无空转) /
+    MainThread 82.4% -> 72.3% / GPU 20.1% -> 18.1% (等 CPU 时间缩短) /
+    aabb_par_check ALL PASS (串行/入口/兜底逐位) / spin_gate_check 5 项全
+    PASS (串行 vs prange 逐位 + worker 归零 + 闸门 + 缓冲复用 + 逃生门) /
+    A/B 截图 NCC 1.000 (画面零变化) / 全量回归 EXIT=0
+  实施实录:
+    - fastpath.py: aabbs_minmax 改**串行** njit (nogil 保留, 去 prange;
+      帧路径不触碰 numba 线程池) + 新增 aabbs_minmax_par (prange 版,
+      逃生门); 两版同算法逐位同源
+    - engine.py: _AABB_PAR_MIN_MODELS=512 闸门 —— 单组模型数 >= 512 才切
+      prange (工作量摊得开 spin 税); _aabbs_batched 接线; 引擎不设环境
+      变量, 闸门随代码走 (打包 exe 同行为)
+    - 堆叠缓冲 thread-local 复用: vhN/m3N/mn/mx 按 (组序号,n,V) 键缓存
+      (threading.local, 池 worker/主线程各持一份免锁), 消每帧 4 次
+      np.empty 大分配 (51球 V=2035 ≈ 3.3MB/帧)
+    - 插桩: _model_aabbs_par 计 'aabbs' 阶段 (实测 1.25ms/帧, shadow_prep
+      内部大头独立观测; shadow_prep 3.07 -> 2.67ms 其余部分同步下降)
+  探针资产: tests/_tmp/numba_spin_probe.py (根因取证, 只读) /
+    spin_gate_check.py (本组对拍网 5 断言, 常驻可复跑) / ab_spin_before.png
+    + ab_spin_after.png / 组6验收报告.txt
+  ★500 球扩展压测 (用户指令, 同日): stress_scene.py 参数化 [球数] +
+    stress_probe.py 第 2 参数选场景; 500 高面数球 (101.75 万顶点, 29x18
+    网格, 100 脚本球, Jolt 501 体) 实测 16.4FPS / physics 22.84ms +
+    shadow_prep 33.52ms (aabbs 11.02ms) / numba 池未唤醒 (500<512 闸门,
+    组6 语义保持) / 帧池 worker 7-12% 正常有活不空烧。判读: 下一轮堵点
+    = physics (Jolt 501 体+12.5万对) 与 shadow_prep 非AABB 段细拆,
+    见组6验收报告.txt 第二节。
+  ★实测场景布置 (用户实测用): Loom\保存\压测500球.json 已生成
+    (make_500_scene_save.py, 与 50 球原文件逐字段同构 v8 格式; sceneio
+    校验 501 对象 PASS; LoomHub 同款启动链路实开验证 "已加载 501 个
+    对象")。用户 50 球实测 (2026-08-31): 195FPS, 多核压力下降——组6 治理
+    后空烧消失, 单核上限提高带出主线程帧率提升; 用户判读"仍单核跑死,
+    其他核有点压力但不多" (与 stress MainThread 72.3% 一致, 下轮=主线程
+    串行段细拆)。
+
+--------------------------------------------------------------------
+组5 = 物理桥收尾 (B1-P2 后残留; 待 V02 人工实测过后再动)
+--------------------------------------------------------------------
+  - post_step 逐体循环: 滚动摩擦/停滞判定数学部分向量化 (physics_bridge
+    976-1050; 每体 C 写回 API 无批量接口 → 写回仍逐体)
+  - pre_step 脏传播父链 while 每帧重走 → 层级变更时缓存 (848-857)
+  - ★红线: 睡眠/唤醒语义 (P1 修复_b①②) 一行都不能变;
+    动前必须 V02 物理人工实测已过。
+  - 基线: P1 实测 post=504µs / 整帧 666µs@50球。
+
+====================================================================
+已判死不动 (Case1 优化到头, 勿再排查): numpy 矩阵主体 / GL-wgpu 调用
+本身 / 脚本层 (契约) / 主循环胶水 / matlib / parallel.py 框架。
+可选放弃: A9 HUD (仅裸 pygame 生效) / B3 mesh 生成 (一次性, 顺手才做)。
+
+外部待办 (非优化, 提醒用):
+  - 人工实测: V02 物理全套 / V03 听感 / P22 距离无关帧率 / 跳台玩感 /
+    V01 Vulkan 目测
+  - 重打包: 编译版/开源版不存在, 四件套重打 (含 culverin.libs) 等指令
+  - 跳台游戏配置 render_api:opengl 待删回默认; Vk animator-audio 组件
+    未加载 (记录)
+  - ★待用户备份 (双夹规则, 手动复制): 插桩批+GC 批 (09-01) + 多物体批
+    7 步+可移植件批 4 件 (09-02 夜, 实测验收后)
+  - 文档收尾: 台账/任务清单/进度对照 已更新 (09-02); 代码架构.txt 的
+    批量路径条目待补 (fastpath numpy 快路径/SAP/件3/件4 已进主干)
+  - 看护 cron: 每批子代理开工必须同步挂 3 分钟巡检 (判活只信 ListAgents
+    + 完成通知; 复活=SendMessage 状态检查; 代理通知 result 全文在会话
+    jsonl 的 queue-operation 行可抢救, output 文件是 0KB 空壳)
+====================================================================
+
+
+====================================================================
+★★★ 批4 = 编译版性能追击·剩余堵点 (2026-09-07 收官II 后排队, 等用户拍板顺序)
+====================================================================
+背景: 批1-3 战役收官 (第 13 版编译版 55.7FPS@TPS20 / 编辑态 161, 超同算法
+  源码冻结 19%; 全程 16.4→55.7)。原则=一切以编译版为最终目标, 验收线=
+  编译版 FPS (compiled_verify.py 同口径)。剩余账目 (09-06 编译版 45s 窗):
+  logic_step 18.9s (aabbs 13.2s / pipe_wait 9.2s / collide 1.0s) +
+  world_matrices 5.2s + buckets 3.1s + shadow_prep 3.1s + interp 2.6s。
+
+批4A = aabbs 并行档闸门校正 (最小改动, 一行, 先做)
+  - 现状: _AABB_PAR_MIN_MODELS=512, 混合500 单组 n≈500 恰好卡在串行档外
+    → C 串行 5.2ms 而非 C 并行 1.6ms。
+  - 改法: 闸门 512→384 (或按"n×V 工作量"判据替代纯行数判据)。
+  - 风险: Win32 线程池每帧 CreateThread×9 开销 (C 侧无池) — 需微基准
+    验证 500 行规模下并行净收益 (预估 5.2→~2.5ms, 扣线程创建 ~0.5ms)。
+  - 探针: ckernels_bench.py 已有 par 档计时, 补 400-500 行区间数据。
+
+批4B = aabbs C 内核 avx2/分块再压 (中改动)
+  - 现状: 内核 5.2ms@500×2035 串行 = 每顶点 ~5ns, 纯标量 f64。
+  - 方向: ①编译加 /arch:AVX2 (f64×4 向量, min/max 用 _mm256_min/max_
+    pd, k=4 求和序保持=分块内水平加需逐位对拍) ②顶点循环展开 4×
+    ③行内双缓冲写合并。对拍闸门不变 (≤1e-7 + 零矩阵逐位)。
+  - 预期: 5.2→~2ms (标量→AVX2 经验 2-3×)。
+
+批4C = pipe_wait 9.2s 管线结构优化 (大改动, 需拍板)
+  - 现状: 帧内流水线 S1 等待段 (脚本→连发物理→音频动画→S1等待→prep),
+    等待=流水线语义固有, 编译版帧慢时等待占比放大。
+  - 方向: ①S1 等待期间预取下一逻辑帧纯 Python 段 (TPS 缓冲思路, 已有
+    frame_buffer.py 记账器可复用) ②prep 段前移与物理重叠 (现 prep 在
+    S1 后串行)。
+  - 风险: 动管线顺序=动语义, 红线 R1-R9 全适用 + TPS/时间轴对拍;
+    逻辑帧输入延迟最多 +1 帧的既有边界不得突破。
+
+批4D = world_matrices 5.2s (中改动)
+  - 现状: 逐深度层级批量 matmul (d 层循环 world[idx]=local[idx]@world[
+    parent[idx]]), 500 物体 5-6 层深 = 5-6 次批量 GEMM。
+  - 方向: ①浅层 (d=0/1) 与深层重叠不可行 (依赖序), 但 f32 降档可探
+    (渲染矩阵 f32 精度足够, 逻辑态保 f64 — 需插值对拍) ②静止子树
+    缓存 (件4 已有 _fw_cache 整表级, 可下探到子树级)。
+
+批4E = buckets 3.1s + interp 2.6s (低优先, 共有成本)
+  - 取证=源码编译同价, 非编译版特异; interp 是插值快照维护, buckets 是
+    实例组装。等 4A-4D 落地后重测账目再定。
+
+批4 流程 (沿用批3 模式): 子代理取证→择优落地→主线程统一验收 (对拍+
+  回归+重编+compiled_verify) → 用户实测备份。
+====================================================================

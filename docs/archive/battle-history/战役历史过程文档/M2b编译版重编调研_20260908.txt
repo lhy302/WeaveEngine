@@ -1,0 +1,178 @@
+====================================================================
+Loom 引擎 编译版重编调研报告 (M2b 前置, 只读调研)
+====================================================================
+日期: 2026-09-08    范围: 打包链路取证 / 重编清单 / 耗时风险 / 执行建议
+红线遵守: 本次未编译、未打包、未改动 Loom(编译版) 目录, 仅新增本报告文件。
+约定: 每条结论标 来源(文件名:行号); 无直接证据的判断标「推断」。
+
+--------------------------------------------------------------------
+一、打包链路取证
+--------------------------------------------------------------------
+1.1 Nuitka 命令 (来源: AI工作排查笔记\T3_编译报告.md:15-21, 与当前产物同名同参数)
+  cd "D:\my-project\Loom(py源代码-工作区)\Loom"
+  py -3.12 -m nuitka --standalone --msvc=latest --assume-yes-for-downloads ^
+     --windows-disable-console --output-dir=Loom_build ^
+     --output-filename=Loom.exe build_entry.py
+  · 注: 实际生效旗标可用 --windows-console-mode=disable (旧名
+    --windows-disable-console 会打 1 行 Nuitka 警告, T3_编译报告.md:78, 无害)。
+  · 关键参数: standalone=真 (来源: Loom_build\build_entry.build\scons-debug.py:8
+    的 'standalone_mode=true'); onefile 未使用 (dist 为整目录投放);
+    console_mode=disable (同文件 'console_mode=disable'); msvc_version=latest;
+    未加任何 --enable-plugin (T3_编译报告.md:18 原命令无插件;
+    PySide6 plugins 由组装脚本手工补拷, 见 1.3)。
+  · 历史记忆的 --nofollow-import-to=numba 在 T3 命令文本中未出现 (来源:
+    代码架构.txt:1630 记为 "编译配方 build5+"), 但产物内实测无 numba\ /
+    llvmlite\ 目录 (实测: build_entry.dist 与 编译版\Loom 均无), 与
+    fastpath.py:37-45 的 _FROZEN 分支 (冻结环境根本不 import numba) 一致
+    → 「配方含该旗标或等价排除」结论成立; 重编沿用原配方即可 (代码架构.txt:935
+    "重编配方 --nofollow-import-to=numba 不变")。
+  · 入口 = build_entry.py (源码根), 不是 Loom.py (来源: 代码架构.txt:926
+    "Nuitka standalone exe (py3.12 + build_entry.py)")。
+1.2 产物目录结构
+  · build_entry.dist\Loom.exe (26.09 MB, 2026-09-07 12:13) + 运行库
+    (python312.dll / sdl2*.dll / qt6*.dll / PySide6\ / numpy\ / pygame\ 等),
+    实测 112 文件 / 124 MB (实测 build_entry.dist 统计)。
+  · 编译版最终形态 = 组装脚本产物 (来源: tests\_tmp\assemble_release_0906.py:46-118):
+    D:\my-project\Loom(编译版)\Loom\  ← dist 整体替换 (删旧放新, :49-52)
+    + 投放 GUI/plugins/core_plugins/scripts/assets/保存 (:55-57)
+    + ckernels\loom_kernels.dll (:59-67)
+    + PySide6\plugins (:69-74, qwindows.dll QUIET 坑, 缺则 exe 无窗即崩)
+    + 设置.json / 解释器.json(exe 版) / 根文档 (:76-115)
+  · 当前编译版实测缺 ui\、core_components\ (ui 已编入 exe; core_components
+    从未投放 — 见 2.3)。
+1.3 现成脚本盘点
+  · 无 Nuitka 打包 bat; 打包命令只以文档形式留存 (T3_编译报告.md:15-21,
+    使用操作指南.txt:403-404 仅记要点)。
+  · 有 DLL 一键重编+全量对拍: build_all.bat (37-46 编译 5 个 DLL, 60-78 跑 17 探针;
+    用法 "build_all.bat [skip_checks]", :19)。
+  · 有组装脚本: tests\_tmp\assemble_release_0906.py (当前版, 增量流程: 只重编
+    改过的 exe, LoomHub 原样保留, :3-9, :103-109)。
+  · 编译版实测验证探针: tests\_tmp\compiled_verify.py (EXE 路径:17, 场景:18)。
+
+--------------------------------------------------------------------
+二、本次必须重编 / 重投放清单
+--------------------------------------------------------------------
+2.1 改动的 .py → 影响哪个 exe
+  · engine.py (2026-09-08 19:31 修改) → 编入 Loom.exe (来源: build_entry.py:265-365
+    导入 engine; 旧构建确有 module.engine.c, 实测 build_entry.build 目录)。
+    本次改动点: _pipeline_light_vps() (engine.py:2863-2874) 与
+    compute_world_matrices 的 pipeline.dll 优先路径 (engine.py:3235-3249)。
+  · pipeline_glue.py (新增/改动, 2026-09-08 19:25) → 被 engine.py 函数内
+    import (engine.py:2874, 3242) → 属 Loom.exe 依赖。
+  · core_components\module_registry.py / module_loader.py → pipeline_glue.py:73
+    的 `import module_registry` 运行时依赖 (非 engine 直接导入)。
+  · ★风险: 旧构建产物中没有 module.pipeline_glue.c / module.module_registry.c
+    (实测 Loom_build\build_entry.build 目录列表), 说明函数内 import + 子目录
+    模块曾未被静态跟随 → 重编时建议显式
+    `--include-module=pipeline_glue,module_registry,module_loader` (先例:
+    LoomHub 打包为 filedialog 加 --include-module, 来源: 使用操作指南.txt:405-408,
+    T3_编译报告.md:27)。
+2.2 新增 DLL → 投放位置 (对照 ckernels 先例)
+  · 先例: ckernels\loom_kernels.dll 投放为 编译版\Loom\ckernels\loom_kernels.dll,
+    由 fastpath.py:66-69 在冻结环境按 sys.executable 同级 ckernels\ 查找
+    (注释明写 "冻结环境: DLL 与 exe 同级投放 (assemble 脚本负责拷贝)")。
+  · 本次新增/需重投:
+    - core_components\pipeline\pipeline.dll → 编译版\Loom\core_components\pipeline\pipeline.dll
+    - core_components\module_ref.dll        → 编译版\Loom\core_components\module_ref.dll
+    - ckernels\loom_kernels.dll             → 编译版\Loom\ckernels\ (★源码 09-08
+      版 16896 B vs 编译版现存 15872 B, 已过期, 必须覆盖)
+    依据: registry.json:7-35 的 path 均为相对「引擎根」路径, 加载时
+    base_dir = 引擎根 (module_registry.py:22, 311-313), 路径拼接见 :135, :163。
+  · 同时必须投放 registry.json (module_registry.py:312-314 按
+    <base>/core_components/registry.json 读取) — 当前组装脚本没有这一步。
+2.3 探针专用靶必须排除 (绝不随引擎发行)
+  · 靶文件: core_components\badvector.dll / ambiguous.dll。build_badvector.bat:2
+    自述 "M1-5 模糊测试坏靶 badvector.dll (绝不发行)"。
+  · 加载侧: 注册表只加载 registry.json 列出的条目 (module_registry.py:133-136,
+    按 entry['path'] 定位), 当前 registry.json 只有 module_ref / ckernels /
+    pipeline 三条 (registry.json:6-35) → 即使误拷进目录也不会被 LoadLibrary。
+    但"文件躺在发行目录里"本身违反红线, 仍须排除。
+  · 当前投放脚本会不会误带: assemble_release_0906.py 目前**完全不投放
+    core_components** (:55-67 只有 6 个投放目录 + ckernels 单文件) → 现状不会
+    误带, 但同样没带 pipeline.dll/module_ref.dll/registry.json。
+  · 排除点 (给改动留位置): 若按「整目录投放 core_components」实现, 排除点应
+    放在 assemble_release_0906.py:54-57 的投放循环内 (白名单式, 只拷
+    pipeline\pipeline.dll + module_ref.dll + registry.json + module_loader.py +
+    module_registry.py), 或新增一条显式拷贝 (与 :59-67 ckernels 同款),
+    **不要用 merge_tree 整目录递归** (:30-43 是整目录递归, 会带上两个靶)。
+
+--------------------------------------------------------------------
+三、耗时与风险估计
+--------------------------------------------------------------------
+3.1 耗时 (依据: T3_编译报告.md:20 B1 实测 7.8 min; 本次构建产物时间戳
+    build_entry.build 12:09→dist\Loom.exe 12:13 = 约 4 min, 实测)
+  · Loom.exe 全量 Nuitka 打包: 4-8 min (7.8 min 为 2026-08-30 首次全量;
+    9-07 实测约 4 min, 属 Nuitka 复用 .build 缓存的增量)
+  · 组装 assemble_release_0906.py: <1 min (T3_编译报告.md:54 "耗时 ~1 min 内")
+  · 对拍/回归: build_all.bat 17 探针 (build_all.bat:60-78) + compiled_verify.py
+    实机 2 段 (compiled_verify.py:21-58) → 约 3-6 min
+  · 合计预期 10-15 min (不含人工验收)。
+3.2 主要风险
+  R1 (高) core_components 未投放 / module_registry 未编入 → pipeline_glue.handle()
+     走 except 静默降级 (pipeline_glue.py:77-79), 表现为"重编了但没提速",
+     且不报错。验证法: 见 §四 S5。
+  R2 (中) numba 冻结四连坑 (代码架构.txt:1625-1630): 配方漏掉
+     --nofollow-import-to=numba → fastpath 走 numba 路径在冻结环境崩/降级。
+     现产物无 numba 目录, 保持原配方即可。
+  R3 (中) 缺 DLL / 缺 PySide6\plugins → exe 启动即退或空窗 (assemble_release_0906.py:69-74
+     注释: "缺失=编译版 Loom.exe 启动即崩无窗无报错")。
+  R4 (低) 体积膨胀: dist 124 MB / exe 26 MB (实测); 本次新增 pipeline.dll 20 KB +
+     module_ref.dll 10 KB + registry.json 1.8 KB, 体积影响可忽略。
+  R5 (低) 旧 ckernels DLL 未覆盖 → 编译版仍跑 09-07 内核 (15872 B), 与源码
+     16896 B 不同源; 覆盖即可。
+  R6 (低) 编译版目录整替换不可逆 (assemble_release_0906.py:49-52 rmtree+copytree)
+     → 重编前建议先备份 编译版\Loom。
+3.3 最小重编路径 (只动 Loom.exe, 不动 LoomHub.exe)
+  · 可行, 且是既定流程: assemble_release_0906.py:3-9, 103-109 明写"只重编修改过的
+    exe; LoomHub 没改就不编译, 保留编译版现有 LoomHub 原样不动"; 台账
+    (bench_result_对比台账.txt:475) 亦记 "编译版第 6 次重编落地 (仅 Loom, LoomHub
+    复用 — 用户流程定案)"。
+  · Loom.exe 本身无部分重编选项 (Nuitka 全量重跑, 但 .build 缓存使未改模块
+    复用对象文件, 故实测约 4 min)。
+
+--------------------------------------------------------------------
+四、建议执行步骤 (可操作)
+--------------------------------------------------------------------
+S1. 前置绿闸 (源码侧, 不碰编译版)
+    cd "D:\my-project\Loom(py源代码-工作区)\Loom" && build_all.bat
+    验证: 末行 "ALL PASS" 且 exit 0 (build_all.bat:84-85); 5 DLL + 17 探针。
+S2. 备份现有编译版 (可逆性)
+    复制 编译版\Loom → 备份目录 (整目录, 含 .agent_port.json 无关文件可略)。
+    验证: 备份目录内 Loom.exe 可执行 (双击出 Qt 编辑器窗口, 标题 "Loom — 编辑器 (Qt)")。
+S3. 打 Loom.exe (增量, 不动 LoomHub)
+    cd 源码根; 执行 T3_编译报告.md:18 命令, 建议追加
+      --include-module=pipeline_glue,module_registry,module_loader
+    验证: exit 0; Loom_build\build_entry.dist\Loom.exe 时间戳为本次;
+      并确认 dist 内**不出现** numba\ / llvmlite\。
+S4. 投放 (组装 + 新增 DLL)
+    py -3.12 tests\_tmp\assemble_release_0906.py   (先按 2.3 加白名单投放:
+      core_components\{pipeline\pipeline.dll, module_ref.dll, registry.json,
+      module_loader.py, module_registry.py} + ckernels\loom_kernels.dll 覆盖)
+    验证: 编译版\Loom\core_components\pipeline\pipeline.dll 与源码字节一致;
+      同目录**无** badvector.dll / ambiguous.dll; ckernels\loom_kernels.dll = 16896 B。
+S5. 实机收口
+    py -3.12 tests\_tmp\compiled_verify.py  (编译版 Loom.exe --open 混合500 --agent)
+    验证: 编辑态/播放态 FPS 与阶段账 (logic_step / shadow_bounds) 较 09-07 版不劣;
+      EAI 端口 40s 内就绪 (compiled_verify.py:28-41); 无崩溃、无 "pipeline:
+      unavailable" 诊断串 (诊断串来源 pipeline_glue.py:277-284)。
+    补充: 打开编辑器 HUD/控制台确认 pipeline 状态为已加载 (若仍显示 unavailable
+      → R1 命中, 检查 core_components 投放与 registry.json)。
+
+--------------------------------------------------------------------
+五、本次重编不涉及的部分 (防范围蔓延)
+--------------------------------------------------------------------
+· LoomHub.exe / LoomHub 目录 — 本次未改动其源码, 不重编不重投
+  (assemble_release_0906.py:103-109)。
+· build_game.exe 与玩家运行时 player_runtime\MyGame.exe — 本次无改动 (T3 四件套
+  中的 B3/B4, 本次不重跑)。
+· 稳定版本备份区 / 开源版同步 (tests\_tmp\sync_opensource.py) — 与本战役无关。
+· culverin C ABI 包装 / 物理调度离主线程 / 渲染提交外包 — M2b 后续任务
+  (M2暂停点交接文档:84-89), 不在本次重编范围。
+· 越界 vis_idx 边界校验 (D5, M2验收报告:109) — 代码修复项, 非打包项。
+· DLL 本身的重编 — 由 build_all.bat 覆盖 (S1), 不属"引擎重编"耗时口径。
+
+====================================================================
+(报告完 — 结论: 打包=单条 Nuitka standalone 命令 + 组装脚本; 本次必须重编
+ Loom.exe 并新增投放 core_components 三项+registry.json, 排除 badvector/
+ ambiguous 两靶; 预计 10-15 min; LoomHub 不动。)
+====================================================================

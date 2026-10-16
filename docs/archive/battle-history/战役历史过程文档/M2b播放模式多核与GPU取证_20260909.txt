@@ -1,0 +1,171 @@
+====================================================================
+M2b 播放模式「多核分摊 + GPU 是否吃满」取证报告
+生成: 2026-09-09 19:30 (M2 收口第 12 轮续作)
+作者: DSH 编码代理 (Loom DLL 化战役 M2)
+====================================================================
+本报告回答用户最高优先级问题:
+  (a) DLL 模块化是否把负载真正拆到多核?
+  (b) GPU 是否吃满 / 有无瓶颈?
+口径: 播放模式 (Loom.py --open 保存\压测500混合.json --agent → play on → 稳态)
+      每核 busy% 由 parallel.measure_core_busy(window=0.5) 采样 12s
+      GPU 由 Get-Counter '\GPU Engine(*)\Utilization Percentage' 采样 12 个 1s 样本
+      截图由 tests\_tmp\tm_shot.ps1 对任务管理器窗口定向截图 (CPU 逻辑处理器视图 + GPU 页)
+机器: Xeon E5-2696 v3 @2.30GHz, 18 物理核/18 逻辑处理器, GTX 1050 Ti, 1920x1080
+
+--------------------------------------------------------------------
+一、结论(先看这里)
+--------------------------------------------------------------------
+【答 (a) 多核分摊】—— 多核分摊确实存在, 但**不是 DLL 化带来的**:
+  · 两档都在 ~2.4 个核当量 (ON 240.83% vs OFF 242.31%), 差异 1.5%,
+    远小于各自的离散度 (sd 50.18 / 41.34 个百分点) → **无统计显著差异**。
+  · 同时活跃的核数: ON 6.33 个核 >10% / 2.83 个核 >20%;
+                     OFF 6.80 个核 >10% / 2.80 个核 >20% → 形态相同。
+  · 最高核 busy%: ON 69.13% vs OFF 67.11% (sd 5.63 / 1.37) → 也相当。
+  · 18 核机器上两档都只用 ~2.4 核当量 → 并行度受任务粒度/线程池限制,
+    与「验收② 45% 目标不可达」的既有结论一致 (见 M2_权威数字表)。
+  · **DLL 化的真实收益体现在单线程效率而非核数**:
+    fps ON 75.5 vs OFF 67.6 (+11.7%); 主线程 ON 8.68 vs OFF 9.57 ms/帧 (-9.3%)。
+
+【答 (b) GPU 吃满】—— **没有吃满, GPU 不是瓶颈**:
+  · 3D 引擎利用率: ON 均值 46.73% (区间 42.41-50.89, sd 4.24);
+                   OFF 均值 42.76% (区间 39.82-45.69, sd 4.15);
+     Loom 进程自身口径: ON 43.63% / OFF 40.03%。峰值从未超过 55.41%。
+  · 其余引擎全部为 0: Copy ≈0.1-0.3%, Video Encode / Video Decode /
+    Compute_0 / Compute_1 / CUDA / VR / Graphics_1 / Security 全 0.00%。
+  · 专用 GPU 内存仅 0.6/4.0 GB (共享 0.1/31.9 GB) → 显存也远未吃满。
+  · 结论: 帧率受限在 CPU 侧 (主线程 8.7-9.6 ms/帧 + 池 ~11 ms/帧),
+    与验收②「主线程自身已超 45% 目标换算」的定量结论互相印证。
+
+--------------------------------------------------------------------
+二、截图证据链: v1 失效 → v2 修复 (重要, 涉及证据有效性)
+--------------------------------------------------------------------
+[v1 缺陷 — 2026-09-08 21:23-21:29 产物, 已作废]
+  21:23 与 21:29 落盘的 4 张 PNG (tm_cpu_play_src_20260908_212317.png /
+  tm_cpu_play_src_20260908_212927.png / tm_gpu_play_src_20260908_212320.png /
+  tm_gpu_play_src_20260908_212951.png 及 play_off 两张) **内容全部是 DSH 浏览器
+  窗口, 不是任务管理器** → 目视证据无效, 本报告不引用。
+  根因 (有日志物证, 见 m2b_play_forensics_on.json 的 shot_stdout):
+    [WARN] SetForegroundWindow did not take effect; screenshot may show another
+           window on top
+  即前台锁拒绝置顶 → CopyFromScreen 按任务管理器的窗口矩形抓屏, 却抓到了压在
+  其上的浏览器像素。同一次运行里 GPU 页导航也失败 (NAV_FAIL: gpu view not
+  reached, resourceTitle 仍是 [CPU])。
+
+[v2 修复 — tests\_tmp\tm_shot.ps1, 备份 tm_shot_v1_backup_20260909.ps1]
+  1. 唤醒: IsIconic → ShowWindow(SW_RESTORE/SW_SHOW); 实测任务管理器曾被最小化
+     (GetWindowRect 返回 -32000,-32000 199x34), v1 对此无处理。
+  2. 置顶: SetWindowPos(HWND_TOPMOST) 保证窗口绘制在最上层, 不依赖前台锁;
+     收尾 HWND_NOTOPMOST 复原。
+  3. 双通道采集: CopyFromScreen + PrintWindow(PW_RENDERFULLCONTENT=2),
+     各落一张 PNG, 并做像素体检 (非黑占比 / 唯一色数), 自动选主图。
+     主图优先 PrintWindow (窗口自身内容, 不受遮挡与位置漂移影响)。
+  4. 采集前**重读窗口矩形**: 实测窗口位置在脚本运行期间会漂移
+     (29→96), v1 只读一次导致边缘混入浏览器像素。
+  5. 导航改为 **UIA 模式优先**: 诊断证实侧栏项只暴露 InvokePattern
+     (gpu_entry_0_0_92061 → Invoke 后 resourceTitle 由 [CPU] 变 [GPU]),
+     v1 优先"鼠标点矩形中心"在窗口被挡住时会点到别的窗口, 实测还导致
+     任务管理器被最小化 (iconic=True)。
+  6. 日志通道改 Write-Host: v1 用 Write-Output, 日志混进函数返回值后被
+     [void]()/赋值调用吞掉, 导致 [MOUSE]/[NAV] 等关键行静默丢失。
+
+[v2 实测结果 — 全部通过]
+  ON  : VIEW=cpu(logical) panes=17 title=[CPU] / VIEW=gpu title=[GPU], exit 0
+  OFF : VIEW=cpu(logical) panes=17 title=[CPU] / VIEW=gpu title=[GPU], exit 0
+  每次采集均有 [CAP] foreground=tm is_foreground=True iconic=False,
+  像素体检 sane=True (screen 非黑 99.3% / PrintWindow 非黑 96.8%)。
+  已人工目视确认 4 张主图 (ON/OFF × CPU逻辑处理器/GPU页), 内容正确。
+
+--------------------------------------------------------------------
+三、权威数据表
+--------------------------------------------------------------------
+[3.1 每核负载 (播放模式, 12s 采样)]
+来源: tests\_tmp\editor_core_{on,off}_r{1,2,3}.json +
+      tests\_tmp\m2b_play_forensics_{on,off}{,_r2,_r3}.json
+汇总: tests\_tmp\m2b_play_forensics_agg.json + _agg_summary.json
+
+run                       档   total_core%  核当量  最高核%  >10%核  >20%核  fps  主线程ms/帧  GPU3D%
+editor_core_on_r1         ON    212.33      2.12    66.06    5      2     75    8.634       -
+editor_core_on_r2         ON    209.01      2.09    68.64    4      3     73    9.138       -
+editor_core_on_r3         ON    303.62      3.04    79.66    7      2     76    8.487       -
+forensics_on (09-08)      ON    307.36      3.07    70.20   10      5     69    9.705     42.41
+forensics_on_r2           ON    209.31      2.09    63.66    7      3     72    8.785     46.89
+forensics_on_r3           ON    203.37      2.03    66.56    5      2     88    7.335     50.89
+editor_core_off_r1        OFF   221.21      2.21    66.02    5      2     67    9.647       -
+editor_core_off_r2        OFF   276.15      2.76    67.25    8      4     62   10.299       -
+editor_core_off_r3        OFF   296.01      2.96    66.57   11      4     74    8.651       -
+forensics_off (09-08)     OFF   200.27      2.00    66.30    5      2     66    9.616     39.82
+forensics_off_r2          OFF   217.93      2.18    69.43    5      2     69    9.630     45.69
+
+统计:
+  ON (n=6): total 均值 240.83% 区间[203.37,307.36] sd 50.18 | 最高核 69.13% sd 5.63
+            >10% 核 6.33 | >20% 核 2.83 | fps 75.5 sd 6.6 | 主线程 8.68 ms/帧 sd 0.79
+            GPU 3D 46.73% sd 4.24 (Loom 进程 43.63%)  ← 该行样本量 n=3, 非 n=6
+  OFF(n=5): total 均值 242.31% 区间[200.27,296.01] sd 41.34 | 最高核 67.11% sd 1.37
+            >10% 核 6.80 | >20% 核 2.80 | fps 67.6 sd 4.39 | 主线程 9.57 ms/帧 sd 0.59
+            GPU 3D 42.76% sd 4.15 (Loom 进程 40.03%)  ← 该行样本量 n=2, 非 n=5
+
+读法: total_core% 是 18 个逻辑处理器 busy% 之和 → 除以 100 即"核当量"。
+      两档 total 均值差 1.48 个百分点, 而单档 sd 达 41-50 → 差异不可辨。
+
+[3.2 GPU 引擎利用率 (播放模式, 12×1s 样本)]
+来源: 上表 5 次 forensics 运行的 json 内 gpu.by_engtype_all / by_engtype_loompid
+
+引擎               ON 均值(全进程)  ON 峰值   OFF 均值(全进程)  OFF 峰值
+3D                   42.41-50.89      55.41      39.82-45.69      47.28
+Copy                 0.12-0.28        0.57       0.15-0.27        0.63
+Video Encode         0.00             0.00       0.00             0.00
+Video Decode         0.00             0.00       0.00             0.00
+Compute_0/1, CUDA     0.00             0.00       0.00             0.00
+VR / Graphics_1 /
+LegacyOverlay /
+Security             0.00             0.00       0.00             0.00
+专用显存             0.6/4.0 GB                 0.6/4.0 GB
+
+--------------------------------------------------------------------
+四、物证清单 (全部为已落盘实测产物, 非计划)
+--------------------------------------------------------------------
+[截图 — v2 有效]
+  tests\_tmp\tm_cpu_play_on_r3_20260909_192616_pw.png   (ON  CPU 逻辑处理器 18 窗格)
+  tests\_tmp\tm_gpu_play_on_r3_20260909_192630_pw.png   (ON  GPU 页, 3D 50%)
+  tests\_tmp\tm_cpu_play_off_r2_20260909_192724_pw.png  (OFF CPU 逻辑处理器)
+  tests\_tmp\tm_gpu_play_off_r2_20260909_192737_pw.png  (OFF GPU 页, 3D 43%)
+  同名 _pw 为 PrintWindow 主图; 同名的无后缀 .png 为 CopyFromScreen 副本(同一次采集)。
+[截图 — v1 作废]
+  tm_cpu/tm_gpu_play_src_20260908_2123*.png / _2129*.png / play_off_20260908_2127*,
+  _2128*.png → 内容为浏览器窗口, 不得作为证据引用 (原因见 §二)。
+[数据]
+  tests\_tmp\m2b_play_forensics_{on,off}.json          (09-08 首轮, 含 GPU)
+  tests\_tmp\m2b_play_forensics_on_r2.json / _on_r3.json / _off_r2.json
+  tests\_tmp\m2b_play_forensics_{on,off}{,_r2,_r3}.log
+  tests\_tmp\editor_core_{on,off}_r{1,2,3}.json + editor_core_verdict_r{1,2,3}.json
+  tests\_tmp\m2b_play_forensics_agg.json / _agg_summary.json  (本报告汇总)
+[脚本]
+  tests\_tmp\tm_shot.ps1 (v2, 530→700 行) / tm_shot_v1_backup_20260909.ps1
+  tests\_tmp\m2b_play_forensics.py (新增 --suffix, 保留多轮物证)
+  tests\_tmp\_diag_gpu_nav.ps1 (GPU 侧栏 UIA 模式诊断, 只读)
+
+--------------------------------------------------------------------
+五、对 M2 验收面的影响
+--------------------------------------------------------------------
+1. 验收② (每核负载 ≤45%): 本报告新增 n=6/5 的播放模式样本, **不改变原判定**。
+   最高核 ON 均值 69.13% (最低 63.66%) 仍远超 45% 目标;
+   且"多核分摊"不是 DLL 化的贡献 → 若以"并行度提升"为②的定标口径, 应判定为
+   **不可达/需转出**, 与 M2_权威数字表 §一 的作废结论一致。
+2. 验收③ (编译版 FPS): 本报告 ON fps +11.7% / 主线程 -9.3% 与
+   compiled_verify 的 [GATE-FPS] PASS (+7.2%) 方向一致, 互为旁证。
+3. 用户目视需求: (a)(b) 两个问题均已用「任务管理器定向截图 + 计数器物证」双通道
+   回答完毕, 结论为「多核分摊存在但与 DLL 化无关」「GPU 未吃满, 瓶颈在 CPU」。
+
+--------------------------------------------------------------------
+六、遗留 / 建议
+--------------------------------------------------------------------
+· 采样离散度极大 (sd 41-50 pt): 若要给"核当量差异"下定论, 需 ≥15 轮采样或
+  改用更长采样窗; 当前样本量足以否定"翻倍"级差异, 不足以判定 <5% 的差异。
+· 任务管理器窗口位置在脚本运行期间会漂移 (29→96), v2 已按"采集前重读矩形"处理;
+  若未来改用其他截图工具, 需保留这一处理。
+· tm_shot.ps1 v2 依赖 UIAutomationClient (Windows PowerShell 5.1), 且 .ps1 必须
+  保存为 **UTF-8 with BOM** —— 无 BOM 时 PS 5.1 按 GBK 解析中文注释会语法报错
+  (本轮实际踩坑, 见 §二.6 与 §二.5 之外的排错记录)。
+====================================================================
+(报告完 — 物证均在 tests\_tmp 下, 数字可逐条回溯)
+====================================================================

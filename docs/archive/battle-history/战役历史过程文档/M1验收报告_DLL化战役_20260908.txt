@@ -1,0 +1,147 @@
+====================================================================
+Loom 引擎 DLL 化战役 — M1 验收报告
+====================================================================
+日期: 2026-09-08 (第三棒收尾, DSH 主线程)
+战役总纲: D:\my-project\DLL化改造可行性方案与执行路径报告.txt (v1.3)
+契约权威: core_components\loom_module.h (C ABI v1.0)
+规则权威: core_components\注册表格式与契约设计说明.txt (218 行)
+验收口径: 总纲 §六 M1 — ①无用户 DLL 完整运行 (全官方 DLL) ②对拍网 MVP 全 PASS
+          ③模糊测试全拦+自愈 (坏 DLL 弹出/回退官方)
+
+--------------------------------------------------------------------
+一、验收结论 — 三条全过
+--------------------------------------------------------------------
+[√] ① 无用户 DLL 完整运行: registry.json 仅 2 条官方条目 (module_ref/ckernels),
+    组装 loaded=2 / popped=0 / provides_map 3 项齐全; LOOM_NO_DLL 逃生门三态
+    (指名/`*`/清空) 全实测。
+    ★端到端实证 (accept1_e2e_check.py 6/6): 无注入条目 → assemble 全 loaded →
+    经注册表句柄真跑两条热路径 (ckernels aabbs 逐位 dmn=dmx=0 / module_ref echo
+    逐位 maxdiff=0) → LOOM_NO_DLL='*' 全跳且 get 抛 ModuleNotAvailable (引擎不死)。
+[√] ② 对拍网 MVP 全 PASS: pipeline_prep_check.py 56 项 ALL PASS / EXIT=0;
+    绞杀者核心 = ckernels DLL vs 旧 Python 标量实现逐位 maxdiff=0.0
+    (n137/V37 · n1/V1 · n500/V2035 · n0 四组)。
+[√] ③ 模糊测试全拦+自愈: module_fuzz_check.py 20 项 ALL PASS / EXIT=0;
+    坏 DLL (badvector, 0xC0000005) → ctypes OSError → crash_reporter.write_dump
+    → pop_and_fallback → 官方顶回 → echo 逐位, 全链实证; sha 信任闸前置拦截实证。
+
+全量构建: build_all.bat EXIT=0 — 4 个 DLL 编译全 OK + 10 个探针全 ALL PASS。
+真实 registry.json 哈希: 8b07bc12ec0611a0… (验收前后未变, 无探针污染)。
+
+--------------------------------------------------------------------
+二、交付物清单 (全部落盘并实测)
+--------------------------------------------------------------------
+[机械层]
+  core_components\module_loader.py           393 行  加载器 (M1-3)
+  core_components\module_registry.py         478 行  验证器/组装器 (M1-2)
+[坏靶/专用靶 — 绝不发行, 不进 registry.json]
+  core_components\badvector.c                 84 行  崩溃向量靶 (M1-5)
+  core_components\build_badvector.bat         15 行
+  core_components\ambiguous.c                 71 行  校6 歧义注入靶 (M1-2 补)
+  core_components\build_ambiguous.bat         15 行
+[对拍网 (tests\_tmp, 常驻可复跑)]
+  accept1_e2e_check.py         6 项  ALL PASS  验收①端到端 (M1-8)
+  module_contract_check.py    29 项  ALL PASS  加载器契约链 (M1-3)
+  module_registry_check.py  36 项  ALL PASS  注册表规则校0-校8/§7/§8/§9 (M1-2)
+  pipeline_prep_check.py      56 项  ALL PASS  对拍网 MVP (M1-4)
+  module_fuzz_check.py        20 项  ALL PASS  模糊测试自愈链 (M1-5)
+[集成]
+  build_all.bat  接线: [DLL 清单] +3 行 (build_ref/badvector/ambiguous);
+                 [对拍清单] 取消 3 处注释 + 新增 accept1_e2e/module_registry_check/
+                 pipeline_prep_check
+  共 10 个探针 (既有 5 + M1 新增 5)
+
+--------------------------------------------------------------------
+三、实测数据 (全部亲跑, 命令可复现)
+--------------------------------------------------------------------
+构建 (build_all.bat, EXIT=0):
+  ckernels\loom_kernels.dll   16896 B  BUILD_OK
+  core_components\module_ref.dll 10240 B  BUILD_OK
+  core_components\badvector.dll   9728 B  BUILD_OK (零警告, 无 C4819)
+  core_components\ambiguous.dll   9728 B  BUILD_OK
+
+探针 (10/10 ALL PASS):
+  ckernels_val_check.py / ckernels_e2e_check.py / collide_val_check.py /
+  aabb_f32_check.py / crash_reporter_check.py (9/9)  ← 既有 5 个不回归
+  accept1_e2e_check.py       6/6
+  module_contract_check.py  29/29
+  module_registry_check.py  36/36
+  module_fuzz_check.py      20/20
+  pipeline_prep_check.py    56/56
+
+关键数值口径:
+  sizeof(LoomModuleInfo) = 104 B (MSVC 与 ctypes 一致, 模块级 assert 钉死)
+  sizeof(LoomTensor)     = 48 B
+  ABI 双口一致           0x00010000 (info.abi_version == loom_module_abi())
+  对拍逐位               maxdiff == 0.0 (echo 三形状 + aabbs 四用例 + reload 后复跑)
+  坏靶 AV                OSError('exception: access violation writing 0x0')
+  自愈链                  write_dump → pop_and_fallback → official=1 顶回 → 逐位一致
+
+--------------------------------------------------------------------
+四、本棒发现并修复的真实缺陷 (全部在 module_registry.py)
+--------------------------------------------------------------------
+F1 官方条目 sha256 未比对 (校0 官方分支缺失)
+   sha 非空的官方条目被 _sha_gate 直接放行 → 官方坏 DLL 可进进程, 违反
+   「官方坏 = AssemblyError 绝不静默降级」。修: 官方 sha 非空即强制比对。
+   实证: module_registry_check B3。
+F2 sha 前置闸弹出未记账
+   条目尚未进在役集合时 _handle_failure 的 _pop 找不到它 → report 漏 'popped'
+   动作 (回退链不可审计)。修: _pop 返 bool, 未记账时补记。
+   实证: module_registry_check B2。
+F3 校6 冲突排序方向反了 (致命误判)
+   holders.sort(key=(bool(official), id)) 升序把**非官方**排首位 → holders[1:]
+   含官方 → 合法「保官方弃歧义」被误判为「双官方 = AssemblyError」。
+   修: key=(not bool(official), id)。实证: module_registry_check D2。
+F4 provides_map 悬空/误删
+   _install 让后安装者覆盖 map 键, 弹出它时会把仍存活的官方接口一并删掉
+   (实测弹出 ambiguous 后 ckernels.aabbs 消失)。修: 新增 _reindex(), 弹出后
+   按在役集合重算 map。实证: module_registry_check D2 (provides_map 3 项完整)。
+
+附带发现 (探针侧, 已修):
+  · module_fuzz_check.py GBK 崩溃: detail 按字节截断落在多字节 UTF-8 中间 →
+    UnicodeEncodeError。修: _safe() 编码兜底 + 子进程 PYTHONIOENCODING=utf-8
+    + 按行取尾部。
+  · 子进程 stdout 编码不匹配导致中文判定标记丢失 (GBK 输出按 UTF-8 解码)。
+  · pipeline_prep_check.py part_b 误对 module_ref 取 loom_aabbs_minmax
+    (该符号只属 ckernels) — 子代理自查时已修; 主线程复核确认。
+
+新增靶件说明: ambiguous.c (module_id="ambiguous", provides=["ckernels.aabbs"])
+  为验证校6「歧义注入」而建 — 现有 DLL 中唯一 module_id≠provides 前缀的是
+  ckernels, 无法构造不同槽位同接口场景。与 badvector 同款「绝不发行」标注。
+
+--------------------------------------------------------------------
+五、接口/规则落地对照 (总纲 §六 M1 清单)
+--------------------------------------------------------------------
+契约头文件 loom_module.h        [√] 已冻结 (前棒)
+注册表格式+验证器               [√] 说明 218 行 + module_registry.py (校0-校8)
+加载器骨架 (含热重载)           [√] module_loader.py (hot_reload 实测)
+对拍网 (pipeline_prep_check)    [√] 56 项 ALL PASS
+DLL 模糊测试 harness            [√] badvector + module_fuzz_check (20 项)
+崩溃落盘 (Minidump)             [√] crash_reporter_check 9/9 (前棒已落)
+build_all.bat 统一构建          [√] 4 DLL + 9 探针, EXIT=0
+
+--------------------------------------------------------------------
+六、遗留与下一步 (M2 输入)
+--------------------------------------------------------------------
+1. module_loader.py / module_registry.py 尚未被 engine.py 实际接线 —
+   M1 只交付「契约 + 组装器 + 对拍网」, 基座侧调用点属 M2 (pipeline.dll) 开工时接。
+2. badvector.dll / ambiguous.dll 是探针靶: 打包/同步脚本必须排除 (build_all 需要
+   它们参与编译, 但 release/assemble 不得携带)。
+3. 编译版重编: 本棒改动均在 core_components/tests/build_all.bat, 未触及 Loom 主程序
+   .py → **编译版无需重编** (M2 动 engine.py 时才需要)。
+4. build_ckernels.bat 全文件 LF 是既有状态 (前棒实证正常), 本棒未改行尾。
+   build_all.bat skip_checks 模式有一条 `'nels.bat' is not recognized` 的
+   无害 stderr 噪音 (EXIT 仍 0) — 疑与 build_ckernels.bat 的 LF 行尾解析有关,
+   留待 M2 统一处理 (已记录, 不影响构建结果)。
+5. 稳定区 (Loom(py源代码-稳定版本备份区)) 本棒只读, 未同步 — 按双夹规则由用户
+   手动复制/备份。
+
+--------------------------------------------------------------------
+七、复现命令
+--------------------------------------------------------------------
+构建+全量对拍:  cd /d "D:\my-project\Loom(py源代码-工作区)\Loom" && build_all.bat
+只编译:        build_all.bat skip_checks
+单探针:        py -3.12 "tests\_tmp\<探针>.py"   (exit 0 = ALL PASS)
+逃生门:        set LOOM_NO_DLL=ckernels   (或 '*')
+====================================================================
+(M1 验收报告完)
+====================================================================

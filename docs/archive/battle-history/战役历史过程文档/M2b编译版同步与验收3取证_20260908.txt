@@ -1,0 +1,375 @@
+================================================================================
+M2b 编译版同步 + 投放校验 + 验收③ 权威取证报告
+生成时间 : 2026-09-08 21:16 (本地)
+执行代理 : M2b 执行代理 (自包含任务)
+源侧 SRC : D:\my-project\Loom(py源代码-工作区)\Loom
+编译版 DST: D:\my-project\Loom(编译版)\Loom
+Python   : py -3.12
+结论摘要 : 任务A 7/7 逐字节一致 (PASS) | 任务B verify_release 7 PASS / 0 FAIL (exit 0)
+           任务C 验收③ [GATE-FPS] PASS (ON 74.1 >= OFF 69.1, +7.2%), exit 0
+           任务D Loom.exe SHA256 / registry 三钉扎 / 0 崩溃日志
+================================================================================
+
+
+================================================================================
+任务 A：同步投放面（7 个文件，源侧 → 编译版）
+================================================================================
+
+A-1 复制动作（Copy-Item -Force，逐个执行，全部成功）
+--------------------------------------------------------------------------------
+copied: core_components\pipeline\pipeline.dll
+copied: core_components\module_ref.dll
+copied: core_components\registry.json
+copied: core_components\module_loader.py
+copied: core_components\module_registry.py
+copied: ckernels\loom_kernels.dll
+copied: pipeline_glue.py
+
+A-2 同步前 DST 基线（证明本任务确实改变了投放面）
+--------------------------------------------------------------------------------
+FILE                                          SRC SHA256 (前16)  DST SHA256 (前16)  状态
+core_components\pipeline\pipeline.dll         902D5F29E2B952F4   D7B8954B55359F32   不同(旧构建)
+core_components\module_ref.dll                3CF5FC9CFC1CABE9   4103D98A96BD57D8   不同(旧构建)
+core_components\registry.json                 A95BED16169495D0   E04C68A71ACB5E2C   不同(1819 B, sha256 空串)
+core_components\module_loader.py              E27160AB8650759A   E27160AB8650759A   已一致
+core_components\module_registry.py            BA34882353F88A43   BA34882353F88A43   已一致
+ckernels\loom_kernels.dll                     DF810FC5652EE238   7305C1BBBD7B7093   不同(旧构建)
+pipeline_glue.py                              D0AADC517B43C5B2   D0AADC517B43C5B2   已一致
+
+A-3 同步后 SHA256 对照表 —— 7/7 逐字节一致
+--------------------------------------------------------------------------------
+FILE                                  SIZE(B)      SHA256 (SRC == DST)                                              一致
+core_components\pipeline\pipeline.dll  20480  902D5F29E2B952F4D05B280C4BE2F7CCC57336D786474F85AAD7BE8C18433329   YES
+core_components\module_ref.dll         10240  3CF5FC9CFC1CABE97306ED308035B358FE9A11E5D43EA6F578A2C5262734B793   YES
+core_components\registry.json           2091  A95BED16169495D0FE8EC2217646CBAA8433028853DB1FED21030729BC486E3E   YES
+core_components\module_loader.py       16093  E27160AB8650759A60BFDF3B6EEEF4D78586AD5F38634BD6C58FCB48B5A91800   YES
+core_components\module_registry.py     20409  BA34882353F88A436D7440176D1C8EA96C6CD1A00673F45CE6DFB94615AA3771   YES
+ckernels\loom_kernels.dll              16896  DF810FC5652EE238D020C448B2C6E06DCE745A2B59ACB2542F37A26D1D45D37B   YES
+pipeline_glue.py                       10629  D0AADC517B43C5B2BFBDC55B7673FC8C44F0A21AF6644D1B969F2505A5934D9A   YES
+
+MATCH_COUNT = 7 / 7      MISMATCH = 0
+（/Brepro 可复现构建预期成立：两侧逐字节相同，含 3 个 DLL 的 PE 头部）
+
+A-4 探针靶排除校验（badvector.dll / ambiguous.dll 必须 0 命中）
+--------------------------------------------------------------------------------
+DST\core_components 递归（显式按文件名比对）: HIT COUNT = 0   -> PASS
+DST 整树递归（显式按文件名比对）          : HIT COUNT = 0   -> PASS
+参考：SRC 侧仍存在 2 个探针靶（未被复制，符合要求）
+  D:\my-project\Loom(py源代码-工作区)\Loom\core_components\ambiguous.dll
+  D:\my-project\Loom(py源代码-工作区)\Loom\core_components\badvector.dll
+
+DST\core_components 下全部 DLL（只有 2 个，均为投放组件，无探针靶）
+  core_components\module_ref.dll          10240 B  2026-09-08 21:10:54
+  core_components\pipeline\pipeline.dll  20480 B  2026-09-08 21:11:00
+
+A-5 约束遵守
+--------------------------------------------------------------------------------
+· 未复制 badvector.dll / ambiguous.dll（0 命中，见 A-4）
+· 未改动 DST 其他文件（本任务仅写入上述 7 个路径；registry.json 后续被任务 B
+  的 refresh_registry_sha 幂等重写，内容字节不变，见 B-1）
+· 未执行 build_all.bat / editor_core_check.py / Loom.py，未修改源侧任何文件
+
+A-6 取证口径备注（命令可靠性）
+--------------------------------------------------------------------------------
+PowerShell 5.1 的 Get-ChildItem -Include 配合 -LiteralPath -Recurse 时**不生效**
+（返回全部文件而非过滤结果），首轮探针靶排除检查因此得到 7 个假命中。已改用
+显式文件名比对（Where-Object）复检，结果为 0 命中。A-4 与 D-4 均为复检后结论。
+
+
+================================================================================
+任务 B：回填编译版 registry.json + 投放校验
+================================================================================
+
+B-1 refresh_registry_sha.py（--root 指向编译版）
+--------------------------------------------------------------------------------
+命令 : py -3.12 "<SRC>\tests\_tmp\refresh_registry_sha.py" --root "D:\my-project\Loom(编译版)\Loom"
+退出码 : 0
+
+原始输出（控制台以 cp936 解码 UTF-8 管道所致中文乱码，数值部分完整可读）：
+  registry.json : D:\my-project\Loom(编译版)\Loom\core_components\registry.json
+  引擎根 --root : D:\my-project\Loom(编译版)\Loom
+  条目数        : 3
+  ------------------------------------------------------------------------------
+  module_id      path                                    旧 sha256    新 sha256
+  ------------------------------------------------------------------------------
+  module_ref     core_components/module_ref.dll           3cf5fc9cfc1c 3cf5fc9cfc1cabe97306ed308035b358fe9a11e5d43ea6f578a2c5262734b793  [基准=引擎根]
+  ckernels       ckernels/loom_kernels.dll                df810fc5652e df810fc5652ee238d020c448b2c6e06dce745a2b59acb2542f37a26d1d45d37b  [基准=引擎根]
+  pipeline       core_components/pipeline/pipeline.dll    902d5f29e2b9 902d5f29e2b952f4d05b280c4be2f7ccc57336d786474f85aad7be8c18433329  [基准=引擎根]
+  ------------------------------------------------------------------------------
+  变更条目数    : 0 / 3
+  registry.json 自身 SHA256 (写回前): a95bed16169495d0fe8ec2217646cbaa8433028853db1fed21030729bc486e3e
+  registry.json 自身 SHA256 (写回后): a95bed16169495d0fe8ec2217646cbaa8433028853db1fed21030729bc486e3e
+  OK refresh_registry_sha: 3 条目已钉扎
+（写回前后哈希完全一致，且与独立实测 D-2 一致）
+
+解读：变更 0/3 = 幂等（源侧 registry.json 已钉扎，复制过来即为钉扎态）；
+     写回前后 registry.json 自身 SHA256 完全相同 → 内容未变，仅 mtime 更新。
+
+B-2 verify_release.py（逐项）
+--------------------------------------------------------------------------------
+命令 : py -3.12 "<SRC>\tests\_tmp\verify_release.py"
+退出码 : 0
+
+原始输出（UTF-8 已正确解码）：
+  === Loom M2b 投放校验 (导出符号 + 关键字符串 + 大小) ===
+  时间    : 2026-09-08 21:13:00
+  源侧    : D:\my-project\Loom(py源代码-工作区)\Loom
+  编译版  : D:\my-project\Loom(编译版)\Loom
+  判据    : 硬=存在性/大小/导出符号(文本为SHA256)+module_id字符串; 软=DLL SHA256 (PE 时间戳差异属预期)
+
+  --- [1/7] core_components/pipeline/pipeline.dll (DLL) ---
+    存在性      : PASS 源侧=有, 编译版=有
+    大小        : PASS 20480 B == 20480 B
+    导出符号    : PASS 13 个完全一致: loom_module_abi, loom_module_deinit, loom_module_depend, loom_module_has, loom_module_info, loom_module_init, loom_module_provide, loom_pipeline_aabbs, loom_pipeline_light_vps, loom_pipeline_mat4_mul_ref, loom_pipeline_scene_bounds, loom_pipeline_shadow_prep, loom_pipeline_world_matrices
+    关键字符串  : PASS 'pipeline' 命中 (src@0x36E8, dst@0x36E8)
+    SHA256      : INFO 一致 902d5f29e2b952f4...
+    判定        : PASS
+
+  --- [2/7] core_components/module_ref.dll (DLL) ---
+    存在性      : PASS 源侧=有, 编译版=有
+    大小        : PASS 10240 B == 10240 B
+    导出符号    : PASS 8 个完全一致: loom_module_abi, loom_module_deinit, loom_module_depend, loom_module_has, loom_module_info, loom_module_init, loom_module_provide, module_ref_echo
+    关键字符串  : PASS 'module_ref' 命中 (src@0x1578, dst@0x1578)
+    SHA256      : INFO 一致 3cf5fc9cfc1cabe9...
+    判定        : PASS
+
+  --- [3/7] ckernels/loom_kernels.dll (DLL) ---
+    存在性      : PASS 源侧=有, 编译版=有
+    大小        : PASS 16896 B == 16896 B
+    导出符号    : PASS 10 个完全一致: loom_aabbs_minmax, loom_aabbs_minmax_par, loom_collide_pairs, loom_module_abi, loom_module_deinit, loom_module_depend, loom_module_has, loom_module_info, loom_module_init, loom_module_provide
+    关键字符串  : PASS 'ckernels' 命中 (src@0x29A8, dst@0x29A8)
+    SHA256      : INFO 一致 df810fc5652ee238...
+    判定        : PASS
+
+  --- [4/7] core_components/registry.json (TEXT) ---
+    存在性      : PASS 源侧=有, 编译版=有
+    大小        : PASS 2091 B == 2091 B
+    SHA256      : PASS 一致 a95bed16169495d0...
+    判定        : PASS
+
+  --- [5/7] core_components/module_loader.py (TEXT) ---
+    存在性      : PASS 源侧=有, 编译版=有
+    大小        : PASS 16093 B == 16093 B
+    SHA256      : PASS 一致 e27160ab8650759a...
+    判定        : PASS
+
+  --- [6/7] core_components/module_registry.py (TEXT) ---
+    存在性      : PASS 源侧=有, 编译版=有
+    大小        : PASS 20409 B == 20409 B
+    SHA256      : PASS 一致 ba34882353f88a43...
+    判定        : PASS
+
+  --- [7/7] pipeline_glue.py (TEXT) ---
+    存在性      : PASS 源侧=有, 编译版=有
+    大小        : PASS 10629 B == 10629 B
+    SHA256      : PASS 一致 d0aadc517b43c5b2...
+    判定        : PASS
+
+  === 明细汇总 (存在性 / 大小 / SHA256 / 导出符号) ===
+  #   项目                                           存在性   大小     SHA256   导出符号   判定
+  1   core_components/pipeline/pipeline.dll          PASS     PASS     INFO     PASS       PASS
+  2   core_components/module_ref.dll                 PASS     PASS     INFO     PASS       PASS
+  3   ckernels/loom_kernels.dll                      PASS     PASS     INFO     PASS       PASS
+  4   core_components/registry.json                  PASS     PASS     PASS     -          PASS
+  5   core_components/module_loader.py               PASS     PASS     PASS     -          PASS
+  6   core_components/module_registry.py             PASS     PASS     PASS     -          PASS
+  7   pipeline_glue.py                               PASS     PASS     PASS     -          PASS
+  ---------------------------------------------------------------------------------------------
+  注: DLL 的 SHA256 列为软信息 (PE 时间戳差异属预期, 不判 FAIL); 文本文件 SHA256 为硬判据。
+
+  === 汇总: 7 项 PASS / 0 项 FAIL ===
+
+B-3 任务 B 结论
+--------------------------------------------------------------------------------
+· 7 项 PASS / 0 项 FAIL，退出码 0 —— 达到期望（无 FAIL，未触发"如实报告"分支）
+· 未修改 verify_release.py / refresh_registry_sha.py 或任何判据
+· 注：DLL 的 SHA256 在本次为「INFO 一致」（/Brepro 可复现构建的额外收益）；
+  verify_release 仍按原设计把 DLL SHA256 归为软信息，不影响硬判据结论。
+
+
+================================================================================
+任务 C：验收③ 权威取证（独占执行）
+================================================================================
+
+C-1 执行环境与前置
+--------------------------------------------------------------------------------
+命令 : py -3.12 "<SRC>\tests\_tmp\compiled_verify.py" --both
+前置检查（开跑前）：Loom.exe 存在（27,504,640 B, 2026-09-08 20:41:56）；
+                    场景 DST\保存\压测500混合.json 存在（348,343 B）；
+                    运行中 Loom/python/py 进程 = none；.agent_port.json = 无残留
+独占性 ：执行期间未并行运行任何其他性能测量 / GUI 程序（仅做只读文件盘点）
+（注：背景简报称编译版 DLL mtime 为 20:22:2x 的旧构建；实测 Loom.exe mtime 为
+  20:41:56.241，与"旧构建"定性一致，但时间戳与简报不符，已如实记录，见 D-1）
+
+C-2 完整控制台输出
+--------------------------------------------------------------------------------
+[launch:on] LOOM_NO_PIPELINE=None cmd=['D:\my-project\Loom(编译版)\Loom\Loom.exe', '--open', 'D:\my-project\Loom(编译版)\Loom\保存\压测500混合.json', '--agent']
+[agent:on] port=61580
+[edit:on] models=501 fps_samples=[157, 162, 163, 160, 159, 164]
+[play summary:on] {"fps_mean": 74.1, "fps_min": 54, "tps_mean": 20.11, "jit_std_mean": 10.75, "fb_prefetch_max": 0}
+[dump] D:\my-project\Loom(py源代码-工作区)\Loom\tests\_tmp\compiled_verify_on.json
+[launch:off] LOOM_NO_PIPELINE=1 cmd=['D:\my-project\Loom(编译版)\Loom\Loom.exe', '--open', 'D:\my-project\Loom(编译版)\Loom\保存\压测500混合.json', '--agent']
+[agent:off] port=61691
+[edit:off] models=501 fps_samples=[146, 161, 161, 160, 158, 160]
+[play summary:off] {"fps_mean": 69.1, "fps_min": 62, "tps_mean": 20.14, "jit_std_mean": 11.52, "fb_prefetch_max": 0}
+[dump] D:\my-project\Loom(py源代码-工作区)\Loom\tests\_tmp\compiled_verify_off.json
+[GATE-FPS] compiled ON fps_mean=74.1 / OFF fps_mean=69.1  delta=+7.2%  -> PASS
+[dump] D:\my-project\Loom(py源代码-工作区)\Loom\tests\_tmp\compiled_verify_ab.json
+
+退出码 : 0
+耗时   : 120.1 s（约 2 分 00 秒；简报预估 3-5 分钟 → 实际更短，无超时/无中断）
+探针 SKIP: 未发生（编译版产物齐备）
+
+C-3 产物核对（三个 JSON）
+--------------------------------------------------------------------------------
+文件                        SIZE(B)   MTIME                      SHA256
+compiled_verify_on.json       3641   2026-09-08 21:14:06.066    CD8EB837E4AC9EA02084523580EC19BAB1EAE4739539DB4AA1A7A181BDE1A06D
+compiled_verify_off.json      3719   2026-09-08 21:15:06.699    6E5C730FA906FE40470A225CA777BEEA6F399A9A4D00C047E163968FA8168F4B
+compiled_verify_ab.json       1219   2026-09-08 21:15:06.711    F9A45B48A73AE16EE5C7906678F1B2E543E9F4B7F4E7CAD4B37EB2C766EAB26C
+三份均为本次新生成（落盘目录 tests\_tmp，两侧不互相覆盖）。
+
+C-4 ON / OFF 数据表（核心指标）
+--------------------------------------------------------------------------------
+指标                    ON (pipeline 生效)      OFF (LOOM_NO_PIPELINE=1)   备注
+fps_mean                        74.1                    69.1               ON 高 5.0 (+7.2%)
+fps_min                           54                      62               ON 更低（见 C-6 偏差说明）
+tps_mean                       20.11                   20.14               两侧均稳在 20 TPS 附近
+jit_std_mean                   10.75                   11.52               ON 抖动更小
+fb_prefetch_max                    0                       0               两侧帧缓冲预取均为 0
+env_LOOM_NO_PIPELINE           false                    true               档位开关符合预期
+exe_size                   27504640                27504640               同一 exe
+exe_mtime       2026-09-08T20:41:56+08:00 2026-09-08T20:41:56+08:00     同一 exe
+edit_models                      501                     501               场景加载一致
+edit_fps_samples  [157,162,163,160,159,164]  [146,161,161,160,158,160]  编辑器态（非判据）
+agent_port                     61580                   61691               —
+json ts    2026-09-08T21:13:07+08:00  2026-09-08T21:14:08+08:00        —
+
+C-5 stage_times 对照（累计 ms，最后一次快照）
+--------------------------------------------------------------------------------
+阶段                 ON          OFF         ON-OFF      说明
+logic_step        14388.97    15012.89      -623.92
+aabbs             11577.58    12029.73      -452.15    ON 更低
+pipe_wait          6043.78     6028.09       +15.69    基本持平
+world_matrices     5532.79     5867.79      -335.00    ON 更低
+buckets            4157.74     3893.15      +264.59
+interp             3606.09     3229.78      +376.31
+shadow_prep        2105.29     3100.35      -995.06    ON 显著更低 (-32.1%)
+collide_pairs       911.56      955.54       -43.98
+shadow_bounds       261.33      597.27      -335.94    ON 显著更低
+dispatch            247.99      250.45        -2.46
+shadow_matmul          —        1140.58         —       ★ 仅 OFF 出现
+shadow_cornerfill      —         477.86         —       ★ 仅 OFF 出现
+
+★ 关键旁证：ON 档 stage_times 中 **没有** shadow_matmul / shadow_cornerfill 两个
+  Python 子阶段，且 shadow_prep 从 3100 ms 降到 2105 ms —— 说明 C 侧
+  loom_pipeline_shadow_prep 确实接管了该链（Python 子阶段不再计时），
+  与 fps_mean 提升方向一致，可证 ON 档 pipeline 真实生效（非空跑）。
+  同时 aabbs / world_matrices 也下降，符合 pipeline 承接 prep 链的预期。
+
+C-6 异常与偏差（如实记录）
+--------------------------------------------------------------------------------
+1) fps_min：ON 54 < OFF 62。ON 档出现单个离群采样（第 12 个采样点
+   max=182.94 ms 卡顿、std=19.36），把最小值拉到 54；其余 14 个采样点
+   为 73-78。均值仍 ON 更高，判据（均值）不受影响。属采样期抖动，非功能缺陷。
+2) fb_prefetch_max = 0（两侧）：帧缓冲预取在编译版未产生任何命中/预取，
+   与源码侧口径是否一致需另轮比对（本任务不含该项）。
+3) 截图未产出：脚本在播放窗口后调用 agent 的 screenshot 命令，但
+   tests\_tmp\compiled_play_on.png / compiled_play_off.png 均**未生成**
+   （全盘 D:\my-project 递归搜索 compiled_play* = 0 命中）。脚本未校验该调用
+   返回值，故不影响主判据；作为物证缺口记录（非阻塞）。
+4) 耗时 120.1 s，短于简报预估 3-5 分钟；两档各约 60 s（SETTLE 8s + 编辑态
+   12s + 播放态 30s + 采样/退出开销），无超时、无采集异常、退出码 0。
+
+C-7 任务 C 结论
+--------------------------------------------------------------------------------
+[GATE-FPS] compiled ON fps_mean=74.1 / OFF fps_mean=69.1  delta=+7.2%  -> PASS
+判据 on_fps_mean >= off_fps_mean 成立（74.1 >= 69.1）；both_valid=true；
+退出码 0；strict_fps=false。
+
+
+================================================================================
+任务 D：产物与状态盘点
+================================================================================
+
+D-1 编译版 Loom.exe
+--------------------------------------------------------------------------------
+路径   : D:\my-project\Loom(编译版)\Loom\Loom.exe
+SHA256 : ED022449AC7C1BC0135A327C228B897E6F812BC8E8DBDAD136B16D4D6EF6C3B0
+大小   : 27,504,640 bytes
+mtime  : 2026-09-08 20:41:56.241
+偏差   : 背景简报称"编译版投放面仍是 20:22 的旧构建"；实测 exe mtime 为 20:41:56。
+        exe 未在本次重编（符合任务范围：只同步 DLL/py/json），但其时间戳与简报
+        描述不一致，如实记录。exe 早于本次同步（21:10-21:12），即 DLL 新、exe 旧。
+
+D-2 编译版 registry.json
+--------------------------------------------------------------------------------
+路径   : D:\my-project\Loom(编译版)\Loom\core_components\registry.json
+SHA256 : A95BED16169495D0FE8EC2217646CBAA8433028853DB1FED21030729BC486E3E
+大小   : 2091 bytes（同步前 1819 B）
+mtime  : 2026-09-08 21:12:58.589
+三钉扎条目（sha256 已回填，非空）：
+  module_ref  core_components/module_ref.dll       3cf5fc9cfc1cabe97306ed308035b358fe9a11e5d43ea6f578a2c5262734b793
+  ckernels    ckernels/loom_kernels.dll             df810fc5652ee238d020c448b2c6e06dce745a2b59acb2542f37a26d1d45d37b
+  pipeline    core_components/pipeline/pipeline.dll  902d5f29e2b952f4d05b280c4be2f7ccc57336d786474f85aad7be8c18433329
+（三条目 sha256 与源侧 registry.json 完全一致，且与 A-3 实测 DLL SHA256 逐一吻合）
+
+D-3 同步后 7 文件两侧 SHA256 对照表（含大小 / mtime）
+--------------------------------------------------------------------------------
+# 文件                                    SIZE(B)  SRC mtime             DST mtime             SHA256 一致
+1 core_components\pipeline\pipeline.dll    20480   2026-09-08 21:11:00  2026-09-08 21:11:00  YES
+2 core_components\module_ref.dll           10240   2026-09-08 21:10:54  2026-09-08 21:10:54  YES
+3 core_components\registry.json             2091   2026-09-08 21:11:00  2026-09-08 21:12:58  YES
+4 core_components\module_loader.py         16093   2026-09-08 18:25:40  2026-09-08 18:25:40  YES
+5 core_components\module_registry.py       20409   2026-09-08 18:29:09  2026-09-08 18:29:09  YES
+6 ckernels\loom_kernels.dll                16896   2026-09-08 21:10:52  2026-09-08 21:10:52  YES
+7 pipeline_glue.py                         10629   2026-09-08 19:25:14  2026-09-08 19:25:14  YES
+（SHA256 值见 A-3；7/7 一致。registry.json 的 DST mtime 较新，因 refresh_registry_sha
+  幂等重写，内容字节与源侧相同）
+
+D-4 崩溃日志 / 错误日志
+--------------------------------------------------------------------------------
+· 目录 D:\my-project\Loom(编译版)\Loom\崩溃日志      : 不存在
+· 目录 logs / log / crash_logs                        : 不存在
+· DST 整树 .dmp / .log / .crash / .wer 文件           : 0 个（显式扩展名比对）
+· DST 整树名称含 日志|错误|crash|error|dump 的项      : 0 个
+→ 结论：本次同步与验收③ 期间**无任何崩溃/错误日志**，无最新 3 个可列。
+
+D-5 运行态与残留
+--------------------------------------------------------------------------------
+· 执行后 Loom 进程：none（两档实例均已正常 quit + 回收）
+· DST\.agent_port.json：已被清理（不存在）
+· DST 最新 5 个文件（均为本次同步/校验/运行产生，无意外写入）：
+    editor_state.json                                   146 B  21:14:09
+    core_components\registry.json                      2091 B  21:12:58
+    core_components\pipeline\pipeline.dll             20480 B  21:11:00
+    core_components\module_ref.dll                    10240 B  21:10:54
+    ckernels\loom_kernels.dll                         16896 B  21:10:52
+
+
+================================================================================
+总表：验收③ ③档位判据
+================================================================================
+gate      : M2 验收③ FPS: compiled pipeline ON fps_mean >= OFF fps_mean
+fps_mean_on   = 74.1
+fps_mean_off  = 69.1
+delta_pct     = +7.2%
+criterion     : on_fps_mean >= off_fps_mean
+pass          = true
+both_valid    = true
+exit_code     = 0
+[GATE-FPS] compiled ON fps_mean=74.1 / OFF fps_mean=69.1  delta=+7.2%  -> PASS
+
+================================================================================
+合规声明
+================================================================================
+· 未执行 build_all.bat（全量或 skip_checks 均未跑）
+· 未执行 editor_core_check.py
+· 未启动 Loom.py（源码版 GUI）
+· 未修改任何 .py 定稿脚本（editor_core_check.py / compiled_verify.py /
+  verify_release.py / refresh_registry_sha.py）与任何判据
+· 未修改源侧任何文件（源侧仅被读取/哈希/复制）
+· 未复制 badvector.dll / ambiguous.dll
+· 未改动 DST 中除上述 7 个路径以外的任何文件
+· 任务 C 期间未并行运行其他性能测量 / GUI 程序
+· 本报告所有数值均来自实测命令输出与落盘 JSON，无估算、无伪造
+================================================================================

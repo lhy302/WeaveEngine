@@ -1,0 +1,134 @@
+DSH 工作记忆（2026-08-20 收尾版）
+
+★★★ 档案状态 (2026-08-31 加注): 本文件 = DSH 协作期的历史快照, 内容已过时 ——
+  ①路径 Loom(py源代码) 已不存在 (现为 Loom(py源代码-工作区), 双文件夹工作流);
+  ②ui/qt_view.py 已更名 ui/loom_gui.py (PySide6 Qt 视图); ③插件分级/沙箱
+  (十四·A)/EAI/Vulkan 后端/B1B2 换库/性能组1-3 均在此后落地, 以《代码架构.txt》
+  (已同步 2026-08-31) 与《任务清单.txt》为准。保留仅供考古, 勿按此开工。
+
+一、当前进行中的工作
+- Loom「一切皆插件」路线 (类 Unity + 开源 + 高度模块化 DIY) 持续推进。
+- L1 插件加载器已落地 (plugin_loader.py + Qt 设置对话框插件区 + 3 示例插件)；
+  下一步候选 L2 菜单/命令扩展点 (register_menu)。
+- **2026-08-20 晚新增**：
+  - obj 导入对齐 Unity (mesh.load_obj: vn/vt/MTL/平滑法线/顶点槽去重; engine._build_gpu
+    法线优先) —— P33 a=1, A41 待人工实测 (配合桌面 Blender 4.5.6 安装包)。
+  - Qt 视图创建按钮补齐 (qt_view.py _build_hier_tools: +平行光/+点光源/+摄像机/显隐) —— A42 待实测。
+  - **首次安全审查 (三工具交叉: Bandit + 主AI + Qoder Security), 9 类缺陷全修,
+    全量 39 测试文件 FAIL=0** —— 详见《Loom安全扫描报告.txt》与项目根《漏洞分析报告.txt》。
+  - 示例游戏废弃 (coin_game.py 已从源码删除; 编译版示例游戏不再重建)。
+  - LoomHub 台账重排 (HA01-04 + H01-H11 对照表); ColorHubGUI 绿色换肤自定义 GUI。
+
+二、已完成事项
+- 安全审查与修复 (9 类): sceneio 坏文件崩溃 / engine 空场景崩溃 / Zip Slip 边界 /
+  脚本文件名白名单 / 版本号 x.y.z 白名单 / 解释器元数据白名单 / PATH 信任 /
+  OBJ 资源上限 / last_scene·projects.json 路径校验 + 三目录 README + requirements.txt。
+- 全量回归: 39 个测试文件 FAIL=0 (新增 test_engine_safety.py)。
+- LoomHub 复选框移到"界面:"下拉与"默认解释器"之间单独一行。
+
+三、关键文件位置
+- 源码: D:\my-project\Loom(py源代码)\Loom\ (mesh.py/sceneio.py/engine.py/scripts.py/
+  plugin_loader.py/ui/qt_view.py/ui/LoomGUI.py)
+- LoomHub: D:\my-project\Loom(py源代码)\LoomHub\ (hub_config.py/hub_install.py/
+  hub_controller.py/hub_view_tk.py/GUI\ColorHubGUI.py)
+- 安全报告: D:\my-project\Loom(py源代码)\Loom安全扫描报告.txt + D:\my-project\漏洞分析报告.txt
+- 台账: D:\my-project\Loom(py源代码)\未测试功能测试方向指南.txt (P32/P33/A40/A41/A42)
+- 桌面: blender-4.5.6-windows-x64.msi (343MB, 清华镜像)
+- QoderCN (安全审查工具): E:\Program Files\QoderCN\
+
+四、下一步
+- A40/A41/A42 人工实测 (插件区/obj 导入/创建按钮)。
+- L2 菜单/命令扩展点 (register_menu)。
+- 编译版三 exe 重打包 (2026-08-20 源码大改后, 示例游戏不再重建)。
+
+（DSH 协作备忘: headless 大任务 2026-08-20 连续 4 次卡死 (CPU 零增长), 复杂委派
+不可靠; 简单小任务 (单文件级) 可尝试, 或改由主 AI 直接执行。）
+
+====================================================================
+2026-08-22 记录 1 (DSH 未参与; Claude 侧)
+====================================================================
+- 平行光 GUI 全面修复: _insp_component_digest 补光源/相机分支、光束遮罩 v3
+  终版 (用户实测 4 组合通过)、obj 导入旋转+相机自动适配、NovaHubGUI 插件、
+  示例插件删除 (用户指示)。
+
+====================================================================
+2026-08-22 记录 2 (DSH 参与: headless 按钮状态扫描)
+====================================================================
+- 任务: 只读扫描 hub_view_tk / NovaHubGUI / ColorHubGUI / LoomGUI 的按钮
+  状态刷新 (Cliude 排查 Qt 检查器 "设为激活相机"按钮 bug 期间委派)。
+- DSH 成果: 交叉确认 LoomHub 三视图 + LoomGUI 全部按钮自身状态正常翻转;
+  唯一发现 2 处可疑 = LoomGUI 设置面板「多核并行」「脚本预留核心数」的 √
+  读运行时值 (点击后不移动, 与同面板 fps/gui 读保存设置不一致)。
+- 结论: 2 处均属实并已修 (√ 改读已保存设置) —— DSH 该轮 2/2 命中。
+- Claude 侧本轮修复 (待办): 详见主 AI 记忆 3d-engine-editor-progress
+  2026-08-22 二段 (激活按钮 guid 比较/焦点守卫收窄/fov 布尔颠倒/
+  AddCameraCommand 槽位错位/digest 补字段)。
+
+====================================================================
+2026-08-22 记录 3 (DSH 未参与; Claude 侧以下两项 + 收工)
+====================================================================
+- A11 实测 (用户): 视口 gizmo 棒线被物体遮挡无法拖动 → Qt 版 _draw_gizmo/
+  光源指示线/相机朝向线三处裸调 draw_lines 继承主 pass 残留 DEPTH_TEST,
+  改包 scope(enable_only=0) 恒可见 (选中框/LoomGUI 同款); 探针
+  qt_gizmo_probe.py (俯视读回 Y 棒绿) ALL PASS, 用户实测通过。
+- A01 防丢退出 (用户): 弹框两按钮+X=不保存退出 → 三态化 'save'|'discard'|
+  'cancel' (Qt 三按钮+escapeButton=取消, pygame 版 askyesnocancel),
+  controller._confirm_unsaved 统一; 探针 qt_confirm_box_probe.py ALL PASS,
+  用户实测通过。
+- 收工: 编译版/开源版文件夹用户已删空, Claude 重新 Nuitka 打包两 exe
+  (tk-inter 插件) + assemble_release 组装编译版 + sync_opensource 组装开源版
+  + 文档全复制; DSH 当日以 headless 扫描方式参与过一次 (见记录 2)。
+
+====================================================================
+2026-08-22 记录 4 (DSH 未参与; Claude 侧 Beta 版本支持 + 重建收尾)
+====================================================================
+- 用户需求: 后续发很多测试 BUG 的内测引擎版本, 解释器元数据版本号支持
+  x.y.z.betaN 格式 (如 1.0.0.beta1); 旧 LoomHub + 新版本引擎兼容边界已
+  固化为"引擎↔LoomHub 元数据合同" (《Loom模块化插件化分析.txt》第九节)。
+- 落地: hub_config._VERSION_RE (beta 支持) + _version_key 排序
+  (beta < 正式版) + hub_install zip 版本输入同判 + plugin_loader
+  _engine_ok (CURRENT_VERSION 支持 beta + 修 min_engine x.y.z 比较 bug)。
+- 测试: test_hub 12 项 + test_plugin_loader 3 项 + 全量回归全绿;
+  端到端 beta 1.2.3.beta7 discover → ('exe')。
+- 重建: 编译版 (Loom 94 / LoomHub 1019, 运行库盘点全 OK, 旧残留+旧文档
+  清理干净) + 开源版 (与源码严格 diff 一致, 文档 11 项); 两 exe 真窗口
+  启动验证通过。
+- 恢复入口: 见主 AI 记忆 3d-engine-editor-progress 2026-08-22 段
+  (beta 支持 / 元数据合同 / 按钮排查 / gizmo / A01)。
+
+====================================================================
+2026-08-23 收工版 (DSH 未参与; Claude 侧全天)
+====================================================================
+- 用户实测 bugs: ①层级树挂父后点箭头"闪一下收回"+二级挂父打不开
+  (setExpanded 未入树时无效 + digest 含选中态致 rebuild 抹 toggle;
+  修=重建后统一全展+箭头区放行 Qt 原生, qt_arrow_probe 18 项 ALL PASS);
+  ②检查器数值无拖条 -> 新功能: 聚焦数值行底部弹 DragBlock 拖拽块调值
+  (通用入口 _spin, 每像素=step, 释放压撤销; 顺带修复 _sync_inspector_values
+  getattr 大小写错位的隐藏 bug); ③拖 X 联动 XYZ (namedtuple 整体重建) ->
+  _vec_set 单轴写, 探针 27 项 ALL PASS。
+- 用户要求标准化链路 (Unity Build 对齐): 用 exe 版引擎封装游戏 ——
+  材料(场景+游戏脚本) → Loom.exe 制作 → [发布游戏]/build_game.exe →
+  发布夹 = MyGame.exe(玩家运行时, 无编辑器) + 游戏包.lsc(场景+脚本+
+  配置 LOOMSC1 混淆, 与 exe 同夹不可分离, 无明文)。全链路已端到端
+  验证(跳台试炼 10s 存活+无明文+窗口标题=游戏名)。新文件 game_pack.py
+  /build_game.py/scripts/:reset_fall.py(游戏脚本示范)+ register_sources。
+- 编译版四件套重打 (用户清空编译版文件夹, 明确指令): 玩家运行时
+  (game_player)/build_game.exe/Loom.exe(编辑器+发布按钮)/LoomHub.exe;
+  组装 Loom 1020 文件 + LoomHub 1017 + 封装测试材料(明场景/scripts/
+  定向测试说明 5 步)。LoomHub 打包连环坑: 运行时 sys.path 借用 Loom
+  目录的 filedialog/guiloader/parallel 三个共享模块静态分析看不到 →
+  必须拷入 LoomHub 目录再打包 (否则启动 ModuleNotFoundError)。
+- 开源版已同步 (Loom 18 核心 py + LoomHub 12 + 根文档 12)。
+- 下一步 (用户明天继续): 按 封装测试材料\定向测试说明.txt 实测 5 步
+  (命令行发布/防窥/游玩/缺包提示/编辑器一键发布)。
+- 台账号: 未测试功能测试方向指南.txt 2026-08-23 条 (发布链路 b=1)。
+- 收工复查 (用户发现体积问题): 源码版曾 998MB/开源版 917MB —— 全部
+  垃圾 = Nuitka 打包中间物 (build_entry.build/dist 458MB + 玩家运行时 +
+  player_runtime 456MB + LoomHub\LoomHub 77MB) 未清理 + sync_opensource
+  删除清单缺这些目录名漏进开源版。已修: 中间物全删 (源码 3.7MB/开源版
+  2.1MB) + sync 防呆清单补全 (build_entry.dist/build/player_runtime/
+  玩家运行时/hub_*/rt2/tk_build/构建器测试); 编译版删老示例 (保存\
+  场景.json) + 老封装演示 (游戏发布\跳台试炼)。清理别用 Remove-Item
+  (沙箱拦大目录), 用 [System.IO.Directory]::Delete。
+- 明日测试不受影响: 编译版四件套完好, 只是源码树中间物需重打包时再生成。
+

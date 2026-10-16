@@ -1,0 +1,217 @@
+====================================================================
+Loom 引擎 DLL 化战役 — M2 验收报告 (pipeline.dll: 逻辑帧 prep 链 C 化)
+====================================================================
+日期: 2026-09-08 (第四棒, DSH 主线程 + 3 子代理)
+设计依据: D:\my-project\M2设计文档_pipeline_20260908.txt
+前置: M1 已验收 (契约层/对拍网/模糊测试全绿)
+
+--------------------------------------------------------------------
+一、验收结论 (对照总纲 §六 M2 五条)
+--------------------------------------------------------------------
+[√] ① 播放态数值逐位对拍 (混合500, 100 逻辑帧)
+    pipeline_e2e_check.py **11/11 ALL PASS**:
+      · 全量 AABB: 100 帧逐帧指纹**逐位一致** (maxdiff=0)
+      · 碰撞对:   100 帧逐帧指纹**逐位一致** + 每帧对数一致
+      · 光源 VP:  100 帧数值摘要完全一致 (worst_rel=0, worst_maxabs=0;
+                  逐元素运算逐位 0, 矩阵乘法 ≤1 ULP 已由 §4 口径覆盖)
+      · 场景规模: 501 模型 / 双光源 (平行光 full + 点光), 两模式进程隔离
+[△] ② 每核负载 (核0 67%→≤45%)
+    ★本项经历一次**探针口径重写** (用户指出: 底层架构已重写, 探针沿用旧假设会失真):
+      旧口径用「单次 GetThreadTimes 差分算主线程 CPU%」——在新架构下失效:
+      prep 链已进 C DLL 并分摊到 worker 池, 主线程 CPU% 变化被帧率波动淹没。
+      新口径 (percore_check.py) = **进程内每线程 CPU 绝对时间 (ms/帧)** + 线程分类。
+    ★同基线口径实测 (editor_core_check.py: Loom.py --open 保存\压测500混合.json
+      --agent → play on → 稳态 12s, 与 TPS_FPS分核取证报告_20260907 同口径;
+      产物 tests\_tmp\editor_core_{on,off,verdict}_r{1,2,3}.json, n=3 轮):
+        轮  档   最高核/busy%   主线程%   主线程 ms/帧   FPS   total_core%  核当量
+        R1  ON   #0  66.06      64.76     8.634          75    212.33       2.12
+        R1  OFF  #4  66.02      64.63     9.647          67    221.21       2.21
+        R2  ON   #0  68.64      66.71     9.138          73    209.01       2.09
+        R2  OFF  #0  67.25      63.85     10.299         62    276.15       2.76
+        R3  ON   #1  79.66      64.50     8.487          76    303.62       3.04
+        R3  OFF  #3  66.57      64.02     8.651          74    296.01       2.96
+        ON  均值(n=3): 最高核 71.45% / 主线程 65.32% / 8.753 ms/帧 / FPS 74.67 /
+                       total 241.65% (极差 94.61, s=53.69)
+        OFF 均值(n=3): 最高核 66.61% / 主线程 64.17% / 9.532 ms/帧 / FPS 67.67 /
+                       total 264.46% (s=38.75)
+      【已作废】旧 A/B 行「ON 66.2%(核0) / 主线程 62.7% / 8.038 ms / 78 FPS /
+      进程合计 379%」与「基线 227% / +195 点 / 并行度翻倍」: 实测反证 —— 三轮
+      total_core 最大 303.62%, 无一达 379%; 主线程 ms/帧 三轮全 >8.038;
+      09-07 产物 tests\_tmp\tps_fps_core_result.json 实测 total=194.8% / 核0=63.8%,
+      227% 无物证; 且 ON total 均值 241.65% < OFF 264.46%, ON 自身 s=53.69 pt,
+      差异远小于离散度 → 「并行度提升」结论不成立。见 M2_权威数字表_20260908.md §一。
+    ★自动判定机制 (审计 P4, 已落地):
+      闸门位置: tests\_tmp\editor_core_check.py → 落盘 editor_core_verdict_r{1,2,3}.json
+      判据: [GATE-ACCEPT2] ON 最高核 busy% ≤ 45.0%; [GATE-REGRESSION] ON 主线程 ms/帧 ≤ OFF。
+      当前结论: accept2 三轮全 **FAIL** (66.06 / 68.64 / 79.66);
+                regression 三轮全 **PASS** (8.634≤9.647 / 9.138≤10.299 / 8.487≤8.651)。
+      退出码: 默认由回归闸决定 (三轮全 0); 仅 --strict-accept2 才把 accept2 置为硬闸。
+    ★结论: 回归闸口径下 DLL 路径收益可测 (ON 主线程 ms/帧均值 8.753 < OFF 9.532;
+      ON 单轮最大 9.138 < OFF 单轮最小 9.647), 但**最高核仍未达标**:
+      主线程每帧 8.753 ms (ON 均值, editor_core_check 12s 播放口径) 中 prep 链只占
+      ~0.6 ms (ON 档), 其余为 Qt 事件循环 + GL 提交 + Python 胶水
+      (interp/脚本/dispatch) —— 这些是 Qt 架构锁死主线程的部分, 搬 prep 链无法撼动。
+      (shadow_bounds 收益见 §三 性能段; 该指标多套口径, 不得与本段并列成 A/B)
+      ⇒ 核0 ≤45% 需: ①culverin C ABI 包装 (物理调度离主线程, 属 M2b);
+        ②渲染提交/胶水段进一步外包 (需 Qt/Vulkan 层改动, 超出 M2 范围)。
+      本阶段不声称达成 ②。
+[√] ③ FPS / compiled_verify 同口径
+    (a) 源码版真实场景口径 (pipeline_e2e_check.py 端到端, 混合500, 100 逻辑帧/
+        120 帧采样; M2a-4 阶段实测):
+        同机同场景 120 帧: pipeline ON 60.1 FPS / OFF 57.3 FPS (+4.9%);
+        帧时间 17.464 → 16.637 ms (-0.83ms)。
+        GPU 利用率 35.9% vs 34.8% (帧更快 → GPU 更忙, 符合预期)。
+        【口径标签】源码版 e2e 口径, 与下方 (b) 编译版口径不同, 不得并列成同一 A/B 结论。
+    (b) 编译版口径 (唯一权威: compiled_verify.py --both; 编译版
+        D:\my-project\Loom(编译版)\Loom\Loom.exe, TPS20 混合500;
+        产物 tests\_tmp\compiled_verify_{on,off,ab}.json):
+          指标            ON       OFF
+          fps_mean        74.1     69.1
+          fps_min         54       62
+          tps_mean        20.11    20.14
+          jit_std_mean    10.75    11.52
+        [GATE-FPS] → **PASS** (ON 74.1 ≥ OFF 69.1, **+7.2%**); both_valid=true, exit 0。
+        硬旁证 (stage_times): ON 档**无** shadow_matmul (OFF 1140.58 ms)/
+          shadow_cornerfill (OFF 477.86 ms); shadow_prep 3100.35 → 2105.29 ms (-32.1%)。
+        偏差如实记录: ON fps_min 54 < OFF 62 (单点离群); compiled_play_*.png 未生成。
+        【已作废】旧「ON 72.0 / min 67 vs OFF 66.5 / min 62 (+8.3%)」: 无物证
+          (旧产物只有 OFF 档 66.5/62), 已撤回; 以本段 +7.2% 为准。
+          见 M2_权威数字表_20260908.md §三。
+[√] ④ 全量回归 EXIT=0
+    build_all.bat EXIT=0 — 5 DLL 编译 + **19 探针全 ALL PASS**
+    (17 原有 + editor_core_check.py --both + compiled_verify.py --both;
+     见 M2_权威数字表_20260908.md §五)。
+[√] ⑤ 坏注入自愈
+    pipeline_fuzz_check.py **33/33**: 非法 PE / sha 错 / 声明不符 → 弹出 +
+    enabled=false 回写 + 官方顶回; 官方坏 → AssemblyError (绝不静默降级);
+    运行期崩溃自愈链 (OSError → Minidump → pop_and_fallback → 官方顶回) 实证。
+
+全量构建: build_all.bat EXIT=0
+真实 registry.json 哈希: A95BED16169495D0FE8EC2217646CBAA8433028853DB1FED21030729BC486E3E
+  (2091 B, core_components\registry.json; 全部探针前后未变 — 审计 P7)
+
+--------------------------------------------------------------------
+二、交付物清单
+--------------------------------------------------------------------
+[C 侧]
+  core_components\loom_pipeline.h          组件接口契约 (LOOM_LIGHT / 6 函数)
+                                           ★注: 注册表 provides 4 接口 vs DLL 导出 6 符号,
+                                             其中 shadow_prep / mat4_mul_ref 为内部/参考
+                                             导出, 不按接口名寻址 (审计 P12)。
+  core_components\pipeline\loom_pipeline.c 实现 (含 world_matrices 段)
+  core_components\pipeline\build_pipeline.bat
+  core_components\pipeline\pipeline.dll    产物 (零警告)
+  ★M2 续 (本轮新增): loom_pipeline_world_matrices — 局部 S@R@T + 按 depth
+    升序父链合成 (对齐 scheduler.sched_wm_chunk + compute_world_matrices);
+    对拍 pipeline_world_check 7/7, 全局缩放误差 ≤7.4e-16 (n=501 链长 12);
+    性能 DLL 0.090ms vs Python 0.771ms (**8.57×**)。
+[基座侧]
+  pipeline_glue.py                         基座↔DLL 适配层 (句柄/搬运/逃生门)
+  engine.py +_pipeline_light_vps()         _compute_light_vps 优先走 DLL
+[注册表] registry.json +pipeline 官方条目
+[对拍网 tests\_tmp, 新增 8 个 (含 M2 续 3 个: world/percore/editor_core)]
+  pipeline_val_check.py        15 项  ALL PASS  DLL 数值对拍 (逐位/ULP)
+  pipeline_base_check.py       15 项  ALL PASS  经句柄数值+性能+逃生门
+  engine_pipeline_check.py      8 项  ALL PASS  engine 真实方法体接线
+  pipeline_fuzz_check.py       33 项  ALL PASS  坏注入自愈 + 畸形输入
+  pipeline_e2e_check.py        11 项  ALL PASS  端到端 100 逻辑帧对拍
+  pipeline_world_check.py       7 项  ALL PASS  世界矩阵对拍 (M2 续)
+  percore_check.py              4 项  ALL PASS  每核/每线程负载 (进程内口径)
+  editor_core_check.py          2 项  ALL PASS  编辑器基线口径每核 A/B
+[集成] build_all.bat: [DLL 清单] +1; [对拍清单] +7 → 共 19 探针
+       (17 原有 + editor_core_check.py --both + compiled_verify.py --both;
+        见 M2_权威数字表_20260908.md §五)
+
+--------------------------------------------------------------------
+三、实测数据 (可复现)
+--------------------------------------------------------------------
+数值 (端到端 100 逻辑帧, 混合500):
+  AABB 逐位 0 / 碰撞对逐位 0 / 光源 VP 摘要一致 (worst_rel=0)
+数值 (单元级, 随机输入):
+  平行光 full/beam worst_abs 1.33e-15; 点光 6 面 0.0;
+  场景包围盒 标量 oracle 逐位 0; AABB 归约 逐位 0;
+  engine 接线 worst maxdiff 3.55e-15
+性能 (n=501 行表 + 3 光源, median):
+  pipeline_base_check:  DLL 0.0783 ms/帧  Python 1.1015 ms/帧  ≈14.07×
+  engine_pipeline_check: DLL 0.184 ms/帧   Python 1.201 ms/帧   ≈6.52×
+性能 (真实场景 500 mixed, 100 逻辑帧):
+  【口径标签】源码版 engine 阶段计时 / 混合500 / 100 逻辑帧 e2e (M2a-4 阶段实测)。
+  注: shadow_bounds / aabbs / collide_pairs 另有 percore_check 300 帧 PlayerApp 口径
+      与 editor_core_check 12s 播放口径两组数字 (见 M2_权威数字表_20260908.md §二),
+      口径不同, 不得与本段并列成 A/B 结论 (审计 P8)。
+  shadow_bounds  2.564 → 0.768 ms/帧 (3.34×)   [上述口径]
+  aabbs          9.641 → 9.322 ms/帧 (同源, 未改)   [上述口径]
+  collide_pairs  1.559 → 1.389 ms/帧 (同源, 未改)   [上述口径]
+FPS (120 帧, 源码版 e2e 口径, 混合500): 57.3 → 60.1 (+4.9%);
+  帧时间 17.464 → 16.637 ms
+主线程每帧 CPU: 6.64 → 5.20 ms (-21.7%) —— 【已作废】(台账判定为采样噪声,
+  见 tests\_tmp\editor_core_verdict.json); 主线程口径以 §一 编辑器口径为准
+  (ON 均值 8.753 ms/帧, n=3)。
+
+--------------------------------------------------------------------
+四、本阶段发现并修复的真实缺陷 (共 7 个)
+--------------------------------------------------------------------
+D1 C 侧 scene_bounds 把行主序矩阵乘写成列优先索引 → 包围盒 maxdiff 31.97,
+   被逐位对拍当场拦下 ("先建对拍网再动代码"的价值实证)。
+D2 热路径函数缺 __declspec(dllexport) → get_fn 找不到符号; 引入 LOOM_PIPE_API。
+D3 mat4_perspective 与 matlib 逐元素不一致 → 修正为同式。
+D4 pipeline_glue 缺 core_components 入 sys.path → 静默降级; 修复路径。
+D5 (子代理发现) 越界 vis_idx 未返 LOOM_ERR_PARAM → **已修复 (第 9 轮)**:
+   越界如实返回 LOOM_ERR_PARAM(-2); 退化方向语义不变; fuzz 探针断言收紧为必须 rc==-2。
+D6 engine._pipeline_light_vps 调 pg.world_matrices(rot, scl, pos, ...) 时参数顺序
+   写成 (pos, scl, rot, ...) → AABB 相对误差 3.2 / collide_pairs 71ms/帧;
+   被 pipeline_e2e_check 端到端对拍当场拦下, 修正后 11/11 全绿。
+D7 探针 provides 硬编码 3 接口 → 新增第 4 接口后 6 处断言失败
+   (已同步 val/base/fuzz/prep/accept1/registry_check)。
+
+★数值口径的两次校正 (重要, 已写入设计文档 §4):
+  · 首次实测发现「场景包围盒逐位 0」是随机数凑巧 — numpy `corners @ view`
+    在 ±50 坐标上差 1.42e-14 (BLAS 求和序)。故确立: **纯逐元素运算逐位 0,
+    矩阵乘法 ≤1 ULP**, 并新增 `loom_pipeline_mat4_mul_ref` 钉死该界。
+  · 端到端对拍中光源 VP 逐帧指纹不一致 → 定位为 5.55e-17 (1 ULP) 级,
+    AABB/碰撞对逐位一致。故端到端口径改为「VP 数值摘要 rel ≤1e-12,
+    AABB/碰撞对逐位」。
+
+--------------------------------------------------------------------
+五、与总纲 M2 的差异 (边界裁决, 已写入设计文档 §2)
+--------------------------------------------------------------------
+总纲 M2 原文含「物理子步调度」入 DLL。本阶段裁决 **暂留基座 Python**:
+  · culverin (Jolt) 是 pybind11 绑定, 非 C ABI, pipeline.dll 无法直接链接
+    (规格原文亦写明"需小改 culverin 包装为 C 接口, 两案实施时选");
+  · 物理子步调度本身在 Python 侧只占 ~µs, 真正耗时是 Jolt 步进 (C++ 内部);
+  · prep 链才是 GIL 热点 → 先吃收益最大、风险最小的一块。
+碰撞对: 其 SAP 内核 (loom_collide_pairs) 已在 M1 前的 ckernels 落地并在线;
+  本阶段实测其输出与 Python 段位**逐位一致** (100 帧), 故未重复搬移,
+  仅确认口径 (决策记录见台账)。
+
+--------------------------------------------------------------------
+六、遗留与下一步 (M2b)
+--------------------------------------------------------------------
+1. 验收② 每核负载未达标 — **已定量论证不可达** (见 M2验收2判定依据与
+   M2b范围裁决_20260908.txt + M2b可行性评估_culverin_ABI_20260908.txt):
+   需降 3.542 ms/帧 (最高核 71.45% = 9.569 ms/帧, 目标 45% = 6.027 ms/帧), 而主线程自身 8.753 ms/帧 (ON 均值, editor_core_check 12s
+   播放口径) 已超目标; 物理三段早已在
+   子线程 → culverin C ABI 包装收益 ≈0-0.2ms; 三方案最优(方案 B)也只到
+   最高核 约 56-67% (方案 B, 按权威锚点 71.45% 重算)。杠杆在 Qt 事件循环 + GL 提交 + Python 胶水 (~8.15 ms/帧 = 8.753 − 0.6)。
+   ⇒ 需用户定标: (a) 改口径 (主线程 ms/帧 或并行度); (b) 转 M3 渲染层;
+   (c) 按「①③④⑤ 达成 + ② 书面转出」收口。
+2. ~~越界 vis_idx 边界校验 (D5)~~ → **已修复** (第 9 轮): 越界如实返回
+   LOOM_ERR_PARAM(-2); 退化方向语义不变; fuzz 探针断言收紧为必须 rc==-2。
+3. 真实场景端到端已覆盖 100 逻辑帧数值; 每核负载采样探针已有
+   (percore_check.py 进程内口径 / editor_core_check.py 编辑器基线口径)。
+4. ~~编译版需重编~~ → **已完成** (第 9 轮):
+   · dist\Loom.exe 27504640 B (无 numba/llvmlite); 投放校验 = 可复现构建 (/Brepro)
+     下哈希稳定 + 导出符号/关键字符串/大小校验 (verify_release.py 7 PASS / 0 FAIL,
+     源侧↔编译版 7/7 逐字节一致 — 审计 P9);
+     靶排除自检 PASS; LoomHub 保留; 备份 Loom(编译版)_备份_20260908
+   · ★编译版内 pipeline 生效实证: ON 74.1 FPS vs OFF 69.1 FPS (**+7.2%**,
+     [GATE-FPS] PASS; 产物 tests\_tmp\compiled_verify_{on,off,ab}.json, TPS20 混合500)。
+     【已作废】旧「ON 72.0 FPS vs OFF 66.5 FPS (+8.3%)」: 无物证 (旧产物只有 OFF 档
+     66.5/62), 已撤回; 见 M2_权威数字表_20260908.md §三。
+   · 重编命令须含 --nofollow-import-to=numba (缺则编译 numba, 极慢且风险高);
+     不可用 --include-module=module_registry (在子目录, Nuitka 找不到)
+5. badvector/ambiguous 仍为探针专用靶, 打包同步必须排除 (组装脚本白名单
+   已实现并自检)。
+====================================================================
+(M2 验收报告完 — ①③④⑤ 达成, ② 留 M2b)
+====================================================================

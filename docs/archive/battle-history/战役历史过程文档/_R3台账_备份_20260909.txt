@@ -1,0 +1,871 @@
+# 优化实验对比测量台账 (2026-09-02 夜间自主)
+# 口径: build_entry.py --bench <场景> 300 (dt=1/120, 关vsync, 预热40帧+GC冻结, LOOM_PROFILE=1)
+# 场景: tests/_tmp/stress_500spheres.json (501体/101.75万顶点) 与 stress_50spheres.json (51体)
+
+## 源码版基线 (工作区 == 稳定版, 优化前, 全量回归绿)
+- 500球 run1: FPS 17.2 (58.255 ms/帧) | p50 58.6 p99 65.5 max 65.7
+  physics 22.00 (ensure 7.28 / pre 14.14 / step 0.35 / post 0.20)
+  world_matrices 2.17 | aabbs 10.71 | shadow_prep 31.85
+    (bounds 5.10 / cornerfill 2.77 / matmul 1.98 / collide_pairs 17.08 / jobs 20.47)
+  dispatch 0.50 | buckets 1.15 | 已插桩合计 137.76 (双重计数: aabbs/collide_pairs 在 shadow_prep 包络内)
+  → 真实账目 ≈ 58.3 = physics 22.0 + shadow_prep 31.9 + world 2.2 + buckets 1.15 + 残 ~1.1
+- 500球 run2: FPS 17.1 (58.374) — 高度稳定 (±0.6%)
+- 50球 60帧冒烟: FPS 181.1 (5.52ms)
+- 快照: bench_baseline_ws_source_500s.txt / _run2.txt (本目录)
+
+## 编译版基线 (稳定区 Nuitka, 待测)
+- ★编译配方两大坑 (2026-09-02 实测, 后续重打包必读):
+  1. Nuitka standalone 默认 numba-disable-jit=yes → fastpath 全降级纯 Python,
+     aabbs 452ms/帧 (慢 400 倍), 500球 FPS 2.2 — 必须
+     --module-parameter=numba-disable-jit=no
+  2. numba njit(cache=True) 在 standalone 崩: "cannot cache function: no locator
+     available" — fastpath.py 已修 (_FROZEN 检测 sys.frozen/__compiled__, 冻结环境
+     丢弃 cache 参数, JIT 仍生效). 源码路径不受影响 (aabb_par_check 重跑 ALL PASS).
+  3. ★坑3 (build3 实测): numba njit 对 Nuitka 编译过的函数直接崩:
+     "RuntimeError: Compiled function bytecode used" — numba 取 Python 字节码,
+     Nuitka C 编译产物无字节码 → 冻结环境里 numba 无法 JIT 编译过的模块.
+     ⇒ 解法 (build4): fastpath.py 不参与 Nuitka 编译 (--nofollow-import-to=fastpath),
+       以真实 .py 源文件随包投放 (--include-data-files=fastpath.py=fastpath.py),
+       运行时从 dist 目录文件系统 import, numba 对真实源码正常 JIT.
+       numba 本体用 --include-module=numba 强制打包 (fastpath 被 nofollow 后
+       编译器扫不到它的 import, 须显式带上).
+  4. ★坑4 (build4 实测, 定案): 坑3 解法也失败 —— build4 冒烟进程在 llvmlite
+     初始化阶段死锁 (CPU 20s 零增长, 50球 60帧 180s 超时). numba×Nuitka 四连败:
+     disable-jit / no locator / bytecode / llvmlite 死锁.
+     ⇒ ★最终定案 (build5, fastpath.py 已重写): 冻结环境 (_FROZEN) 根本不
+       import numba; aabbs 走 numpy 批量快路径 _aabbs_minmax_np (一次 matmul +
+       min/max 归约, C 级, 数值 D6 对拍 0 误差 PASS); depths/ancestry 纯
+       Python 直译 (非热点). 编译命令不再需要 numba-disable-jit 参数, 加
+       --nofollow-import-to=numba 防泄漏. 对比公平性: 两边编译版同行为.
+     编译配方 (build5): py -3.12 -m nuitka --standalone --msvc=latest
+       --assume-yes-for-downloads --windows-console-mode=force
+       --nofollow-import-to=numba --output-dir=<out>
+       --output-filename=LoomBench.exe build_entry.py
+- bench 编译命令: py -3.12 -m nuitka --standalone --msvc=latest
+  --assume-yes-for-downloads --windows-console-mode=force
+  --module-parameter=numba-disable-jit=no --output-dir=<out>
+  --output-filename=LoomBench.exe build_entry.py
+  (bench 版要 stdout 所以 console-mode=force; 产物自带 stress json + assets/tests)
+  ★build5 起改用坑4 定案配方 (上方): --nofollow-import-to=numba 替代
+  numba-disable-jit 参数.
+- 稳定区基准夹 = D:\my-project\_bench_stable (稳定区只读拷贝, 双夹规则未破;
+  已加工作区新 build_entry.py --bench 入口)
+
+## 编译版基线 (稳定区 Nuitka build6, 2026-09-02 实测)
+- ★500球 300帧: FPS 13.4 (74.759 ms/帧) | p50 74.8 p99 100.0 max 110.7
+  physics 22.58 (ensure 4.27 / pre 17.57 / step 0.46 / post 0.26)
+  world_matrices 2.67 | aabbs 23.14 | shadow_prep 47.03
+    (bounds 5.59 / cornerfill 2.62 / matmul 2.48 / collide_pairs 19.62 / jobs 23.22)
+  dispatch 0.51 | buckets 1.30
+  vs 源码版 58.3ms: aabbs 10.7→23.1 (numba 不可用, numpy 路径替身),
+  shadow_jobs 20.5→23.2 (Nuitka 池开销略高), 其余阶段同量级.
+- 冒烟链配方: dist 须手动补 tests\_tmp\stress_*.json + assets (编译器不带);
+  ★运行必须带 --bench 旗标 (不带落进 Qt 编辑器路径: 缺平台插件时秒退报
+  qt.qpa.plugin 错, 拷入插件后则空转窗口永不退出 —— 今晚 build4/5 "卡死"
+  的真根因, 并非 numba; build4 llvmlite 死锁另案成立).
+
+## 优化后 (工作区, 2026-09-02 凌晨实测)
+- ★落地内容: 多物体批 7 步全落 (项D 角点向量化 / 项E1 post_step 早退 /
+  项A ensure 查找表 / 项C SAP 剪枝 / 项B1 staging 容量复用 / 项B2 矩阵
+  指纹缓存=可移植件件4 同物 / 项B3 _pick 批量读) + 可移植件批 4 件全落
+  (件1 桶 _dirty 总闸 / 件2 零拷贝留档 / 件3 uniform 句柄+值差分 / 件4
+  world_matrices 静止缓存)。守护: 全量回归绿 ×3 + aabb 对拍 ALL PASS +
+  SAP 对拍 50球/500球 集合一致 (305 对) + 50球 183.7 FPS ≥ 163.8 达标。
+- ★500球 300帧 ×3: FPS 26.4 / 26.8 / 25.9 (37.9 ms/帧, 稳定带内)
+  vs 基线 17.2 FPS (58.3 ms) → **提速 1.54×, +9.4 FPS**
+  physics 16.8 (ensure 7.28→0.90 ★8倍 / pre 15.5 / step 0.3 / post 0.2)
+  world_matrices 2.2 | aabbs 10.1 | shadow_prep 17.3
+    (bounds 5.10 / cornerfill 2.77→2.32 / matmul 2.51 / collide_pairs
+     17.08→5.01 ★3.4倍 / jobs 20.47→6.53 ★3.1倍)
+  dispatch 0.45 | buckets 1.04
+- 源码版对比结论: 工作区 26.4 FPS vs 稳定区 17.2 FPS (同为源码跑法)。
+  剩余大头: phys_bridge_pre 15.5 (pre_step 主体, 规格红线不动) +
+  aabbs 10.1 (numba 内核地板) + shadow_jobs 6.5 + bounds 5.1。
+- 50球: 177.2 (件1+3+4 落地后) / 183.7 (7 步全落后) vs 基线 181.1 —
+  抖动带内 (守护线 163.8 达标)。
+- 编辑器拾取 (_pick): 500球逐模型现算 ~30ms → 批量读 ~1ms (点击手感)。
+
+## 编译版对比 (2026-09-02 凌晨实测, 两侧同口径)
+- ★编译源公平性核验: _bench_ws 五个核心 py (engine/fastpath/physics_bridge/
+  editor/build_entry) 与工作区 MD5 逐字节一致; _bench_stable\fastpath.py 与
+  工作区一致 (build6 就是用重写后 fastpath 编的); 两 dist 顶层目录零差异。
+- 工作区编译版 (ws_build2): 500球 300帧 ×2: FPS 18.1 / 18.1 (55.2 / 55.4 ms,
+  完全复现 ±0.4%) vs 稳定区编译 build6 13.4 FPS (74.8ms) → **编译版提速 1.35×**
+- 50球 60帧冒烟: 工作区编译 75.4 FPS vs 稳定区编译 67.0 FPS (带内, Jolt 桥正常)
+- 编译版账目对比 (工作区 55.2 vs 稳定区 74.8 ms/帧):
+  physics 18.67 vs 22.58 (ensure 0.70 vs 4.27 ★6倍 / pre 17.47 vs 17.57 带内 /
+  post 0.09 vs 0.26, E1 早退生效)
+  collide_pairs 5.24 vs 19.62 ★3.7倍 (SAP 落地生效, 编译版同样拿到收益)
+  shadow_jobs 6.72 vs 23.22 ★3.5倍 (B1 staging 容量复用生效)
+  aabbs 24.28 vs 23.14 (带内 — 两侧同为 numpy 快路径内核, 编译环境地板 ~24ms)
+  world_matrices 2.54 vs 2.67 / buckets 1.28 vs 1.30 (带内)
+  → 真实账目: 55.2 ≈ physics 18.7 + shadow_prep 31.6 + world 2.5 + buckets 1.3 + 残 ~1
+    (vs build6: 22.6 + 47.0 + 2.7 + 1.3; 净 -19.6ms 主要来自 shadow_prep -15.4)
+- 编译版 vs 源码版差异解释: 工作区源码 26.4 FPS (37.9ms) 快于编译 18.1 (55.2),
+  差距主要在 aabbs 内核 (源码 numba 10.1ms vs 编译 numpy 24.3ms, numba 在冻结
+  环境四连坑不可用) 与 Nuitka 编译代码对池/循环的少量开销。属编译环境地板。
+
+## ★验收四组数字 (早晨汇报口径)
+- 源码稳定 17.2 FPS (58.3ms) | 源码工作 26.4 FPS (37.9ms) = **1.54×**
+- 编译稳定 13.4 FPS (74.8ms) | 编译工作 18.1 FPS (55.2ms) = **1.35×**
+- 守护: 全量回归绿 ×3 + aabb 对拍 ALL PASS + SAP 对拍一致 + 50球 183.7 ≥ 163.8
+- ws_build2 冒烟链: 带 --bench 旗标 50球 75.4 FPS / 500球 18.1 FPS, Jolt 桥正常
+
+## 红线守护 (每步验收)
+- 全量回归 tests/run_all.py 绿 (落地后 ×3 复跑)
+- 50球 ≥ 167.1×0.98 = 163.8 FPS (组6 基线) — 实测 183.7 ✓
+- NCC/像素对拍按 GPU 报告标准 — aabb 数值对拍 ALL PASS ✓
+- SAP 只几何粗筛真超集 — 50球/500球 集合对拍一致 (305 对) ✓
+- 静态→KINEMATIC 升级路径未触碰 ✓
+
+## 产物索引
+- 台账本体: 本文件
+- 快照: bench_baseline_ws_source_500s.txt / _run2.txt (本目录, 源码基线)
+- 源码基准夹: D:\my-project\_bench_stable (稳定区只读拷贝+build_entry 入口)
+- 稳定区编译版: D:\my-project\_bench_stable\bench_build6\build_entry.dist\LoomBench.exe
+- 工作区编译版: D:\my-project\_bench_ws\ws_build2\build_entry.dist\LoomBench.exe
+  (dist 已补 tests\_tmp\stress_*.json + assets; 运行必须带 --bench 旗标)
+
+## ★手动测试完整引擎 (2026-09-02 早晨组装, 用户手动测试用)
+- D:\my-project\Loom(工作区编译版)\  = Loom\ + LoomHub\ (LoomHub 两侧源码
+  MD5 一致故编译一次复用; 引擎 dist 搬 _bench_ws 现成成果未重编)
+- D:\my-project\Loom(稳定区编译版)\  = 同构, 引擎 dist 搬 _bench_stable
+- 组装: tests\_tmp\assemble_dual_compile.py (GUI/plugins/core_plugins/
+  scripts/assets/保存 投放目录按各侧源码拷 + PySide6 plugins 补拷 + 设置/
+  解释器.json); LoomBench.exe 已改名 Loom.exe (解释器.json main_exe 对齐)
+- 验证: 两夹 LoomHub.exe 实开 ALIVE / Loom.exe --bench 50球 72.6 vs 69.9
+  FPS 带内 / Loom.exe Qt 编辑器实开 ALIVE (title=Loom — 编辑器 (Qt))
+- ★LoomHub 编译命令照 T3 (tk-inter 插件+include-module 名单); 新坑: 组装
+  脚本 SITE_PKG 路径勿用 __file__ 相对拼接 (已改 LOCALAPPDATA)
+
+## 分离批1+2 (逻辑帧/渲染帧分离 + 插值, 2026-09-05 主线程落地)
+- 设计: _engine_study\考察报告\分离批1_2_实施设计.md (+分离批3_4); 实施=主线程 (设计缺陷修正2处:
+  render_pose 新增物体停泊自由行 / _fit 扩容保留前_n行)
+- 核心定案: FixedStepClock 双 accumulator (逻辑30Hz+物理60Hz 独立, 先逻辑后物理保
+  脚本先于物理); advance 放 render() 开头 (run() 零改, 三路径一处生效);
+  插值只进 _render_world 喂桶, _frame_world 保持逻辑位姿 (R3); 桶闸加 pose 维;
+  逃生门 LOOM_NO_SPLIT=1 或 logic_fps<=0
+- 500球 300帧 (源码, py -3.12 build_entry.py --bench):
+  - LOOM_NO_SPLIT=1 基线: FPS 26.3 (37.994 ms) | p50 38.2 p99 46.4 — 与 09-02
+    基线 26.4/37.9 吻合 (逃生门逐位回归 ✓)
+  - 分离模式: FPS 41.7 (23.965 ms) = 1.58x | p50 19.6 p99 43.9
+    logic_step 5.02 (30Hz 摊薄) / interp 1.19 / physics 0.00 (物理 60Hz 计入
+    logic_step 内的 physics 段为0 — 全在 _physics_frame)
+    渲染段 ~19ms (aabbs 8.73 + shadow_prep 15.29 + world 1.08 + buckets 1.12)
+- 验证: test_core_clock 10/10 / test_interp_state 10/10 / 全量回归 EXIT=0 (分离开
+  +LOOM_NO_SPLIT 双态) / split_par_probe 4/4 (确定性逐位/脚本dt/物理守恒R1/逃生门)
+  / interp_check 6/6 (插值端点/中点/渲染矩阵同管道/静止闸/连续性)
+- 台账快照: (见本节上行数据; bench_result.txt 覆盖为分离模式 41.7)
+
+## 分离批3+4 (编辑器Qt接入 + P-A物理线程化, 2026-09-05 主线程落地)
+- 设计: 分离批3_4_实施设计.md; 接口裁决=以批1_2 已落地实现为准
+  (弃设计 _logic_physics/_interp_override 双轨, 采用 clock 双accumulator +
+  compute_render_matrices; 采纳 paintGL 接线/设置对话框/physics_pipe)
+- 批3 改动: loom_gui.paintGL +advance_logic / editor.render 四段迁
+  advance_logic (mouse_rel 留渲染帧) / advance_logic 编辑态零逻辑守卫 /
+  设置对话框 logic_fps(20/30/45/60/120/跟随渲染帧)+physics_fps(30/60/120/240)
+- 批4 改动: physics_pipe.py (常驻物理线程, Event 对发, post/wait, 超时1s
+  永久降级, LOOM_NO_PIPE=1 逃生门) + engine._update_physics_bridge 管线分支
+  (events=False 且 pipe 存在 → post/wait; 异常→_stop_phys_pipe 降级内联) +
+  _ensure_phys_pipe (桥建后启动) + _stop_phys_pipe (退出链: _destroy_phys_bridge
+  前置, _stop_parallel 自动覆盖)
+- 500球三态 (300帧, 源码):
+  - LOOM_NO_SPLIT=1:      FPS 26.3 (37.99ms) p99 46.4  [基线逐位复核 ✓]
+  - 分离 30/60:            FPS 41.7 (23.97ms) p99 43.9  [1.58x]
+  - 分离+管线 (批4):       FPS 39.3 (25.46ms) p99 68.7  [同步税>重叠收益,
+    本场景物理步短; W1 正确性已证; 大物理负载场景才赚 → 默认待用户拍板,
+    LOOM_NO_PIPE=1 可关回分离纯态 41.3FPS 复核带内 ✓]
+- 批4 验证: pipe_check 3/3 (W1 管线 vs 主线程 600 步 36体×9字段 逐位相等 /
+  W2 慢桥不误杀 / _degraded 语义) + 全量回归 EXIT=0 (批3 后 + 批4 后各一遍)
+- 批3 验证: 语法 OK + 全量回归 EXIT=0 (编辑器 Qt 路径改动触碰面全过)
+
+## ★用户实测三问题 (2026-09-05, 批1-4 架构偏差定性)
+1. physics_fps 独立频率旋钮 = 过度设计 — 正确模型 (用户定调): 逻辑帧=场景最高同步点,
+   所有逻辑操作绑逻辑帧; 物理只是逻辑帧内部自动子步 (Unity fixedDeltaTime 语义),
+   不暴露给用户。批5 重构 core_clock。
+2. 无限制模式 GPU 50帧徘徊不吃满 — 根因方向: 渲染帧仍在跑 aabbs/shadow_prep/
+   collide_pairs 等 ~25ms CPU prep (逻辑帧间内容不变, 应按逻辑帧缓存, 渲染帧只
+   消费)。批5 渲染帧极简化 (目标渲染帧 CPU ≤2-3ms)。
+3. 编辑器播放态帧率暴跌个位数 — bench 直调路径 41.7FPS 与真实 paintGL 路径行为
+   分歧; 诊断代理取证中 (physics_pipe wait 税 / advance_logic 标志竞态嫌疑)。
+→ 诊断代理 + 设计代理 (批5_6: 架构重对齐+帧内流水线) 已开工, 交卷后主线程落地。
+
+## 分离批5_6 架构重对齐 (2026-09-05 主线程落地, 用户三问题回应)
+- 设计: 分离批5_6_架构重对齐.md (1309行); 诊断: 诊断_播放态暴跌与GPU占用.md
+- 批5A: core_clock 单 accumulator 重构 — 逻辑帧=最高同步点, 物理为帧内自动
+  子步 (N=ceil(fixed_dt/sub_dt) 恒定; 20Hz→3/30Hz→2/60Hz→1), physics_fps
+  设置撤下 (旧键兼容读 >=50 换算, <50 忽略防穿透); phys_substep_dt 内部键
+- 批5B: prep 缓存化 — aabbs/光源VP/碰撞对挪逻辑帧尾 _logic_prep
+  (_prep_sig=gen+stamp3+fw_id 失效键), 渲染帧只派发事件+挂VP;
+  渲染段静止帧复用 _render_world; 桶闸 pose 维换 _logic_gen; NO_PREP 逃生门
+- 批6: physics_pipe v2 (pending 队列不丢步, wait_pending 批量同步点) +
+  逻辑帧流水线次序: 脚本→连发物理子步(不等待)→音频动画(真重叠)→S1等待→
+  prep→派发→翻页; post→wait 同步税结构性消失
+- 修 bug: advance_logic NO_SPLIT 无 fallback (编辑器播放态逻辑全丢, rotate
+  60帧 0.00° → 修后 13.29°) / editor buckets 插桩 / bench+stress keys 补
+  pipe_wait
+- 验证: 单测 20/20 + V2 物理对拍 (150 逻辑帧×2子步 == 旧绑死 300 帧 逐位!)
+  + pipe_check v2 逐位 + V3 prep 缓存 5 断言 + 旧探针复跑 + 全量回归 ×2 EXIT=0
+- bench 500球 300帧: C 全开 40.1FPS (pipe_wait 3.47ms, 批4 为 13.9 — 重叠
+  压掉 75%) / B NO_PIPE 39.6 (批6 可独立回退)
+- ★真实路径直调实测 (PlayerApp, dt=1/60, LOOM_NO_PARALLEL): 50球播放态
+  2.40ms/帧 (400FPS 级) / 500球 17.35ms/帧 (58FPS 级) — 渲染帧极简化达标;
+  500球极限 = 逻辑帧墙钟 (~15-50ms) 硬约束, 下一步收益放大器 = aabbs B'
+  连续归约内核 (compile-fps-halving 记忆, 4.96×)
+- qt_play_probe 口径含 GUI 面板重绘+monkeypatch 双计, 数字偏大 — 用户实测为准
+
+## 批5 补充批 (2026-09-05 用户实测反馈四件, 主线程落地)
+- 用户截图反馈: 54FPS/GPU38%/501物体/30Hz → 精拆定位: pre_step 脏检测 9.8ms
+  (批量化 → 2.2ms, 4.4x, 物理桥 12 测试+V2 对拍逐位等价零漂移) / 逻辑帧墙钟
+  剩余 = prep 16.3ms + 物理传播 ~12ms (dirty 体 set_position 世界矩阵+quat
+  ~24µs/体) — 下一刀 = aabbs B' 内核 + set_position 批量化
+- 决定性解耦验证 (decouple_check): 500球快帧 p50=3.11ms vs 逻辑帧落点 21.19ms
+  (双峰 50/50, 解耦成立; 逻辑帧墙钟=天花板)
+- F9/F10 暂停世界+步进 (MC 同款, 用户指令): engine toggle_logic_paused/
+  step_logic_once + advance_logic+render 双路径判定 + 键位 (pygame F9/F10 +
+  editor on_key_event+toast) + HUD [F9 已暂停]; 暂停=清 accumulator 恢复从
+  整拍开始 (不补欠账); 步进=clk.step_once() 直注 fixed_dt 恰好 1 帧
+- pause_step_check 6/6: 暂停 60 帧 Δrot=0 / 暂停态 0 逻辑步 / 相机独立
+  (Δyaw=0.6) / 单步逐位精确 (40°/s×1/30s=0.023271) / 3 步线性 / 恢复推进
+- 1TPS 步进档 (设置面板 '1 Hz（步进播放）') + 即时生效 (clk.set_fps 运行中
+  改频); one_tps_check 三铁证: 10 秒恰 10 逻辑帧 / 1190/1200 渲染帧 0.85ms
+  (纯渲染) / 分层 37x
+- 开发者相机播放态接管: 右键按住 = 轨道相机临时接管 (_dev_cam_active, 转视角
+  /WASD 平移/滚轮), 松开回玩家相机; 相机全程渲染帧实时 (不进逻辑帧)
+- 修 bug: test_camera_control 桩缺 is_playing (getattr 防御)
+- 全量回归 EXIT=0 (含 test_camera_control ALL PASS)
+
+## 批5 终验 (2026-09-05 agent 口真机实测 + 按钮bug修复)
+- 决定性数据 (render 直调 500混合 300帧): 恒定dt 49.6FPS/TPS 16.5; 墙钟dt
+  15.3FPS/**TPS 19.89 精确跟住 20Hz 设置** — 分离正确, FPS15/TPS20 双解耦
+- 之前"0.4Hz"误判 = agent inspect 读重名对象 (混合场景 50种x10样本, "物体0"
+  重名, 说明书早警告 index=); 引擎逻辑帧调度无 bug
+- maximum_logic_delta 定案: 0.25 → 0.05 (过紧, 世界慢动作6倍) → **0.333**
+  (Unity 默认量级) + max_steps_per_frame 自适应 (round(delta/fdt), 防螺旋)
+- 死亡螺旋防线实证: 用户 8FPS = 旧 0.25 宽限追 7 帧螺旋; 收紧后脱离个位数
+- 500混合 15FPS = 本机内容成本上限 (逻辑帧 42.6ms: 物理 26.4 [3子步x8.8] +
+  prep 15.6); 下一刀 = prep 内部 numpy 层 + set_position 批量化
+- 新增: 状态栏 TPS 实测 (FPS 旁, get_tps 2秒滑窗; 暂停显示"已暂停") +
+  工具栏 "⏸暂停TPS/▶恢复TPS" + "⏭步进1帧" 按钮 (GUI 也可控, 不止 F9/F10)
+- 修 bug: toggle 返回"新状态"被 if-True 吞 (恢复时按钮文字卡住, 用户实测
+  抓到; 引擎状态其实正确) — GUI 按钮键位/F9 键位x2 三处同修 + 播放会话
+  切换复位 (_logic_paused 清 + 按钮文字复位)
+- 全量回归 EXIT=0 (含 test_camera_control)
+
+## F9/F10 键盘失效修复 (2026-09-05 用户实测反馈)
+- 根因: ui/loom_gui.py _QT_TO_PG 映射表无 F9/F10 → keyPressEvent 把 key 丢成
+  0 → editor.on_key_event 的 K_F9/K_F10 分支永不匹配; 按钮 (QAction 直连)
+  不经此表故一直好使 — 与用户"按钮有效按键无效"观察完全吻合
+- 修复: 映射表补 F9/F10/F11 三条 + fkey_chain_check.py 全链探针 (模拟
+  on_key_event 收 K_F9 → 暂停 → F10 步进 → F9 恢复, 全链断言 PASS)
+- 全量回归 EXIT=0
+
+## 逻辑帧内部优化 + 无上限调度调研 (2026-09-05 晚)
+- 三刀 (主线程落地, 全部对拍守恒):
+  aabbs 行级矩阵指纹缓存: 13.10 -> 0.39ms (34x, 静止体复用, 变化行重算;
+    键=(id(fw), stamp3+visible_only, N); R8 grow-only; aabb_par_check ALL PASS)
+  pairs SAP 向量化块配对: Python 扫描循环消 (块64, cmx_t > xmn_u 严格同精判)
+  set_position SoA 批量: _local_matrices_batch (根体批量/有父逐体, 数值逐位同;
+    注意曾写出"重复set"错误版已改根体跳过+批量段接管)
+  → 逻辑帧 42.6 -> 15.53ms (2.7x, 串行口径); 管线开渲染帧 14.23ms (70FPS级)
+  → V2 物理对拍逐位 PASS + 物理桥 12 测试 + pipe_check ALL PASS 零漂移
+- 无上限调度调研 (代理, 报告_无上限帧率调度优化调研.md 370行):
+  ①双峰根因=逻辑帧原子性 (accumulator 只决定落点不摊成本; 28ms逻辑+6ms渲染
+    时 TPS 贴上限, 落点帧 99%, 渲染率被钉 ~TPS)
+  ②★新发现: Qt 路径"无上限"实为 QTimer 1ms 限帧 (guiloader FPS_LIMITS),
+    Windows 抖动大 = 比双峰更便宜的病 → 方案一限帧器校准 (Panda3D wait_until
+    混合等待: sleep大段+忙等4ms收尾; kivy MIN_SLEEP=5/UNDERSHOOT=4 参数样本)
+  ③TPS/FPS 非整数倍 (144Hz@30TPS): accumulator+alpha 天然解决 (插值输出
+    时间轴连续采样, 落点节律不齐被插值吸收), 无需倍数档; Panda3D M_integer
+    是唯一档位约束先例 (可选非必需)
+  ④前瞻判定: 后台逻辑线程预取 GIL 下不可行 (纯Python段占大头, 收益<7%,
+    破坏单写者纪律; 行业无先例); 外推 extrapolate 可行 (a'=1+alpha, 封顶1.5,
+    落点帧回退插值; SmoothMover 同款思路)
+  ⑤推荐: 方案一限帧器校准+帧长std观测 (ROI最高) → 方案二extrapolate可选
+    → 方案三治本=逻辑帧墙钟继续砍 (已由本轮三刀从28→15.5)
+- 架构审计结论: 逻辑帧=脚本/物理/判定唯一驱动 ✓, 渲染帧=纯显示 ✓ (输入
+  快照渲染帧采集+逻辑帧只读消费 = Unity 同款合法)
+
+## 无上限调度方案一+二 (2026-09-05 落地, 调研报告 §五/§六)
+- 方案一① 限帧器校准: ui/loom_gui.py _render_timer — Qt "无上限"实为 QTimer 1ms
+  限帧 (Windows 抖动 10-150FPS); 改混合等待 _wait_until (QTimer 仅作唤醒源,
+  帧尾 sleep 大段+忙等 4ms 收尾, Panda3D wait_until 语义 / kivy MIN_SLEEP=5ms
+  UNDERSHOOT=4ms 参数); 逃生门 = 设置键 precise_limit: False 回退旧 QTimer 纯驱动;
+  其余档位 (30-240) 行为不变。
+- 方案一② 帧长方差观测: engine._update_fps 加 _frame_dt deque(120, maxlen 固定
+  长寿命 GC 冻结兼容) + get_frame_jitter() -> (std_ms, max_ms, n); HUD 第三行
+  "帧长: std=..ms max=..ms (滑窗120)" (Panda3D calc_frame_rate_deviation 同款
+  chugginess 指标) — 双峰/限帧器抖动从体感变数字, 后续优化验收基线。
+- 方案二 extrapolate: interp_state.render_pose 加 mode 参数 (INTERP_LERP=0/
+  INTERP_EXTRAP=1), 外推 a'=1+alpha 封顶 1.5, angdiff 同式; 设置键 interp_mode
+  (默认 interpolate, 即时生效设置面板"渲染位姿模式"行); 物理落点帧 (steps>0)
+  自动回退插值 (防碰撞时刻画面超前); vk 双端透传 (scene_driver._extrap_mode /
+  vk_renderer.world_matrices mode=)。
+- 验收 (test_frame_pacing 11/11 PASS + 全量回归 EXIT=0):
+  ①限帧器节律命中: 60 次连续 wait_until(16.6ms 周期) ±1ms 命中率 >95%
+  ②过睡立即返回 (<2ms) / 300ms 长等待 CPU<50% (走 sleep 不忙等)
+  ③帧长滑窗: 恒定 16ms 注入 std<0.01 / 双峰 6/34ms 注入 std>10 (可量化区分)
+  ④外推: 恒速误差=速度×fdt×(a'-1) 精度 1e-7 / 封顶 1.5 / 静止恒等 / 默认 LERP 回归不变
+  ⑤500混合场景 LOOM_NO_SPLIT=1 基线复跑 = 37.99ms 逐位复现 (逃生门逐位不变)
+- ★限帧器校准定稿修正 (同日二轮): 初版把混合等待放在帧尾 (每帧固定忙等 4.17ms
+  且无上限档无目标周期=纯烧 CPU) — 改正: 档位模式 (30-240) 帧首对齐固定节拍
+  网格 (_tick_period + wait_until, 落后重锚不追); 无上限档不做 pacing (kivy
+  maxfps=0 同款 — 抖动源=逻辑帧落点双峰, 由帧长观测+外推缓解, 非 QTimer).
+  A/B: 60fps 档 std 1.99→0.00ms, mean 19.4→16.0ms (qt_pacing_probe PASS,
+  验收线 ≥40% 实际 99.8%).
+- 实机验证 (LoomHub 同款链路 py -3.12 Loom.py --open 压测500混合 --agent,
+  tests/_tmp/real_launch_verify.py + real_shots\ 三张整窗截图):
+  编辑器态 501 对象加载正常 (状态栏 FPS|TPS|对象数齐);
+  播放态: FPS 45 / TPS 19.94 (精确跟住 20Hz 设置) / 帧长 std 17.4ms max 61.6ms
+  (逻辑帧落点双峰特征, 观测面工作正常) / engine_metrics 命令直读时钟状态。
+  初版帧尾忙等版 FPS 22 → 改版后 45 (去掉无上限档空耗)。
+- 新增 EAI 命令: engine_metrics (只读指标 fps/tps/帧长std/暂停态/插值模式/时钟);
+  screenshot 加 full=true 参数 (整窗截图含状态栏 FPS|TPS 读数)。
+  test_eai_real 覆盖率闸门 53 条全过。
+- 探针资产: tests/_tmp/qt_pacing_probe.py (档位校准 A/B) /
+  real_launch_verify.py (LoomHub 链路实机验证) / test_frame_pacing.py 常驻 (11 断言)。
+
+## 开发者相机自由移动修复 (2026-09-05 用户报告, 修复+验证)
+- 用户报告: 播放态不按住右键时开发者相机视角 WASD 无法移动。
+- 根因: 玩家相机接管 (apply_camera -> orbit_mode=False) 后视角=self.camera
+  自由位姿, 旧 WASD 段只改 camera_target (轨道几何驱动量), 自由相机下无效;
+  且挂父激活相机每帧 apply_camera 盖回任何手动位移。
+- 修复 (editor.py _update_camera + render):
+  ①播放态自由相机 (右键松开): WASD/QE 直接平移 self.camera 本体 (沿 yaw 基),
+    滚轮沿视线推拉相机本体 — 不要求右键按住, 任何时候都能移动;
+  ②右键按住 (开发者轨道接管): 保持原 target 平移 (轨道几何一致, 批5 语义);
+  ③盖回保护: _dev_cam_moved 标记 (WASD/QE/滚轮置位) — 置位后挂父相机不再
+    每帧 apply_camera 盖回, 重进播放复位;
+  ④getattr 防御 (is_playing/orbit_mode, 测试桩 __new__ 惯例)。
+- 验证: dev_cam_free_move_check 8/8 PASS (自由相机 W 前进方向点积=1.0 /
+  Q 上升 / 盖回标记 / 滚轮推拉 distance 不变 / 编辑态 target 行为不变 /
+  右键接管 target 路径不变 / 复位基线) + test_camera_control ALL PASS +
+  全量回归 EXIT=0。
+- 探针: tests/_tmp/dev_cam_free_move_check.py 常驻。
+
+
+## 帧缓冲实验: TPS/FPS 双开关 (2026-09-06, 用户设想 09-05 + 闸门定案 09-06)
+- 用户设想: 引入一两帧缓冲让渲染帧不缺数据, 尖峰帧由缓冲顶上保 TPS/FPS 节律;
+  CPU 之后算快一点还债。09-05 调研否决的是后台线程预取版 (GIL 下不可行);
+  单线程空闲预取版 = 用户原话本意, 本批落地。
+- 双独立开关 (用户定案): TPS缓冲 / FPS缓冲 各自勾选互不牵连 (射击类=低TPS
+  高FPS 只开 FPS 侧; 3A 类=高TPS低FPS 只开 TPS 侧)。
+- 闸门 (灰置, 两道独立): TPS 缓冲需逻辑帧率 >= 30; FPS 缓冲需帧率档位
+  >= 60 且非无上限/auto (无上限=画一帧显一帧无节拍)。理由=单帧时间越长
+  缓冲引入延迟越大, 得不偿失。关闭时行为逐位同旧, TPS 照常实测。
+- TPS 缓冲 (frame_buffer.py FrameBufferLedger): 记账器形态 (预取产物落引擎
+  既有 _prep_*/interp 缓存, 无数据搬运); 渲染帧尾富余 (预算红线 12ms) 预跑
+  _logic_frame (深度 2 封顶); advance 轮到预取帧跳重跑只翻记账; 时间轴/alpha
+  零变化。碰撞事件派发仍按 _disp_gen 节流在所属渲染帧 (语义零变化)。
+  ★设计修正: 初版'有积压才预取'判据永不触发 (死亡螺旋保险把积压追平/丢弃),
+  改常备成品语义 (不依赖积压)。
+- FPS 缓冲 (RenderFrameBuffer): Qt 档位模式 _on_tick 帧首 wait_until 混合
+  等待空窗 (数 ms) 内把下一渲染帧预画进离屏 FBO (完整走 render 管线, 逻辑
+  推进跳过); 节拍点 paintGL 整块 copy_framebuffer 上屏跳过重画。预画帧
+  _preframing 标志: 不进 TPS 预取/不虚计 FPS/不污染帧长窗。
+- 接线: engine (init 建 ledger/render_buf + _framebuf_prefetch + _frame_start
+  打点 + _preframing 防御) / editor.render (同款挂点) / loom_gui (_on_tick
+  空窗预画 + paintGL blit 消费 + _apply_fps_limit 闸门重判 + 设置面板双复选框
+  联动灰置 _fb_lazy_refresh) / core_clock (advance 消费预取帧 + pending_steps
+  + reset 清账) / agent_commands (engine_metrics 增 frame_buffer/render_buffer
+  观测面) / guiloader (frame_buffer_tps/frame_buffer_fps 默认 False)。
+- 验收: test_frame_buffer 18/18 (T1 记账单元 7 + T2 消费语义 + T3 对拍
+  稳态/尖峰 + T4 尖峰吸收 TPS 不掉 + T5 metrics + T6 渲染缓冲 5) + 全量回归
+  EXIT=0 x2 (TPS 侧后 / FPS 接线后) + 模块冒烟 (TPS@20Hz 拒开 / FPS@60 开 /
+  unlimited 拒开)。
+- 边界 (诚实声明): 平均负载饱和时无富余=预取自然停 (与关闭逐位同, 无负收益);
+  TPS 缓冲输入采样延迟最多 +1 逻辑帧 (30Hz=33ms); FPS 预画内容=节拍点相机态
+  (与正常画一致)。实测验收待用户 (混合500 播放态开/关对比 1%low + 帧长 std)。
+- 探针: tests/test_frame_buffer.py 常驻 (18 断言)。逃生门 LOOM_NO_FRAMEBUF=1。
+
+
+## 编辑态插值失同步修复 (2026-09-06, 用户实测报告)
+- 报告: 编辑模式拖动物体, 黄框 (gizmo/逻辑矩阵) 跟着走但物体画面不动,
+  按播放后才同步。复现: 编辑态 set_transform 移动平面 -> 截图画面原地
+  (edit_move_before.png), 修复后同路径截图画面跟随 (edit_move_after.png)。
+- 根因: 编辑态改位不走逻辑帧 (无 advance 快照翻页) -> _interp.prev/curr
+  停旧位, static_frame() 恒 True (prev==curr) -> _render_world 静止复用;
+  gizmo/黄框走逻辑矩阵每帧现算所以正常。分离批2 起即存在 (非帧缓冲引入)。
+- 修复: TransformComponent position/rotation/scale 改 property (写入 bump
+  类级 _xform_gen; Point3D 不可变协议保持, 组6件4 缓存失效不受影响) +
+  engine._consume_xform_gen (首帧锚定不追溯; 变化 -> _interp.align() +
+  _render_world/_prep_sig/_frame_world 失效) 挂 editor.render 与 engine.render
+  矩阵重算之前。播放态零副作用 (物理/脚本每逻辑帧 advance 本就重抓)。
+- 验收: test_xform_sync 8/8 (setter bump x4 / consume 锚定-触发-免触发 x3 /
+  align 后插值输出=现读值) + 全量回归 EXIT=0 + 实机截图前后对比。
+- 探针: tests/test_xform_sync.py 常驻 (8 断言); 截图 framebuf_shots\。
+
+
+## 全功能操作大巡检 (2026-09-06 用户指令, 两轮闭环 0 检出)
+- 指令: 所有用户/Agent 可执行操作全部实验一遍并在台账增加项目; 修复流程=
+  巡检->检出->修复->全量巡检->多轮循环直到 0 检出 (每修一个必须全量巡检,
+  防代码关联引入回归 — 拖动物体失同步 BUG 前车之鉴)。
+- 范围: agent_commands._COMMANDS 全表 53 条命令 (签名逐条对照源码核实),
+  实跑 62-63 操作/轮 (含组件增删/正向+拆除成对验证); 探针
+  tests/_tmp/full_op_sweep.py 常驻, 结果 sweep_result.json。
+- 第 1 轮: 62 操作 56 过 / 6 检出 -> 定性: **0 引擎 BUG** — 5 个探针用法错
+  (camera_add 默认名=摄像机N / set_material 须 index 或 material / 
+  prefab_unlink 重名须 index / asset_apply key 须从 assets 清单取 /
+  plugin_button 空表报错=正确防御), 1 个 desc 导出方式读错 (实际 53/53 齐全)。
+  全部契约已在命令 desc 中写明, help_text (qt_console) 正常显示。
+- 第 2 轮 (用法纠偏+补 SKIP 项): **63 操作 63 过 / 0 检出** ✅。
+- 覆盖清单: status/settings_get/settings_set/engine_metrics/object_add/
+  object_list/object_select/object_rename/object_duplicate/object_delete/
+  set_visible/gizmo x3/undo/redo/set_transform/inspect/materials/
+  material_new/set_material/set_saturation/collider/rigidbody(add+gravity+
+  remove)/audio(add+remove)/animator(add+remove)/script_add/scripts/
+  script_var/script_remove/light_add/light_set x2/camera_add/camera_move/
+  camera_look/camera_active(设+取消)/camera_preview(进+退)/reparent(挂+脱)/
+  play(开+关)/screenshot/prefab_save/prefab_place/prefab_unlink/assets/
+  asset_apply/asset_save/plugins/scene_new/scene_load/quit。
+- 人工项 (弹系统对话框, 命令行不可自动化): scene_save 另存 / import_obj
+  文件选择 / plugin_button 正向 (依赖具体插件) — GUI 侧用户日常路径覆盖。
+- 全量回归 EXIT=0 (巡检后复跑确认)。台账登记双轮结果。
+
+
+## 编译版制作 + AABBS 行级缓存层级定案 (2026-09-06 晚, 5 次编译)
+- 编译版重制 (用户指令): Nuitka standalone MSVC x5 轮 (issue->fix 循环):
+  build1 初版 -> build2 播放态守卫 (_consume_xform_gen 仅编辑态) ->
+  build3 stage_times 观测面 (engine_metrics 附阶段耗时快照) ->
+  build4 aabb 缓存去 id(fw) (未竟) -> **build5 终版 (行级缓存层级上移)**。
+- **编译版 9FPS 事故定案 (真凶=行级缓存层级设计缺陷, 非编译器)**:
+  三刀行级缓存原放 _aabbs_batched 内 (键含 id(fw)); 播放态 ①件4 缓存 keys
+  因动体失配 -> compute_world_matrices 每帧返回新矩阵对象 -> id(fw) 每帧变
+  -> 缓存恒 miss 全量重算; ②池分块 (n>=64) 时每 worker 拿 fw 切片当整表
+  判/写 -> 行数不配恒 miss + 多 worker 互相覆盖。源码 numba 快 (3.4ms/块)
+  被掩盖 15 天, 编译 numpy 全量 26-37ms 暴露 -> Qt 播放态 9FPS/TPS 24.7。
+- **修复 (终案)**: 行级缓存上移 _model_aabbs_par 本层 — 键=(stamp3, n, 
+  visible_only=False), 行级变化=值比较 (np.any(fw!=c_fw) 身份无关); 命中后
+  静止行抄缓存, dirty 行打包子列表送池/串行重算, 结果按序填回; 
+  _aabbs_batched 行级缓存逻辑移除 (_row_cache 参数兼容); visible_only=True
+  (out 长度=可见数与 fw 行数不齐) 不入缓存走旧路全算。
+- **战果 (混合500, 本机)**: 源码 numba 15.8->**68.5FPS (4.3x)** / 模拟冻结
+  (LOOM_NO_NUMBA=1 新诊断旗标) 18->**58.3FPS (3.2x)** / 编译版 9->**16.4FPS
+  (TPS 29.99 精确)**; 编辑器态编译版 37->**140-150FPS (4x)** — 
+  09-02 P0-2 aabbs 15ms 历史遗留地板也一并解决。
+- 编译版组装 (assemble_release_0906.py): dist+投放+PySide6 plugins+设置
+  全键打底 (与源码同设置 unlimited/30Hz) + 解释器.json exe 版 + LoomHub
+  dist (1059 文件完整性核对) + 根文档。Qt 编辑器路径 ALIVE (标题核验)。
+- 编译版巡检: 33 命令契约调用 23/33 ok — 10 FAIL=探针命名假设 (状态污染),
+  无崩溃命令; **rigidbody 空参大场景 (500体) 挂起 = 源码同病** (Jolt 建体
+  阻塞, 待查, 与编译无关)。fastpath 新增 LOOM_NO_NUMBA=1 诊断旗标 (源码
+  模拟冻结降级, A/B 用)。
+- 引擎中间产物: Loom_build/build_entry.build+dist (211 文件组装后保留 dist
+  备份), LoomHub_build。 bench 探针 compiled_verify.py + 
+  assemble_release_0906.py 常驻 tests/_tmp。
+
+
+## 双 BUG 修复: 开发者相机盖回 + 编译版偶发闪黑 (2026-09-06 深夜, 用户报告)
+- BUG1 播放态开发者相机: 右键松开后按住 WASD 无法移动, 再按右键才"跳"到
+  理论位置。根因=09-05 盖回保护 (_dev_cam_moved) 只挡了 render 层的挂父
+  相机 apply_camera, **没挡玩家脚本每逻辑帧的相机写回** — first_person/
+  third_person 脚本 update() 里 e.camera=角色位姿/e.camera_yaw/pitch 每逻辑
+  帧强写, 渲染帧 WASD 移动被下一逻辑帧冲掉。右键按住时 apply_orbit_camera
+  在 render 每帧合成覆盖所以能动。修=脚本写回前查 _dev_cam_moved, 开发者
+  自由移动期间跳过相机写回 (角色移动/跳跃不受影响; 重进播放复位)。
+- BUG2 编译版低 TPS 偶发闪黑 (TPS1=显示1s黑1s / TPS20=快闪; 源码无;
+  偶发, 重启即愈, 调 TPS 屏闪节奏跟随)。根因=paintGL 开头
+  detect_framebuffer() 信任"当前绑定" — 帧首 _on_tick 空窗 FPS 预画
+  (FPS 缓冲) 在 paintGL 之前做 GL 操作, 离屏 FBO 绑定残留 → detect 拿到
+  错 FBO → 整帧画到看不见处 = 黑屏一拍, 与逻辑帧节拍耦合交替 (编译版帧
+  时序 140FPS 与源码 60 不同更易踩)。修=①widget FBO 首帧 detect 后缓存
+  稳定复用 (_widget_fb), paintGL 不再每帧 detect ②预画 commit/abort 后
+  显式 use() 绑回 widget FBO (防御纵深)。
+- 验证: test_camera_control + dev_cam_free_move_check + 全量回归 EXIT=0。
+  编译版第 6 次重编落地 (仅 Loom, LoomHub 复用 — 用户流程定案: 以后只重
+  编修改过的 exe, 组装脚本改增量版保留现有 LoomHub)。
+- 探针: flicker_probe.py (编译版/源码 低TPS 连拍; 踩坑: 编译版读 exe 目录
+  自己的设置.json, 探针必须 base=exe 目录写设置 — 首轮实验全白跑)。
+﻿
+## 播放态相机统一 (2026-09-06 用户定案) + 指令实测通过
+- 用户定案: 播放态直接套用编辑态相机逻辑, 彻底删除双轨制。改动:
+  ①_update_camera 播放/编辑同一 WASD/QE/方向键分支 (全走 camera_target
+  平移+方向键转向), 删"播放态自由相机移 camera 本体"分支与 _dev_cam_active
+  接管状态机; ②滚轮统一推拉 camera_distance (删播放态推拉本体分支);
+  ③render 相机分支统一 apply_orbit_camera (预览除外), 删挂父相机盖回/
+  _dev_cam_moved 保护/开发者轨道三分支; ④scripts.py first_person/
+  third_person 删相机写回与 orbit_mode 切换 (双驱动源=历次开发者相机
+  BUG 总根); ⑤test_scripts 契约更新 (脚本不写相机)。
+- 实测 (playcam_probe.py 指令驱动+截图四连): 基线/target 推进/yaw90 转
+  向/distance 缩放/远移 全部实时生效无回弹无跳变; fps26 tps27.5 正常。
+- 性能差距根源定案 (用户问编译版为何落后): dist 无 .py 源码 (全编译,
+  排除解释执行假设); bench 同口径 源码59.8 vs 编译43.4FPS (1.38x),
+  aabbs 差 2x (6.08 vs 11.92ms, numba 冻结禁用) + 各阶段均匀 1.3-1.5x
+  = Nuitka 编译 numpy 调用层开销。结构性差距非 bug。
+- 频闪进展: 用户实测关 FPS 缓冲仍频闪 → 预画路径排除; widget FBO 稳定
+  缓存 (_widget_fb) 保留; 新增 LOOM_FLICKER_DEBUG=1 探针 (paintGL 逐帧
+  读回中心像素, 暗帧打印 buckets/alpha/vp_nan 状态快照) 待用户复现抓证。
+- 全量回归 EXIT=0。
+
+
+## ★编译版性能定基 + C 内核 DLL 双批落地 (2026-09-07, 用户拍板"一切以编译版为最终目标")
+- **原则定案 (用户)**: 所有优化以编译版为最终目标, 验收线=编译版 FPS; 源码
+  numba 只作上限参考。执行模式: 子代理落地+主线程验收 (子代理无上下文堆积
+  效率更高; 本日实证: C 内核代理五连断零产出被主线程收编自干, collide 代理
+  一次交付全闸门过 — 复活循环尽早止损改自干)。
+- **定基 (诊断代理测量+主线程收尾报告, 编译版性能定基报告_20260906.txt)**:
+  三侧对拍 (500混合播放态, TPS30 同口径): 编译 17.6FPS / 源码冻结 23.3 /
+  源码 numba 39.0。代理 FPS 公式 FPS=(1000−30×L)/R 三侧全部命中 (L=逻辑帧
+  耗时 26.4/24.9/21.9ms, R=渲染非逻辑 11.7/12.3/7.4ms)。
+  ⇒ **定案: ①播放态瓶颈 80% 在逻辑帧 (aabbs+collide_pairs 占 L 78-83%),
+  渲染/Qt 无辜 ②"Nuitka 编译 numpy 变慢"排除 (微基准双环境 ±10% 持平,
+  逐阶段倍率 0.71-1.14× 多数编译版更快) ③上轮 1.38×"结构性差距"推翻
+  (bench 口径假象) ④编译版账目: aabbs 18.5ms + collide_pairs 4.2ms 是
+  L 项两大头**。
+- **批1 = C 内核 DLL (主线程落地, C内核DLL落地报告_20260907.txt)**:
+  ckernels\loom_kernels.c+dll (MSVC /O2 /LD; f64 逐位直译 numba 算法;
+  串行+Win32 线程并行; 本机 MSVC OpenMP 前端坏 (最小样例 C3015) 弃用) +
+  fastpath.py 三级分派 C>numba>numpy + LOOM_NO_CKERNELS=1 逃生门。
+  bench (500×2035): C 并行 1.62ms / C 串行 5.18 / numba 参考 5.37 /
+  numpy B' 17.59 → aabbs 提速 3.4×。闸门: 对拍 ≤6.9e-14 / 50球 895FPS /
+  回归 EXIT=0×2。★numba 0.67.0 fastpath 模块级实例疑似反复重编病 (~5s/次,
+  既存问题; C 优先后 numba 退休)。MSVC 导出须 __declspec(dllexport)。
+- **批2 = collide_pairs C 化 (实施代理一次交付, collide_pairs优化报告
+  _20260907.txt)**: 取证 (collide_prof) 热量=候选段解释器开销 72% (提取
+  1.04+SAP扫描 0.95+yz 0.79), ancestry/精判仅 0.3ms 非热点。落地:
+  loom_kernels.c 新增 loom_collide_pairs (排序+扫描+yz+ancestry+精判一体
+  C 内核, aabbs 老内核未动) + fastpath collide_extract 向量化候选提取
+  (2×) + engine C 路分派/全局碰撞体数组延迟构建。**4.2→1.27ms (3.3×)**。
+  闸门: 对拍 (混合500 100/100 帧+随机×3 各 60/60 逐位一致+NO_SAP+逃生门) /
+  50球 866FPS / 回归 EXIT=0 / DLL 重编后 aabbs 对拍仍全过。主线程独立
+  复跑对拍+回归确认。
+  ★附带预存 BUG 修复: _prep_pairs 陈旧对跨播放会话/换场景派发 (IndexError/
+  虚假 on_collision_start) — editor.toggle_play×2+engine.load_scene 三处
+  与 _prep_sig 同址清缓存。
+- 遗留: SAP 回退段死代码 r_order/pos_in_r/xmns (0.04ms, 下批清) / 物理
+  桥"树数>31 轮转位"WARN (混合500 78 树, 位掩码语义, 未动)。
+- **编译版第 8 次重编**: 进行中 (增量流程仅 Loom; 含相机统一+speed 行+
+  sync_script_keys+ckernels DLL 投放)。预期: logic_step 26.4→~21ms,
+  播放态 16.4→35-40FPS 区间 (pipe_wait 8.8ms 犹在), compiled_verify.py
+  同口径验收。
+- **★编译版第 8-12 次重编 + 同口径验收 (compiled_verify, 混合500 TPS30 双缓冲关)**:
+  | 版本 | 播放态 | 编辑态 | aabbs | collide | 备注 |
+  | 8 | 22.7 | 145 | 21.2s | 1.4s | collide C 生效; aabbs 疑折叠(误) |
+  | 9 | 24.7 | 148 | 20.7s | 1.4s | 运行时包装(误判方向) |
+  | 10 | 25.5 | 154 | 19.0s | 1.4s | dict 中转(仍误判) |
+  | 10b | 16.7 | — | 19.8s | 4.4s | LOOM_NO_CKERNELS=1 反证: collide 翻转→DLL 全程正常 |
+  | 11 | 14.4 | 148 | 26.8s | 1.4s | np.stack 每帧 32MB 分配 = 倒退 (教训) |
+  | **12** | **25.9** | 155 | ~19s | 1.4s | 回滚原地写+tolist 解包, **收官版** |
+  **★真相定案 (三连假设全错后用反证实验实锤)**: aabbs C 内核第 8 版起一直
+  生效, 账目 14ms = C 内核 5.2ms + 组装段 ~9ms (vhN 逐行原地写, 零分配
+  前提下已近地板) — "账目不降=没走 C"是误读, C 收益被旧 numpy 账目里
+  内核+组装混计掩盖。16.4→25.9 = aabbs(净)+collide(净)+tolist 合计。
+- **★Nuitka 常量折叠系列实验 (全证伪, 但三个防御措施已留在代码里无害)**:
+  模块级 if 分派 / 函数体模块全局判断 / dict 中转三版实测无差异 → 本机
+  Nuitka 2.7.1 对 fastpath 这类"运行时才确定"模块的折叠并不发生 (或不是
+  aabbs 不降的原因)。dict 中转 (_CK['dll']) 与运行时包装保留 (防御纵深,
+  无性能代价)。
+- **★第 11 版 np.stack 倒退教训 (32MB/帧分配)**: 组装段原地写违反不得
+  违反项B1 grow-only 复用 — "向量化"不等于快, 每帧大分配 = page fault
+  风暴 (与 09-02 _w_np 缓冲复用教训同源, 重蹈)。
+- **收官数字**: 编译版播放态 16.4 → **25.9FPS (+58%)** / 编辑态 143→155;
+  TPS 30.01 精确。剩余堵点: logic_step ~19s (aabbs 组装段 ~9ms + pipe_wait
+  9.5s + collide 1.4s) / world_matrices 4.5s / shadow 族 4.4s。
+  用户实测验收 (A56) 待人工确认后备份。
+
+
+## ★批3 双优化 + 第 13 次重编: 追平源码冻结 (2026-09-07 收官II, 用户实测驱动)
+- **用户实测输入 (TPS20 口径)**: 源码 numba 64FPS / 编译版第 12 版 55FPS
+  → 差距 9 帧, 反推剩余=R 段 (编译 12.3 vs 源码 7.4ms/帧) + aabbs 组装段。
+- **批3A aabbs 组装段 gather 化 (实施代理, 报告 aabb组装段优化报告
+  _20260907.txt)**: 取证=分组按 V, 每组内仅 2~5 种唯一网格 (460 球=30 种
+  (radius,stacks,slices) 组合) → 方案 A 身份命中 (键=(gi,V,seq) 完整 vh
+  身份序列, 命中帧整段跳写; miss 帧 唯一行表+np.take clip 模式 out= C 级
+  gather)。三方案微基准: 逐行 3.07ms / **A 0.31ms (10.0×, 零分配)** /
+  每帧 gather 3.06 无收益 / fancy 临时 11.7+9.65MB 倒退。★两个深坑:
+  np.take 默认 raise 模式 out= 强制内部缓冲 (17.7ms, clip 消) / 纯 (gi,V)
+  键池分块碰撞 (交替 A/B 揪出 -3.6%, 序列键修复)。整机模拟冻结
+  15.8→7.6ms (2.1×)。对拍 18/18 (含 id 复用陷阱)。
+- **批3B 渲染 R 段 shadow 族 (实施代理, 报告 shadow族优化报告
+  _20260907.txt)**: 取证=_scene_light_bounds_par 1052µs 中 ab/cd 属性链
+  拆包循环 633µs (60%) 大头; buckets/interp=源码编译共有成本未动。
+  改动=三处纯加法: _aabbs_batched(out_rows=) 行表回填 (组装循环零改动,
+  与批3A 协作无冲突) / _scene_light_bounds_par(row_input=) 零拷贝列视图
+  / id(out)+n 配对守卫发布。shadow_bounds 1.18→0.53ms (2.2×)。
+  对拍逐位全过。
+- **第 13 次重编 (compiled_verify 同口径 TPS20)**:
+  | 环境 | 播放态 | 编辑态 |
+  | 编译版第 13 版 | **55.7** | **161** |
+  | 源码 LOOM_NO_NUMBA=1 (同探针) | 46.9 | 148 |
+  | 用户实测源码 numba | 64 | — |
+  **编译版超同算法源码冻结 +19%**; vs 源码 numba 64 剩余差距=JIT vs C
+  内核档差 (L 项 ~21ms 残余) + 无头探针口径偏保守。账目: aabbs 13.2s
+  / shadow_bounds 631ms (-60%) / collide 983ms / pipe_wait 9.2s (下一批
+  候选) / world_matrices 5.2s。
+- 用户实测验收 (A54-A56) 待人工确认 → 备份 → 发布。
+
+## ★播放态相机卡顿/运动模糊排查+修复 (2026-09-07, 用户报告 "55.7FPS@TPS20 物体流畅但相机一动就卡顿/模糊")
+- **主嫌疑证伪 (反证实验)**: "相机位姿挂逻辑帧 20Hz 台阶"不成立 — 双探针实锤:
+  (1)playcam_cadence_probe (固定节拍口径): target/VP 100% 渲染帧连续, 恒速
+  输入增量恒定 (spread 4.6e-16); (2)playcam_real_probe (真 Qt 循环 300 帧):
+  VP 变化 95%+ 帧且运动速率逐帧贴墙钟 (dt 5~29ms 帧速率恒定 0.0136 u/ms)。
+  相机链架构本就正确: _update_camera 每渲染帧跑 (Qt _on_tick 与 paintGL 同拍),
+  apply_orbit_camera 每渲染帧从 target/yaw/pitch/distance 合成, 不经 interp/
+  逻辑帧。_preframing 预画用的相机态与节拍帧一致 (相机输入在 _on_tick 后段
+  采集), 无重影源。interp_mode extrapolate 与相机无耦合 (相机不在插值平面)。
+- **真根因 (双峰实锤)**: 帧交付不均匀 — 逻辑帧落点帧 (steps=1) 整帧 22.5ms
+  vs 纯渲染帧 6.2ms (3.6x 双峰), 56% 相邻帧跳变 >1.5x; 相机全屏运动把帧长
+  方差放大成肉眼卡顿/模糊 (物体运动因 alpha 插值半帧落后而无此放大)。
+  TPS20 时每 50ms 逻辑帧 15.2ms 工作突发于单渲染帧 (advance 16.6ms)。
+  叠加 dt 时钟量化: time.time() 系统定时器 1ms 粒度 (无 timeBeginPeriod 机器
+  15.6ms) -> 相机速率逐帧 +-15% 抖动 + jitter 读数 15.8ms 即 15.6 量化伪峰。
+- **修复 (4 点, 全部最小 diff)**:
+  (1)dt 时钟 time.time->perf_counter: editor._update_camera 无参路径 / loom_gui
+     paintGL delta / engine run() / _update_fps+_last_frame_stamp (同源单调钟,
+     时间轴/alpha 语义零变化);
+  (2)physics_bridge._dirty_mask_batch 跨子步缓存: 判据=ids序+位姿平面+sync平面+
+     父链id拓扑 四键逐位相等 (任何写者必改其一->miss, 不依赖时序推理); 祖先传播
+     自 pre_step 内收进 dmb (传播闭包随缓存); 返回 dict 拷贝防污染;
+  (3)physics_pipe ensure_models 只在批次首子步跑 (x3->x1, 500 体签名重建
+     0.66ms x2 省);
+  (4)_local_matrices_batch 内联属性抓取代 _t3 (500 体 ~0.3ms)。
+- **效果 (混合500 TPS20 源码实测)**: 逻辑帧 15.2->12.5ms (-18%); advance 段
+  16.6->13.9ms (-16%); 重帧 22.5->19.4ms; 帧长 p90 26.4->21.4 / p99
+  32.6->25.7 / std 11.8->9.7; ensure 3->1 次/逻辑帧; dmb 缓存子步3 命中
+  (每逻辑帧省 ~2.6ms)。双峰比 3.6x->3.0x (残余=逻辑帧原子性, 再压需批4C
+  prep 前移管线重叠)。
+- **验证 (全绿)**: phys_dmb_equiv_check 12/12 (基础/传播/reparent miss/命中/
+  污染防护/边界) + phys_cache_bitwise_check (100 逻辑帧位形逐位一致 maxdiff=0)
+  + playcam_headless_check 17/17 (新增 P9 轻/重帧速率恒定契约锚 + P10 steps=0
+  反台阶锚) + playcam_cadence_probe 4/4 + playcam_probe 实机四连截图 ALL PASS
+  (TPS 30.05+-0.6 不冻结) + one_tps_check (相机独立 1200/1200) +
+  pause_step_check (NO_PIPE 同过) + pipe_check + fkey_chain + 全量回归 EXIT=0。
+- **探针资产 (常驻 tests/_tmp)**: playcam_cadence_probe / playcam_real_probe
+  (逐帧 CSV: t/dt/steps/adv/ren/相机位姿) / phys_dmb_equiv_check /
+  phys_cache_bitwise_check。已知既有问题: interp_check 探针在稳定备份区同崩
+  (GLEngine 桩缺 _tps_events, 与本批无关, 待修探针)。
+- **编译版**: 本批改动 (editor/loom_gui/engine/physics_bridge/physics_pipe)
+  均在 Loom 主程序 -> **编译版需重编** (增量: 仅 Loom, LoomHub 保留)。
+  FPS 预期收益: advance -2.7ms/逻辑帧 -> TPS20 下重帧 -3ms, 均帧长 -1.4ms。
+
+
+## ★批4A aabbs C 内核并行闸门校正 (2026-09-07 深夜, 落地代理)
+- **任务前提实测证伪 (重要定案)**: "播放态恒走串行 C 内核 par=0, 混合500 单组
+  n≈400 卡 512 闸门外" 半对半错 —— par=0 属实, 但**单组 n≈400 不存在**:
+  ①场景分组按 V: 混合500 = 7 组 (V=3015×100/2501×90/2035×90/1617×90/
+  1247×90 + cube V=24×40 + plane V=4), 最大组仅 100 行;
+  ②播放态 prep 走 _model_aabbs_par → 行级缓存 (批5) + FramePool 16 块分块 →
+  **每逻辑帧内核 50 次调用全部 n≤2 (池分块路径) / n≤6**, 累计仅 100 行
+  (aabbs_call_pattern_probe.py 实锤, 改前改后一致)。C 内核本体在播放态
+  占比 ~0.1ms/逻辑帧级, 闸门在播放路径**从未有触发机会**。
+- **微基准 (ckernels 直调, NT=9 Win32 线程, 预热 200-400 轮)**:
+  并行地板 ~0.9-1.0ms/调用 (CreateThread 税 ~0.5ms + 派发/join), 串行
+  ≈4.6ns × n×V。n=500×V=2035: 串行 4.64ms → 并行 1.43ms (**3.2×, 净收益
+  69%**); n=400×V=2035: 3.73→1.28 (**65.6%**); (100,3015): 1.33→0.98
+  (+26%); (90,1247): 0.51→1.03 (**-102% 倒退**); 小 n 全倒退 (n=64×2035
+  -64%, n=24 -315%)。**净收益>15% 临界 = n×V ≈ 0.26M row-vertices**;
+  n-only 闸门 (384) 会误开低 V 组 (384×cube V=24 → -1200%)。
+- **改动 (单点最小 diff)**: engine.py 闸门判据 n >= _AABB_PAR_MIN_MODELS(512)
+  → **n×V >= _AABB_PAR_MIN_WORK(300_000)** (新类常量, 微基准 0.26M 取整加
+  裕度, 宁保守); 旧常量保留 (探针兼容引用, 不再参与判定) + 注释/docstring
+  更新。生效面 = _aabbs_batched 单体路径 (LOOM_NO_PARALLEL / 池初始化失败 /
+  无池环境); 池分块路径每块 n≤31×V 组合不变。
+- **对拍 (aabbs_gate_check.py 新建常驻, 13/13 ALL PASS)**: C 串行 vs 并行
+  **逐位一致 maxdiff=0** (随机 n=400/450/500×2035 + (100,3015) 高V + 零矩阵/
+  单位矩阵/多层树1-7层合成/奇异矩阵/单模型边界) + 闸门行为三锚 ((100,3015)
+  n×V=301.5k 开并行 / (99,3015)=298.5k 不开 / (512,V=24)=12.3k 不误开) +
+  引擎输出并行档==强制串行档逐位。既有网: ckernels_val_check ALL PASS
+  (串行/并行 vs numpy 参考 rel ≤9.05e-14, n=64,V=1 项; 改前基线同值,
+  非本批引入; 本批对拍主线 = 串行 vs 并行逐位 maxdiff=0) / spin_gate_check
+  ALL PASS / shadow_val_check ALL PASS。
+- **实测 (混合500 TPS20, diag2_dual_matrix src_frozen 口径 ×2-3 稳态)**:
+  改前 FPS 73.2/75.0 → 改后 76.2/68.1/77.2 (噪声带内持平, TPS 20.1 精确);
+  aabbs stage 15.2 → 17.4ms/logic (带内)。无池 A/B (aabbs_gate_nopool_ab.py,
+  OLD=W=∞ vs NEW=300000 交替 3 轮): 124.93 vs 125.04 FPS (ratio 1.0009 —
+  本场景仅 (100,V=3015) 单组越闸, 收益 +0.26ms/帧被噪声淹没, 符合微基准
+  预期 ±0.1%)。同机播放态 FPS 不变 (播放路径不触发闸门, 零副作用实证)。
+- **收益定性 (诚实账)**: 本批对混合500 播放态**零收益** (闸门在播放路径
+  无触发机会; 前提里 "aabbs 5.2ms→2.5ms" 的 5.2ms 是无池单体口径, 播放态
+  实际不走)。真实收益场景 = 大模型数单组形态 (压测500球 stress 场景
+  500×2035 撞池分块单组 ~125 行×V=2035=0.25M 仍串行; >4K 顶点网格 ×100+
+  同组 / LOOM_NO_PARALLEL 环境)。核数 ≥2 线程摊得开的场景自动吃到
+  (判据与机器无关, 0.30M ≈ 1.4ms 串行 ≈ 并行地板 1.4×)。
+- **全量回归**: EXIT=0 (49 文件, test_integration 收尾, 含 test_parallel/
+  test_collision/test_physics 全绿)。
+- **编译版**: engine.py 在 Loom 主程序 → **编译版需重编** (增量, 仅 Loom);
+  预期收益 ≈0 (编译版播放态同样走池分块路径), 重编顺带即可不为此单独重编。
+- **探针资产 (常驻 tests/_tmp)**: aabbs_call_pattern_probe.py (内核调用形态
+  取证) / aabbs_gate_ab_probe.py (闸门三档交替) / aabbs_gate_check.py
+  (对拍网 13 断言) / aabbs_gate_nopool_ab.py (无池端到端 A/B)。
+- **后续建议**: 若要真吃并行档收益, 方向是池分块聚合 (同 V 组跨块合并成
+  大组再内核级并行) —— 属批4 新项, 未动。
+
+## ★M1 完成 — DLL 化战役设计定稿+开发脚手架 (2026-09-08 第三棒)
+- **验收三条全过** (详见 D:\my-project\M1验收报告_DLL化战役_20260908.txt):
+  ①无用户 DLL 完整运行 (2 官方条目 loaded=2/popped=0, LOOM_NO_DLL 三态实测);
+  ②对拍网 MVP 全 PASS (pipeline_prep_check 56/56, aabbs DLL vs 旧 Python 标量
+  逐位 maxdiff=0.0 四用例 n137/V37·n1/V1·n500/V2035·n0);
+  ③模糊测试全拦+自愈 (module_fuzz_check 20/20: badvector AV → ctypes OSError →
+  Minidump → pop_and_fallback → 官方顶回 → echo 逐位)。
+- **交付物**: core_components\loom_module.h (C ABI v1.0, LOOM_MODULE_INFO 104B) /
+  注册表格式与契约设计说明.txt (218 行规则权威) / registry.json (2 官方条目) /
+  module_loader.py 393 行 (机械层: 6 必需导出+magic/ABI 双口+严格 utf-8 身份+
+  provides/depends 枚举防呆+hot_reload+LOOM_NO_DLL) / module_registry.py 478 行
+  (策略层: 槽位模型+校0-校8+§7 回退矩阵+pop_and_fallback 自愈) /
+  探针靶 badvector.dll (0xC0000005) + ambiguous.dll (校6 歧义注入) /
+  build_all.bat 接线 (4 DLL + 9 探针)。
+- **对拍网 (tests\_tmp 常驻)**: module_contract_check 29/29 / module_registry_check
+  34/34 / pipeline_prep_check 56/56 / module_fuzz_check 20/20; 既有 5 探针
+  (ckernels_val/e2e/collide_val/aabb_f32/crash_reporter) 全不回归。
+- **全量构建**: build_all.bat EXIT=0 (4 DLL 编译零警告 + 9 探针全 ALL PASS);
+  真实 registry.json 哈希 8b07bc12ec0611a0… 验收前后未变。
+- **本棒修复 4 个真实缺陷** (module_registry.py): F1 官方条目 sha256 未比对
+  (校0 官方分支缺失 → 官方坏 DLL 可进进程); F2 sha 前置闸弹出未记账 (回退链
+  不可审计); F3 校6 冲突排序方向反了 (合法"保官方弃歧义"被误判为"双官方=
+  AssemblyError"); F4 provides_map 悬空/误删 (弹出注入方会删掉仍存活官方接口)。
+  探针侧另修: module_fuzz_check GBK 崩溃 + 子进程 stdout 编码不匹配。
+- **编译版**: 本棒改动全在 core_components/tests/build_all.bat, 未触及 Loom 主程序
+  .py → **无需重编** (M2 动 engine.py 时才需)。
+- **遗留**: 基座 engine.py 实际接线属 M2; badvector/ambiguous 打包同步必须排除;
+  build_all skip_checks 有一条无害 stderr 噪音 ('nels.bat' 误读, EXIT 仍 0)。
+
+## ★M2a 完成 — pipeline.dll 逻辑帧 prep 链 C 化 (2026-09-08 第四棒)
+- **验收结论** (详见 D:\my-project\M2a验收报告_pipeline_20260908.txt):
+  ①数值等价: 纯逐元素运算 (view/ortho 组装/场景包围盒/AABB 归约/点光 6 面) 与
+    engine 现行 Python 实现**逐位 maxdiff=0**; 矩阵乘法 (numpy BLAS 求和序)
+    ≤1 ULP 已钉死界; engine 真实方法体接线后 worst maxdiff=3.55e-15。
+  ②性能: 光源 VP 批量 n=501+3光源 **DLL 0.0783 ms/帧 vs Python 1.1015 ms/帧 (14.07×)**;
+    engine 接线口径 0.184 vs 1.201 ms (6.52×, 含方法体与 ndarray 转换开销)。
+  ③逃生门: LOOM_NO_PIPELINE=1 (接线层) / LOOM_NO_DLL='pipeline' (注册表层)。
+  ④回归: build_all.bat **EXIT=0** — 5 DLL 编译 + **14 探针全 ALL PASS**。
+  ⑤坏注入自愈: 非法 PE/sha 错/声明不符 → 弹出+enabled 回写+官方顶回;
+    官方坏 = AssemblyError (绝不静默降级); 运行期崩溃自愈链实证 (33/33)。
+- **交付物**: core_components\loom_pipeline.h (108 行, LOOM_LIGHT+4 函数+LOOM_PIPE_API)
+  / core_components\pipeline\loom_pipeline.c (372 行: scene_bounds/light_vps/aabbs
+  /shadow_prep/mat4_mul_ref) / build_pipeline.bat / pipeline.dll (10752 B 零警告)
+  / pipeline_glue.py (基座↔DLL 适配层: 惰性句柄+数据搬运+逃生门+静默降级)
+  / engine.py +_pipeline_light_vps() (_compute_light_vps 优先走 DLL, 失败回退)。
+- **对拍网新增 4 探针**: pipeline_val_check 15/15 (DLL 数值逐位) /
+  pipeline_base_check 15/15 (经注册表句柄数值+性能+逃生门) /
+  engine_pipeline_check 8/8 (engine 真实方法体接线) /
+  pipeline_fuzz_check 33/33 (坏注入自愈+畸形输入)。
+- **本棒修复 4 个真实缺陷**: D1 C 侧 scene_bounds 行主序矩阵乘写成列优先索引
+  (maxdiff 31.97, 被逐位对拍当场拦下 — "先建对拍网再动代码"的价值实证);
+  D2 热路径函数缺 dllexport (get_fn 找不到符号); D3 mat4_perspective 与 matlib
+  逐元素不一致; D4 pipeline_glue 缺 core_components 入 sys.path。观察项 D5
+  (越界 vis_idx 未返 LOOM_ERR_PARAM) 留 M2b 补边界校验。
+- **★边界裁决 (与总纲 M2 原文差异, 已写入设计文档 §2)**: 物理子步调度暂留
+  基座 Python — culverin (Jolt) 是 pybind11 绑定非 C ABI, pipeline.dll 无法直接
+  链接; 且其耗时在 Jolt 内部 (C++, 不占 GIL); prep 链 33.52ms/帧 才是 GIL 热点。
+  M2a 先吃收益最大、风险最小的一块; M2b = culverin C ABI 包装 + 物理入 DLL +
+  每核负载验收 (核0 67%→≤45%) + 真实场景端到端 100 逻辑帧对拍。
+- **编译版**: engine.py 已改 → **编译版需重编** (M2b 完成时一并)。
+- **遗留**: 端到端 100 逻辑帧与每核负载需真实图形环境 (引擎依赖 moderngl/pygame),
+  留 M2b; badvector/ambiguous 仍为探针专用靶, 打包同步必须排除。
+
+## ★M2 验收 — pipeline.dll 逻辑帧 prep 链 C 化 (2026-09-08 第四棒)
+- **验收对照总纲 §六 M2 五条** (报告: D:\my-project\M2验收报告_pipeline_20260908.txt):
+  ①端到端 100 逻辑帧对拍 **√** (pipeline_e2e_check 11/11: 501 模型双光源两模式
+    进程隔离; 全量 AABB 逐帧**逐位 0** / 碰撞对逐帧**逐位 0** / 光源 VP 数值摘要
+    worst_rel=0 — 矩阵乘法 1 ULP 已由 §4 口径覆盖)
+  ②每核负载 **△ 未达标** (prep 链已离主线程: 主线程每帧 CPU 6.64→5.20ms -21.7%;
+    但 Jolt 物理 + world_matrices + GL 提交仍在主线程 → 核0 ≤45% 属 M2b)
+  ③FPS **√** (同机同场景 120 帧 57.3 → 60.1 FPS +4.9%; 帧时间 17.464→16.637ms)
+  ④全量回归 **√** (build_all EXIT=0: 5 DLL + **15 探针全 ALL PASS**)
+  ⑤坏注入自愈 **√** (pipeline_fuzz_check 33/33: 非法 PE/sha 错/声明不符 →
+    弹出+enabled 回写+官方顶回; 官方坏=AssemblyError; 运行期崩溃自愈链实证)
+- **性能实测**: 真实场景 shadow_bounds **2.564 → 0.768 ms/帧 (3.34×)**;
+  单元级光源 VP n=501+3光源 **0.0783 vs 1.1015 ms (14.07×)**;
+  engine 接线口径 0.184 vs 1.201 ms (6.52×)。
+- **交付物**: loom_pipeline.h / pipeline\loom_pipeline.c 372 行 / build_pipeline.bat
+  / pipeline.dll (18432 B 零警告) / pipeline_glue.py (基座↔DLL 适配层) /
+  engine.py +_pipeline_light_vps() / registry.json +pipeline 官方条目。
+- **对拍网新增 5 探针**: pipeline_val_check 15/15 / pipeline_base_check 15/15 /
+  engine_pipeline_check 8/8 / pipeline_fuzz_check 33/33 / pipeline_e2e_check 11/11。
+- **本阶段修复 5 个真实缺陷**: D1 scene_bounds 行主序矩阵乘写成列优先索引
+  (maxdiff 31.97, 被逐位对拍当场拦下); D2 热路径缺 dllexport; D3
+  mat4_perspective 与 matlib 不一致; D4 pipeline_glue 缺 sys.path;
+  D5 越界 vis_idx 未返 LOOM_ERR_PARAM (留 M2b)。
+- **★数值口径两次校正** (已写入设计文档 §4): ①「包围盒逐位 0」首次是随机数凑巧
+  — numpy corners@view 在 ±50 坐标差 1.42e-14 (BLAS 求和序) → 确立「纯逐元素
+  运算逐位 0, 矩阵乘法 ≤1 ULP」并新增 mat4_mul_ref 钉死界; ②端到端光源 VP
+  逐帧指纹不一致 → 定位 5.55e-17 (1 ULP), AABB/碰撞对逐位一致 → 端到端口径
+  改为「VP 摘要 rel ≤1e-12, AABB/碰撞对逐位」。
+- **碰撞对决策**: SAP 内核 (loom_collide_pairs) 已在 ckernels 在线, 本阶段实测
+  其输出与 Python 段位 100 帧**逐位一致**, 故未重复搬移, 仅确认口径。
+- **遗留 (M2b)**: culverin C ABI 包装 + 物理入 DLL (核0 ≤45%) / vis_idx 边界校验 /
+  每核负载专用 CPU 采样探针 / **编译版重编** (engine.py 已改)。
+
+## ★M2 续 — world_matrices 入 pipeline.dll + 探针口径重写 (2026-09-08 第四棒第 3 轮)
+- **world_matrices C 化** (M2 链最后一环): `loom_pipeline_world_matrices`
+  = 局部 S@R@T (逐位对齐 scheduler.sched_wm_chunk) + 按 depth 升序父链合成
+  (对齐 engine.compute_world_matrices)。engine.compute_world_matrices 在
+  静止缓存未命中时优先走 DLL, LOOM_NO_PIPELINE=1 / 失败 → 回退 numpy 路径。
+  · 对拍 pipeline_world_check **7/7 ALL PASS** (n=1/5/64/501/1000 × 链长 1/6/12
+    + 全根 + 深链 199 层); 局部段缩放误差 2.2e-17, 世界矩阵全局缩放误差
+    7.4e-16 (n=501 链长 12) / 1.1e-15 (深链 199)。
+  · 性能 **DLL 0.090ms vs Python 0.771ms (8.57×)** (n=501)。
+- **★探针口径重写 (用户指出的架构问题)**: 旧 percore_check 用「单次
+  GetThreadTimes 差分算主线程 CPU%」—— 新架构下 prep 链已进 C DLL 并分摊到
+  worker 池, 主线程 CPU% 被帧率波动淹没 (同配置两次跑差 1-3 点, 甚至出现
+  "shadow_bounds 降 4× 但主线程 CPU 反升"的假象)。新口径 = **进程内每线程
+  CPU 绝对时间 ms/帧** (与帧率解耦) + 线程分类 (主线程/物理/池/sched) +
+  每核 busy 多窗中位数。
+  新口径实测 (500 mixed 300 帧): 主线程 5.260 vs 5.104 ms/帧 (持平),
+  进程合计 18.802 vs 19.427 ms/帧 (-0.625), shadow_bounds 0.594 vs 2.463
+  (-1.870), FPS 52.2 vs 50.7 → **帧时间 -0.57ms 与 shadow_bounds 差吻合**,
+  数据自洽 (旧口径的"主线程 -21.7%"是采样噪声, 已作废)。
+- **本轮修复 2 个真实缺陷**:
+  D6 `engine._pipeline_light_vps` 调 `pg.world_matrices(rot, scl, pos, ...)` 时
+     参数顺序写成 `(pos, scl, rot, ...)` → AABB 相对误差 3.2、collide_pairs
+     71ms/帧 (场景数值全乱); 被 pipeline_e2e_check 端到端对拍当场拦下
+     (worst_rel=3.21 + collide 异常放大), 修正后 11/11 全绿、性能恢复。
+  D7 探针 provides 硬编码 3 接口 → 新增第 4 接口后 4 个探针失败;
+     已同步 (val/base/fuzz/prep/accept1/registry_check 共 6 处)。
+- **口径随架构调整** (已写入报告): world_matrices 入 DLL 后 AABB 输入带
+  1 ULP 级差 → 端到端 AABB 由「逐位」改为「数值摘要相对 ≤1e-12」;
+  碰撞对仍逐位一致 (阈值判定吸收了 AABB 微差)。
+- **全量回归**: build_all.bat **EXIT=0** — 5 DLL + **17 探针全 ALL PASS**。
+- **遗留 (M2b)**: 验收② 每核负载 (主线程仍 5.26ms/帧, 需 culverin C ABI 包装
+  + 更多主线程段外包); vis_idx 边界校验 (D5); 编译版重编。
+
+## ★M2 验收② 同口径实测 — 每核负载基线对齐 (2026-09-08 第 4 轮)
+- **新探针 editor_core_check.py**: 复刻 TPS_FPS分核取证报告_20260907 的基线口径
+  (Loom.py --open 混合500 --agent → play on → 稳态 12s → measure_core_busy 每核
+  + GetThreadTimes 每线程 + agent engine_metrics FPS)。支持 --both 自检 (on/off
+  两子进程 + 对比 + exit 0/1)。
+- **同口径 A/B 实测** (编辑器+播放态, 12s 采样):
+    指标            ON (DLL)      OFF (Python)   差
+    最高核 busy     66.2% (核0)   67.9% (核2)    -1.7 点
+    主线程          62.7%         65.7%          -3.0 点
+    主线程每帧      8.038 ms      8.762 ms       **-0.72 ms**
+    FPS             78            75             +4.0%
+    进程合计        379%          184%           +195 点 (并行度提升)
+  基线 (2026-09-07): 核0=67% / 主线程 65.3% / 总 227% → 本棒 ON 档核0=66.2% /
+    主线程 62.7% / 总 379%。
+- **★结论 (验收② 仍未达标, 且已定位瓶颈)**:
+  DLL 路径收益真实可测 (主线程每帧 -0.72ms; 与 shadow_bounds -1.87ms 经 worker
+  分摊后一致; 进程并行度翻倍), 但**核0 未降**: 主线程每帧 8.04ms 中 prep 链
+  ON 档只占 ~0.6ms, 其余 = Qt 事件循环 + GL 提交 + Python 胶水 (interp/脚本/
+  dispatch) —— Qt 架构锁死主线程的部分, 搬 prep 链撼不动。
+  ⇒ 核0 ≤45% 需 ①culverin C ABI 包装 (物理调度离主线程, M2b)
+    ②渲染提交/胶水段外包 (需 Qt/Vulkan 层改动, 超出 M2 范围)。
+- **全量回归**: build_all.bat **EXIT=0** (5 DLL + 17 探针全 ALL PASS)。
+  editor_core_check.py 因启动编辑器两次 (~60s) 暂列为可选探针 (build_all 中注释)。
+- **暂停点状态**: M2 验收 ①③④⑤ 达成; ② 未达标 (数据与瓶颈已定量)。
+  遗留: culverin C ABI 包装 / vis_idx 边界校验 (D5) / 编译版重编 (engine.py 已改)。
+
+## ★M2 编译版收口 + D5 修复 (2026-09-08 第 9-10 轮)
+- **D5 修复** (vis_idx 越界): `loom_pipeline.c` 越界下标如实返回 LOOM_ERR_PARAM(-2),
+  不再吞成 rc=0/kind=-1; 退化方向语义保持 rc=0/kind=-1。实测: 合法[0,2,4]→rc=0/kind=0;
+  越界[0,2,99]→rc=-2; 负[-1,2]→rc=-2; 退化→rc=0/kind=-1。pipeline_fuzz_check 断言
+  收紧为必须 rc==ERR_PARAM。
+- **编译版重编完成** (第 9 轮; 纠正子代理两处错误):
+  ① 命令缺 `--nofollow-import-to=numba` → 实测编译 module.numba.*.obj, 11 分钟未出
+     dist; 中断+杀进程后改用正确命令。
+  ② `--include-module=module_registry` 报 "failed to locate module" (在 core_components
+     子目录非源码根) → 去掉 --include-module, 让 Nuitka 跟随 engine.py 的 import
+     (实测产物含 module.pipeline_glue.c)。
+  · dist\Loom.exe 27504640 B, 112 文件, **无 numba/llvmlite**;
+  · 组装脚本补 pipeline_glue.py 投放; 编译版 233 文件 / core_components 7 文件;
+  · SHA256 一致性 5/5 PASS; 靶排除自检 PASS (无 badvector/ambiguous); LoomHub 保留;
+  · 备份 D:\my-project\Loom(编译版)_备份_20260908 (225 文件)。
+- **★编译版内 pipeline 生效实证** (compiled_verify, TPS20 混合500):
+    pipeline ON : FPS mean 72.0 / min 67
+    pipeline OFF: FPS mean 66.5 / min 62   (LOOM_NO_PIPELINE=1)
+    ⇒ **+5.5 FPS (+8.3%)** — DLL 路径在编译版真实生效。
+- **全量回归**: build_all.bat **EXIT=0** (5 DLL + 17 探针全 ALL PASS)。
+- **验收② 判定**: 已定量论证不可达 (需降 2.718ms/帧, 主线程自身 8.038ms 已超目标;
+  物理早已在子线程 → culverin ABI 收益 ≈0; 三方案最优也只到核0 51-62%)。
+  杠杆在 Qt 事件循环 + GL 提交 + Python 胶水 (~7.4ms/帧) → 待用户定标。
+- **文档**: M2验收报告 §六 已更新; M2压缩点交接文档_20260908.txt 为最新恢复入口。

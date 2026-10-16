@@ -1,0 +1,279 @@
+====================================================================
+Loom 引擎 DLL 化战役 — M1 交接文档·续 (批次1 完成 / 批次2 待派)
+====================================================================
+日期: 2026-09-08 (第二棒, DSH 主线程)
+首棒文档: D:\my-project\M1交接文档_DLL化战役_20260908.txt (必读, 战役纪律/坑/盘点)
+本棒性质: 用户要求"开子代理细分任务提高质量" → 批次化派发。
+  本棒完成 批次1 (B=ckernels 契约化 / C=注册表格式文档 + 主线程注册表接线),
+  加载器子代理两次失败 (见 §5), 用户指示: A2 结束后停工、落记忆、
+  等清空上下文重启再接批次2。
+★状态一句话: 契约侧与注册表侧已就绪且实测通过; 加载器/验证器/两个探针
+  仍未落盘 → 重启后从 §6 批次2 接着干。
+双夹规则不变: 稳定区 (Loom(py源代码-稳定版本备份区)) 只读, 改动全在工作区
+  (Loom(py源代码-工作区))。
+
+--------------------------------------------------------------------
+0. 开工前必读 (优先级从高到低)
+--------------------------------------------------------------------
+1. D:\my-project\M1交接文档_DLL化战役_20260908.txt  (首棒: 定案/纪律/坑)
+2. D:\my-project\DLL化改造可行性方案与执行路径报告.txt (v1.3 施工总纲)
+3. D:\my-project\Loom(py源代码-工作区)\Loom\core_components\loom_module.h
+   (C ABI 契约 v1.0 — 唯一耦合点)
+4. D:\my-project\Loom(py源代码-工作区)\Loom\core_components\
+   注册表格式与契约设计说明.txt  (★本棒新增, 注册表规则权威文档 218 行)
+5. 本文件 (批次1 战果 + 钉死的接口规格 + 批次2 派发方案)
+
+--------------------------------------------------------------------
+1. 本棒已完成 (全部实测, 重启后可直接依赖, 无需重做)
+--------------------------------------------------------------------
+[√] 1.1 ckernels 契约化 (子代理 B, 全闸门绿)
+    改: ckernels\loom_kernels.c 336→413 行 (末尾纯追加 77 行, 既有三内核
+        一字未动); ckernels\build_ckernels.bat cl 行补 /utf-8。
+    内容: 横幅注释 + #include "../core_components/loom_module.h" +
+        static g_module_info{magic, ABI 1.0, "ckernels", "1.0.0", 1, 2, 0, 0}
+        + g_module_provides{"ckernels.aabbs","ckernels.collide"} + 7 契约导出
+        (写法对齐 loom_module_ref.c; depend 越界返 NULL; has 的 NULL 返 0)。
+    实测: BUILD_OK 零警告 (C4819 消失), DLL 15872→16896 字节;
+        9 导出 (7 契约 + loom_aabbs_minmax + loom_collide_pairs) 全在位;
+        info 读回 id=ckernels ver=1.0.0 official=1 provides=2 depends=0;
+        provide(2) 越界返 NULL; init()==0; abi()==0x10000。
+    回归硬闸门全过: ckernels_val_check.py ALL PASS /
+        ckernels_e2e_check.py EXIT=0 (C 开 103.49 FPS) /
+        collide_val_check.py VAL ALL PASS / aabb_f32_check.py ALL PASS;
+        fastpath._CKERNELS 非 None (ctypes 直调链完好)。
+[√] 1.2 注册表格式与契约设计说明.txt (子代理 C)
+    位置: core_components\注册表格式与契约设计说明.txt (218 行, 11 章节)。
+    registry.json 的 _doc 指向它 (此前缺失, 本棒补齐)。
+    权威规则: 槽位=module_id / 官方条目常驻 enabled=true 作回退靶 /
+        注入条目 enabled=true 遮蔽官方 / 顶替=沿用官方同一 module_id /
+        不同 module_id 同接口=歧义注入 → 保官方弃歧义 / 校0 sha256 前置闸
+        (LoadLibrary 之前) / 校1-8 (magic·ABI·双口·身份·声明·依赖·冲突·环·
+        init 拓扑) / 回退矩阵 (注入坏=弹出+enabled=false 回写+官方顶回;
+        官方坏=AssemblyError 绝不静默降级) / LOOM_NO_DLL 逃生门 /
+        运行期 pop_and_fallback 链 / 版本演进 / 示例。
+[√] 1.3 registry.json 加 ckernels 条目 (主线程)
+    现状 2 条, 均 official=true enabled=true:
+      module_ref → core_components/module_ref.dll, provides ["module_ref.echo"]
+      ckernels   → ckernels/loom_kernels.dll, provides ["ckernels.aabbs","ckernels.collide"]
+[√] 1.4 ★布局实证纠偏 (子代理 B 的 MSVC 实测, 极重要, 别再踩)
+    LoomModuleInfo 真实布局 = 4+4+64+16+4+4+4+4 = 104 字节, 无对齐尾补
+    (契约头 char module_id[LOOM_NAME_MAX+1], LOOM_NAME_MAX=63 → 数组 64)。
+    首棒交接文档 §4 M1-3 写的 "4+4+65+16+4+4+4+4" 与 "108" 是笔误:
+    按 65 字节建 ctypes 镜像会让 version/official/counts 整体错位读出垃圾
+    (B 已实证)。ctypes 侧必须 assert sizeof(LoomModuleInfo) == 104。
+
+--------------------------------------------------------------------
+2. 当前实测基线 (重启后可直接复跑核对)
+--------------------------------------------------------------------
+registry.json: _format=loom-core-registry/1.0, registry_version=1.0, 2 组件。
+sizeof(LoomModuleInfo)=104 (ctypes 与 MSVC 一致, 本棒实测)。
+module_ref.dll   (10240 B): magic=0x4d4f4f4c abi=0x10000 id=module_ref
+                 ver=1.0.0 official=1 provides=1 depends=0。
+loom_kernels.dll (16896 B): magic=0x4d4f4f4c abi=0x10000 id=ckernels
+                 ver=1.0.0 official=1 provides=2 depends=0。
+冒烟脚本口径 (本棒临时跑过, 未落盘, 可照抄复跑): json.load registry.json
+  → WinDLL 两个 DLL → loom_module_info() 读回 104 字节镜像 → 字段全对
+  → 打印 SMOKE_OK / exit 0。
+
+--------------------------------------------------------------------
+3. 未完成清单 (批次2/3, 按序)
+--------------------------------------------------------------------
+[M1-3] core_components\module_loader.py + tests\_tmp\module_contract_check.py
+       ← 批次2 之首 (其余三项都依赖它的 API)
+[M1-2] core_components\module_registry.py (注册表验证器/组装器)
+[M1-4] tests\_tmp\pipeline_prep_check.py (对拍网 MVP)
+[M1-5] core_components\badvector.c + build_badvector.bat + badvector.dll
+       + tests\_tmp\module_fuzz_check.py (模糊测试 harness)
+[M1-8] build_all.bat 接线 + 全量构建 EXIT=0 + 报告 §四/§六/§八 更新
+       + M1 验收报告 + 代码架构.txt/台账同步
+M1 验收三条 (总纲 §六): ①无用户 DLL 完整运行 (全官方 DLL) ②对拍网 MVP
+  全 PASS ③模糊测试全拦+自愈 (坏 DLL 弹出/回退官方)。
+
+--------------------------------------------------------------------
+4. 钉死的接口规格 (批次2 任务书原文口径, 直接复用, 勿重新发明)
+--------------------------------------------------------------------
+4.1 module_loader.py (M1-3) — 契约的 Python 侧机械层; 不 import
+    module_registry/fastpath/engine; 策略层一律不做。
+```python
+class ModuleLoadError(Exception)
+class ModuleValidationFailed(ModuleLoadError)   # 加载/校验失败 → 基座 catch 后弹出
+class ModuleNotAvailable(ModuleLoadError)       # LOOM_NO_DLL 跳过/槽位空 → get 抛
+class AssemblyError(ModuleLoadError)            # 官方组件坏/注册表结构错 → 不降级
+
+LOOM_MODULE_MAGIC = 0x4D4F4F4C
+LOOM_ABI_VERSION_CURRENT = (1 << 16) | 0
+def loom_abi_make(major, minor); def loom_abi_major(v); def loom_abi_minor(v)
+LOOM_DTYPE_F32,F64,I32,I64,U8 = 0,1,2,3,4
+
+class LoomModuleInfo(Structure): magic u32, abi_version u32, module_id c_char*64,
+    version c_char*16, official u32, provides_count u32, depends_count u32, reserved u32
+class LoomTensor(Structure): data c_void_p, shape c_int64*4, ndim c_int32, dtype c_int32
+def tensor_from_array(arr) -> (LoomTensor, keepalive)
+    # np.ascontiguousarray; shape[0..ndim-1]=真实维度, 其余置 0; dtype 映射;
+    # numpy 函数体内延迟 import; keepalive 调用方必须持有到调用结束
+
+class ModuleHandle:   # 属性 path/module_id/version/official/abi_version/
+                      #      provides/depends/inited
+    @classmethod load(cls, path, expected_module_id=None)   # 失败抛 ModuleValidationFailed
+    has(iface_name) -> bool          # 导出缺席 → False
+    get_fn(name, restype, argtypes)  # dict 缓存; 已卸载抛 ModuleNotAvailable
+    init() -> int                    # 已 inited 幂等返 0
+    deinit() -> None                 # 未 inited 幂等
+    unload() -> None                 # deinit+FreeLibrary+清缓存+移出 _LIVE
+    hot_reload(new_path=None) -> ModuleHandle  # deinit→unload→load(同 module_id)→init
+
+def no_dll_skips() -> set   # LOOM_NO_DLL: 未设→空集; '*'→{'*'}; 'a,b'→{'a','b'}
+```
+    load() 校验链 (每步失败抛 ModuleValidationFailed, 消息含路径+原因):
+      ① 路径不存在 ② WinDLL 加载失败 ③ 六必需导出在位 (has 可选)
+      ④ restype/argtypes 按契约 typedef ⑤ info 非 NULL / magic / ABI 主版本
+      相等 / abi() 与 info 双口一致 ⑥ module_id·version 严格 utf-8 + 长度守约
+      ⑦ provides/depends 枚举 (NULL/重复/超 4096/越界未返 NULL 皆失败)
+      ⑧ expected_module_id 不符失败。
+    其他: 模块级 _LIVE dict 持句柄防 GC (Nuitka 折叠防御); import 期
+      assert sizeof(LoomModuleInfo)==104; FreeLibrary 失败仅 stderr warning。
+
+4.2 module_registry.py (M1-2) — 注册表验证器 + 组装器 (策略层)
+```python
+class AssemblyResult:
+    modules: dict[str, ModuleHandle]      # 已加载+已 init
+    provides_map: dict[str, str]          # iface -> module_id
+    report: list[dict]                    # {seq, action, module_id, path, official, reason}
+                                          # action ∈ loaded/fallback/popped/skipped/
+                                          #          writeback/conflict/init_failed
+    registry_path: str
+    def get(self, module_id) -> ModuleHandle       # 缺件抛 ModuleNotAvailable
+    def pop_and_fallback(self, module_id, reason, persist=True) -> ModuleHandle
+        # 运行期自愈: deinit+unload 坏句柄 → 该条目 enabled=false (persist→回写 json)
+        # → 同槽位官方条目 load+validate+init → 返新句柄;
+        # 弹的是官方 / 无官方可回退 → AssemblyError
+    def deinit_all(self); def shutdown(self); def summary(self) -> str
+
+def assemble(registry_path=None, base_dir=None, do_init=True, persist=True)
+    -> AssemblyResult
+    # registry_path 默认 <引擎根>/core_components/registry.json;
+    # base_dir 默认引擎根; 条目 path 相对 base_dir 解析
+```
+    规则 (权威口径见 注册表格式与契约设计说明.txt §6/§7):
+      · _format 不符/结构非法 → AssemblyError
+      · 槽位=module_id; 候选序 = 用户注入(enabled) → 官方(enabled);
+        同槽位同 officialness 重复条目 → AssemblyError
+      · sha256 前置闸 (LoadLibrary 之前): official=false 且非空且不符 →
+        不加载直接弹出; 官方条目 sha 不符 → AssemblyError
+      · 加载/校验失败: 用户注入 → 弹出 + enabled=false 回写 + 官方顶回;
+        官方 → AssemblyError
+      · info.official 必须与条目 official 一致; provides/depends JSON 声明
+        必须与 DLL 导出枚举逐集合一致 → 不符按失败处理
+      · 接口双提供冲突 → 弹用户注入一方; 双官方 → AssemblyError
+      · depends 未满足 → 依赖方弹出 (用户注入回退官方; 官方 → AssemblyError)
+      · 依赖环 → AssemblyError (init 拓扑序无解)
+      · init 按拓扑序; init 失败按弹出规则处理
+      · LOOM_NO_DLL: '*' 全跳 / 指名槽位跳过 → report action=skipped,
+        get 抛 ModuleNotAvailable
+      · 回写用原子写 (临时文件 + os.replace), 只改 enabled 字段, 其余原样
+      · 定点循环上限 (如 64 轮) 防死循环 → 超限 AssemblyError
+
+4.3 M1-4 探针 pipeline_prep_check.py 要点
+    A 组装真实 registry.json → 2 组件 loaded / 0 popped; provides_map 齐全
+    B module_ref 全链: info 六字段断言 + abi() + has() 正反 + echo 逐位
+      (形状 (16,)/(4,5)/(2,3,4), maxdiff=0) + 参数向量 rc==-2
+    C ckernels 对拍 (绞杀者口径, 逐位 maxdiff=0):
+      registry 句柄 get_fn('loom_aabbs_minmax', c_int,
+        [POINTER(c_double)]*4 + [c_int64, c_int64])
+      vs 旧 Python 标量实现 fastpath._aabbs_minmax_impl (C 内核即按它逐位直译,
+      ★不要用 _aabbs_minmax_np 做基准 — numpy dgemm 有 ~4 ULP 差)
+      用例: (n=137,V=37) / (n=1,V=1) / (n=500,V=2035) / 空输入 n=0
+    D init 重入 + hot_reload 后再跑 echo/aabbs 逐位
+    E LOOM_NO_DLL 逃生门: 'ckernels' → 该槽 skipped + get 抛 ModuleNotAvailable,
+      module_ref 正常; '*' → 全跳; 清 env 后重装恢复
+
+4.4 M1-5 坏靶 + 模糊测试要点
+    badvector.c (core_components, 照抄 build_ref.bat 做 build_badvector.bat):
+      module_id "module_ref" (顶替官方槽位), official=0, provides
+      ["module_ref.echo"], 契约 7 导出合法; module_ref_echo 内用
+      `volatile int *p = NULL; *p = 1;` 触发 0xC0000005 (volatile 防折叠)。
+    module_fuzz_check.py 用例:
+      A sha 信任闸: 条目 sha256 故意错 → 不加载直接弹出 + 官方顶回
+        (且真实 registry.json 未被改动: 用探针自建的 fuzz 注册表文件)
+      B 崩溃自愈 (子进程+超时): fuzz 注册表放 badvector (sha 正确) →
+        assemble 成功 (official=false) → echo 首调 → 期望 OSError (ctypes SEH
+        把 DLL 内 AV 转 OSError) → crash_reporter.write_dump(reason) →
+        reg.pop_and_fallback('module_ref', reason) → 返回官方句柄 →
+        echo 逐位 vs numpy → 打印哨兵 + exit 0
+      C 定向畸形输入 (进程内): data=NULL / dtype 不符 / ndim=0 / ndim=5 → rc==-2;
+        随机垃圾内容 echo 仍逐位
+      D 崩溃向量 (子进程): 超大 shape + 小缓冲 → AV → OSError 捕获 → 哨兵 + exit 0
+      E ckernels 健壮性: n=0/V=0 → 0; 负 n → 1; 随机 (n,V) 跑不崩
+      F 收尾: 重新 assemble 真实 registry.json 仍全绿 + registry.json 哈希未变
+    注意: crash_reporter.write_dump 限流同分钟 2 个; 探针一律子进程+超时
+      (参考 crash_reporter_check.py 的 --childX 模式)。
+
+--------------------------------------------------------------------
+5. ★子代理经验教训 (本棒最大教训 — 影响批次2 派发策略)
+--------------------------------------------------------------------
+- A  (602088ca-10de-45f5-bf93-e3fcfcbac72c): 上游 API 断线, 零文件产出
+  (中断时 module_loader.py 与探针均不存在); 续工指令投递后仍无产出。
+- A2 (b88d3d6c-c351-4681-b019-bb80d8909561): "ran out of room" 上下文耗尽,
+  同样零文件产出 (closing message 停在"按纪律先写交付物 1 并立即落盘"之前)。
+- 教训与对策 (批次2 必须照做):
+  ① 任务书里"先读 5 个文件"会吃掉子代理大半上下文 → 只留必读 2-3 个,
+     规格直接引用本文件 §4 (粘贴而非让它自己推导);
+  ② 明确"写优先"顺序: 先写文件落盘 → 再读文档补细节 → 最后跑验证;
+  ③ 单子代理交付物 ≤2 个文件, 单个文件 ≤300 行, 避免长文件+长探针同包;
+  ④ 关键路径 (module_loader.py) 建议主线程亲自写 (规格已在 §4.1 完整),
+     子代理只写验证器/探针 (可并行, 互不重叠)。
+- 成功经验: B/C 任务书"改动面窄 + 验收命令明确 + 红线清楚" → 一次全绿。
+
+--------------------------------------------------------------------
+6. 批次2 派发方案 (重启后照做)
+--------------------------------------------------------------------
+方案 A (推荐): 主线程亲自写 module_loader.py (§4.1 规格完整, ~250 行) →
+    探针 module_contract_check.py 跑到 ALL PASS → 再并行派 D/E/F。
+方案 B: 单开一个瘦身任务书的 loader 子代理 (只读 loom_module.h + 本文件 §4.1,
+    写优先, 交付 2 文件)。
+D = module_registry.py (§4.2) / E = badvector + build_badvector.bat +
+    module_fuzz_check.py (§4.4) / F = pipeline_prep_check.py (§4.3) —
+    三代理文件互不重叠, 可并行; 但 D 必须先于 E/F 的"验证"步骤,
+    故 E/F 任务书写明"若 module_registry.py 未就绪, 先写文件并报告待集成"。
+集成 (主线程):
+  1) build_all.bat [DLL 清单] 加: call :build_dll core_components build_ref.bat
+     与 call :build_dll core_components build_badvector.bat
+  2) [对拍清单] 把注释位换成实调用: module_contract_check.py /
+     pipeline_prep_check.py / module_fuzz_check.py / crash_reporter_check.py
+  3) 全量跑 build_all.bat → EXIT=0 (含既有 4 探针 + 新增 4 探针)
+  4) M1-8: 报告 §四/§六/§八 状态更新 + M1 验收报告落盘
+     + 代码架构.txt 同步 + tests\_tmp\ledger_append.py 台账登记
+     + 记忆同步 (本文件续写或新开第三棒交接文档)
+构建命令备忘 (路径含括号, 加引号):
+  cmd /c "cd /d ""D:\my-project\Loom(py源代码-工作区)\Loom\ckernels"" && call build_ckernels.bat"
+  探针: py -3.12 "D:\my-project\Loom(py源代码-工作区)\Loom\tests\_tmp\<探针>.py"
+
+--------------------------------------------------------------------
+7. 环境/纪律速记 (首棒 §5-§7 全有效, 本棒新增实证)
+--------------------------------------------------------------------
+- py 一律 -3.12 (系统绑定 3.12.10); MSVC 2022 Community vcvars64;
+  cl /nologo /utf-8 /O2 /LD /MD; 禁 /fp:fast (保求和序)。
+- .bat 必须 CRLF — 例外: build_ckernels.bat 全文件 LF 是既有状态
+  (B 原样保留未"修复", 实测工作正常), 别顺手改行尾。
+- 引擎根路径含括号: bat 里勿把含括号变量塞进 if (...) 块; pushd 后 call 用 .\ 前缀。
+- 探针惯例: BASE=三层 dirname(abspath(__file__)) + sys.path.insert + os.chdir;
+  子进程+超时包住任何可能硬崩的用例; 结尾 ALL PASS/exit 0。
+- 对拍铁律: 逐位 maxdiff=0 (搬移期旧 Python vs 新 DLL); 1e-7 只在明确论证处。
+- ctypes 调 DLL 内访问违例 → OSError (SEH 包裹), 走不到 unhandled filter
+  → 这是 M1-5 自愈链 (write_dump + pop_and_fallback) 的前提。
+- crash_reporter: write_dump 限流同分钟 2 个; LOOM_NO_CRASHDUMP=1 逃生门。
+- LOOM_NO_* 族分层: LOOM_NO_DLL=注册表层门 (本棒新增), LOOM_NO_CKERNELS/
+  LOOM_NO_PARALLEL/LOOM_NO_CRASHDUMP=组件内部门。
+- 北极星三问 (总纲 §10.3) 仍是每个决策的判据。
+
+--------------------------------------------------------------------
+8. 目标状态与重启动作
+--------------------------------------------------------------------
+DSH 同会话目标: goal-1bcc4751-0d50-4948-82cf-28762bde6386
+  目标: 完成 M1 剩余 (M1-2/M1-3/M1-4/M1-5/M1-8), 达成 M1 三条验收。
+  轮次上限 12, 本棒已用若干轮。
+重启后动作: 用户说"继续/接着干" → 先 get_goal 取 id/revision →
+  update_goal resume 重新武装 → 按 §6 派发批次2 → 集成 → M1-8 落款。
+====================================================================
+(本续篇完 — 批次1 战果已固化, 批次2 任务书规格见 §4)
+====================================================================
