@@ -1,0 +1,82 @@
+﻿pygame 2.6.1 (SDL 2.28.4, Python 3.12.10)
+Hello from the pygame community. https://www.pygame.org/contribute.html
+PASS mask_of 空 -> 0
+PASS mask_of [0,1,2] -> 7
+PASS mask_of id>=64 放弃
+PASS mask_of id>=64 全放弃
+PASS 混合 is_hybrid=True
+PASS 混合 n_logical=12
+PASS 混合 process_mask = P 全掩码(0x00FF)  mask=0xFF
+PASS 混合 script_mask = 前2个P核(bit0,1)  mask=0x3
+PASS 混合 pool_mask = P减2 (0xFC)  mask=0xFC
+PASS 混合 预留核=2
+PASS 饥饿 不预留 (sc=0)
+PASS 饥饿 script_mask=0
+PASS 饥饿 process_mask 非空 (bit0)  mask=0x1
+PASS 均质18 is_hybrid=False
+PASS 均质18 process_mask = 全18核  mask=0x3FFFF
+PASS 均质18 script_mask = 最高2核(bit16,17)  bits=[16, 17]
+PASS 均质18 pool_mask = 16核  mask=0xFFFF
+PASS 均质4 不预留 (sc=0)
+PASS 均质4 script_mask=0
+PASS 均质4 process_mask=全4核
+PASS 空拓扑 全 0
+PASS id>=64 放弃绑定
+PASS 混合 id>=64 放弃绑定
+PASS 防锁死 process_mask!=0 (12核)
+PASS 防锁死 script_mask⊆process_mask
+PASS 防锁死 pool_mask⊆process_mask
+PASS 防锁死 pool_mask!=0
+PASS 防锁死 process_mask!=0 (4核)
+PASS 防锁死 script_mask⊆process_mask
+PASS 防锁死 pool_mask⊆process_mask
+PASS 防锁死 process_mask!=0 (18核)
+PASS 防锁死 script_mask⊆process_mask
+PASS 防锁死 pool_mask⊆process_mask
+PASS 防锁死 pool_mask!=0
+PASS 防锁死 process_mask!=0 (4核)
+PASS 防锁死 script_mask⊆process_mask
+PASS 防锁死 pool_mask⊆process_mask
+PASS 防锁死 process_mask!=0 (16核)
+PASS 防锁死 script_mask⊆process_mask
+PASS 防锁死 pool_mask⊆process_mask
+PASS 防锁死 pool_mask!=0
+PASS ScriptRunner 线程名+顺序  ['loom-scripts:0.0', 'loom-scripts:0.5', 'loom-scripts:1.0', 'loom-scripts:1.5']
+PASS ScriptRunner 异常回抛
+PASS ScriptRunner 异常后仍可用
+PASS ScriptRunner stop 后线程结束
+PASS current_process_mask 非空  mask=0x3FFFF
+PASS apply_process_policy 当前掩码成功(无操作)
+PASS pin_current_thread 当前掩码成功(无操作)
+PASS apply mask=0 -> False
+PASS pin mask=0 -> False
+PASS 批量矩阵 vs 逐模型 数值等价(含父链)  max_err=0.00e+00
+PASS 批量矩阵形状 (N,4,4)  (30, 4, 4)
+PASS 空列表批量矩阵
+PASS 向量化碰撞判定 vs 标量 逐位等价  mismatch=0
+PASS 并行碰撞检测 vs 内联 结果一致(含物体移动)  mismatch=0
+PASS _split_bounds 8->4 块
+PASS _split_bounds 10->3 块 (差<=1)
+PASS _split_bounds n==k 每块1
+PASS frame_workers 18核-2脚本-1主 = 8  n=8
+PASS frame_workers 4核 = min(8,4-0-1)=3  n=3
+PASS frame_workers 退化保底 1  n=1
+PASS map_indexed 顺序=串行 (工作窃取分块)  n=60
+PASS map_indexed 空 -> []
+PASS map_indexed 单worker = 串行
+PASS run_parallel 顺序
+PASS run_parallel 空 -> []
+PASS _model_aabbs_par 串行 = get_bounding_box 逐模型  mismatch=0
+PASS _model_aabbs_par 池分块 = 串行 (8核均摊路径)
+PASS _scene_light_bounds_par == 串行包围盒  diff=0.0e+00
+PASS _scene_light_bounds_par 空 -> None
+PASS measure_core_busy 返回 {核: 0..100 busy%}  [(0, 0.0), (1, 0.0), (2, 0.0)]
+PASS 调度器选中负载最低 P 核 (bit5, 避开 CPU1/bit1)  5
+PASS E 核不被选 (即便负载最低)  5
+PASS exclude_bits 排除 bit5 后选次低 P 核  0
+PASS margin 防抖: 差 20 < margin40 不迁移  5
+PASS margin 达标: 差 40 >= 15 迁移到 bit2  2
+PASS interval=0 仍做启动选核  5
+PASS interval=0 不启 watchdog 线程
+PASS interval=20 启 watchdog 线程
+总结果: ALL PASS ✅

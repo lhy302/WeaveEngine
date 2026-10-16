@@ -1,0 +1,13 @@
+﻿ckernels=ON numba=False
+pygame 2.6.1 (SDL 2.28.4, Python 3.12.10)
+Hello from the pygame community. https://www.pygame.org/contribute.html
+[parallel] 均质 | 逻辑核 18 (P 18 / E 0) | 脚本预留 2 核 | 进程亲和已应用 (mask=0x3FFFF)
+[parallel] 主线程锁定到负载最低的大核 #11 (启动锁一次, 不周期跳核)
+[parallel] 预计算池 8 worker (目标 8 核均摊, pool_mask=0xFFFF)
+models=501 lights=2
+  [物理] WARN 树数>31: 第 33 根树轮转位=0b1 (与其它树共用位 -> 其间不互撞)
+  [物理] WARN 树数>31: 第 34 根树轮转位=0b10 (与其它树共用位 -> 其间不互撞)
+  [物理] WARN 树数>31: 第 35 根树轮转位=0b100 (与其它树共用位 -> 其间不互撞)
+[物理] Jolt (Culverin) 物理桥已建立: 501 体
+[播放态] FPS=98.3 帧=10.17ms  scripts=0.00  physics=0.00  world_matrices=0.00  shadow_prep=0.00  aabbs=0.00
+98.35

@@ -1,0 +1,53 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.pyd
+.pytest_cache/
+*.egg-info/
+
+# ---- 原生二进制与编译产物（.c/.h/.bat 源码保留）----
+*.dll
+*.lib
+*.exp
+*.obj
+*.pdb
+*.ilk
+*.exe
+*.msi
+
+# ---- 运行时产物 ----
+崩溃日志/
+*.dmp
+*.log
+
+# ---- 运行时状态文件（含 token/pid，禁提交）----
+.agent_port.json
+**/.agent_port.json
+.hub_agent_port.json
+**/.hub_agent_port.json
+editor_state.json
+
+# ---- 截图/调试产物 ----
+**/保存/shot_*.png
+**/保存/_probe*.png
+**/tests/_tmp/_probe*.png
+
+# ---- 图谱/基准/诊断产物（可重建）----
+graphenium-out/
+**/graphenium-out/
+_bench_ws/
+_diag_brepro/
+
+# ---- 编辑器/助手配置 ----
+.claude/
+.codex/
+.mcp.json
+
+# ---- 备份文件 ----
+*.bak
+*~
+
+# ---- 构建目录 ----
+build/
+dist/
+*.spec

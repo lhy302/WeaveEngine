@@ -1,0 +1,147 @@
+====================================================================
+逻辑帧/渲染帧分离 — 实现报告 (2026-09-05 收官版)
+====================================================================
+会话: my-project-c2 (2026-09-05 全天); 全部改动在工作区
+Loom(py源代码-工作区)\Loom, 用户已复制存档点。
+上游设计: _engine_study\考察报告\{分离批1_2_实施设计.md,
+  分离批3_4_实施设计.md, 分离批5_6_架构重对齐.md,
+  诊断_播放态暴跌与GPU占用.md, 报告_无上限帧率调度优化调研.md}
+
+--------------------------------------------------------------------
+〇、架构终态 (一批话)
+--------------------------------------------------------------------
+逻辑帧 = 场景最高同步点 (用户裁决): 单 accumulator (core_clock.py,
+FixedStepClock), 逻辑 30Hz 可调 ('logic_fps' 设置), 物理为逻辑帧内
+自动子步 (N=ceil(fixed_dt/sub_dt) 编译期定常数; physics_fps 概念已撤,
+旧键兼容读 >=50 换算否则兜底 60Hz)。逻辑帧内段序 (批6 流水线):
+  脚本 → 连发物理子步(不等待) → 音频+动画(与物理C段真重叠)
+  → S1 等待(pipe.wait_pending) → _logic_prep → 事件派发 → 插值翻页
+渲染帧 = 纯显示: prep (aabbs/光源VP/碰撞对) 按逻辑帧缓存 (_logic_prep),
+渲染帧只派发+挂VP+插值+桶填充+GPU 提交; 插值只喂 _render_world 不回写
+逻辑状态 (R3); 静止帧全缓存命中。
+碰撞事件 = 每逻辑帧一次 (Unity OnCollisionEnter 在 FixedUpdate 后同义)。
+
+--------------------------------------------------------------------
+一、文件清单 (全部落地+验证)
+--------------------------------------------------------------------
+新文件:
+  core_clock.py       FixedStepClock 单 accumulator + step_once +
+                      set_fps + clock_from_settings/split_enabled
+  interp_state.py     prev/curr numpy 快照 + render_pose(alpha) 插值
+                      (pos/scl lerp + rot angdiff 跨±π; id 钉住 R6/
+                      grow-only R8/新增物体停泊自由行)
+  physics_pipe.py     v2 常驻物理线程 (pending 队列不丢步 +
+                      wait_pending 批量同步点; 超时 1s 永久降级;
+                      LOOM_NO_PIPE=1 逃生门)
+接线改动:
+  engine.py           _logic_frame(流水线版)/_physics_frame/advance_logic
+                      (编辑态零逻辑+F9暂停+F10步进+NO_SPLIT fallback)/
+                      compute_render_matrices/_logic_prep/
+                      _parallel_shadow_and_collision 瘦身/桶闸 pose 维/
+                      toggle_logic_paused/step_logic_once/get_tps/
+                      _pipe_post/_stop_phys_pipe/F9F10 键位/HUD
+  editor.py           render 拆段/toggle_play 边界/开发者相机 (_dev_cam_
+                      active 播放态右键接管)/F9F10 键位+toast
+  ui/loom_gui.py      paintGL +advance_logic/设置对话框 logic_fps 档
+                      (1Hz步进/20/30/45/60/120/跟随渲染)+即时生效/
+                      工具栏 ⏸暂停TPS+⏭步进1帧 按钮/状态栏 FPS|TPS
+                      双读数/_QT_TO_PG 补 F9/F10/F11
+  runtime.py          PlayerApp 首帧快照对齐 + prep 失效
+  guiloader.py        DEFAULT_SETTINGS logic_fps=30 (physics_fps 撤)
+  scene_driver.py     vk 路径同款时钟/插值/子步
+  vk_player/vk_renderer  draw 走时钟+插值; world_matrices(interp=)
+  physics_bridge.py   _dirty_mask_batch 批量脏检测 (9.8→2.2ms 4.4×)+
+                      祖先链数组化传播 + _local_matrices_batch SoA 批量
+                      (根体批量/有父逐体, 数值逐位同 R4)
+  build_entry.py      bench keys 补 logic_step/interp/pipe_wait
+
+--------------------------------------------------------------------
+二、性能账 (混合500场景 逻辑帧墙钟, 本机)
+--------------------------------------------------------------------
+起点 (批1-4 双accumulator+渲染帧prep)   ~40ms 逻辑帧, 播放态 25FPS,
+  用户机 8FPS (死亡螺旋: maximum_logic_delta=0.25 追7帧)
+批5_6 架构重对齐后                      42.6ms (账目: 物理 26.4 [3子步]
+  + aabbs 13.1 + pairs ~5 + VP 1.2)
+本轮三刀:
+  aabbs 行级矩阵指纹缓存  13.10 → 0.39ms (34×) — 键=(id(fw), stamp3+
+    visible_only, N), np.any(fw!=cache) 行级掩码, 静止行复用
+  pairs SAP 向量化块配对  ~21 → ~4ms — Python 逐体扫描 → 块64 numpy
+    (cmx_t > xmn_u 严格同精判, unique 吸收)
+  set_position SoA 批量  ~5.2/子步 → 批量 — _local_matrices_batch
+    (逐位同: 同公式同序; 有父体保留逐体路径)
+→ 逻辑帧 15.53ms (2.7×); 管线开渲染帧 14.23ms (70FPS级);
+  暂停纯渲染 4.88-5.9ms (170FPS级)
+零漂移守恒: V2 物理对拍 (150逻辑帧==旧300帧逐位) + 物理桥 12 测试 +
+  pipe_check (600步逐位) + aabb_par_check + 全量回归 EXIT=0 ×多轮
+
+--------------------------------------------------------------------
+三、功能清单 (用户新增需求全交付)
+--------------------------------------------------------------------
+F9/F10 (MC 同款): 暂停/恢复逻辑时钟 + 暂停态步进 1 逻辑帧; 按钮与
+  键位双入口; 暂停清 accumulator (恢复从整拍不补欠账); HUD/toast/
+  状态栏三处反馈。踩坑记录: ①advance_logic 与 engine.render 双路径
+  都要判定 (直调路径漏=暂停失效, pause_step_check 抓住); ②toggle
+  返回"新状态"被 if-True 吞 (恢复时按钮文字卡住); ③_QT_TO_PG 映射
+  表漏 F9/F10 (键被丢成 0, 按钮好使按键失效 — 新功能键必须同步此表)。
+状态栏 TPS 实测 (get_tps 2秒滑窗) — 用户需求 "FPS 旁直读逻辑时钟"。
+1Hz 步进档 (设置面板, clk.set_fps 运行中即时生效) — one_tps_check
+  三铁证: 10秒恰10帧 / 1190/1200 渲染帧 0.85ms / 分层 37×。
+开发者相机: 播放态右键按住=轨道相机接管 (WASD/滚轮), 松开回玩家。
+maximum_logic_delta 定案 0.333 (Unity 量级) + max_steps 自适应
+  (round(delta/fdt)); 0.05 过紧=世界慢动作 (实测踩坑); 0.25 太宽=
+  死亡螺旋 (用户 8FPS 根因)。
+
+--------------------------------------------------------------------
+四、架构审计结论 (用户判定标准: 逻辑帧主导, 渲染帧纯显示)
+--------------------------------------------------------------------
+达标 ✓: 脚本/物理/判定 (碰撞对检测+事件派发) 全部只挂逻辑帧;
+  渲染帧零游戏状态写入 (插值只喂 GPU); 输入快照渲染帧采集+逻辑帧
+  只读消费 (Unity 同款); vk 双端对称; 编辑态交互是编辑器功能非
+  游戏机制。无实质违规。
+
+--------------------------------------------------------------------
+五、无上限调度调研结论 (代理产出, 370行报告)
+--------------------------------------------------------------------
+双峰根因 = 逻辑帧原子性 (accumulator 只决定落点不摊成本)。
+TPS/FPS 非整数倍 (144Hz@30TPS): alpha 插值天然解决, 无需倍数档
+  (Panda3D M_integer 是唯一档位约束先例, 可选非必需)。
+后台逻辑线程预取: GIL 下不可行 (纯 Python 占大头, 收益<7%, 破坏
+  单写者纪律, 行业无先例)。extrapolate 外推可行 (a'=1+alpha 封顶
+  1.5, 落点帧回退插值) — 待落地。
+★Qt "无上限"实为 QTimer 1ms 限帧 (Windows 抖动) — 下一刀: 限帧器
+  校准 (Panda3D wait_until 混合等待: sleep 大段+忙等 4ms 收尾;
+  kivy 参数 MIN_SLEEP=5ms/UNDERSHOOT=4ms)。
+
+--------------------------------------------------------------------
+六、工作区清理 (417MB → 4.3MB)
+--------------------------------------------------------------------
+删: LoomHub.build 317.7MB + LoomHub.dist 77.5MB (Nuitka 中间产物,
+  dist 已组装进双编译夹) + __pycache__ + 28 张验证截图
+  (保存夹 shot_*.png 19 张 agent 实测 + tests/_tmp A/B 9 张)。
+核心文件完整性抽查通过。
+
+--------------------------------------------------------------------
+七、探针资产 (tests/_tmp 常驻)
+--------------------------------------------------------------------
+split_par_probe (4项确定性) / interp_check (6项插值) / pipe_check
+(W1 逐位+W2 超时) / batch5_par_probe (V2 物理对拍) / batch5_prep_probe
+(V3 缓存) / pause_step_check (F9F10 6项) / one_tps_check (三铁证) /
+decouple_check (解耦双峰) / fkey_chain_check (键链) / nosplit_logic_
+probe (逃生门逻辑) / qt_play_probe / gpu_probe / micro_probe×2 /
+buckets_probe / split_play_probe / stress_probe
+
+--------------------------------------------------------------------
+八、待办 (下一会话)
+--------------------------------------------------------------------
+1. 用户实测: 混合500 播放态 (逻辑帧 15.5ms×用户机系数 ≈ 39ms < 50ms
+   20Hz 预算, 预期脱离个位数 ~3× 于 8FPS); F9/F10 (重启后); 状态栏;
+   步进; 开发者相机
+2. 下一批候选: ①限帧器校准+帧长 std 观测 (调研方案一, ROI 最高)
+   ②extrapolate 外推模式 (方案二) ③prep 内部再砍 (VP/角点 numpy 层)
+3. 编译版重打包等用户指令 (compile-only-on-request); 重打包须验证
+   新文件 (core_clock/interp_state/physics_pipe) 进包
+4. 测试台账入账 (test-tally-new-feature 铁律): F9F10/TPS显示/1Hz档/
+   开发者相机 四项新功能未登记
+====================================================================
+(完) 2026-09-05; 配套: bench_result_对比台账.txt (全程数据)
+====================================================================

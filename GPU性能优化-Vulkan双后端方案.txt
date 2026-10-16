@@ -1,0 +1,147 @@
+====================================================================
+Loom GPU 性能优化 · Vulkan 双后端方案 (2026-08-28 用户拍板)
+====================================================================
+配套记忆: perf-optimization-task / dual-folder-workflow / loft-08-15 多核史。
+开发纪律: 双夹工作流 (只动工作区), 测试全绿才存档, 改动须过探针验证。
+
+--------------------------------------------------------------------
+一、任务总纲 (用户原话精神整理)
+--------------------------------------------------------------------
+1. 最大任务: 彻彻底底摆脱 Python 本身执行逻辑的极低效率。
+   ★ 但"摆脱"≠底层重构/自研内核: 是"尽可能用库生态绕过 Python 内部
+   极低效率语句"来实现性能飞跃 (Python 库生态吸引力大, 在 Python 基础
+   上利用好库生态最大化榨取性能)。
+2. 先从 GPU 渲染开始改。
+3. 引擎必须同时支持 Vulkan 和 OpenGL 两种调用 GPU 的计算方式。
+4. OpenGL: 保留支持即可, 不对其特性做深度调优。
+   Vulkan: 渲染底层优化逻辑优先考虑 Vulkan 特性极限优化。
+   通用算法优化 (与 API 无关的) 两个后端都能吃到的, 该咋做咋做。
+5. CPU 优化为 GPU 完工后的下一阶段 (见第六节流程铁律)。
+
+--------------------------------------------------------------------
+二、选型决策 (2026-08-28 夜, 已定稿)
+--------------------------------------------------------------------
+★ Vulkan 后端 = wgpu-py (wgpu 0.32.0) + GLFW 窗口 (rendercanvas 2.7)。
+
+候选库实测 (pip 查 PyPI + GitHub 活跃度):
+  - wgpu-py (wgpu 0.32.0)          ✅ 活跃, Rust 原生调 Vulkan/Metal/DX12,
+                                      Windows10+ Vulkan 开箱, 强制 VK 用
+                                      WGPU_BACKEND_TYPE=Vulkan。
+  - realitix/vulkan (1.3.275.1)    ❌ 半死库 (0 commit/90天, OpenSSF 2.1/10),
+                                      裸 Vulkan 全套管线全手写, 风险最高。
+  - vulkan-object (1.4.360)        ❌ 不是运行时绑定! 只是 vk.xml 注册表解析工具。
+  - vulkpy 0.0.8 / vkdispatch 0.1.0 / lava 0.4.1 / vkinline 0.3.7 /
+    pyvulkan 0.9 / chturne-vulkan 1.1  ❌ 玩具/死项目。
+  - Infernux / Whale Engine / HyperGL ❌ PyPI 无包 (仅 GitHub 项目),
+                                      只作架构参考不作依赖。
+  - pygfx 0.17.0                    ❌ 高层完整 3D 框架 (自觉场景图/材质),
+                                      与现有引擎冲突, 不用 (但可参考)。
+备注: "Vulkan 特性极限优化"在 wgpu 语义下 = 全覆盖 WebGPU 特性
+(实例化/间接绘制/MRT/深度+模板/compute 剔除/绑定组), 1050Ti (Pascal)
+本身无 mesh shader, 可用的 Vulkan 新特性本就有限, 丢得不多。
+
+--------------------------------------------------------------------
+三、技术验证结果 (2026-08-28 夜, 全部通过)
+--------------------------------------------------------------------
+探针 (tests/_tmp/):
+  - wgpu_vk_probe.py   : 适配器=1050Ti/backend=Vulkan/driver 582.66;
+                         compute WGSL 写 buffer 读回 [7,9,11,13] ✅;
+                         offscreen 128x128 画红 pixel(255,0,0,255) ✅。
+  - wgpu_glfw_probe.py : GLFW 表面 (bgra8unorm-srgb swapchain) 呈现 ✅,
+                         vsync off 持续模式 788 FPS / 1.27ms-1.44ms 每帧
+                         (画面=深灰 clear + 半屏渐变三角, 用户已目视确认)。
+
+★ wgpu-py 0.32 API 变更清单 (第 3 版坑, 换版本勿走老写法):
+  - wgpu.gpu.request_adapter() → request_adapter_sync(canvas=..., power_preference=...)
+  - adapter.request_device()  → request_device_sync()
+  - GPUAdapterInfo 是 dict 风格: info['device']/['backend_type']/['adapter_type']
+  - WGSL: @builtin(global_invocation_id) (勿用 global_invocation_index/invocation_index!)
+  - compute pass: dispatch_workgroups() (dispatch 已改名)
+  - TextureAspect.all (color 已改名); read_texture() 返回 memoryview (.data 无)
+  - rendercanvas 2.7: 窗口循环 = rendercanvas.glfw.loop.run() (AsyncioLoop 对象);
+    draw 回调 = canvas.request_draw(fn); present 由框架自动做 (勿调 ctx.present())
+  - context: ctx.get_preferred_format(adapter) (需传 adapter); configure(device=...)
+  - 强制 Vulkan: 环境变量 WGPU_BACKEND_TYPE='Vulkan' (在任何 wgpu import 前)
+
+--------------------------------------------------------------------
+四、双后端架构设计
+--------------------------------------------------------------------
+原则: 场景/组件/脚本/物理/并行 (逻辑层) 完全不动 —— 后端只负责"画"。
+
+  SceneLogic (现有 engine.py 场景/脚本/物理/并行, 零改动)
+        │  每帧: update(dt) → world 矩阵/AABB 缓存/灯光状态 (后端无关)
+        ▼
+  RenderBackend (新抽象接口)
+     - GlBackend: 现有 moderngl 代码迁入, 特性不再深调
+     - VkBackend: wgpu-py, WGSL shader, 优先极限优化
+
+后端接口面 (由引擎调用方 / renderer 层适配):
+  - 目标窗口/交换链 (GL: pygame/Qt 外部 ctx; VK: GLFW 表面)
+  - 顶点/索引缓冲 (numpy 连续数组上传)
+  - 实例绘制 (每物体 M 矩阵 → 实例缓冲区, 单次 draw 替换逐物体 draw!)
+  - 深度纹理 (阴影 pass)、渲染目标、采样器
+  - uniform 常量绑定 (相机 VP/L) —— VK 侧用 bind group 而非逐 uniform 上传
+  - 计算 shader 调度 (culling/皮肤/粒子 → 预留, compute 已验证)
+
+shader 策略: Vk 侧 = WGSL 单源 (与 GL 不共享 shader 文本);
+GL 侧 = 保持现有 GLSL 不动 (保底不深调)。共享的是"算法"不是 shader。
+
+引擎入口规划 (每帧): 【逻辑 update → 后端驱动渲染】
+  PlayerApp (播放器): Vk (wgpu+GLFW) 为主力, GL (pygame) 保底可切 (配置项).
+                     ★ 2026-08-28 用户拍板: 发布链窗口换 GLFW。
+  EditorApp (编辑器): 维持 Qt+OpenGL 不动 (性能需求低, Qt 内嵌 wgpu 是
+                     bitmap 回读拖慢; Vk 力量全投播放/发布路径)。
+                     ★ 用户拍板: 编辑器不上 Vk。
+
+--------------------------------------------------------------------
+五、里程碑 (2026-08-29 全部完成 ✅, 每步 = 探针/截图/全量回归)
+--------------------------------------------------------------------
+P0 已 ✓: wgpu 链路验证。
+P1 已 ✓: 最小渲染 (v1 版本后升级为 P4F 实例化架构)。
+P2 已 ✓ (P2F): 全光照+阴影 → **248.5FPS** (GL 基线 202FPS)；视觉 A/B
+   NCC 0.906；**front_face='cw'** (引擎绕序)、法线 CPU 逆转置 (逐位验证 0 误差)。
+P3 已 ✓: 中间层 scene_driver.py (脚本/动画/轨道相机, 后端无关) +
+   vk_player 入口化; bob 脚本差分 19812px 验证。
+P4 已 ✓ (P4F): 实例化批绘制+mesh 去重 (51 draw/51 bind → 2 draw/1 bind,
+   几何 51 buffer → 2) → **290.4FPS** (超 GL 基线 44%)；视觉 NCC 0.876。
+   ★naga 0.32 顶点属性限制: 实例输入仅标量/向量 (mat 声明被拒, 标量触发
+   inter-stage 误检) → 矩阵列拆 vec4 (loc3-6 world / 7-10 nm / 11 sat /
+   12 color 覆標), 属性表与 shader 严格 10 项同步; 颜色 per-instance
+   覆盖 (桶公共几何, 各物体色不同)。
+P5 已 ✓: 渲染 API 切换 — 设置键 render_api (guiuloader, 编辑器设置面板
+   "播放器渲染 API (默认)" 下拉) + 统一入口 run_player.py --backend
+   vulkan|opengl|auto (auto: Vk 失败自动回退 GL) + 发布链 game_player.py
+   (--backend 参数 exe 级覆盖 / 游戏配置.json render_api 字段 / 应用默认
+   值), pack 模式 scene_data dict 直喂。
+P6 结论: 编辑器不内嵌 Vk (Qt 内嵌 = bitmap 回读拖慢, 已实测), 维持 Qt+GL。
+
+基线与探针纪律 ([[probe-verify-runtime-data]] 铁律):
+  真数据运行循环 (非空场景), 核对 models 数, LOOM_PROFILE + 每线程 CPU +
+  GPU 利用率 (nvidia-smi 已并入 stress_probe)。压测场景 = tests/_tmp/
+  stress_50spheres.json (stress_scene.py 生成)。
+
+--------------------------------------------------------------------
+六、CPU 优化阶段 (GPU 完工后, 流程铁律 2026-08-28 补充)
+--------------------------------------------------------------------
+★ 触发条件: GPU 优化完成 → 用户指令后, 停下来先完整梳理 CPU 优化方案,
+  再逐个堵点替换清理, 绝不边干边想。梳理产物 = 本文档增补"堵点清单"。
+
+改写边界准则 (用户原话):
+  - 只改"哪怕 Nuitka 编译成 C/字节码后也消除不了"的低效语句:
+    动态类型/对象属性/列表容器/多核 GIL 等在 Nuitka 下照样差 C 的堵点。
+  - Nuitka 能优化到接近 C 的语句 (简单结构化循环/数值运算) = 能不改就不改。
+  - 修改范围严格限定"编译后执行效率仍远差于同逻辑 C 代码"的情况 = 消除堵点。
+  - 手段 = 换高性能库实现 (numpy 向量化/Numba JIT/wgpu compute/并行池…),
+    每条改完须与编译版对照验证, 不引入新依赖时先单库调研。
+
+每次修改流程 (危险操作红线):
+  1. 单次修改范围 ≤ 1 个堵点。
+  2. 改前: 全量测试绿 + (稳定版整夹备份已存在)。
+  3. 改中: 只在工作区动。
+  4. 改后: 全量测试 + 对应探针 + 真数据参照 → 绿才"稳定"。
+  5. 稳定 = 用户确认后存档 (工作区整夹覆盖稳定版, 双夹流转规则)。
+  6. 任何一步写毁 → 稳定版整夹回滚重来。
+  原因: 底层执行逻辑改动最危险, 稍有不慎代码全毁进度大倒退;
+  双夹提前独立正是为此, 单次小步 + 稳定存档保证每一次都有回头路。
+
+待办: GPU 完工后先补"堵点清单" (本文件第七节预留)。

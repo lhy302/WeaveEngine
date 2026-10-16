@@ -1,0 +1,18 @@
+﻿ckernels=ON numba=False
+pygame 2.6.1 (SDL 2.28.4, Python 3.12.10)
+Hello from the pygame community. https://www.pygame.org/contribute.html
+[parallel] 均质 | 逻辑核 18 (P 18 / E 0) | 脚本预留 2 核 | 进程亲和已应用 (mask=0x3FFFF)
+[parallel] 主线程锁定到负载最低的大核 #0 (启动锁一次, 不周期跳核)
+[parallel] 预计算池 8 worker (目标 8 核均摊, pool_mask=0xFFFF)
+models=501 lights=2
+  [物理] WARN 树数>31: 第 33 根树轮转位=0b1 (与其它树共用位 -> 其间不互撞)
+  [物理] WARN 树数>31: 第 34 根树轮转位=0b10 (与其它树共用位 -> 其间不互撞)
+  [物理] WARN 树数>31: 第 35 根树轮转位=0b100 (与其它树共用位 -> 其间不互撞)
+[物理] Jolt (Culverin) 物理桥已建立: 501 体
+冻结口径: n_all=501 n_vis=501 重复 N=2000
+[shadow_bounds 解构] 属性链ab/cd=633.3us  corners展开=103.3us  matmul+minmax=306.3us  整体=1052.3us
+[numpy行直填版] 整体=428.8us (省属性链+strided读取)
+[buckets] 重填=1101.2us  闸命中=13.6us
+[interp] compute_render_matrices=1225.6us
+[aabbs_batched n=501 全流程]=6948.5us
+完成

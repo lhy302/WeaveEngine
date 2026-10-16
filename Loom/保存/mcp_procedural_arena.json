@@ -1,0 +1,290 @@
+{
+  "version": "1.0",
+  "scene_name": "MCP_Procedural_Arena",
+  "ambient": [
+    0.2,
+    0.2,
+    0.25
+  ],
+  "objects": [
+    {
+      "name": "Arena_Floor",
+      "type": "plane",
+      "position": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        40.0,
+        1.0,
+        40.0
+      ],
+      "material": {
+        "color": "#2B3A4A",
+        "saturation": 0.8
+      },
+      "collider": {
+        "shape": "box",
+        "enabled": true
+      },
+      "rigidbody": {
+        "mass": 0.0,
+        "use_gravity": false,
+        "is_kinematic": true
+      },
+      "scripts": []
+    },
+    {
+      "name": "Player_Hero",
+      "type": "cube",
+      "position": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        2.0,
+        1.0
+      ],
+      "material": {
+        "color": "#33CCFF",
+        "saturation": 1.2
+      },
+      "collider": {
+        "shape": "box",
+        "enabled": true
+      },
+      "rigidbody": {
+        "mass": 1.0,
+        "use_gravity": true,
+        "is_kinematic": false
+      },
+      "scripts": [
+        "character_controller",
+        "reset_fall"
+      ]
+    },
+    {
+      "name": "JumpPad_North",
+      "type": "cube",
+      "position": [
+        0.0,
+        0.5,
+        12.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        3.0,
+        0.4,
+        3.0
+      ],
+      "material": {
+        "color": "#FFCC00",
+        "saturation": 1.5
+      },
+      "collider": {
+        "shape": "box",
+        "enabled": true
+      },
+      "scripts": [
+        "jump_pad"
+      ]
+    },
+    {
+      "name": "JumpPad_South",
+      "type": "cube",
+      "position": [
+        0.0,
+        0.5,
+        -12.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        3.0,
+        0.4,
+        3.0
+      ],
+      "material": {
+        "color": "#FFCC00",
+        "saturation": 1.5
+      },
+      "collider": {
+        "shape": "box",
+        "enabled": true
+      },
+      "scripts": [
+        "jump_pad"
+      ]
+    },
+    {
+      "name": "Elevator_West",
+      "type": "cube",
+      "position": [
+        -15.0,
+        0.2,
+        0.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        4.0,
+        0.5,
+        4.0
+      ],
+      "material": {
+        "color": "#00FF88",
+        "saturation": 1.0
+      },
+      "collider": {
+        "shape": "box",
+        "enabled": true
+      },
+      "scripts": [
+        "door_trigger"
+      ]
+    },
+    {
+      "name": "Elevator_East",
+      "type": "cube",
+      "position": [
+        15.0,
+        0.2,
+        0.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        4.0,
+        0.5,
+        4.0
+      ],
+      "material": {
+        "color": "#00FF88",
+        "saturation": 1.0
+      },
+      "collider": {
+        "shape": "box",
+        "enabled": true
+      },
+      "scripts": [
+        "door_trigger"
+      ]
+    },
+    {
+      "name": "PatrolGuard_Alpha",
+      "type": "sphere",
+      "position": [
+        -5.0,
+        1.0,
+        5.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "material": {
+        "color": "#FF3333",
+        "saturation": 1.4
+      },
+      "collider": {
+        "shape": "sphere",
+        "enabled": true
+      },
+      "scripts": [
+        "patrol_ai"
+      ]
+    },
+    {
+      "name": "PatrolGuard_Beta",
+      "type": "sphere",
+      "position": [
+        5.0,
+        1.0,
+        -5.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "material": {
+        "color": "#FF3333",
+        "saturation": 1.4
+      },
+      "collider": {
+        "shape": "sphere",
+        "enabled": true
+      },
+      "scripts": [
+        "patrol_ai"
+      ]
+    },
+    {
+      "name": "Center_Totem",
+      "type": "cube",
+      "position": [
+        0.0,
+        4.0,
+        0.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        2.0,
+        8.0,
+        2.0
+      ],
+      "material": {
+        "color": "#AA44FF",
+        "saturation": 1.1
+      },
+      "collider": {
+        "shape": "box",
+        "enabled": true
+      },
+      "scripts": [
+        "rotate"
+      ]
+    }
+  ]
+}

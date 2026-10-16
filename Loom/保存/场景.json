@@ -1,0 +1,412 @@
+{
+  "version": 10,
+  "camera": {
+    "target": [
+      2.8751020143609423,
+      2.564203545379638,
+      2.674080196758687
+    ],
+    "distance": 10.0,
+    "yaw": 4.469999999999967,
+    "pitch": -0.39000000000000057
+  },
+  "materials": [
+    {
+      "id": "6fdbf17a3cd0411997299e9c3e797ce1",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0
+    },
+    {
+      "id": "2e430750dba74c2296f589769a9c7906",
+      "name": "材质",
+      "color": "#FF5555",
+      "saturation": 1.0
+    },
+    {
+      "id": "a1185af997804a18adfb22a50debab0d",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0
+    },
+    {
+      "id": "0c2d01de54ec47ba96fb4120826d40ff",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0
+    },
+    {
+      "id": "285f8c6dfcb74198ac2328ce73f93a94",
+      "name": "材质",
+      "color": "#FF5555",
+      "saturation": 1.0
+    },
+    {
+      "id": "a34f007d944f40a3a23ac6fededa09ab",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0
+    },
+    {
+      "id": "fc2177f4d7d84094b45dc984d3cd42a9",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0
+    },
+    {
+      "id": "50b4338a509f4e0c9abda5cc657030e2",
+      "name": "材质",
+      "color": "#FF5555",
+      "saturation": 1.0
+    },
+    {
+      "id": "f84f701bcc0947a0b22ead4d73915711",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0
+    },
+    {
+      "id": "d8c9ebc1a787418cb6da7ae33726aa62",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0
+    },
+    {
+      "id": "39227a2bf9804d4f90bded7cf42788e7",
+      "name": "材质",
+      "color": "#FF5555",
+      "saturation": 1.0
+    },
+    {
+      "id": "9365119c59c541c6babe260fdcaef5fd",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0
+    },
+    {
+      "id": "a446f8a9887d4677b2a9fccd7552df71",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0
+    },
+    {
+      "id": "ef29061accef4f8a801759b9dcb45fc5",
+      "name": "材质",
+      "color": "#FF5555",
+      "saturation": 1.0
+    },
+    {
+      "id": "e2f6a4e3a9bc45d48408f850635f9f42",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0
+    },
+    {
+      "id": "042662aac0db4d698c9ef60e1bc90b4c",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0
+    },
+    {
+      "id": "ab10c7fff2b64629ae8d5bcd353d849f",
+      "name": "材质",
+      "color": "#FF5555",
+      "saturation": 1.0
+    },
+    {
+      "id": "aec0296b965e462e80855ba4c9c67ca2",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0
+    },
+    {
+      "id": "c71c242adccd4631bcaf51d4e90edf66",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0
+    },
+    {
+      "id": "06a1af0c92ad44539b6608896de403f4",
+      "name": "材质",
+      "color": "#FF5555",
+      "saturation": 1.0
+    },
+    {
+      "id": "098f3f5c74994162b3e068ae229e7b27",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0
+    },
+    {
+      "id": "a7c4fe6d874c43b68bf455e6026e8da4",
+      "name": "材质",
+      "color": "#55FF55",
+      "saturation": 1.0
+    },
+    {
+      "id": "34b5884d8b4f4baf9d60e17acc1d69cc",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0
+    },
+    {
+      "id": "dfc60e03b50449168db2f07d9e270b9d",
+      "name": "材质",
+      "color": "#FF5555",
+      "saturation": 1.0
+    },
+    {
+      "id": "c9be6b81ea394945926129d2d4ff1d18",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0
+    },
+    {
+      "id": "eefa2bf01d0a4f83842a4a115448f032",
+      "name": "材质",
+      "color": "#55FF55",
+      "saturation": 1.0
+    },
+    {
+      "id": "27f749cc08144420b9bd28d323df9bdc",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0
+    },
+    {
+      "id": "2de814daba6242e1b993797c36076cbd",
+      "name": "材质",
+      "color": "#FF5555",
+      "saturation": 1.0
+    },
+    {
+      "id": "0050a05dafb447e183fb4954e48a9c4b",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0
+    },
+    {
+      "id": "9db1974e88204db590e2fb332e47868d",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0
+    },
+    {
+      "id": "d11f14f448bc450ea56580aa1dd96281",
+      "name": "材质",
+      "color": "#FF5555",
+      "saturation": 1.0
+    },
+    {
+      "id": "ad52dfea741348e3b5432c013a439061",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0
+    },
+    {
+      "id": "b2da070896504175b5be46dc3f30ed81",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0
+    },
+    {
+      "id": "a014c42f07e94183b1f309cd05179e38",
+      "name": "材质",
+      "color": "#FF5555",
+      "saturation": 1.0
+    },
+    {
+      "id": "5532626898d34a3f924b472a5625d56b",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0
+    },
+    {
+      "id": "68cb288737974ee7b2e30cef2160b8b9",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0
+    },
+    {
+      "id": "8f495aa9cea544de926fff30b5d89fa7",
+      "name": "材质",
+      "color": "#FF5555",
+      "saturation": 1.0
+    },
+    {
+      "id": "b6e88811f09b46e7a5ca218d631bedb3",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0
+    },
+    {
+      "id": "2868a787d96f44cfa46b059c076a7877",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0
+    },
+    {
+      "id": "eac2cfe627bb4d0e984b3c03eb8bf6bb",
+      "name": "材质",
+      "color": "#FF5555",
+      "saturation": 1.0
+    },
+    {
+      "id": "b34560aaa0a54fcd8c6cd1d1ab5380f8",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0
+    }
+  ],
+  "lights": [
+    {
+      "id": "857393050c5949728dd4ea50e39974c8",
+      "name": "平行光",
+      "kind": "directional",
+      "position": [
+        0.0,
+        5.0,
+        0.0
+      ],
+      "direction": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "azimuth": 0.0,
+      "elevation": 0.0,
+      "roll": 0.0,
+      "color": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "intensity": 1.0,
+      "mode": "full",
+      "shape": "circle",
+      "size": 5.0,
+      "shadow": true
+    }
+  ],
+  "cameras": [],
+  "active_camera": null,
+  "objects": [
+    {
+      "id": "20d41d3fcc9c4d1a9f4a920aaa1a917f",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "平面",
+      "type": "plane",
+      "params": {
+        "width": 8.0,
+        "depth": 8.0
+      },
+      "position": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "color": null,
+      "material_id": "6fdbf17a3cd0411997299e9c3e797ce1",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "c7a93a3cfcd14a56913aeceec6895428",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "立方体1",
+      "type": "cube",
+      "params": {
+        "size": 1.5
+      },
+      "position": [
+        2.4621705555731292,
+        0.75,
+        0.3
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "color": "#FF5555",
+      "material_id": "2e430750dba74c2296f589769a9c7906",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "de36d823306041b7b2dc7e79977de265",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "球体",
+      "type": "sphere",
+      "params": {
+        "radius": 1.0,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        -1.541416681674232,
+        1.0,
+        0.5
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "color": null,
+      "material_id": "a1185af997804a18adfb22a50debab0d",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    }
+  ]
+}

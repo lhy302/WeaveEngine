@@ -1,0 +1,117 @@
+{
+  "module": "loom_physics",
+  "blocks": [
+    {
+      "block_id": "imports",
+      "category": "hoisted",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "c": "loom_physics.spec.c.dsl"
+        },
+        "code": {
+          "c": "loom_physics.c"
+        }
+      },
+      "symbols_defined": [],
+      "symbols_used": [],
+      "status": "confirmed"
+    },
+    {
+      "block_id": "test_raw",
+      "category": "emitting",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "c": "loom_physics.spec.c.dsl"
+        },
+        "code": {
+          "c": "loom_physics.c"
+        }
+      },
+      "symbols_defined": [],
+      "symbols_used": [],
+      "status": "confirmed"
+    },
+    {
+      "block_id": "pre_step",
+      "category": "emitting",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "c": "loom_physics.spec.c.dsl"
+        },
+        "code": {
+          "c": "loom_physics.c"
+        }
+      },
+      "symbols_defined": [],
+      "symbols_used": [],
+      "status": "confirmed"
+    },
+    {
+      "block_id": "post_step",
+      "category": "emitting",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "c": "loom_physics.spec.c.dsl"
+        },
+        "code": {
+          "c": "loom_physics.c"
+        }
+      },
+      "symbols_defined": [],
+      "symbols_used": [],
+      "status": "confirmed"
+    },
+    {
+      "block_id": "substep_loop",
+      "category": "emitting",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "c": "loom_physics.spec.c.dsl"
+        },
+        "code": {
+          "c": "loom_physics.c"
+        }
+      },
+      "symbols_defined": [],
+      "symbols_used": [],
+      "status": "confirmed"
+    },
+    {
+      "block_id": "module_abi",
+      "category": "emitting",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "c": "loom_physics.spec.c.dsl"
+        },
+        "code": {
+          "c": "loom_physics.c"
+        }
+      },
+      "symbols_defined": [],
+      "symbols_used": [],
+      "status": "confirmed"
+    },
+    {
+      "block_id": "test_block",
+      "category": "emitting",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "c": "loom_physics.spec.c.dsl"
+        },
+        "code": {
+          "c": "loom_physics.c"
+        }
+      },
+      "symbols_defined": [],
+      "symbols_used": [],
+      "status": "confirmed"
+    }
+  ]
+}

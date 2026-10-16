@@ -1,0 +1,15 @@
+﻿pygame 2.6.1 (SDL 2.28.4, Python 3.12.10)
+Hello from the pygame community. https://www.pygame.org/contribute.html
+[PASS] row_input 直喂 == 旧属性链 (n=1) 逐位 
+[PASS] row_input=None 回退 == 旧 (n=1) 逐位 
+[PASS] row_input 直喂 == 旧属性链 (n=7) 逐位 
+[PASS] row_input=None 回退 == 旧 (n=7) 逐位 
+[PASS] row_input 直喂 == 旧属性链 (n=501) 逐位 
+[PASS] row_input=None 回退 == 旧 (n=501) 逐位 
+[PASS] 空 aabbs -> None 
+[PASS] 空 aabbs + rows -> None 
+[PASS] _aabbs_batched out_rows 行序==out 列表 (visible_only=True) shape=(80, 6)
+[PASS] _aabbs_batched out_rows 行序==out 列表 (visible_only=False) shape=(80, 6)
+[PASS] fw 不全兜底行回填 (out==rows 逐位) 
+[PASS] 混合500 全链 (batched行表->可见过滤->row_input) == 旧 逐位 
+结果: ALL PASS

@@ -1,0 +1,34 @@
+{
+  "projects": [
+    {
+      "name": "_m3_100obj",
+      "scene": "Loom/保存/_m3_100obj.json",
+      "version": null
+    },
+    {
+      "name": "_m3_noshadow",
+      "scene": "Loom/保存/_m3_noshadow.json",
+      "version": null
+    },
+    {
+      "name": "压测500混合",
+      "scene": "Loom/保存/压测500混合.json",
+      "version": null
+    },
+    {
+      "name": "压测500球",
+      "scene": "Loom/保存/压测500球.json",
+      "version": null
+    },
+    {
+      "name": "压测50球",
+      "scene": "Loom/保存/压测50球.json",
+      "version": null
+    },
+    {
+      "name": "场景",
+      "scene": "Loom/保存/场景.json",
+      "version": null
+    }
+  ]
+}

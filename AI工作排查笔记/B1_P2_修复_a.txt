@@ -1,0 +1,173 @@
+# B1 物理换库 P2 修复记录 a (2026-08-30, 用户实测 4 问题)
+
+- 日期: 2026-08-30 (修复子代理)
+- 范围: 全部改动只在工作区 `D:\my-project\Loom(py源代码-工作区)`; 稳定版本备份区未触碰。
+- 环境: 系统 py3.12 + culverin 0.14.0 (桥真实激活, 与 P2 落地说明相同)。
+- 结论速览: **P1 修复生效 (标定 K=23, 3m/s 起滚 3.98s 停) / P2 防御性修复已上
+  (实测未复现但机制廉价且零回归) / P3 修复生效 (单组显示+滚动摩擦行) /
+  P4 三途径复现全部阴性, 四项候选全排除 (诊断工具留存)。**
+
+---
+
+## P1 滚动摩擦没生效 (球滚起来停不下来)
+
+**根因 (实测确认)**: culverin 0.14.0 **没有原生滚动摩擦/角阻尼**:
+- `create_body` 合法关键字实测 (TypeError 列出可取集): pos/rot/size/shape/motion/
+  user_data/is_sensor/mass/category/mask/**friction**/**restitution**/material_id/ccd
+  —— 无 linear/angular_damping/rolling_friction。
+- `_culverin_c.pyi` 321 行: `linear_damping` 只属于 `create_soft_body`;
+  496-497 行: `set_linear_damping`/`set_angular_damping` 被**注释禁用**。
+- Jolt 摩擦模型对纯滚动球不做功 (接触点无滑动 → 库仑摩擦无效应) —— 实测
+  `rolling=0(关闭)` 时球滚 8s 仅 3.0→1.4 m/s, 几乎永不停 → 用户"停不下来"成立。
+
+**修复 (桥内实现, physics_bridge.py)**:
+1. 新字段 `rolling_friction` (默认 0.1, 范围 0-3, 0=关闭): ColliderComponent/
+   RigidbodyComponent (engine.py 396-409 / 423-434 / add_rigidbody 766-773)。
+2. 检查器新行 "滚动摩擦" (与摩擦系数/弹性同控制组): loom_gui.py 1770-1791。
+3. 序列化/快照: sceneio.py `collider`/`rigidbody` dict 加 `rolling_friction` 键
+   (105-118 / 191-199 / 215-223; 旧文件缺键 → 缺省 0.1, 兼容); undo.py 快照
+   第 5 槽 (collider) / 第 6 槽 (rigidbody), apply_snapshot 旧 2/3/4/5 元兼容
+   (42-52 / 86-100)。
+4. **衰减公式** (post_step 878-951): 对清醒 (is_active) DYNAMIC 体:
+   ```
+   f  = max(0, 1 - mu * rolling * K * dt)      # K = 23.0 (标定)
+   ω *= f   (全分量);   vx/vz *= f   (仅水平, vy 不碰——不影响下落/弹跳)
+   ```
+   - `mu` = 物体自身摩擦系数 (动态体=rb.friction) —— 与用户"滚动摩擦与 μ 相关"
+     需求对应: 摩擦越大滚筒停得越快 (衰减率 = rolling × μ × 23)。
+   - Jolt 接触侧继续用 pair 组合 (sqrt(μ1·μ2)) 管滑动/推挤, 桥只补"滚动阻力"。
+   - **不防睡眠**: 仅 `|ω| > 0.06 rad/s` 才写回; 阈值以下停写 → Jolt 自然入睡 →
+     post_step 睡眠体速度归零兜底 (active 计数红利保留)。
+5. 附带修: `_entry_signature` 数值字段 bool() 改 float() (626-641) —— 原 bool()
+   使 0.5 vs 0.2 摩擦改动画等签名 → 播放中改摩擦不重建体 (真 bug, 同函数内顺手修)。
+
+**标定数值 (roll_calib_probe.py, r=0.5 球 / μ=0.5 / 平地面, 60fps)**:
+| 场景 | 实测停止时间 | 说明 |
+|---|---|---|
+| rolling=0.1, μ=0.5, v0=3 m/s | **3.98 s** | 目标 2-4s ✓ (K=23) |
+| rolling=0.1, μ=1.0, v0=3 m/s | 1.98 s | μ↑ → 更快 ✓ |
+| rolling=0.5, μ=0.5, v0=3 m/s | 1.37 s | rolling↑ → 更快 ✓ |
+| rolling=0 (关闭) | 不停 (0.75s 后仍 2.06 m/s) | 关闭语义 ✓ |
+| rolling=0.1, μ=0.5, v0=1 m/s | 2.50 s | 慢速也停 ✓ |
+| 停后 | active=0 | 睡眠红利保留 ✓ |
+
+---
+
+## P2 碰撞器开了物体浮空完全不动
+
+**复现调查 (实测反证, 坦白记录)**: 三途径均**未复现"浮空不动"** ——
+- bridge 直测 (p2_float_probe.py): 新动态体 (场景同型: 地面顶 -2 + 玩家盒 y=0)
+  帧 0 即 active=True, 正常下落落定。
+- EditorApp 真 GL + 跳台试炼播放 (p2_editor_probe.py, 含 first_person/count_touch
+  脚本): 玩家 y=0→-1.619 落定, active 1→0, 播放结束快照还原 y=0.000。
+- Qt 真窗口 10 轮播放: 每轮 玩家 y→-1.34~-1.37 (下落中) ✓。
+- 推断: "新体初始即入眠" 只是**假设** (任务书重点假设), 本环境 culverin 将新体
+  直接入活跃集; 用户现象可能由 (a) 其当时场景的其它组件组合, (b) 其它环境因素
+  触发。**仍需保留本修复**: 机制廉价、零回归, 且覆盖"以睡眠态入世"的边缘
+  (culverin 文档明确 is_active 对 PENDING 体返回 False / 重力=0 时 Jolt 可在建体后
+  立刻入眠的版本差异)。
+
+**修复 (防御性, physics_bridge.py)**:
+1. `_build_one` (675-698): DYNAMIC + use_gravity 体建后立即 `w.activate(h)`
+   (culverin 文档: 对 PENDING_CREATE 兼容, 命令排队到下次 step 生效)。
+2. `pre_step` (783-845) 激活保底: 每帧 `guard_left -= 1`; 建体后 **90 帧 (1.5s @60fps)**
+   内、且体睡眠 (`is_active=False`)、且**从未被脚本/碰撞碰过** (`|v|<1e-3`, 无活动
+   速度) → `w.activate(h)` + **当帧手动累加重力一次**。一旦该体被观测到清醒过一次
+   (或脚本写过速度) → guard 清零, 此后**永不触碰** → 目标"落定后仍能自然入眠"
+   不受影响 (防抖设计: 不是"永远醒着", 而是 90 帧保底窗口)。
+3. use_gravity=False 动态体不激活 (悬浮体由脚本/碰撞天然唤醒, 不耗 CPU)。
+
+**验证**: 用例 11 (test_physics_bridge.py): 球 5m 下落 6s 后 active=0 + 位形稳定
+(保底不防眠断言); EditorApp 复测前后数值**逐位一致** (-1.619 / active=0) —— 零回归。
+GUI 10 轮每轮下落正常 (p4_smoke_out.txt)。
+
+---
+
+## P3 摩擦选项有两个
+
+**根因**: P2 把"摩擦系数/弹性"同时放进 碰撞体区 (静态/运动学体用) 与 刚体区
+(动态体用); 同一物体两侧各显示一组 → 用户困惑"到底哪组生效"。
+
+**修复 (loom_gui.py 1765-1791)**: **单组显示** switch:
+- 物体有 rigidbody → 只显示刚体组 (摩擦系数/弹性/滚动摩擦, 写 rb.*);
+- 无 → 只显示碰撞组 (写 col.*)。
+- 数据仍双通道 (桥 `_build_one`: 动态体用 rb 值, 否则 col 值), 序列化保持两键
+  (实际三键) 缺省兼容 —— 旧文件不变。
+- `_sync_inspector_values` 补 col.roll/rb.roll 回读键 (2156/2162)。
+- 撤销/即时写回走既有 _spin → edit_model 协议, 无新路径。
+
+**验证 (p3_inspector_probe.py, 真 Qt 窗口, ALL PASS)**: 刚体对象只显示 rb 组三键
+(无 col 组); 非刚体只显示 col 组三键 (无 rb 组); **真实 DragBlock 拖拽路径**:
+聚焦"滚动摩擦"行 → 拖拽块按住拖动 45px (步长 0.05) → 0.1→2.35 即时写回 →
+撤销回 0.1 → 重做回 2.35 (undo/redo 完整协议)。
+
+---
+
+## P4 停播弹窗风暴 ("按下播放后停止播放弹出一堆小窗口然后快速关闭")
+
+**复现记录 (三途径, 全部阴性 + 候选排查)**:
+1. **Qt 真窗口 10 轮** (qt_play_stop_probe.py: LoomGUI+跳台试炼场景,
+   QTimer 播放 2s→停止×10, PYTHONFAULTHANDLER=1): **0 未捕获异常**;
+   EnumWindows 轮询线程捕获全部"新顶层窗口" 16-17 个 —— 全部为环境桌面前置窗口
+   (360浏览器/QQ/任务管理器/NVIDIA GeForce Overlay CE-OSC/Chrome 辅助窗口等,
+   属首次枚举基线, 无一个由 Loom 产生、无一个"弹出一堆快速关闭")。
+2. **EditorApp 真 GL + toggle_play ×2** (同 test_integration 7.8/7.9 路径): 通过、
+   无异常。
+3. **静态体被脚本移动** (p4_static_move_probe.py: 静态平台每帧被转 5° → pre_step
+   destroy+重建 KINEMATIC ×3 轮): **无 0xC0000005** —— P2 期发现的
+   `set_motion_type(STATIC→KINEMATIC)` 原生崩溃已由"销毁重建"修复, 复核仍有效。
+
+**候选逐项排查**:
+- ① toggle_play 时序: 退出分支 apply_snapshot 全部还原在 `_destroy_phys_bridge`
+  **之前** (editor.py 1645-1703) ✓; `ensure_models` 在 destroy 后幂等 no-op
+  (bridge 690-691 `self._w is None → return`) ✓。
+- ② 停播后 update_physics: EditorApp.render 仅 is_playing=True 才调物理 (1719-1727) ✓。
+- ③ World 析构: 10 轮建/销世界无崩溃 ✓。
+- ④ destroy 后事件循环再建: 标准路径无调用者; `_phys_bridge_auto` 重建仅发生在
+  update_physics 直调 (编辑器非播放期不调用) ✓。
+
+**结论**: P4 在 Loom 侧**未复现**; 已把最可能的"原生崩溃→WER 弹窗"家族
+(set_motion_type 0xC0000005) 复核为已修复且有效。剩余解释: 环境侧弹窗
+(WER/GeForce Overlay/IDE 附着调试器) 或用户场景特有触发。**诊断工具留存**:
+qt_play_stop_probe.py (含窗口观察线程/excepthook/faulthandler), 用户再遇时
+按"弹窗标题+时间点"记录即可定位; 复测要求 (停止再播放连转 10 轮无弹窗/无异常)
+已达成: p4_smoke_out.txt (0 异常, 10 轮, 每轮 玩家 正常下落)。
+
+---
+
+## 回归
+
+| 项 | 结果 |
+|---|---|
+| tests\test_physics_bridge.py (新增 10a/10b/10c/11) | **ALL PASS** (14 断言) |
+| tests\run_all.py (v3 最终) | 全绿 (test_integration 真实窗口+GL 最后, 通过) |
+| test_physics.py 期望更新 | `(2.0,False,False,0.5,0.0)` → `(2.0,False,False,0.5,0.0,0.1)` |
+| test_sceneio.py | 契约字段级断言 (原"整 dict 相等"过时于 P2, 本次修正) |
+| EditorApp 播放冒烟 | 玩家下落/落定/快照还原, 数值与修复前逐位一致 |
+| Qt GUI 冒烟 (10 轮) | 0 异常, 播放-停止-播放 连贯 |
+
+## 未决项
+
+1. **P4 未复现**: 定位为环境侧或场景特有; 用户实测复核时带弹窗标题重跑
+   qt_play_stop_probe。
+2. **_spin 键盘输入路径撤销"少退一步"**: 既有全局行为 (所有数值行同款,
+   DragBlock 拖拽路径已正确), 非本次引入, 未动。
+3. **滚动摩擦=0**: 球受 Jolt 固有微降 (8s 3→1.4 m/s) 仍滚极远 —— "关闭"语义预期
+   (只有桥的滚动衰减能显著止滚)。
+4. P2 已知差异 (表亲同树不互撞 / R3 形状冻结 / >31 树轮转位) 不属本卡, 未变。
+5. 未做任何"顺手重构"; 全部改动 = 4 问题对应 (P1/P2/P3 代码 + P4 诊断与复核)。
+
+## 改动文件清单 (行区)
+
+| 文件 | 改动 |
+|---|---|
+| Loom\physics_bridge.py | P1: ROLLING_K=23.0/ROLLING_ANG_EPS/GRAVITY_GUARD_FRAMES (56-79); __init__ _last_dt (531-536); _entry_signature float()+rolling (626-641); _build_one roll/mu/activate/guard (670-722); pre_step 激活保底 (777-850); step 记 dt (871-876); post_step 滚动衰减 (878-980) |
+| Loom\engine.py | ColliderComponent/RigidbodyComponent rolling_friction (385-434); add_rigidbody 透传 (757-775) |
+| Loom\undo.py | 快照第 5/6 槽 + apply 兼容 (40-52 / 76-100) |
+| Loom\sceneio.py | _emit_object 两 dict 加键 (102-119); _apply_object 缺省 0.1 (187-223) |
+| Loom\scene_driver.py | build_models 加 rolling_friction (51-68) |
+| Loom\ui\loom_gui.py | P3 单组显示 + 滚动摩擦行 (1765-1791); _sync_inspector_values 补键 (2145-2164) |
+| Loom\tests\test_physics_bridge.py | 用例 10a/10b/10c/11 (270-345) |
+| Loom\tests\test_physics.py | undo 期望 6 元 (95) |
+| Loom\tests\test_sceneio.py | collider 契约字段级断言 (199-206) |
+| Loom\tests\_tmp\qt_play_stop_probe.py / p3_inspector_probe.py / p2_float_probe.py / p2_editor_probe.py / p4_static_move_probe.py / roll_calib_probe.py / roll_debug_probe.py | 探针留存 (诊断/标定/复现证据) |

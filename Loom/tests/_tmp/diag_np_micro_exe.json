@@ -1,0 +1,43 @@
+{
+  "env": {
+    "frozen": false,
+    "nuitka": true,
+    "numpy": "2.2.5",
+    "python": "3.12.10"
+  },
+  "batch_matmul_444": {
+    "med_ms": 0.1005,
+    "min_ms": 0.0996,
+    "max_ms": 0.1122
+  },
+  "aabbs_kernel": {
+    "med_ms": 18.2087,
+    "min_ms": 16.4057,
+    "max_ms": 19.8229
+  },
+  "elementwise": {
+    "med_ms": 0.0074,
+    "min_ms": 0.0071,
+    "max_ms": 0.0192
+  },
+  "np_any_row": {
+    "med_ms": 0.0255,
+    "min_ms": 0.0251,
+    "max_ms": 0.0308
+  },
+  "np_empty_alloc": {
+    "med_ms": 0.0504,
+    "min_ms": 0.0472,
+    "max_ms": 0.0744
+  },
+  "reduction_sum": {
+    "med_ms": 16.5065,
+    "min_ms": 15.7045,
+    "max_ms": 17.3504
+  },
+  "f32_tobytes": {
+    "med_ms": 0.1307,
+    "min_ms": 0.1304,
+    "max_ms": 0.1486
+  }
+}

@@ -1,0 +1,25 @@
+﻿pygame 2.6.1 (SDL 2.28.4, Python 3.12.10)
+Hello from the pygame community. https://www.pygame.org/contribute.html
+[parallel] 均质 | 逻辑核 18 (P 18 / E 0) | 脚本预留 2 核 | 进程亲和已应用 (mask=0x3FFFF)
+[parallel] 主线程锁定到负载最低的大核 #1 (启动锁一次, 不周期跳核)
+[parallel] 预计算池 8 worker (目标 8 核均摊, pool_mask=0xFFFF)
+models=501 lights=2
+  [物理] WARN 树数>31: 第 33 根树轮转位=0b1 (与其它树共用位 -> 其间不互撞)
+  [物理] WARN 树数>31: 第 34 根树轮转位=0b10 (与其它树共用位 -> 其间不互撞)
+  [物理] WARN 树数>31: 第 35 根树轮转位=0b100 (与其它树共用位 -> 其间不互撞)
+[物理] Jolt (Culverin) 物理桥已建立: 501 体
+[带profile播放态] FPS=98.2 帧=10.18ms
+  logic_step                  5.250 ms/帧
+  aabbs                       3.755 ms/帧
+  pipe_wait                   2.312 ms/帧
+  interp                      1.330 ms/帧
+  buckets                     1.232 ms/帧
+  world_matrices              1.133 ms/帧
+  collide_pairs               0.304 ms/帧
+  shadow_bounds               0.194 ms/帧
+  shadow_prep                 0.092 ms/帧
+  dispatch                    0.081 ms/帧
+  shadow_matmul               0.080 ms/帧
+  shadow_cornerfill           0.049 ms/帧
+  shadow_prep+buckets+interp 合计 2.654 ms/帧
+完成

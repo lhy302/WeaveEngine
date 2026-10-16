@@ -1,0 +1,21 @@
+========== 场景基准 stress_500spheres.json (300 帧, 墙钟 17.51s) ==========
+FPS: 17.1  (平均帧时间 58.374 ms)
+帧稳定性: p50=58.691 p99=67.849 max=68.911 ms
+逐阶段累计耗时 (LOOM_PROFILE, ms/帧):
+  physics                  21.99
+  phys_bridge_ensure        7.53
+  phys_bridge_pre          13.94
+  phys_bridge_step          0.35
+  phys_bridge_post          0.15
+  world_matrices            2.14
+  aabbs                    10.72
+  shadow_prep              32.00
+  shadow_bounds             5.21
+  shadow_cornerfill         2.96
+  shadow_matmul             1.90
+  collide_pairs            16.98
+  shadow_jobs              20.59
+  dispatch                  0.54
+  buckets                   1.13
+  已插桩阶段合计           138.13 (帧时间 58.374, 其余=GL/脚本/事件)
+完成。

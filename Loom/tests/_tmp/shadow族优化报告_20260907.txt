@@ -1,0 +1,69 @@
+================================================================================
+shadow_prep 族优化报告 (2026-09-07)
+实施代理: shadow 族 R 段优化 | 范围: engine.py | 红线: 阴影覆盖/数值逐位一致
+================================================================================
+
+一、取证 (tests/_tmp/shadow_prof.py + shadow_microbench.py, n=501, LOOM_NO_NUMBA=1
+   冻结口径 = 编译版等效)
+   _scene_light_bounds_par 整体 1052us/调用, 解构:
+     - ab/cd 属性链拆包填充循环 (for i,(a,b) in enumerate(aabbs): ab[i]=(a.x,...))
+       = 633us  ← 大头, 60% (501 次 × 6 属性链 + namedtuple 解包)
+     - corners tile/repeat 展开 = 103us (不是大头, 不动)
+     - matmul+minmax = 306us (numpy 批量, 不动)
+   numpy 行直填版整体 = 429us (2.45x)。
+   buckets: 重填 1101us / 闸命中 13.6us; interp: compute_render_matrices 1226us
+   —— 编译版账目 (buckets 1.35 / interp 1.08 ms/帧) 与源码同量级 → 属"两端共有
+   的渲染帧成本", 非编译版特异放大; 按任务约束 (候选 c) 只报告不动, 控制爆炸半径。
+
+二、改动 (全部 engine.py, 只加不改另一代理刚落地的组装循环体)
+   1. _aabbs_batched(out_rows=None): 新增可选 (N,6) f64 行表回填 —— 组循环内
+      rows[k_idx, 0:3]=mn_v / rows[k_idx, 3:6]=mx_v 按 sel 下标散写 (组序与 sel 序
+      交错, 不能连续段拷); get_bounding_box 兜底行出口回填; tolist+Point3D 公共
+      契约原样保留。out_rows=None 时零新增成本。
+   2. _model_aabbs_par: 仅 visible_only=False (全量对齐 = 播放态路径) 分发行表并
+      发布 _aabb_shadow_rows + 配对守卫 _aabb_shadow_gen=(id(out), n);
+      visible_only=True 不发布 (sel 子集行序与 models 下标错位风险 → 消费方自动
+      走旧属性链回退)。dirty 行级复用路径: 上帧表形状匹配即复用 (静止行沿用),
+      脏行段重算增量更新; 池 worker 各写 rows_full 连续切片视图 (互斥段, 不碰
+      实例字段); dirty 连续段行表走位置切片 (fancy-index 副本坑已防, 跨段块回退
+      + 按需回填)。池分块块序=parallel._split_bounds 连续 range, 切片视图与 out
+      拼接同构。
+   3. _scene_light_bounds_par(row_input=None): 新增参数; (n,6) f64 时 ab/cd = 零
+      拷贝列视图 (rows[:, 0:3] / rows[:, 3:6]), 消 633us 属性链; 形状/dtype 不符
+      或 None 走旧路径 (逐位)。
+   4. _compute_light_vps: 行表与 aabbs id 配对时, 可见过滤处同步花式拷 vis_rows
+      (~39us), 随 vis_aabbs 传 _dir_light_vp(新 rows 参数); 配对守卫 (id+len) 挡
+      过时表/行序错位; _dir_light_vp 自算路径同样受守卫保护。
+
+三、数据 (前后对比)
+   - 微基准 (冻结口径 n=501, 对拍逐位 PASS):
+       旧 1176us → 新 491us + 可见过滤 39us ≈ 530us (净省 ~646us/逻辑帧, 1.9x)
+       (目测口径: shadow_bounds ~1.05-1.18ms → ~0.49-0.53ms, 含过滤)
+   - e2e 带 profile 播放态 (源码, 8s, 混合500):
+       shadow_bounds 0.334 → 0.194/0.212 ms/帧; shadow_cornerfill 0.182 →
+       0.038/0.049; shadow_matmul 0.092 → 0.080/0.100
+       (播放态 prep 在逻辑帧 20Hz 摊到渲染帧, 渲染帧均摊收益 ~0.08ms)
+   - 端到端 FPS (LOOM_NO_NUMBA=1, 无 profile): 基线 98.3/99.0 → 改后 95.7~100.6
+     (波动带内; 本场景 shadow 族已让位于物理/interp/buckets, 不期望 e2e 大跳)
+   - 编译版预期: R 段 shadow_bounds 部分 ~1.2ms→0.5ms 级 (源码差值口径), 待重编。
+
+四、闸门 (全过)
+   1. tests/_tmp/shadow_val_check.py: ALL PASS (新旧输出 np.array_equal 逐位;
+      n=1/7/501 随机 + None 分支 + 混合500 全链 batched行表→可见过滤→row_input
+      + fw 不全兜底行回填 + out_rows 行序==out 列表 × visible_only 两模式;
+      numba 开/关双口径)。
+   2. 微基准: 达标 (目标 shadow_prep 族 ~4.3→≤3ms 编译等效; 本族可计段
+      shadow_bounds 源码口径 1.05→0.49ms, 拆包大头 633us 已消)。
+   3. tests/run_all.py EXIT=0 (终版代码复跑两轮, 无并发干扰)。
+   4. 端到端守门: FPS 带内 (96.7-100.6 vs 基线 98.3-99.0)。
+   附: test_parallel.py / aabb_par_check.py / aabb_assembly_check.py (组装段
+   协作代理的对拍) 全 PASS。
+
+五、给下一次的留档
+   - buckets(重填 1.1ms/interp(1.2-1.35ms) 为源码/编译共有成本, 非编译版特异;
+     若继续压 R 段, 下一步可考 interp 的 parent/depth DP 缓存与 buckets 的
+     _mesh_key 属性链, 但均已多轮优化过, 收益空间待取证。
+   - _aabb_shadow_rows 生命周期 = 上次 _model_aabbs_par(visible_only=False) 发布;
+     任何 id(out) 失配 (结构变/编辑改位) 自动回退属性链, 无语义风险。
+   - 编译版需重打包 (铁律: 不主动编译, 用户点名才编)。
+================================================================================

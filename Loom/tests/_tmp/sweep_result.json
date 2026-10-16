@@ -1,0 +1,1295 @@
+[
+  {
+    "cmd": "status",
+    "args": null,
+    "ok": true,
+    "error": null,
+    "result": {
+      "scene": "场景",
+      "models": [
+        "平面",
+        "立方体1",
+        "球体"
+      ],
+      "lights": [
+        "平行光"
+      ],
+      "cameras": [],
+      "selected": "平面"
+    },
+    "note": ""
+  },
+  {
+    "cmd": "settings_get",
+    "args": {},
+    "ok": true,
+    "error": null,
+    "result": {
+      "gui": "LoomGUI",
+      "save_dir": "",
+      "parallel_enable": true,
+      "script_cores": 4,
+      "show_grid": true
+    },
+    "note": ""
+  },
+  {
+    "cmd": "settings_get",
+    "args": {
+      "key": "fps_limit"
+    },
+    "ok": true,
+    "error": null,
+    "result": {
+      "fps_limit": "90"
+    },
+    "note": ""
+  },
+  {
+    "cmd": "settings_set",
+    "args": {
+      "key": "gravity",
+      "value": -9.8
+    },
+    "ok": true,
+    "error": null,
+    "result": {
+      "set": {
+        "gravity": -9.8
+      },
+      "type": "float"
+    },
+    "note": ""
+  },
+  {
+    "cmd": "engine_metrics",
+    "args": {},
+    "ok": true,
+    "error": null,
+    "result": {
+      "fps": 92,
+      "is_playing": false,
+      "logic_paused": null,
+      "logic_steps": 0,
+      "interp_mode": "interpolate"
+    },
+    "note": ""
+  },
+  {
+    "cmd": "object_add",
+    "args": {
+      "type": "cube"
+    },
+    "ok": true,
+    "error": null,
+    "result": {
+      "type": "cube"
+    },
+    "note": ""
+  },
+  {
+    "cmd": "object_add",
+    "args": {
+      "type": "sphere"
+    },
+    "ok": true,
+    "error": null,
+    "result": {
+      "type": "sphere"
+    },
+    "note": ""
+  },
+  {
+    "cmd": "object_list",
+    "args": {},
+    "ok": true,
+    "error": null,
+    "result": {
+      "models": [
+        {
+          "index": 0,
+          "name": "平面",
+          "parent": null
+        },
+        {
+          "index": 1,
+          "name": "立方体1",
+          "parent": null
+        },
+        {
+          "index": 2,
+          "name": "球体",
+          "parent": null
+        },
+        {
+          "index": 3,
+          "name": "立方体4",
+          "parent": null
+        },
+        {
+          "index": 4,
+          "name": "球体5",
+          "parent": null
+        }
+      ],
+      "lights": [
+        {
+          "index": 0,
+          "name": "平行光",
+          "kind_of": "directional"
+        }
+      ],
+      "cameras": [],
+      "selected": "球体5"
+    },
+    "note": ""
+  },
+  {
+    "cmd": "object_select",
+    "args": {
+      "name": "球体5"
+    },
+    "ok": true,
+    "error": null,
+    "result": {
+      "selected": "球体5",
+      "kind": "model",
+      "index": 4,
+      "ambiguous": false
+    },
+    "note": ""
+  },
+  {
+    "cmd": "object_rename",
+    "args": {
+      "name": "球体5",
+      "new": "sweep_obj"
+    },
+    "ok": true,
+    "error": null,
+    "result": {
+      "renamed": [
+        "球体5",
+        "sweep_obj"
+      ]
+    },
+    "note": ""
+  },
+  {
+    "cmd": "object_duplicate",
+    "args": {},
+    "ok": true,
+    "error": null,
+    "result": {
+      "ok": true
+    },
+    "note": ""
+  },
+  {
+    "cmd": "set_visible",
+    "args": {
+      "name": "sweep_obj",
+      "on": false
+    },
+    "ok": true,
+    "error": null,
+    "result": {
+      "name": "sweep_obj",
+      "visible": false
+    },
+    "note": ""
+  },
+  {
+    "cmd": "set_visible",
+    "args": {
+      "name": "sweep_obj",
+      "on": true
+    },
+    "ok": true,
+    "error": null,
+    "result": {
+      "name": "sweep_obj",
+      "visible": true
+    },
+    "note": ""
+  },
+  {
+    "cmd": "gizmo",
+    "args": {
+      "mode": "move"
+    },
+    "ok": true,
+    "error": null,
+    "result": {
+      "mode": "move"
+    },
+    "note": ""
+  },
+  {
+    "cmd": "gizmo",
+    "args": {
+      "mode": "rotate"
+    },
+    "ok": true,
+    "error": null,
+    "result": {
+      "mode": "rotate"
+    },
+    "note": ""
+  },
+  {
+    "cmd": "gizmo",
+    "args": {
+      "mode": "scale"
+    },
+    "ok": true,
+    "error": null,
+    "result": {
+      "mode": "scale"
+    },
+    "note": ""
+  },
+  {
+    "cmd": "undo",
+    "args": {},
+    "ok": true,
+    "error": null,
+    "result": {
+      "ok": true
+    },
+    "note": ""
+  },
+  {
+    "cmd": "redo",
+    "args": {},
+    "ok": true,
+    "error": null,
+    "result": {
+      "ok": true
+    },
+    "note": ""
+  },
+  {
+    "cmd": "set_transform",
+    "args": {
+      "name": "sweep_obj",
+      "x": 3.0,
+      "y": 2.0,
+      "z": 1.0,
+      "rx": 10.0,
+      "ry": 20.0,
+      "rz": 30.0,
+      "sx": 1.5,
+      "sy": 1.5,
+      "sz": 1.5
+    },
+    "ok": true,
+    "error": null,
+    "result": {
+      "name": "sweep_obj",
+      "position": [
+        3.0,
+        2.0,
+        1.0
+      ],
+      "rotation_deg": [
+        10.0,
+        20.0,
+        30.0
+      ],
+      "scale": [
+        1.5,
+        1.5,
+        1.5
+      ]
+    },
+    "note": ""
+  },
+  {
+    "cmd": "inspect",
+    "args": {
+      "name": "sweep_obj"
+    },
+    "ok": true,
+    "error": null,
+    "result": {
+      "kind": "model",
+      "name": "sweep_obj",
+      "position": [
+        3.0,
+        2.0,
+        1.0
+      ],
+      "rotation": [
+        0.17453292519943295,
+        0.3490658503988659,
+        0.5235987755982988
+      ],
+      "scale": [
+        1.5,
+        1.5,
+        1.5
+      ]
+    },
+    "note": ""
+  },
+  {
+    "cmd": "materials",
+    "args": {},
+    "ok": true,
+    "error": null,
+    "result": {
+      "materials": [
+        {
+          "index": 0,
+          "name": "材质"
+        },
+        {
+          "index": 1,
+          "name": "材质"
+        },
+        {
+          "index": 2,
+          "name": "材质"
+        },
+        {
+          "index": 3,
+          "name": "材质"
+        },
+        {
+          "index": 4,
+          "name": "材质"
+        },
+        {
+          "index": 5,
+          "name": "材质"
+        },
+        {
+          "index": 6,
+          "name": "材质"
+        },
+        {
+          "index": 7,
+          "name": "材质"
+        },
+        {
+          "index": 8,
+          "name": "材质"
+        },
+        {
+          "index": 9,
+          "name": "材质"
+        },
+        {
+          "index": 10,
+          "name": "材质"
+        },
+        {
+          "index": 11,
+          "name": "材质"
+        },
+        {
+          "index": 12,
+          "name": "材质"
+        },
+        {
+          "index": 13,
+          "name": "材质"
+        },
+        {
+          "index": 14,
+          "name": "材质"
+        },
+        {
+          "index": 15,
+          "name": "材质"
+        },
+        {
+          "index": 16,
+          "name": "材质"
+        },
+        {
+          "index": 17,
+          "name": "材质"
+        },
+        {
+          "index": 18,
+          "name": "材质"
+        },
+        {
+          "index": 19,
+          "name": "材质"
+        },
+        {
+          "index": 20,
+          "name": "材质"
+        },
+        {
+          "index": 21,
+          "name": "材质"
+        },
+        {
+          "index": 22,
+          "name": "材质"
+        },
+        {
+          "index": 23,
+          "name": "材质"
+        },
+        {
+          "index": 24,
+          "name": "材质"
+        },
+        {
+          "index": 25,
+          "name": "材质"
+        },
+        {
+          "index": 26,
+          "name": "材质"
+        },
+        {
+          "index": 27,
+          "name": "材质"
+        },
+        {
+          "index": 28,
+          "name": "材质"
+        },
+        {
+          "index": 29,
+          "name": "材质"
+        },
+        {
+          "index": 30,
+          "name": "材质"
+        },
+        {
+          "index": 31,
+          "name": "材质"
+        },
+        {
+          "index": 32,
+          "name": "材质"
+        },
+        {
+          "index": 33,
+          "name": "材质"
+        },
+        {
+          "index": 34,
+          "name": "材质"
+        },
+        {
+          "index": 35,
+          "name": "材质"
+        },
+        {
+          "index": 36,
+          "name": "材质"
+        },
+        {
+          "index": 37,
+          "name": "材质"
+        },
+        {
+          "index": 38,
+          "name": "材质"
+        },
+        {
+          "index": 39,
+          "name": "材质"
+        },
+        {
+          "index": 40,
+          "name": "材质"
+        },
+        {
+          "index": 41,
+          "name": "材质"
+        },
+        {
+          "index": 42,
+          "name": "材质"
+        },
+        {
+          "index": 43,
+          "name": "材质"
+        },
+        {
+          "index": 44,
+          "name": "材质"
+        },
+        {
+          "index": 45,
+          "name": "材质"
+        },
+        {
+          "index": 46,
+          "name": "材质"
+        }
+      ]
+    },
+    "note": ""
+  },
+  {
+    "cmd": "material_new",
+    "args": {
+      "name": "sweep_obj"
+    },
+    "ok": true,
+    "error": null,
+    "result": {
+      "name": "sweep_obj",
+      "material": "材质48",
+      "count": 48
+    },
+    "note": ""
+  },
+  {
+    "cmd": "set_material",
+    "args": {
+      "name": "sweep_obj",
+      "index": 0
+    },
+    "ok": true,
+    "error": null,
+    "result": {
+      "name": "sweep_obj",
+      "material": "材质",
+      "index": 0
+    },
+    "note": ""
+  },
+  {
+    "cmd": "set_saturation",
+    "args": {
+      "name": "sweep_obj",
+      "value": 1.5
+    },
+    "ok": true,
+    "error": null,
+    "result": {
+      "name": "sweep_obj",
+      "saturation": 1.5
+    },
+    "note": ""
+  },
+  {
+    "cmd": "collider",
+    "args": {
+      "name": "sweep_obj",
+      "on": true
+    },
+    "ok": true,
+    "error": null,
+    "result": {
+      "name": "sweep_obj",
+      "enabled": true
+    },
+    "note": ""
+  },
+  {
+    "cmd": "rigidbody",
+    "args": {
+      "name": "sweep_obj",
+      "action": "add"
+    },
+    "ok": true,
+    "error": null,
+    "result": {
+      "name": "sweep_obj",
+      "action": "add",
+      "rigidbody": {
+        "use_gravity": true
+      }
+    },
+    "note": ""
+  },
+  {
+    "cmd": "rigidbody",
+    "args": {
+      "name": "sweep_obj",
+      "action": "gravity"
+    },
+    "ok": true,
+    "error": null,
+    "result": {
+      "name": "sweep_obj",
+      "action": "gravity",
+      "rigidbody": {
+        "use_gravity": false
+      }
+    },
+    "note": ""
+  },
+  {
+    "cmd": "audio",
+    "args": {
+      "name": "sweep_obj",
+      "action": "add"
+    },
+    "ok": true,
+    "error": null,
+    "result": {
+      "name": "sweep_obj",
+      "action": "add",
+      "audio": {
+        "clip": null,
+        "loop": false,
+        "playing": false,
+        "volume": 1.0
+      }
+    },
+    "note": ""
+  },
+  {
+    "cmd": "animator",
+    "args": {
+      "name": "sweep_obj",
+      "action": "add"
+    },
+    "ok": true,
+    "error": null,
+    "result": {
+      "name": "sweep_obj",
+      "action": "add",
+      "animator": {
+        "loop": true,
+        "playing": false,
+        "current": null
+      }
+    },
+    "note": ""
+  },
+  {
+    "cmd": "script_add",
+    "args": {
+      "sid": "rotate",
+      "target": "sweep_obj"
+    },
+    "ok": true,
+    "error": null,
+    "result": {
+      "sid": "rotate",
+      "target": "sweep_obj"
+    },
+    "note": ""
+  },
+  {
+    "cmd": "scripts",
+    "args": {
+      "name": "sweep_obj"
+    },
+    "ok": true,
+    "error": null,
+    "result": {
+      "scripts": [
+        {
+          "id": "rotate",
+          "name": "自转"
+        },
+        {
+          "id": "orbit",
+          "name": "公转"
+        },
+        {
+          "id": "bob",
+          "name": "浮动"
+        },
+        {
+          "id": "wasd_move",
+          "name": "WASD移动"
+        },
+        {
+          "id": "camera_follow",
+          "name": "相机跟随"
+        },
+        {
+          "id": "fall",
+          "name": "重力落地"
+        },
+        {
+          "id": "bounce",
+          "name": "弹跳"
+        },
+        {
+          "id": "first_person",
+          "name": "第一人称"
+        },
+        {
+          "id": "third_person",
+          "name": "第三人称"
+        },
+        {
+          "id": "jump",
+          "name": "跳跃"
+        },
+        {
+          "id": "count_touch",
+          "name": "触碰计数彩球"
+        },
+        {
+          "id": "reset_fall",
+          "name": "跌出重置"
+        }
+      ]
+    },
+    "note": ""
+  },
+  {
+    "cmd": "script_var",
+    "args": {
+      "name": "sweep_obj",
+      "index": 0,
+      "key": "speed",
+      "value": 45.0
+    },
+    "ok": true,
+    "error": null,
+    "result": {
+      "name": "sweep_obj",
+      "index": 0,
+      "speed": 45.0
+    },
+    "note": ""
+  },
+  {
+    "cmd": "script_remove",
+    "args": {
+      "name": "sweep_obj",
+      "index": 0
+    },
+    "ok": true,
+    "error": null,
+    "result": {
+      "name": "sweep_obj",
+      "removed": "rotate"
+    },
+    "note": ""
+  },
+  {
+    "cmd": "rigidbody",
+    "args": {
+      "name": "sweep_obj",
+      "action": "remove"
+    },
+    "ok": true,
+    "error": null,
+    "result": {
+      "name": "sweep_obj",
+      "action": "remove",
+      "rigidbody": null
+    },
+    "note": ""
+  },
+  {
+    "cmd": "audio",
+    "args": {
+      "name": "sweep_obj",
+      "action": "remove"
+    },
+    "ok": true,
+    "error": null,
+    "result": {
+      "name": "sweep_obj",
+      "action": "remove",
+      "audio": null
+    },
+    "note": ""
+  },
+  {
+    "cmd": "animator",
+    "args": {
+      "name": "sweep_obj",
+      "action": "remove"
+    },
+    "ok": true,
+    "error": null,
+    "result": {
+      "name": "sweep_obj",
+      "action": "remove",
+      "animator": null
+    },
+    "note": ""
+  },
+  {
+    "cmd": "light_add",
+    "args": {
+      "kind": "point"
+    },
+    "ok": true,
+    "error": null,
+    "result": {
+      "kind": "point"
+    },
+    "note": ""
+  },
+  {
+    "cmd": "light_set",
+    "args": {
+      "name": "点光源",
+      "intensity": 2.0
+    },
+    "ok": true,
+    "error": null,
+    "result": {
+      "kind": "light",
+      "name": "点光源",
+      "position": [
+        0,
+        5,
+        0
+      ],
+      "kind_of": "point",
+      "intensity": 2.0
+    },
+    "note": ""
+  },
+  {
+    "cmd": "light_set",
+    "args": {
+      "name": "点光源",
+      "shadow": true,
+      "mode": "full"
+    },
+    "ok": true,
+    "error": null,
+    "result": {
+      "kind": "light",
+      "name": "点光源",
+      "position": [
+        0,
+        5,
+        0
+      ],
+      "kind_of": "point",
+      "intensity": 2.0
+    },
+    "note": ""
+  },
+  {
+    "cmd": "camera_add",
+    "args": {},
+    "ok": true,
+    "error": null,
+    "result": {
+      "ok": true
+    },
+    "note": ""
+  },
+  {
+    "cmd": "object_list",
+    "args": {},
+    "ok": true,
+    "error": null,
+    "result": {
+      "models": [
+        {
+          "index": 0,
+          "name": "平面",
+          "parent": null
+        },
+        {
+          "index": 1,
+          "name": "立方体1",
+          "parent": null
+        },
+        {
+          "index": 2,
+          "name": "球体",
+          "parent": null
+        },
+        {
+          "index": 3,
+          "name": "立方体4",
+          "parent": null
+        },
+        {
+          "index": 4,
+          "name": "sweep_obj",
+          "parent": null
+        },
+        {
+          "index": 5,
+          "name": "sweep_obj_副本",
+          "parent": null
+        }
+      ],
+      "lights": [
+        {
+          "index": 0,
+          "name": "平行光",
+          "kind_of": "directional"
+        },
+        {
+          "index": 1,
+          "name": "点光源",
+          "kind_of": "point"
+        }
+      ],
+      "cameras": [
+        {
+          "index": 0,
+          "name": "摄像机1"
+        }
+      ],
+      "selected": null
+    },
+    "note": ""
+  },
+  {
+    "cmd": "camera_move",
+    "args": {
+      "name": "摄像机1",
+      "x": 5.0,
+      "y": 5.0,
+      "z": 10.0
+    },
+    "ok": true,
+    "error": null,
+    "result": {
+      "target": [
+        5.0,
+        5.0,
+        10.0
+      ],
+      "distance": 10.0
+    },
+    "note": ""
+  },
+  {
+    "cmd": "camera_look",
+    "args": {
+      "name": "摄像机1",
+      "yaw": 45.0,
+      "pitch": -20.0
+    },
+    "ok": true,
+    "error": null,
+    "result": {
+      "yaw_deg": 45.0,
+      "pitch_deg": -20.0
+    },
+    "note": ""
+  },
+  {
+    "cmd": "camera_active",
+    "args": {
+      "name": "摄像机1"
+    },
+    "ok": true,
+    "error": null,
+    "result": {
+      "active": "摄像机1"
+    },
+    "note": ""
+  },
+  {
+    "cmd": "camera_active",
+    "args": {},
+    "ok": true,
+    "error": null,
+    "result": {
+      "active": null
+    },
+    "note": ""
+  },
+  {
+    "cmd": "camera_preview",
+    "args": {
+      "name": "摄像机1"
+    },
+    "ok": true,
+    "error": null,
+    "result": {
+      "preview": "摄像机1"
+    },
+    "note": ""
+  },
+  {
+    "cmd": "camera_preview",
+    "args": {
+      "off": true
+    },
+    "ok": true,
+    "error": null,
+    "result": {
+      "preview": null
+    },
+    "note": ""
+  },
+  {
+    "cmd": "reparent",
+    "args": {
+      "child": "sweep_obj",
+      "parent": "立方体1"
+    },
+    "ok": true,
+    "error": null,
+    "result": {
+      "child": "sweep_obj",
+      "parent": "立方体1"
+    },
+    "note": ""
+  },
+  {
+    "cmd": "reparent",
+    "args": {
+      "child": "sweep_obj"
+    },
+    "ok": true,
+    "error": null,
+    "result": {
+      "child": "sweep_obj",
+      "parent": null
+    },
+    "note": ""
+  },
+  {
+    "cmd": "play",
+    "args": {
+      "on": true
+    },
+    "ok": true,
+    "error": null,
+    "result": {
+      "playing": true
+    },
+    "note": ""
+  },
+  {
+    "cmd": "play",
+    "args": {
+      "on": false
+    },
+    "ok": true,
+    "error": null,
+    "result": {
+      "playing": false
+    },
+    "note": ""
+  },
+  {
+    "cmd": "screenshot",
+    "args": {
+      "file": "D:\\my-project\\Loom(py源代码-工作区)\\Loom\\tests\\_tmp\\sweep_shot.png",
+      "full": true
+    },
+    "ok": true,
+    "error": null,
+    "result": {
+      "file": "D:\\my-project\\Loom(py源代码-工作区)\\Loom\\tests\\_tmp\\sweep_shot.png",
+      "size": [
+        1924,
+        1055
+      ]
+    },
+    "note": ""
+  },
+  {
+    "cmd": "prefab_save",
+    "args": {},
+    "ok": true,
+    "error": null,
+    "result": {
+      "saved": "prefab1"
+    },
+    "note": ""
+  },
+  {
+    "cmd": "prefab_place",
+    "args": {},
+    "ok": true,
+    "error": null,
+    "result": {
+      "placed": "prefab1",
+      "count": 7
+    },
+    "note": ""
+  },
+  {
+    "cmd": "object_list",
+    "args": {},
+    "ok": true,
+    "error": null,
+    "result": {
+      "models": [
+        {
+          "index": 0,
+          "name": "平面",
+          "parent": null
+        },
+        {
+          "index": 1,
+          "name": "立方体1",
+          "parent": null
+        },
+        {
+          "index": 2,
+          "name": "球体",
+          "parent": null
+        },
+        {
+          "index": 3,
+          "name": "立方体4",
+          "parent": null
+        },
+        {
+          "index": 4,
+          "name": "sweep_obj",
+          "parent": null
+        },
+        {
+          "index": 5,
+          "name": "sweep_obj_副本",
+          "parent": null
+        },
+        {
+          "index": 6,
+          "name": "sweep_obj",
+          "parent": null
+        }
+      ],
+      "lights": [
+        {
+          "index": 0,
+          "name": "平行光",
+          "kind_of": "directional"
+        },
+        {
+          "index": 1,
+          "name": "点光源",
+          "kind_of": "point"
+        }
+      ],
+      "cameras": [
+        {
+          "index": 0,
+          "name": "摄像机1"
+        }
+      ],
+      "selected": "sweep_obj"
+    },
+    "note": ""
+  },
+  {
+    "cmd": "prefab_unlink",
+    "args": {
+      "name": "sweep_obj",
+      "index": 6
+    },
+    "ok": true,
+    "error": null,
+    "result": {
+      "name": "sweep_obj",
+      "prefab_ref": null
+    },
+    "note": ""
+  },
+  {
+    "cmd": "assets",
+    "args": {},
+    "ok": true,
+    "error": null,
+    "result": {
+      "assets": [
+        {
+          "type": "mesh",
+          "key": "builtin.cube",
+          "name": "立方体"
+        },
+        {
+          "type": "mesh",
+          "key": "builtin.sphere",
+          "name": "球体"
+        },
+        {
+          "type": "mesh",
+          "key": "builtin.plane",
+          "name": "平面"
+        },
+        {
+          "type": "prefab",
+          "key": "prefab.prefab.prefab",
+          "name": "prefab"
+        },
+        {
+          "type": "prefab",
+          "key": "prefab.prefab1.prefab",
+          "name": "prefab1"
+        }
+      ]
+    },
+    "note": ""
+  },
+  {
+    "cmd": "asset_apply",
+    "args": {
+      "note": "empty material assets"
+    },
+    "ok": true,
+    "error": null,
+    "result": null,
+    "note": ""
+  },
+  {
+    "cmd": "asset_save",
+    "args": {
+      "what": "material",
+      "path": "D:\\my-project\\Loom(py源代码-工作区)\\Loom\\材质"
+    },
+    "ok": true,
+    "error": null,
+    "result": {
+      "saved": "material",
+      "path": "D:\\my-project\\Loom(py源代码-工作区)\\Loom\\材质"
+    },
+    "note": ""
+  },
+  {
+    "cmd": "plugins",
+    "args": {},
+    "ok": true,
+    "error": null,
+    "result": {
+      "plugins": [],
+      "buttons": []
+    },
+    "note": ""
+  },
+  {
+    "cmd": "scene_new",
+    "args": {},
+    "ok": true,
+    "error": null,
+    "result": {
+      "ok": true
+    },
+    "note": ""
+  },
+  {
+    "cmd": "object_add",
+    "args": {
+      "type": "cube"
+    },
+    "ok": true,
+    "error": null,
+    "result": {
+      "type": "cube"
+    },
+    "note": ""
+  },
+  {
+    "cmd": "scene_load",
+    "args": {
+      "path": "D:\\my-project\\Loom(py源代码-工作区)\\Loom\\保存\\场景.json"
+    },
+    "ok": true,
+    "error": null,
+    "result": {
+      "loaded": "D:\\my-project\\Loom(py源代码-工作区)\\Loom\\保存\\场景.json"
+    },
+    "note": ""
+  }
+]

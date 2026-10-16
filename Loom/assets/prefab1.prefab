@@ -1,0 +1,52 @@
+{
+  "version": 1,
+  "prefab": {
+    "guid": "12773c91e4b14876b8ad88739586cd97",
+    "name": "sweep_obj"
+  },
+  "objects": [
+    {
+      "id": "12773c91e4b14876b8ad88739586cd97",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "sweep_obj",
+      "type": "sphere",
+      "params": {
+        "radius": 1.0,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        3.0,
+        2.0,
+        1.0
+      ],
+      "rotation": [
+        0.17453292519943295,
+        0.3490658503988659,
+        0.5235987755982988
+      ],
+      "scale": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "color": null,
+      "material_id": "6fdbf17a3cd0411997299e9c3e797ce1",
+      "normal_mode": "vertex",
+      "saturation": 1.5,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    }
+  ]
+}

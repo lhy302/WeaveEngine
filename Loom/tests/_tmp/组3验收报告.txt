@@ -1,0 +1,65 @@
+组3 (公共算法层+SoA+Numba) 验收报告 — 2026-08-31
+====================================================================
+三层全部落地, 主线程验收 (DSH 承担 D1/D2 编码, 会话崩后主线程接手验证;
+原生子代理承担层1独立验证; AABB 层3 由主线程直接实施)。
+
+一、层1 = SoA 数据平面化 (消每帧 3N 属性链)
+  - engine._transform_snapshot: (id(models), _struct_gen, len) + 每物体三件
+    id 键 + 对象引用钉住的硬化快照; _soa_snap 缓存命中免重采
+  - compute_world_matrices: 9 次属性链列取 -> 快照平面切片
+  - _batch_rotations 支持外部 (N,3) 平面注入
+  - 独立验证 (tests/_tmp/soa_val_check.py): 6 场景 (线性链10/宽扇出33/
+    三森林/单根单叶/浮点欧拉/重复父共享) 世界矩阵+深度 np.array_equal
+    逐位全 PASS, 缓存二次调用稳定
+  - 采集段基准 (soa_bench.py, 200物体×50遍中位): 平均 1.25x
+    (链10层 1.65x / 森林 1.10x; 加速幅度与层数正相关)
+
+二、层2 = Numba @njit 静态编译 (Nuitka 编译后仍动态的纯 Python 循环)
+  - fastpath.py: _njit_or_py 工厂 (numba 装了=njit(cache=True, nogil=True);
+    没装=functools.wraps 透传, 数值同源直译)
+  - depths: compute_world_matrices 深度 DP (已接线, 对拍 224 组逐位)
+  - ancestry_dfs: _ancestry_ranges DFS (CSR+栈式, D1 接线, 对拍 204 组
+    vs engine + 224 组 vs 参考全逐位; wire_check 6 树形全 PASS)
+  - 动画采样 A6 (D2): AnimationClip 快/慢双路径 (searchsorted+向量化插值
+    / 旧循环保底), 资格闸门 (None/bool/np数/str/nan/乱序/超精度全挡慢路),
+    id+len 缓存失效; 10 场景对拍 (含大int通道 2^53+3 / 崩溃奇偶) 全 PASS
+  - 回归: test_animation 12 项全 PASS
+
+三、层3 = nogil+prange 真并行 (突破单核)
+  - fastpath.aabbs_minmax: AABB 批量归约 (njit+prange(parallel), nogil)
+    —— 每顶点 9乘6加标量循环, prange 模型维并行
+  - engine._aabbs_batched: 按 V 分组堆叠 + fastpath 调用; M 缺失/罕见形态
+    兜底旧 get_bounding_box; _model_aabbs_par 池路径分块同款
+  - ★实施弯路记录: 纯 numpy 堆叠版 (stack+batched matmul+transpose) 在
+    50球V=2035 实测 0.52x 负收益 (堆叠拷贝 1.1ms + batched matmul 比
+    50 次独立 dgemm 慢 + transpose 0.9ms, 微基准 aabb_bench.py 拆解实证),
+    已废弃; out= 预分配变体 0.97-0.23x 同样不行; numba 标量循环 104µs
+    vs 旧 2471µs (23.8x) 才是正解 —— 结论: 高面数 AABB 这种"轻计算重
+    调用"负载, numba 平坦循环 > 一切 numpy 批量化
+  - 数值: vs numpy dgemm ~4 ULP (8.9e-16) 舍入差 (BLAS SIMD 分块求和序),
+    D6 标准 "逐位/1e-7 内" 合格; A/B 截图 NCC 1.000 双端 (画面零影响)
+
+四、验收数据 (全部亲测)
+  - stress 300帧 (50高面数球+Jolt51体+阴影平行光):
+    FPS 140.0 -> 146.6 (+4.7%); shadow_prep 4.10 -> 3.18ms (-22%);
+    帧时间 7.96 -> 6.82ms; 主线程 CPU 74.9% -> 72.6%
+  - 多核铺开: 18 个 numba prange 线程各 87-96% CPU (真并行吃核达成
+    —— 验收标准 "主线程降 + 多核铺开" 两项全过)
+  - A/B 截图: NCC 1.000 (Vk + GL 双端, vs 组1基线参考)
+  - 全量回归: run_all.py EXIT=0 (D1/D2 后采); AABB 后重点七连
+    (physics/collision/collision_edges/scripts_collision/engine_safety/
+    undo/integration) 全 PASS
+  - engine.py AST 完整 (4123 行)
+
+五、产物清单
+  - fastpath.py (层2/层3 编译函数: depths/ancestry_dfs/aabbs_minmax)
+  - engine.py (SoA 快照/深度接线/ancestry 接线/动画A6/AABB 批量化)
+  - tests/_tmp/: soa_val_check.py, soa_bench.py, soa_verify_report.txt,
+    numba_par_check.py, ancestry_wire_check.py, ancestry_wire_report.txt,
+    anim_np_check.py, anim_np_report.txt, aabb_par_check.py, aabb_bench.py,
+    stress_layer3_report.txt (本报告数据源)
+
+六、待用户
+  - 人工实测 (播放模式/编辑器目测) -> 手动复制工作区到稳定版本备份区
+  - 确认后开组4 (视锥剔除 A11, 需重新拍板)
+====================================================================

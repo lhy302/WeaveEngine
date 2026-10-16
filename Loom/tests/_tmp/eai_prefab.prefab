@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "prefab": {
+    "guid": "87313ae65076471ba8428e5deffcb0e1",
+    "name": "模型1"
+  },
+  "objects": [
+    {
+      "id": "87313ae65076471ba8428e5deffcb0e1",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "模型1",
+      "type": "obj",
+      "params": {
+        "obj": "D:\\my-project\\Loom(py源代码-工作区)\\Loom\\tests\\_tmp\\eai_tri.obj"
+      },
+      "position": [
+        0,
+        0.0,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "color": null,
+      "material_id": "884589fbb0154e25925dbb58f897ca9a",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    }
+  ]
+}

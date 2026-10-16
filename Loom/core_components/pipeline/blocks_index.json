@@ -1,0 +1,37 @@
+{
+  "module": "loom_pipeline",
+  "blocks": [
+    {
+      "block_id": "imports",
+      "category": "hoisted",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "c": "loom_pipeline.spec.c.dsl"
+        },
+        "code": {
+          "c": "loom_pipeline.c"
+        }
+      },
+      "symbols_defined": [],
+      "symbols_used": [],
+      "status": "draft"
+    },
+    {
+      "block_id": "pack_bucket_instances",
+      "category": "emitting",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "c": "loom_pipeline.spec.c.dsl"
+        },
+        "code": {
+          "c": "loom_pipeline.c"
+        }
+      },
+      "symbols_defined": [],
+      "symbols_used": [],
+      "status": "draft"
+    }
+  ]
+}

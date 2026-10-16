@@ -1,0 +1,635 @@
+{
+  "WorldInit": [
+    {"name": "settings", "type": "object", "required": false},
+    {"name": "bodies", "type": "object", "required": false}
+  ],
+  "Body": [
+    {"name": "pos", "type": "object", "required": false},
+    {"name": "rot", "type": "object", "required": false},
+    {"name": "size", "type": "object", "required": false},
+    {"name": "shape", "type": "int", "required": false},
+    {"name": "motion", "type": "int", "required": false},
+    {"name": "user_data", "type": "int", "required": false},
+    {"name": "is_sensor", "type": "bool", "required": false},
+    {"name": "mass", "type": "float", "required": false},
+    {"name": "category", "type": "int", "required": false},
+    {"name": "mask", "type": "int", "required": false},
+    {"name": "friction", "type": "float", "required": false},
+    {"name": "restitution", "type": "float", "required": false},
+    {"name": "material_id", "type": "int", "required": false},
+    {"name": "ccd", "type": "bool", "required": false}
+  ],
+  "Impulse": [
+    {"name": "handle", "type": "int", "required": true},
+    {"name": "x", "type": "float", "required": true},
+    {"name": "y", "type": "float", "required": true},
+    {"name": "z", "type": "float", "required": true}
+  ],
+  "WheelIdx": [
+    {"name": "index", "type": "int", "required": true}
+  ],
+  "AngImpulse": [
+    {"name": "handle", "type": "int", "required": true},
+    {"name": "x", "type": "float", "required": true},
+    {"name": "y", "type": "float", "required": true},
+    {"name": "z", "type": "float", "required": true}
+  ],
+  "Force": [
+    {"name": "handle", "type": "int", "required": true},
+    {"name": "x", "type": "float", "required": true},
+    {"name": "y", "type": "float", "required": true},
+    {"name": "z", "type": "float", "required": true}
+  ],
+  "Torque": [
+    {"name": "handle", "type": "int", "required": true},
+    {"name": "x", "type": "float", "required": true},
+    {"name": "y", "type": "float", "required": true},
+    {"name": "z", "type": "float", "required": true}
+  ],
+  "SetLinVel": [
+    {"name": "handle", "type": "int", "required": true},
+    {"name": "x", "type": "float", "required": true},
+    {"name": "y", "type": "float", "required": true},
+    {"name": "z", "type": "float", "required": true}
+  ],
+  "SetAngVel": [
+    {"name": "handle", "type": "int", "required": true},
+    {"name": "x", "type": "float", "required": true},
+    {"name": "y", "type": "float", "required": true},
+    {"name": "z", "type": "float", "required": true}
+  ],
+  "ImpulseAt": [
+    {"name": "handle", "type": "int", "required": true},
+    {"name": "ix", "type": "float", "required": true},
+    {"name": "iy", "type": "float", "required": true},
+    {"name": "iz", "type": "float", "required": true},
+    {"name": "px", "type": "float", "required": true},
+    {"name": "py", "type": "float", "required": true},
+    {"name": "pz", "type": "float", "required": true}
+  ],
+  "HOnly": [
+    {"name": "handle", "type": "int", "required": true}
+  ],
+  "Destroy": [
+    {"name": "handle", "type": "int", "required": true}
+  ],
+  "Activate": [
+    {"name": "handle", "type": "int", "required": true}
+  ],
+  "Gravity": [
+    {"name": "x", "type": "float", "required": true},
+    {"name": "y", "type": "float", "required": true},
+    {"name": "z", "type": "float", "required": true}
+  ],
+  "SetPos": [
+    {"name": "handle", "type": "int", "required": true},
+    {"name": "x", "type": "float", "required": true},
+    {"name": "y", "type": "float", "required": true},
+    {"name": "z", "type": "float", "required": true}
+  ],
+  "Buoy": [
+    {"name": "handle", "type": "int", "required": true},
+    {"name": "surface_y", "type": "float", "required": true},
+    {"name": "buoyancy", "type": "float", "required": false},
+    {"name": "linear_drag", "type": "float", "required": false},
+    {"name": "angular_drag", "type": "float", "required": false},
+    {"name": "dt", "type": "float", "required": false},
+    {"name": "fluid_velocity", "type": "object", "required": false}
+  ],
+  "BatchBuoy": [
+    {"name": "handles", "type": "object", "required": true},
+    {"name": "surface_y", "type": "float", "required": true},
+    {"name": "buoyancy", "type": "float", "required": false},
+    {"name": "linear_drag", "type": "float", "required": false},
+    {"name": "angular_drag", "type": "float", "required": false},
+    {"name": "dt", "type": "float", "required": false},
+    {"name": "fluid_velocity", "type": "object", "required": false}
+  ],
+  "Mesh": [
+    {"name": "pos", "type": "object", "required": true},
+    {"name": "rot", "type": "object", "required": true},
+    {"name": "vertices", "type": "object", "required": true},
+    {"name": "indices", "type": "object", "required": true},
+    {"name": "user_data", "type": "int", "required": false},
+    {"name": "category", "type": "int", "required": false},
+    {"name": "mask", "type": "int", "required": false}
+  ],
+  "SetTrns": [
+    {"name": "handle", "type": "int", "required": true},
+    {"name": "pos", "type": "object", "required": true},
+    {"name": "rot", "type": "object", "required": true}
+  ],
+  "CCD": [
+    {"name": "handle", "type": "int", "required": true},
+    {"name": "enabled", "type": "bool", "required": true}
+  ],
+  "ConvexHull": [
+    {"name": "pos", "type": "object", "required": true},
+    {"name": "rot", "type": "object", "required": true},
+    {"name": "points", "type": "object", "required": true},
+    {"name": "motion", "type": "int", "required": false},
+    {"name": "mass", "type": "float", "required": false},
+    {"name": "user_data", "type": "int", "required": false},
+    {"name": "is_sensor", "type": "bool", "required": false},
+    {"name": "category", "type": "int", "required": false},
+    {"name": "mask", "type": "int", "required": false},
+    {"name": "material_id", "type": "int", "required": false},
+    {"name": "friction", "type": "float", "required": false},
+    {"name": "restitution", "type": "float", "required": false},
+    {"name": "ccd", "type": "bool", "required": false}
+  ],
+  "Compound": [
+    {"name": "pos", "type": "object", "required": true},
+    {"name": "rot", "type": "object", "required": true},
+    {"name": "parts", "type": "object", "required": true},
+    {"name": "motion", "type": "int", "required": false},
+    {"name": "mass", "type": "float", "required": false},
+    {"name": "user_data", "type": "int", "required": false},
+    {"name": "is_sensor", "type": "bool", "required": false},
+    {"name": "category", "type": "int", "required": false},
+    {"name": "mask", "type": "int", "required": false},
+    {"name": "material_id", "type": "int", "required": false},
+    {"name": "friction", "type": "float", "required": false},
+    {"name": "restitution", "type": "float", "required": false},
+    {"name": "ccd", "type": "bool", "required": false}
+  ],
+  "BatchCreate": [
+    {"name": "positions", "type": "object", "required": true},
+    {"name": "sizes", "type": "object", "required": true},
+    {"name": "shape_type", "type": "int", "required": false},
+    {"name": "motion_type", "type": "int", "required": false}
+  ],
+  "BatchDestroy": [
+    {"name": "handles", "type": "object", "required": true}
+  ],
+  "SetRot": [
+    {"name": "handle", "type": "int", "required": true},
+    {"name": "x", "type": "float", "required": true},
+    {"name": "y", "type": "float", "required": true},
+    {"name": "z", "type": "float", "required": true},
+    {"name": "w", "type": "float", "required": true}
+  ],
+  "Render": [
+    {"name": "alpha", "type": "float", "required": true}
+  ],
+  "Raycast": [
+    {"name": "start", "type": "object", "required": true},
+    {"name": "direction", "type": "object", "required": true},
+    {"name": "max_dist", "type": "float", "required": false},
+    {"name": "ignore", "type": "int", "required": false}
+  ],
+  "RayBatch": [
+    {"name": "starts", "type": "object", "required": true},
+    {"name": "directions", "type": "object", "required": true},
+    {"name": "max_dist", "type": "float", "required": false}
+  ],
+  "Shapecast": [
+    {"name": "shape", "type": "int", "required": true},
+    {"name": "pos", "type": "object", "required": true},
+    {"name": "rot", "type": "object", "required": true},
+    {"name": "dir", "type": "object", "required": true},
+    {"name": "size", "type": "object", "required": false},
+    {"name": "ignore", "type": "int", "required": false}
+  ],
+  "OverlapSphere": [
+    {"name": "center", "type": "object", "required": true},
+    {"name": "radius", "type": "float", "required": true}
+  ],
+  "OverlapAABB": [
+    {"name": "min", "type": "object", "required": true},
+    {"name": "max", "type": "object", "required": true}
+  ],
+  "SetUserData": [
+    {"name": "handle", "type": "int", "required": true},
+    {"name": "data", "type": "int", "required": true}
+  ],
+  "GetUserData": [
+    {"name": "handle", "type": "int", "required": true}
+  ],
+  "GetMotion": [
+    {"name": "handle", "type": "int", "required": true}
+  ],
+  "SetMotion": [
+    {"name": "handle", "type": "int", "required": true},
+    {"name": "motion", "type": "int", "required": true}
+  ],
+  "ColFilter": [
+    {"name": "handle", "type": "int", "required": true},
+    {"name": "category", "type": "int", "required": true},
+    {"name": "mask", "type": "int", "required": true}
+  ],
+  "RegMat": [
+    {"name": "id", "type": "int", "required": true},
+    {"name": "friction", "type": "float", "required": false},
+    {"name": "restitution", "type": "float", "required": false}
+  ],
+  "SetConstrTarget": [
+    {"name": "handle", "type": "int", "required": true},
+    {"name": "target", "type": "float", "required": true}
+  ],
+  "Heightfield": [
+    {"name": "pos", "type": "object", "required": true},
+    {"name": "rot", "type": "object", "required": true},
+    {"name": "scale", "type": "object", "required": true},
+    {"name": "heights", "type": "object", "required": true},
+    {"name": "grid_size", "type": "int", "required": true},
+    {"name": "user_data", "type": "int", "required": false},
+    {"name": "category", "type": "int", "required": false},
+    {"name": "mask", "type": "int", "required": false},
+    {"name": "material_id", "type": "int", "required": false},
+    {"name": "friction", "type": "float", "required": false},
+    {"name": "restitution", "type": "float", "required": false}
+  ],
+  "DebugData": [
+    {"name": "shapes", "type": "bool", "required": false},
+    {"name": "constraints", "type": "bool", "required": false},
+    {"name": "bbox", "type": "bool", "required": false},
+    {"name": "centers", "type": "bool", "required": false},
+    {"name": "wireframe", "type": "bool", "required": false}
+  ],
+  "CreateConstr": [
+    {"name": "type", "type": "int", "required": true},
+    {"name": "body1", "type": "int", "required": true},
+    {"name": "body2", "type": "int", "required": true},
+    {"name": "params", "type": "object", "required": false},
+    {"name": "motor", "type": "object", "required": false}
+  ],
+  "DestroyConstr": [
+    {"name": "handle", "type": "int", "required": true}
+  ],
+  "Step": [
+    {"name": "dt", "type": "float", "required": false}
+  ],
+  "CreateChar": [
+    {"name": "pos", "type": "Vector3", "required": true},
+    {"name": "height", "type": "float", "required": false},
+    {"name": "radius", "type": "float", "required": false},
+    {"name": "step_height", "type": "float", "required": false},
+    {"name": "max_slope", "type": "float", "required": false}
+  ],
+  "LoadState": [
+    {"name": "state", "type": "object", "required": true}
+  ],
+  "CreateVehicle": [
+    {"name": "chassis", "type": "int", "required": true},
+    {"name": "wheels", "type": "object", "required": true},
+    {"name": "drive", "type": "object", "required": false},
+    {"name": "engine", "type": "object", "required": false},
+    {"name": "transmission", "type": "object", "required": false}
+  ],
+  "CreateTracked": [
+    {"name": "chassis", "type": "int", "required": true},
+    {"name": "wheels", "type": "object", "required": true},
+    {"name": "tracks", "type": "object", "required": true},
+    {"name": "max_torque", "type": "float", "required": false},
+    {"name": "max_rpm", "type": "float", "required": false}
+  ],
+  "CreateRagdoll": [
+    {"name": "settings", "type": "object", "required": true},
+    {"name": "pos", "type": "Vector3", "required": true},
+    {"name": "rot", "type": "Quaternion", "required": false},
+    {"name": "user_data", "type": "int", "required": false},
+    {"name": "category", "type": "int", "required": false},
+    {"name": "mask", "type": "int", "required": false},
+    {"name": "material_id", "type": "int", "required": false}
+  ],
+  "RagdollSettings": [
+    {"name": "skeleton", "type": "object", "required": true}
+  ],
+  "CreateSoftBody": [
+    {"name": "shared_settings", "type": "object", "required": true},
+    {"name": "pos", "type": "object", "required": true},
+    {"name": "rot", "type": "object", "required": true},
+    {"name": "user_data", "type": "int", "required": false},
+    {"name": "category", "type": "int", "required": false},
+    {"name": "mask", "type": "int", "required": false},
+    {"name": "pressure", "type": "float", "required": false},
+    {"name": "vertex_radius", "type": "float", "required": false},
+    {"name": "linear_damping", "type": "float", "required": false},
+    {"name": "num_iterations", "type": "int", "required": false},
+    {"name": "max_linear_velocity", "type": "float", "required": false},
+    {"name": "gravity_factor", "type": "float", "required": false},
+    {"name": "friction", "type": "float", "required": false},
+    {"name": "restitution", "type": "float", "required": false},
+    {"name": "make_rotation_identity", "type": "bool", "required": false},
+    {"name": "update_position", "type": "bool", "required": false},
+    {"name": "faces_double_sided", "type": "bool", "required": false}
+  ],
+  "GetSbVertex": [
+    {"name": "handle", "type": "int", "required": true},
+    {"name": "index", "type": "int", "required": true}
+  ],
+  "StressTest": [
+    {"name": "a0", "type": "int", "required": false},
+    {"name": "a1", "type": "int", "required": false},
+    {"name": "a2", "type": "int", "required": false},
+    {"name": "a3", "type": "int", "required": false},
+    {"name": "a4", "type": "int", "required": false},
+    {"name": "a5", "type": "int", "required": false},
+    {"name": "a6", "type": "int", "required": false},
+    {"name": "a7", "type": "int", "required": false},
+    {"name": "a8", "type": "int", "required": false},
+    {"name": "a9", "type": "int", "required": false},
+    {"name": "a10", "type": "int", "required": false},
+    {"name": "a11", "type": "int", "required": false},
+    {"name": "a12", "type": "int", "required": false},
+    {"name": "a13", "type": "int", "required": false},
+    {"name": "a14", "type": "int", "required": false},
+    {"name": "a15", "type": "int", "required": false},
+    {"name": "a16", "type": "int", "required": false},
+    {"name": "a17", "type": "int", "required": false},
+    {"name": "a18", "type": "int", "required": false},
+    {"name": "a19", "type": "int", "required": false},
+    {"name": "a20", "type": "int", "required": false},
+    {"name": "a21", "type": "int", "required": false},
+    {"name": "a22", "type": "int", "required": false},
+    {"name": "a23", "type": "int", "required": false},
+    {"name": "a24", "type": "int", "required": false},
+    {"name": "a25", "type": "int", "required": false},
+    {"name": "a26", "type": "int", "required": false},
+    {"name": "a27", "type": "int", "required": false},
+    {"name": "a28", "type": "int", "required": false},
+    {"name": "a29", "type": "int", "required": false},
+    {"name": "a30", "type": "int", "required": false},
+    {"name": "a31", "type": "int", "required": false},
+    {"name": "a32", "type": "int", "required": false},
+    {"name": "a33", "type": "int", "required": false},
+    {"name": "a34", "type": "int", "required": false},
+    {"name": "a35", "type": "int", "required": false},
+    {"name": "a36", "type": "int", "required": false},
+    {"name": "a37", "type": "int", "required": false},
+    {"name": "a38", "type": "int", "required": false},
+    {"name": "a39", "type": "int", "required": false},
+    {"name": "a40", "type": "int", "required": false},
+    {"name": "a41", "type": "int", "required": false},
+    {"name": "a42", "type": "int", "required": false},
+    {"name": "a43", "type": "int", "required": false},
+    {"name": "a44", "type": "int", "required": false},
+    {"name": "a45", "type": "int", "required": false},
+    {"name": "a46", "type": "int", "required": false},
+    {"name": "a47", "type": "int", "required": false},
+    {"name": "a48", "type": "int", "required": false},
+    {"name": "a49", "type": "int", "required": false},
+    {"name": "a50", "type": "int", "required": false},
+    {"name": "a51", "type": "int", "required": false},
+    {"name": "a52", "type": "int", "required": false},
+    {"name": "a53", "type": "int", "required": false},
+    {"name": "a54", "type": "int", "required": false},
+    {"name": "a55", "type": "int", "required": false},
+    {"name": "a56", "type": "int", "required": false},
+    {"name": "a57", "type": "int", "required": false},
+    {"name": "a58", "type": "int", "required": false},
+    {"name": "a59", "type": "int", "required": false},
+    {"name": "a60", "type": "int", "required": false},
+    {"name": "a61", "type": "int", "required": false},
+    {"name": "a62", "type": "int", "required": false},
+    {"name": "a63", "type": "int", "required": false}
+  ],
+  "CreateShip": [
+    {"name": "sled", "type": "int", "required": true},
+    {"name": "kp", "type": "float", "required": true},
+    {"name": "kd", "type": "float", "required": true},
+    {"name": "throttle_force", "type": "float", "required": true},
+    {"name": "steer_speed", "type": "float", "required": true},
+    {"name": "banking", "type": "float", "required": false},
+    {"name": "lateral_grip", "type": "float", "required": false},
+    {"name": "linear_drag", "type": "float", "required": false}
+  ],
+  "CharMove": [
+    {"name": "velocity", "type": "Vector3", "required": true},
+    {"name": "dt", "type": "float", "required": true}
+  ],
+  "SetPosChar": [
+    {"name": "pos", "type": "Vector3", "required": true}
+  ],
+  "SetRotChar": [
+    {"name": "rot", "type": "Quaternion", "required": true}
+  ],
+  "SetStrengthChar": [
+    {"name": "strength", "type": "float", "required": true}
+  ],
+  "VehicleInput": [
+    {"name": "forward", "type": "float", "required": false},
+    {"name": "right", "type": "float", "required": false},
+    {"name": "brake", "type": "float", "required": false},
+    {"name": "handbrake", "type": "float", "required": false}
+  ],
+  "TankInput": [
+    {"name": "left", "type": "float", "required": true},
+    {"name": "right", "type": "float", "required": true},
+    {"name": "brake", "type": "float", "required": false}
+  ],
+  "RegEntityOnly": [
+    {"name": "entity", "type": "int", "required": true}
+  ],
+  "RegCompOnly": [
+    {"name": "comp_id", "type": "int", "required": true}
+  ],
+  "RegRegComp": [
+    {"name": "size_bytes", "type": "int", "required": true}
+  ],
+  "RegAdd": [
+    {"name": "entity", "type": "int", "required": true},
+    {"name": "comp_id", "type": "int", "required": true},
+    {"name": "data", "type": "object", "required": false}
+  ],
+  "RegEntComp": [
+    {"name": "entity", "type": "int", "required": true},
+    {"name": "comp_id", "type": "int", "required": true}
+  ],
+  "RegSyncPhys": [
+    {"name": "world", "type": "object", "required": true},
+    {"name": "handle_comp_id", "type": "int", "required": true},
+    {"name": "transform_comp_id", "type": "int", "required": true},
+    {"name": "rot_comp_id", "type": "int", "required": false}
+  ],
+  "AddJoint": [
+    {"name": "name", "type": "object", "required": true},
+    {"name": "parent_index", "type": "int", "required": false}
+  ],
+  "GetJointIdx": [
+    {"name": "name", "type": "object", "required": true}
+  ],
+  "RagdollDrive": [
+    {"name": "root_pos", "type": "Vector3", "required": true},
+    {"name": "root_rot", "type": "Quaternion", "required": true},
+    {"name": "matrices", "type": "object", "required": true}
+  ],
+  "RagdollAddPart": [
+    {"name": "joint_index", "type": "int", "required": true},
+    {"name": "shape_type", "type": "int", "required": true},
+    {"name": "size", "type": "object", "required": true},
+    {"name": "mass", "type": "float", "required": false},
+    {"name": "parent_index", "type": "int", "required": false},
+    {"name": "twist_min", "type": "float", "required": false},
+    {"name": "twist_max", "type": "float", "required": false},
+    {"name": "cone_angle", "type": "float", "required": false},
+    {"name": "axis", "type": "Vector3", "required": false},
+    {"name": "normal", "type": "Vector3", "required": false},
+    {"name": "pos", "type": "object", "required": false}
+  ],
+  "ShipInput": [
+    {"name": "forward", "type": "float", "required": true},
+    {"name": "right", "type": "float", "required": true}
+  ],
+  "SbssAddVertex": [
+    {"name": "pos", "type": "object", "required": true},
+    {"name": "inv_mass", "type": "float", "required": false},
+    {"name": "velocity", "type": "object", "required": false}
+  ],
+  "SbssAddFace": [
+    {"name": "v1", "type": "int", "required": true},
+    {"name": "v2", "type": "int", "required": true},
+    {"name": "v3", "type": "int", "required": true},
+    {"name": "material_index", "type": "int", "required": false}
+  ],
+  "SbssAddVertices": [
+    {"name": "positions", "type": "object", "required": true},
+    {"name": "inv_masses", "type": "object", "required": false},
+    {"name": "velocities", "type": "object", "required": false}
+  ],
+  "SbssAddFaces": [
+    {"name": "indices", "type": "object", "required": true},
+    {"name": "materials", "type": "object", "required": false}
+  ],
+  "SbssCreateConstraints": [
+    {"name": "compliance", "type": "float", "required": true},
+    {"name": "bend_type", "type": "int", "required": false}
+  ],
+  "MathPersp": [
+    {"name": "fovy", "type": "float", "required": true},
+    {"name": "aspect", "type": "float", "required": true},
+    {"name": "near", "type": "float", "required": true},
+    {"name": "far", "type": "float", "required": true}
+  ],
+  "MathOrtho": [
+    {"name": "left", "type": "float", "required": true},
+    {"name": "right", "type": "float", "required": true},
+    {"name": "bottom", "type": "float", "required": true},
+    {"name": "top", "type": "float", "required": true},
+    {"name": "near", "type": "float", "required": true},
+    {"name": "far", "type": "float", "required": true}
+  ],
+  "MathLookAt": [
+    {"name": "eye", "type": "object", "required": true},
+    {"name": "target", "type": "object", "required": true},
+    {"name": "up", "type": "object", "required": true}
+  ],
+  "MathTRS": [
+    {"name": "translation", "type": "object", "required": true},
+    {"name": "rotation", "type": "object", "required": true},
+    {"name": "scale", "type": "object", "required": true}
+  ],
+  "MathTRSBatch": [
+    {"name": "translations", "type": "object", "required": true},
+    {"name": "rotations", "type": "object", "required": true},
+    {"name": "scales", "type": "object", "required": true}
+  ],
+  "MathMat": [
+    {"name": "mat", "type": "object", "required": true}
+  ],
+  "MathMatPair": [
+    {"name": "a", "type": "object", "required": true},
+    {"name": "b", "type": "object", "required": true}
+  ],
+  "MathMatVec": [
+    {"name": "mat", "type": "object", "required": true},
+    {"name": "vec", "type": "object", "required": true}
+  ],
+  "MathMatBatch": [
+    {"name": "mat", "type": "object", "required": true},
+    {"name": "batch", "type": "object", "required": true}
+  ],
+  "MathCull": [
+    {"name": "vp", "type": "object", "required": true},
+    {"name": "min", "type": "object", "required": true},
+    {"name": "max", "type": "object", "required": true}
+  ],
+  "MathCullBatch": [
+    {"name": "vp", "type": "object", "required": true},
+    {"name": "aabbs", "type": "object", "required": true}
+  ],
+  "MathVec3Batch": [
+    {"name": "vecs", "type": "object", "required": true}
+  ],
+  "MathEuler": [
+    {"name": "x", "type": "float", "required": true},
+    {"name": "y", "type": "float", "required": true},
+    {"name": "z", "type": "float", "required": true}
+  ],
+  "MathQuat": [
+    {"name": "x", "type": "float", "required": true},
+    {"name": "y", "type": "float", "required": true},
+    {"name": "z", "type": "float", "required": true},
+    {"name": "w", "type": "float", "required": true}
+  ],
+  "MathSlerp": [
+    {"name": "q1", "type": "object", "required": true},
+    {"name": "q2", "type": "object", "required": true},
+    {"name": "t", "type": "float", "required": true}
+  ],
+  "MathQuatPair": [
+    {"name": "a", "type": "object", "required": true},
+    {"name": "b", "type": "object", "required": true}
+  ],
+  "MathLerpBatch": [
+    {"name": "vecs_a", "type": "object", "required": true},
+    {"name": "vecs_b", "type": "object", "required": true},
+    {"name": "alpha", "type": "float", "required": true}
+  ],
+  "MathQuatVec": [
+    {"name": "q", "type": "object", "required": true},
+    {"name": "v", "type": "object", "required": true}
+  ],
+  "MathQuatVecBatch": [
+    {"name": "q", "type": "object", "required": true},
+    {"name": "vecs", "type": "object", "required": true}
+  ],
+  "MathQuatOp": [
+    {"name": "q", "type": "object", "required": true}
+  ],
+  "MathProject": [
+    {"name": "v", "type": "object", "required": true},
+    {"name": "mvp", "type": "object", "required": true},
+    {"name": "viewport", "type": "object", "required": true}
+  ],
+  "MathUnproject": [
+    {"name": "v", "type": "object", "required": true},
+    {"name": "mvp", "type": "object", "required": true},
+    {"name": "viewport", "type": "object", "required": true}
+  ],
+  "MathVecPair": [
+    {"name": "v1", "type": "object", "required": true},
+    {"name": "v2", "type": "object", "required": true}
+  ],
+  "MathRayPlane": [
+    {"name": "ray_origin", "type": "object", "required": true},
+    {"name": "ray_dir", "type": "object", "required": true},
+    {"name": "plane_pos", "type": "object", "required": true},
+    {"name": "plane_norm", "type": "object", "required": true}
+  ],
+  "MathAxisAngle": [
+    {"name": "axis", "type": "object", "required": true},
+    {"name": "angle", "type": "float", "required": true}
+  ],
+  "MathDistBatch": [
+    {"name": "vecs_a", "type": "object", "required": true},
+    {"name": "vecs_b", "type": "object", "required": true}
+  ],
+  "MathVecOp": [
+    {"name": "v", "type": "object", "required": true}
+  ],
+  "MathReflect": [
+    {"name": "v", "type": "object", "required": true},
+    {"name": "normal", "type": "object", "required": true}
+  ],
+  "MathEulerVec": [
+    {"name": "euler", "type": "object", "required": true}
+  ],
+  "MathEulerBatch": [
+    {"name": "eulers", "type": "object", "required": true}
+  ],
+  "DumpSchema": [
+    {"name": "path", "type": "str", "required": false}
+  ]
+}

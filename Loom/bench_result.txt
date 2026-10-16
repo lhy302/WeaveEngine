@@ -1,0 +1,24 @@
+========== 场景基准 压测500混合.json (300 帧, 墙钟 5.01s) ==========
+FPS: 59.8  (平均帧时间 16.714 ms)
+帧稳定性: p50=13.004 p99=38.658 max=43.224 ms
+逐阶段累计耗时 (LOOM_PROFILE, ms/帧):
+  logic_step                3.32
+  interp                    0.19
+  pipe_wait                 1.99
+  physics                   0.00
+  phys_bridge_ensure        0.00
+  phys_bridge_pre           0.00
+  phys_bridge_step          0.00
+  phys_bridge_post          0.00
+  world_matrices            1.02
+  aabbs                     6.15
+  shadow_prep              10.50
+  shadow_bounds             3.19
+  shadow_cornerfill         2.31
+  shadow_matmul             0.61
+  collide_pairs             4.42
+  shadow_jobs               5.51
+  dispatch                  0.30
+  buckets                   1.33
+  已插桩阶段合计            40.84 (帧时间 16.714, 其余=GL/脚本/事件)
+完成。

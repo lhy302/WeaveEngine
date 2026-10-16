@@ -1,0 +1,91 @@
+{
+  "ts": "2026-09-09T21:51:46",
+  "secs": 12.0,
+  "on": {
+    "mode": "on",
+    "fps": 157,
+    "per_core": [
+      79.84375,
+      52.34375,
+      16.25,
+      7.03125,
+      5.0,
+      18.863636363636363,
+      16.40625,
+      7.96875,
+      2.65625,
+      2.8125,
+      7.344666422287389,
+      1.7140151515151516,
+      2.964626099706745,
+      4.521780303030303,
+      4.0625,
+      45.78125,
+      10.78125,
+      6.084280303030303
+    ],
+    "total_core": 292.43050464320623,
+    "main_pct": 78.67473124568937,
+    "main_ms_per_frame": 5.01112937870633,
+    "top_core_index": 0,
+    "top_core_pct": 79.84375
+  },
+  "off": {
+    "mode": "off",
+    "fps": 137,
+    "per_core": [
+      3.125,
+      54.375,
+      13.755040322580646,
+      4.702620967741935,
+      71.71875,
+      18.68371212121212,
+      16.99337121212121,
+      7.5,
+      3.75,
+      2.334280303030303,
+      6.680871212121213,
+      1.25,
+      0.6300403225806452,
+      2.8125,
+      3.5890151515151514,
+      34.270833333333336,
+      10.0,
+      4.370876099706745
+    ],
+    "total_core": 260.5419110459433,
+    "main_pct": 71.70343817113955,
+    "main_ms_per_frame": 5.233827603732814,
+    "top_core_index": 4,
+    "top_core_pct": 71.71875
+  },
+  "accept2": {
+    "metric": "core0_busy_pct",
+    "target_max": 45.0,
+    "measured": 79.84375,
+    "pass": false,
+    "note": "判据=ON 档实测最高核 busy% (measured=79.84%) > target=45.0%; 实测最高核即核0"
+  },
+  "regression": {
+    "metric": "main_ms_per_frame",
+    "on": 5.01112937870633,
+    "off": 5.233827603732814,
+    "pass": true
+  },
+  "parallelism": {
+    "on_total_core": 292.43050464320623,
+    "off_total_core": 260.5419110459433,
+    "on_core_equiv": 2.924305046432062,
+    "off_core_equiv": 2.605419110459433
+  },
+  "sampling_valid": true,
+  "artifacts": {
+    "on": "D:\\my-project\\Loom(py源代码-工作区)\\Loom\\tests\\_tmp\\editor_core_on.json",
+    "off": "D:\\my-project\\Loom(py源代码-工作区)\\Loom\\tests\\_tmp\\editor_core_off.json",
+    "verdict": "D:\\my-project\\Loom(py源代码-工作区)\\Loom\\tests\\_tmp\\editor_core_verdict.json"
+  },
+  "exit_policy": {
+    "default": "regression",
+    "strict_accept2": false
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "gui": "LoomGUI",
+  "open_py": false,
+  "save_dir": "",
+  "parallel_enable": true,
+  "script_cores": 2,
+  "show_grid": true,
+  "fps_limit": "120",
+  "precise_limit": true,
+  "cam_speed": 1.0,
+  "gravity": -9.8,
+  "logic_fps": 30,
+  "interp_mode": "interpolate",
+  "frame_buffer_tps": false,
+  "frame_buffer_fps": false,
+  "render_api": "vulkan",
+  "physics_fps": 60
+}

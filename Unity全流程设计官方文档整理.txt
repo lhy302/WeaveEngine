@@ -1,0 +1,446 @@
+====================================================================
+Unity 全流程设计官方文档整理（Unity 2022.3 LTS）
+====================================================================
+整理日期: 2026-08-16
+资料来源: Unity 官方手册/脚本参考（docs.unity3d.com/cn/2022.3/ 与国内镜像
+  docs.unity.cn），Addressables 部分依据官方包手册。每节附官方 URL 便于查证原文。
+说明: 本文档是"设计要点"参考，抓各系统的核心概念 + 关键做法，不是手册逐字翻译。
+  本机可访问的版本是 Unity 2022.3 LTS；Unity 6 与 2022.3 约 95% 通用，差异主要
+  在 API 改名与 URP（见 Loom(py源代码)\Unity6-vs-2022-version-gap 记录）。
+
+目录
+  第零章 快速认识：Unity 做游戏的整体流程
+  第一章 基础与场景系统
+  第二章 输入与物理系统
+  第三章 渲染与视觉（摄像机/光照/材质/管线）
+  第四章 内容与玩法系统（UI/音频/动画/导航/粒子/地形）
+  第五章 脚本与工程全流程（生命周期/API/性能/打包/调试/版本控制）
+  附：常用官方文档入口
+
+====================================================================
+第零章 快速认识：Unity 做游戏的整体流程
+====================================================================
+1. 搭建: 在 Hierarchy 摆 GameObject（物体/光源/摄像机/UI），Inspector 加组件设参数。
+2. 赋予行为: 给物体挂 C# 脚本（MonoBehaviour），处理输入、移动、物理、逻辑。
+3. 试玩: 点 Play 模拟玩家视角，退出 Play 改动自动还原（编辑器安全试玩）。
+4. 资产化: 把可复用对象存成 Prefab；资源（模型/贴图/音频）进 Assets 自动导入。
+5. 打包: Build Settings 选场景与平台 → Player Settings 配平台 → Build 出包。
+核心思想: "容器 + 组件"（GameObject 是空壳，功能全在 Component）+ "资产驱动"
+  （Prefab/资源集中管理，改一处全更新）。
+
+====================================================================
+第一章 基础与场景系统
+====================================================================
+1.1 编辑器界面
+  概念: Unity 编辑器是自由停靠的窗口集合，核心工作流 = 可视化场景 + 属性面板 + 资源库。
+  关键要点:
+  - Scene 场景视图: 可视化导航编辑场景，切 2D/3D 视角，移动/旋转/缩放工具（Gizmo）。
+  - Game 游戏视图: 由场景摄像机渲染，展示最终画面；Play 模拟、Simulator 预览移动端。
+  - Hierarchy 层级: 场景中 GameObject 的树形列表，与 Scene 联动，父子化/排序/多场景。
+  - Project 项目: 资产库，导入的资源都在这里，可搜索/过滤/预览。
+  - Inspector 检查器: 查看编辑选中对象（GameObject/组件/资源）的全部属性。
+  - Console 控制台: 错误/警告/日志，可折叠、Error Pause、连真机日志。
+  - Play 播放模式: 运行中一切修改都是临时的，退出即还原——"安全试玩"的核心设计。
+  URL: docs.unity3d.com/cn/2022.3/Manual/UsingTheEditor.html | UsingTheSceneView.html
+       | GameView.html
+
+1.2 GameObject 与组件系统
+  概念: GameObject（游戏对象）是场景构建块，但"它本身不能做任何事"，只是组件的容器；
+    真正提供功能的是挂在上面的 Component。挂不同组件组合，空对象就变成光源/树/带物理的立方体。
+  关键要点:
+  - 每个 GameObject 必带一个不可删除的 Transform；其余组件用 Component 菜单 / Add Component 加。
+  - 组件依赖: 绘制需 Mesh Filter + Mesh Renderer；物理需 Rigidbody + Collider；有的组件依赖别的组件。
+  - 脚本取组件: GetComponent<T>()（取不到返回 null）；运行时加 AddComponent<T>()。
+  - 跨对象访问: Inspector 拖引用，或 Transform.Find / GameObject.Find / FindWithTag。
+  - 空 GameObject 常作脚本挂载点 / 组织节点；SetActive 停用会关闭其上全部组件。
+  URL: docs.unity3d.com/cn/2022.3/Manual/GameObjects.html | UsingComponents.html
+       | class-GameObject.html
+
+1.3 Transform
+  概念: 决定每个对象的 Position/Rotation(度)/Scale，并记录父子状态——对象在场景中的"存在方式"。
+  关键要点:
+  - 有父对象时，Position/Rotation/Scale 是相对父的局部坐标；无父即世界坐标；缩放父会连带影响子。
+  - 父子层级: 子完全跟随父移动/旋转/缩放；一个对象可有多个子、但只能有一个父。
+  - 脚本区分局部与全局: localPosition/position、localRotation/rotation、localScale/lossyScale。
+  - 官方建议按真实比例做模型，尽量别在 Transform 上改 Scale；避免非等比缩放（让碰撞体变形、旋转子对象错切）。
+  URL: docs.unity3d.com/cn/2022.3/Manual/class-Transform.html
+
+1.4 场景与场景管理
+  概念: 场景（Scene）是一个关卡/一块游戏世界的载体，本身是 .unity 资产，支持多场景同开。
+  关键要点:
+  - 运行时切场景: SceneManager.LoadScene("名字"或索引)（需先加入 Build Settings）/ LoadSceneAsync 异步。
+  - 加载新场景会销毁当前场景所有对象；想跨场景保留（背景音乐/全局管理器）用 Object.DontDestroyOnLoad(obj)
+    —— 只对根 GameObject 有效，会连带保留其全部子对象。
+  - 多场景编辑（Multi-Scene Editing）: 大项目拆多场景协作。
+  URL: docs.unity3d.com/cn/2022.3/Manual/scenes-working-with.html
+       | ScriptReference/SceneManagement.SceneManager.html | ScriptReference/Object.DontDestroyOnLoad.html
+
+1.5 Prefab 预制件
+  概念: 把一个 GameObject 及其全部组件/属性/子对象保存为可复用资产（模板），核心价值是"自动同步"：
+    改模板，所有实例一起更新（对应 Loom 的"存模板/放实例"）。
+  关键要点:
+  - 创建: 把 Hierarchy 对象拖到 Project 即生成预制件资源，原对象自动变实例。
+  - 使用: 拖回场景生成实例；运行时 Instantiate 实例化（弹幕/NPC/特效）。
+  - 覆盖 Override: 单个实例可独立改属性/加组件/加子对象（Inspector 被覆盖项加粗），可 Apply 回模板或 Revert。
+  - 预制件变体 Prefab Variant: 以另一预制件为基础固化"系列变化"（同敌人多形态）。
+  - 嵌套预制件 Nested Prefab: 预制件里再放预制件实例，各自保留链接。
+  URL: docs.unity3d.com/cn/2022.3/Manual/Prefabs.html | CreatingPrefabs.html | PrefabVariants.html
+
+1.6 资源/资产系统
+  概念: 资产（Asset）是项目里任何用来做游戏的东西（模型/纹理/音频/脚本/场景/数据），
+    贯穿"导入→创建→构建→分发→运行时加载"流水线。
+  关键要点:
+  - Assets 文件夹: 源文件放进 Assets 自动导入；导入不改源文件，按导入设置生成游戏数据进 Library
+    （Library 是可删重建的缓存，不应纳入版本控制；每个资源带 .meta 文件）。
+  - 每种资产有独立 Import Settings（贴图可选纹理/精灵/法线，FBX 可调比例拆动画）。
+  - AssetBundle: 按平台打包非代码资源存档，用于 DLC/减首包/按需加载。
+  - Addressables: 官方推荐的资源管理方案（基于 AssetBundle），给资源一个"地址"从本地/远程按需加载，
+    自动处理依赖与内存；官方建议用它而不是直接操作 AssetBundle。
+  URL: docs.unity3d.com/cn/2022.3/Manual/AssetWorkflow.html | ImportingAssets.html
+       | AssetBundlesIntro.html | Packages/com.unity.addressables@1.21/manual/index.html
+
+====================================================================
+第二章 输入与物理系统
+====================================================================
+2.1 旧输入系统 Input Manager
+  概念: 经典输入方案，通过静态类 Input 按"名称"读虚拟轴/虚拟按钮；轴在 Project Settings>Input 配置。
+  关键要点:
+  - GetAxis("Horizontal") 返回平滑 -1~1（键盘/手柄）；鼠标轴 Mouse X/Y 返回"移动增量×灵敏度"；
+    GetAxisRaw 未平滑。移动用 GetAxis，事件类（跳跃/开枪）用 GetButton。
+  - GetButtonDown/Up 只在按下/松开帧为 true；GetKey 读按键；GetMouseButton/mousePosition 读鼠标。
+  - 默认轴: Horizontal/Vertical（WASD+方向键）、Mouse X/Y、Fire1/2/3。
+  - Input 应在 Update 中读；旧系统每次读做字符串查找，性能较差。
+  URL: docs.unity3d.com/cn/2022.3/Manual/class-InputManager.html | ScriptReference/Input.html
+
+2.2 新输入系统 Input System
+  概念: 官方包 com.unity.inputsystem，事件驱动、设备无关、可视化配置，官方推荐新项目使用。
+    核心是 Input Actions 资产: Action Map 分组 → Action（按名称调）→ Binding（绑定设备）。
+  关键要点:
+  - 三类 Action: Value（连续值摇杆）、Button、Pass-through。代码按名称调，
+    如 FindAction("Move").ReadValue<Vector2>()；按钮用 WasPressedThisFrame()/IsPressed()。
+  - PlayerInput 组件: 代表一个玩家输入入口，支持本地多人。
+  - Processor（死区/归一化）与 Interaction（长按/双击）在资产编辑器里配。
+  - 切换: Edit>Project Settings>Player>Active Input Handling（Old/New/Both，迁移期设 Both）。
+    映射: GetAxis→ReadValue、GetButtonDown→WasPressedThisFrame、GetKey→Keyboard.current.wKey.isPressed。
+  URL: docs.unity3d.com/cn/2022.3/Manual/com.unity.inputsystem.html
+       | Packages/com.unity.inputsystem@1.6/manual/Migration.html | manual/PlayerInput.html
+
+2.3 刚体 Rigidbody
+  概念: Rigidbody 让对象受物理引擎（PhysX）控制——受重力、参与碰撞、接受力。只有 Collider 无
+    Rigidbody 的物体是静态碰撞体，不参与动力学。
+  关键要点:
+  - mass 质量（两刚体质量差勿超 10 倍）、useGravity、Interpolate（高速防抖）、
+    Collision Detection（Discrete/Continuous，子弹等快速物体用 Continuous 防穿透）。
+  - Is Kinematic 运动学: 不受力与重力，只能靠 Transform 移动，但仍能推动其他动态刚体。
+  - AddForce + ForceMode（Force/Acceleration/Impulse/VelocityChange），**须在 FixedUpdate 中调用**。
+  - 物理代码放 FixedUpdate（固定时间步默认 0.02s）；不要同时用刚体 + 直接改 Transform。
+  URL: docs.unity3d.com/cn/2022.3/Manual/class-Rigidbody.html | ScriptReference/Rigidbody.html
+
+2.4 碰撞体 Collider
+  概念: Collider 定义碰撞外形（不可见组件），用粗略近似即可；分 Box/Sphere/Capsule/Mesh 等，
+    每个 3D 碰撞体有对应 2D 版本。
+  关键要点:
+  - 三类: 静态碰撞体（有 Collider 无 Rigidbody）、刚体碰撞体（动态/运动学）、触发器。
+  - Is Trigger 触发器: 不产生物理阻挡，改为"进入/停留/离开"通知 OnTriggerEnter/Stay/Exit；
+    **参与双方至少一方须有 Rigidbody**，否则不触发。常用于拾取区/警戒区/门禁。
+  - 真实接触用 OnCollisionEnter/Stay/Exit。
+  - Physic Material 物理材质: 控制摩擦与弹性。
+  - Layer 碰撞矩阵: Project Settings>Physics 配置各 Layer 是否碰撞；官方建议项目早期规划好 Layer。
+  - 快速移动物体开 Continuous 防穿透；复杂形状优先用复合基本碰撞体而非 MeshCollider。
+  URL: docs.unity.cn/Manual/CollidersOverview.html | Components/collider-interactions-create-trigger.html
+       | ScriptReference/Collider.html
+
+2.5 CharacterController
+  概念: 内置胶囊体专用角色碰撞器，自带碰撞约束且不依赖 Rigidbody，专门做"受碰撞约束的移动"。
+  关键要点:
+  - Move（位移向量，乘 deltaTime，自动碰撞滑行）与 SimpleMove（速度向量，自动加重力）。
+    **每帧只调用其中一次**。
+  - 特性: 不受外力、无真实动量；自动处理爬坡（默认 45°）与上台阶（默认 0.3）；能推开刚体但自身不被反弹。
+  - 何时用: 需要快速启停、精确控制、爬坡上台阶的角色 → CharacterController；
+    需要真实动量、受打击力、被推动 → Rigidbody。
+  URL: docs.unity.cn/Manual/CharacterControllers.html | ScriptReference/CharacterController.html
+
+2.6 关节与力（简述）
+  概念: Joint 用约束连接两个刚体（或刚体与空间点），以"施加力 + 限位"限制相对运动。
+  关键要点:
+  - 常见关节: HingeJoint 铰链（门/钟摆，含 Motor 电机/Spring 弹簧/Limits 限位）、FixedJoint 完全锁死
+    （类似父子化但走物理）、ConfigurableJoint 通用、CharacterJoint 布娃娃、SpringJoint 弹簧。
+  - Break Force/Torque: 超过阈值关节断裂，可用 OnJointBreak 回调感知。
+  - 力与扭矩: Rigidbody.AddForce/AddTorque + ForceMode；ConstantForce 持续施力。
+  URL: docs.unity.cn/Components/Joints.html | class-HingeJoint.html
+
+====================================================================
+第三章 渲染与视觉（摄像机/光照/材质/管线）
+====================================================================
+3.1 摄像机 Camera 组件
+  概念: 摄像机决定玩家"看见什么"，只是场景里挂 Camera 组件的 GameObject。看到的内容由
+    Transform（位置+旋转）与 Camera 组件参数共同决定。
+  关键要点:
+  - **朝向完全由 Transform 决定（重点）**: 官方文档明确"变换位置定义视点，向前(+Z)轴定义视图方向，
+    向上(+Y)轴定义屏幕顶端"。**摄像机组件上没有独立的 yaw/pitch/roll 参数**，一切转动都靠改
+    Transform 的 Rotation。Cinemachine 的 POV 之所以能转 yaw/pitch，是算法在替你改 Transform，
+    不是摄像机自带参数。—— 对比 Loom：我们给 CameraState 加了独立的 yaw/pitch/roll（度制）参数，
+    是"摄像机自带朝向参数"的简化做法；Unity 是"朝向完全由变换决定"。
+  - Projection: Perspective 透视（近大远小，默认）/ Orthographic 正交（无透视，2D/小地图）。
+  - FOV 视野: 透视模式可设，单位"度"；FOV Axis 可选水平/垂直，实际视锥由 FOV + 宽高比共同决定。
+  - Clipping Planes: Near/Far 最近最远可绘制距离；远面过大会因浮点精度闪烁。
+  - Culling Mask: 按 Layer 决定渲染哪些物体（UI 相机只渲染 UI 层）。
+  - Depth: 多相机绘制顺序，值大者画上面（武器相机/UI 相机）。
+  - Clear Flags: Skybox/Solid Color/Depth only/Don't clear（Depth only 典型用于武器相机不清颜色只清深度）。
+  - Viewport Rect: 以视口坐标(0-1)定位画面画在哪，是分屏/小地图/后视镜的基础。
+  - Physical Camera: 模拟真实相机（Focal Length 焦距/Sensor Size 传感器/Lens Shift）。
+  URL: docs.unity3d.com/cn/2022.3/Manual/class-Camera.html | UnderstandingFrustum.html
+       | CamerasOverview.html
+
+  ★ 玩家相机在 Unity 里的常用做法（综合官方资料）:
+  - 第一人称: 把相机做成玩家 GameObject 的**子物体**（挂玩家身上，位置=眼高），鼠标驱动父物体
+    Transform 的旋转 → 相机跟着父转。或写脚本每帧把相机 Transform 设为玩家位置+朝向。
+  - 第三人称: 相机独立于玩家，脚本在 **LateUpdate**（玩家 Update 移动之后）把相机放在角色
+    后方上方并朝向角色（Lerp/SmoothDamp 做平滑跟随）。LateUpdate 正是为"跟随"设计的。
+  - 进阶: 用 **Cinemachine**（见 3.2）做虚拟相机，声明式配置跟随/构图/防穿墙，不必手写跟随脚本。
+
+3.2 Cinemachine（官方智能摄像机）
+  概念: 把运镜从手写代码里解放。核心是**虚拟摄像机**——它不渲染画面，只算一套镜头参数（位置/旋转/FOV），
+    由主相机上的 **Brain** 采纳执行。场景可放几十个虚拟相机，按优先级切换并混合。
+  关键要点:
+  - Virtual Camera: Follow（跟谁，Body 处理位移）、Look At（看谁，Aim 处理朝向）、Priority（优先级）、
+    Lens（FOV/裁剪面/Dutch 等镜头参数）。
+  - Brain: 挂真实相机上的控制中心——选出 Priority 最高者为 Live，同步给真实相机，处理切换过渡混合。
+  - Body（管移动）: Transposer（与目标固定相对位置带阻尼，经典第三人称）、Orbital Transposer（绕目标转，
+    可接收玩家输入）、Framing Transposer（屏幕空间跟框，2D/近距离）。
+  - Aim（管朝向）: Composer（把目标约束在画面构图区内）、POV（第一人称，输入驱动 yaw/pitch）、
+    Do Nothing（不做转向，第三人称常配）。
+  - 扩展: CinemachineCollider（防穿墙）、Confiner（限制活动范围）。
+  URL: docs.unity3d.com/cn/2022.3/Manual/com.unity.cinemachine.html | CinemachineVirtualCamera.html
+       | CinemachineBrain.html
+
+3.3 光照 Light
+  概念: 光照决定明暗/阴影/氛围。静态物体可预先"烘焙"光照，动态物体靠光照探针/实时光，兼顾画质与性能。
+  关键要点:
+  - 光源类型: Directional 平行光（只受旋转影响）、Point 点光、Spot 聚光、Area 面光（仅烘焙生效）。
+  - Mode: Realtime（实时）/ Mixed（混合）/ Baked（烘焙）。Baked 运行时零开销，但没有实时直射与镜面。
+  - 阴影 Shadow: Hard/Soft/关闭；Soft 更真实更贵。Bias/Normal Bias 防自阴影瑕疵。
+  - 烘焙前置: 物体勾 Lightmap Static；结果写光照贴图（静态）+ 光照探针（动态）。
+  - 光照探针 Light Probes: 空间布置采样点，让移动物体在烘焙场景吃到间接光。
+  - 反射探针 Reflection Probes: 抓取周围 Cubemap，供金属/光滑材质反射。
+  URL: docs.unity3d.com/cn/2022.3/Manual/class-Light.html | LightProbes.html | class-ReflectionProbe.html
+
+3.4 材质与 Shader 基础
+  概念: Shader 是决定"怎样画到屏幕"的 GPU 程序；Material 是 Shader 的实例化资产，填具体参数。
+    内置 Standard Shader 采用 PBR（基于物理的渲染）。
+  关键要点:
+  - PBR 工作流: Metallic（金属度）与 Specular 两套；金属度越高越反射环境、反照率颜色越弱。
+  - Smoothness 光滑度: 越高反射越清晰（镜面），越低光线散射越强（哑光）。
+  - 贴图通道约定: Metallic 贴图 R 通道=金属度，Alpha 通道=光滑度。
+  - Normal Map 法线贴图: 用贴图编码法线，不增面数模拟凹凸细节（配 Bump Scale）。
+  - 其他: Albedo 反照率、Emission 自发光。
+  URL: docs.unity3d.com/cn/2022.3/Manual/class-Material.html | StandardShaderMaterialParameters.html
+       | StandardShaderMaterialParameterMetallic.html
+
+3.5 渲染管线
+  概念: 渲染管线是"场景内容变屏幕像素"的整套流程（剔除→着色→后处理）。Unity 2022.3 三条官方管线，
+    画质/性能/平台取向不同，**必须尽早选定**，中途切换代价极高。
+  关键要点:
+  - 内置管线 Built-in: 默认最通用、支持全部平台、自定义有限；官方已停止新增功能。
+  - URP 通用渲染管线: 基于 SRP、主要 C# 公开可改、全平台、带 SRP Batcher 与 Shader Graph；2D/3D 手游首选。
+  - HDRP 高清渲染管线: 仅高端 PC/主机；物理光照、光追、体积光雾等 3A 效果。
+  - 后处理: 泛光/景深/色调映射/抗锯齿。内置走 Post Processing Stack；URP/HDRP 用自带 Volume 系统。
+  - 三条管线不可混用；Shader Graph 只服务 URP/HDRP。
+  URL: docs.unity3d.com/cn/2022.3/Manual/render-pipelines.html | choose-a-render-pipeline.html
+       | render-pipelines-feature-comparison.html
+
+3.6 天空盒与雾
+  概念: 天空盒是包裹场景外的"背景球"，也可作环境光来源；雾随距离混色调，营造景深氛围。
+  关键要点:
+  - 天空盒本质是一种材质（6 Sided/Cubemap/Panoramic/Procedural），在 Lighting>Environment 指定；
+    也可作环境光 Source。HDRP 不用天空盒材质，用自带天空生成方案。
+  - 雾 Fog: Lighting>Scene 开启，三种模式——Linear（设 Start/End）、Exponential（配 Density）、
+    ExponentialSquared（指数平方，默认）；Unity 默认无雾。
+  URL: docs.unity3d.com/cn/2022.3/Manual/skyboxes-using.html | shader-skybox-cubemap.html
+       | PostProcessing-Fog.html
+
+====================================================================
+第四章 内容与玩法系统（UI/音频/动画/导航/粒子/地形）
+====================================================================
+4.1 UI 系统
+  概念: uGUI 基于 GameObject，所有 UI 元素必须是 Canvas 的子树。Canvas Scaler 控制 UI 在不同分辨率
+    下缩放；UI 元素用 RectTransform 取代 Transform，通过"锚点+轴心+偏移"确定相对父矩形的布局。
+  关键要点:
+  - Canvas 三种渲染模式: Screen Space - Overlay（屏幕覆盖，最常用）、Screen Space - Camera、
+    World Space（世界中的物体，如 3D 血条）。
+  - Canvas Scaler 常用 "Scale With Screen Size": 参考分辨率 + Screen Match Mode，UI 随屏幕等比缩放。
+  - 锚点 Anchor: 按父矩形比例定义（0,0→1,1），锚点分离则随父级拉伸，是自适应布局核心。
+  - 常用元素: Text/Image 显示；Button/Slider/Toggle/InputField 交互（Selectable），经 UnityEvent 响应。
+  - EventSystem 把鼠标/触摸/键盘转成事件，靠 Graphic Raycaster 判定命中；同屏只保留一个 EventSystem。
+  - UI Toolkit（新框架）: 虚拟 Visual Tree + UXML（HTML 类结构）+ USS（CSS 类样式）+ Flexbox，
+    性能更好，官方推荐新项目；但 uGUI 仍是游戏运行时 UI 主流。
+  URL: docs.unity3d.com/cn/2022.3/Manual/UICanvas.html | script-CanvasScaler.html
+       | class-RectTransform.html | UIToolkits.html
+
+4.2 音频 Audio
+  概念: 三件套——AudioListener（"耳朵"，每场景必须有且只能一个，一般挂主相机）+
+    AudioSource（"播放器"，挂发声物体播一个 AudioClip）+ AudioClip（音频资源）。
+    AudioMixer 在 Source 与 Listener 之间做混音。
+  关键要点:
+  - 2D 声音（SpatialBlend=0）全场景等音量，适合背景音乐/UI 音效；3D 声音按距离衰减，适合脚步/爆炸。
+  - 背景音乐: 独立 AudioSource，Loop 勾选、Priority 设 0、关 3D；音效: 短 Clip，关 Play On Awake，脚本 Play()。
+  - AudioMixer 分组（Music/SFX/Dialogue）: 把 Source 的 Output 指到组，可统一调音量加效果；
+    组音量 Expose to script 后可做设置面板音量滑块。
+  - 快照 Snapshot: 保存整组参数状态，用 TransitionToSnapshots() 平滑切换（暂停/水下/战斗）。
+  URL: docs.unity3d.com/cn/2022.3/Manual/Audio.html | class-AudioSource.html | AudioMixerOverview.html
+
+4.3 动画 Animator
+  概念: Mecanim 动画系统。Animator 组件引用 Animator Controller；Controller 含状态机 + 参数。
+    状态机是流程图: 每个状态播放一个 Animation Clip 或混合树，靠 Transition（过渡）连接，由参数或
+    Exit Time 触发。
+  关键要点:
+  - 参数类型 Bool/Float/Int/Trigger；脚本 SetBool/SetFloat/SetTrigger；Trigger 一次性触发自动复位。
+  - 过渡属性: Transition Duration（混合时长）、Has Exit Time、Conditions（可多个须全满足）。
+  - Blend Tree 混合树: 把相似动画（走/跑）按一个参数（speed）平滑插值，是角色移动动画标准做法。
+  - 人形 Avatar: 模型 Rig 设 Humanoid 自动生成骨骼映射，收益是动画重定向与骨骼 IK。
+  URL: docs.unity3d.com/cn/2022.3/Manual/AnimationStateMachines.html | class-BlendTree.html
+       | ConfiguringtheAvatar.html
+
+4.4 导航寻路 Navigation
+  概念: 让角色智能移动。NavMesh（导航网格）是"可行走表面"数据结构，由静态几何烘焙；
+    NavMeshAgent 挂移动角色上自动寻路并互相避障；NavMeshObstacle 表示会动的障碍。
+  关键要点:
+  - 流程: Window>AI>Navigation，静态障碍设 Navigation Static 后 Bake。
+  - 代码核心: agent.SetDestination(target)，用 remainingDistance 判断到达；Warp() 传送；
+    areaMask/SetAreaCost 控制区域通行成本。
+  - NavMeshObstacle 移动时实时避让，静止后在网格"雕刻"出洞。
+  URL: docs.unity3d.com/cn/2022.3/Manual/nav-NavigationSystem.html | nav-BuildingNavMesh.html
+       | ScriptReference/AI.NavMeshAgent.html
+
+4.5 粒子系统 Particle System（简述）
+  概念: 用大量小图元模拟火焰/烟雾/尘土/魔法。组件把属性组织成多个模块。
+  关键要点:
+  - 核心模块: Main（lifetime/speed/size/color）、Emission（发射速率/burst）、Shape（球/锥/圆/网格）、
+    Color over Lifetime、Size over Lifetime、Velocity over Lifetime。
+  - 属性四种模式: 固定值/曲线/两值随机/两曲线随机 + Gradient。
+  - 性能: 压 Max Particles、用纹理图集、控制远处粒子数。
+  URL: docs.unity3d.com/cn/current/Manual/ParticleSystemModules.html | PartSysMainModule.html
+
+4.6 地形 Terrain（简述）
+  概念: 把地面做成大型高度图 + 纹理层，直接"画"山丘、贴草地、种树、撒草。
+  关键要点:
+  - 创建: GameObject>3D Object>Terrain。顶栏五工具: 建瓦片/雕刻绘制/加树/加细节/常规设置。
+  - 高度: Raise/Lower/Set Height/Stamp；纹理: Paint Texture 建 Terrain Layer 涂抹混合。
+  - 性能: Draw Instanced 实例化渲染、Base Map Dist 控制全分辨率距离、Pixel Error 平衡精度性能。
+  URL: docs.unity3d.com/cn/2022.3/Manual/terrain-UsingTerrains.html | terrain-PaintTexture.html
+
+====================================================================
+第五章 脚本与工程全流程（生命周期/API/性能/打包/调试/版本控制）
+====================================================================
+5.1 MonoBehaviour 生命周期
+  概念: Unity 按预定顺序调用挂载对象上的事件函数，理解此顺序是写脚本的基础。
+  顺序: 场景加载 Awake→OnEnable→(第一帧前)Start；每帧 FixedUpdate→Update→LateUpdate；
+    禁用 OnDisable；销毁 OnDisable→OnDestroy。
+  关键要点:
+  - Awake: 创建时第一个调用、只一次，初始化自身引用（GetComponent 等）。
+  - OnEnable: 每次启用都调用，是订阅事件的地方；同一对象保证 Awake 先于 OnEnable。
+  - Start: 第一帧 Update 前；场景对象所有 Awake/OnEnable 都跑完才轮到任何 Start——
+    "依赖别的对象已初始化"的逻辑放 Start。
+  - FixedUpdate: 固定间隔（默认 0.02s，Time.fixedDeltaTime），物理紧随其后；帧率低时一帧可能多次调用。
+  - Update: 每帧一次，主逻辑入口。LateUpdate: Update 后一帧一次，典型用途=第三人称相机跟随
+    （角色先动、相机后跟）。
+  - 顺序控制: Edit>Project Settings>Script Execution Order 或 [DefaultExecutionOrder]；
+    官方提醒不要依赖不同对象间同事件的先后。
+  URL: docs.unity.cn/cn/2022.3/Manual/ExecutionOrder.html | class-MonoManager.html
+
+5.2 常用脚本 API
+  关键要点:
+  - 组件: GetComponent<T>()、TryGetComponent<T>()（更安全）、GetComponentInChildren/InParent、
+    AddComponent<T>()；**组件引用缓存成字段**，避免 Update 里反复 GetComponent。
+  - 克隆/销毁: Object.Instantiate(预制体)；Destroy(obj) 当前帧末安全销毁；DontDestroyOnLoad 跨场景。
+  - Transform: position/rotation/localScale、Translate、Rotate、LookAt。
+  - Time: deltaTime（移动乘它即与帧率无关）；fixedDeltaTime（物理步长）；timeScale（0 即暂停，
+    为 0 时 Update 仍跑但 deltaTime 为 0）；unscaledDeltaTime 不受影响（UI 动画用）。
+  - Random: Random.Range(a,b)（int 含两端；float 返回 [a,b)）、Random.value、Random.insideUnitSphere。
+  - 向量/四元数: Vector3（normalized/Dot/Cross）；Quaternion 表示旋转，用 Euler/LookRotation/Slerp
+    组合，**不要直接改欧拉角分量**。
+  URL: docs.unity.cn/ScriptReference/Component.html | ScriptReference/Time-deltaTime.html
+       | docs.unity3d.com/2022.3/Documentation/ScriptReference/Time.html
+
+5.3 协程 Coroutine
+  概念: 返回 IEnumerator、含 yield return 的方法，用 StartCoroutine 启动，可在 yield 处暂停交还
+    控制权，之后满足条件处继续。**不是线程**——仍跑主线程，只是分时暂停/恢复。
+  关键要点:
+  - 常用 yield: null（下一帧）、WaitForSeconds（受 timeScale 影响）、WaitForSecondsRealtime（不受）、
+    WaitForEndOfFrame（帧末）、WaitForFixedUpdate、WaitUntil(条件)、yield return StartCoroutine(...)。
+  - 局部变量在 yield 间保留（编译器生成状态机类，启动协程有固定内存开销）。
+  - 停止: StopCoroutine/StopAllCoroutines；SetActive(false) 会停，enabled=false 不会。
+  - 何时用: 计时器、每 N 秒检查、配合异步加载；**真正并行计算用 C# Job System**；每帧逻辑直接用 Update。
+  URL: docs.unity.cn/Manual/Coroutines.html | ScriptReference/Coroutine.html
+
+5.4 事件与消息
+  关键要点:
+  - 物理回调: OnCollisionEnter/Stay/Exit（双方 collider 且均未勾 Is Trigger，需 Rigidbody）；
+    OnTriggerEnter/Stay/Exit（至少一方 Is Trigger）。2D 版带 2D 后缀。
+  - UnityEvent: 可在 Inspector 绑持久回调（无需写代码配事件）；脚本 AddListener/RemoveListener/Invoke，
+    支持泛型 UnityEvent<T>。适合"解耦的、内容驱动的回调"。
+  - 鼠标: 旧式 OnMouseDown/OnMouseUp；UGUI 用 EventSystem 的 IPointerClickHandler 等接口。
+  - 延迟: Invoke("方法名",秒)/InvokeRepeating（字符串反射有开销）；SendMessage 官方不太推荐。
+  URL: docs.unity.cn/ScriptReference/Events.UnityEvent.html | Components/collider-interactions.html
+
+5.5 性能优化
+  概念: 两大主线——渲染 Draw Call 数与托管堆 GC 分配。
+  关键要点:
+  - Draw Call 批处理: 静态批处理（构建时合并不动网格，≤64k 顶点，Inspector 勾 Batching Static）；
+    动态批处理（≤300 顶点，官方**不再推荐**）；GPU Instancing（大量同网格）；SRP Batcher（SRP 下）。
+    **只有共享同材质的对象才能一起批**；脚本改材质用 Renderer.sharedMaterial，
+    用 MaterialPropertyBlock 改属性不破坏批处理。
+  - 对象池: 预创建复用对象（子弹/敌人），避免频繁 Instantiate/Destroy 的 GC 与卡顿。
+  - GC: Update 里避免 new、字符串拼接、LINQ、闭包、装箱；复用 List/Dictionary（Clear()）。
+  - Profiler: CPU 看 GC Alloc 列（单帧分配 >2KB 应排查）；**在目标设备/开发构建上测**，编辑器数据不可靠。
+  - 官方清单: 先 Profiler 再优化、主线程每帧分配趋零、缓存组件引用、复用对象、共享材质与纹理图集。
+  URL: docs.unity.cn/Manual/optimizing-draw-calls.html | docs.unity3d.com/cn/2023.2/Manual/
+       performance-garbage-collection-best-practices.html
+
+5.6 打包发布 Build
+  关键要点:
+  - Build Settings: Scenes In Build 决定打进包的场景（按列表顺序）；选平台后 Switch Platform；
+    勾 Development Build 才含调试符号与 Profiler。
+  - Player Settings（Edit>Project Settings>Player）: Company/Product Name/Version/图标；
+    平台专属含 Scripting Backend（Mono/IL2CPP）、API Level、分辨率/全屏、启动画面。
+  - 场景打包: 只有 Build Settings 列表里的场景被打进包；大量内容用 Addressables/AssetBundle 按需加载。
+  - 平台: Android 官方推荐 IL2CPP + ARM64；WebGL 建议 Brotli、Enable Exceptions 设 None、Strip Engine Code。
+  URL: docs.unity.cn/Manual/BuildSettings.html | class-PlayerSettings.html | IL2CPP.html
+
+5.7 调试
+  关键要点:
+  - Debug.Log/Warning/Error；Debug.Log(msg, this) 第二参传对象，点日志可在场景高亮；
+    Debug.DrawRay/DrawLine 可视化；Debug.Break() 暂停。
+  - Console: Collapse 折叠重复、Error Pause（出错暂停）、双击跳代码位置。
+  - 断点: 编辑器切 Debug Mode（Release 无法附加调试器）；VS 用 Debug>Attach Unity Debugger，
+    Rider 直接断点附加；Player 需 Development Build + Script Debugging。WebGL 不支持托管调试。
+  URL: docs.unity.cn/cn/current/Manual/managed-code-debugging.html | ScriptReference/Debug.html
+
+5.8 版本控制
+  关键要点:
+  - 核心: 只提交源文件，不提交可再生的缓存；**.meta 文件必须入库**（资源关联信息在里面）。
+  - Git 集成: 先 Edit>Project Settings>Editor>Version Control 启用 Visible Meta Files；
+    只提交 Assets/、ProjectSettings/、Packages/。
+  - .gitignore（GitHub 官方 Unity.gitignore）: 忽略 Library/、Temp/、Logs/、Obj/、Build/、
+    UserSettings/、MemoryCaptures/、.vs/、*.csproj、*.sln、*.user。Library 是本地导入缓存，提交会冲突。
+  - 进阶: 大二进制资源（贴图/模型/音频）配 Git LFS；场景/prefab 是 YAML，用 Unity Smart Merge
+    （YAMLMerge）代替默认文本合并减少冲突。
+  - Unity Version Control（原 Plastic SCM）: Unity 内置，用 ignore.conf 而非 .gitignore。
+  URL: docs.unity.com/en-us/unity-version-control/ignore-files | github.com/github/gitignore/blob/main/Unity.gitignore
+
+====================================================================
+附：常用官方文档入口
+====================================================================
+- Unity 2022.3 中文手册首页: docs.unity3d.com/cn/2022.3/Manual/index.html
+- 国内镜像（可访问性更好）: docs.unity.cn/cn/2022.3/Manual/（ScriptReference 同理）
+- 脚本 API（ScriptReference）: docs.unity3d.com/cn/2022.3/ScriptReference/
+- Cinemachine: docs.unity3d.com/cn/2022.3/Manual/com.unity.cinemachine.html
+- Input System: docs.unity3d.com/cn/2022.3/Manual/com.unity.inputsystem.html
+- Addressables: docs.unity3d.com/Packages/com.unity.addressables@1.21/manual/index.html
+- GitHub 官方 Unity.gitignore: github.com/github/gitignore/blob/main/Unity.gitignore
+
+====================================================================
+(完) 本文件与 Unity使用速学笔记.txt（unitykit.cn 教程）互补：那份是"照着做"的速学，
+  这份是"查系统设计"的参考。官方 URL 为本机可访问版本路径，若 404 可把版本号换成
+  cn/current 或 cn/2021.3 等邻近版本。
+====================================================================

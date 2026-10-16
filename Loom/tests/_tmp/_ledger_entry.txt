@@ -1,0 +1,20 @@
+﻿
+## 播放态相机统一 (2026-09-06 用户定案) + 指令实测通过
+- 用户定案: 播放态直接套用编辑态相机逻辑, 彻底删除双轨制。改动:
+  ①_update_camera 播放/编辑同一 WASD/QE/方向键分支 (全走 camera_target
+  平移+方向键转向), 删"播放态自由相机移 camera 本体"分支与 _dev_cam_active
+  接管状态机; ②滚轮统一推拉 camera_distance (删播放态推拉本体分支);
+  ③render 相机分支统一 apply_orbit_camera (预览除外), 删挂父相机盖回/
+  _dev_cam_moved 保护/开发者轨道三分支; ④scripts.py first_person/
+  third_person 删相机写回与 orbit_mode 切换 (双驱动源=历次开发者相机
+  BUG 总根); ⑤test_scripts 契约更新 (脚本不写相机)。
+- 实测 (playcam_probe.py 指令驱动+截图四连): 基线/target 推进/yaw90 转
+  向/distance 缩放/远移 全部实时生效无回弹无跳变; fps26 tps27.5 正常。
+- 性能差距根源定案 (用户问编译版为何落后): dist 无 .py 源码 (全编译,
+  排除解释执行假设); bench 同口径 源码59.8 vs 编译43.4FPS (1.38x),
+  aabbs 差 2x (6.08 vs 11.92ms, numba 冻结禁用) + 各阶段均匀 1.3-1.5x
+  = Nuitka 编译 numpy 调用层开销。结构性差距非 bug。
+- 频闪进展: 用户实测关 FPS 缓冲仍频闪 → 预画路径排除; widget FBO 稳定
+  缓存 (_widget_fb) 保留; 新增 LOOM_FLICKER_DEBUG=1 探针 (paintGL 逐帧
+  读回中心像素, 暗帧打印 buckets/alpha/vp_nan 状态快照) 待用户复现抓证。
+- 全量回归 EXIT=0。

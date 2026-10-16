@@ -1,0 +1,193 @@
+====================================================================
+Loom EAI / HUB-EAI 说明书 — 给开发游戏的 Agent 与人人看的命令手册
+====================================================================
+版本: 2026-08-28    适用: Loom 1.0.0 (EAI 52 条) + LoomHub 1.0.0 (HUB-EAI 16 条)
+阅读对象: ①写/配脚本的 AI Agent (照抄命令即可) ②学了引擎但还不会用
+命令行的人 (每条都给了"人话解释 + 示例 + 看什么返回值")。
+
+※ 一条总原则: 命令层与 GUI 按钮**同一套程序** —— 你敲命令 = 人点了按钮。
+  反过来不成立: GUI 的滑动/拖拽/长按这类手感操作, 命令层不模拟
+  (有意设计, 见 §5)。
+
+--------------------------------------------------------------------
+§0 三个入口, 一条命令表 (先说清楚怎么调)
+--------------------------------------------------------------------
+Loom 编辑器里有三个方式跑同一条命令, 效果完全一样:
+  ① 编辑器窗口底部命令行坞: F12 或状态栏 [命令行] 打开, 输入回车。
+  ② 远程 HTTP: 启动时加 --agent, 别的程序 (Agent) 用端口令牌调用。
+  ③ 工具栏按钮/检查器: 人用鼠标点 (GUI 面, 命令表是它的程序化替身)。
+
+输入语法 (命令行坞/命令化调用都一样):
+   命令名 key=value key=value ...
+  例:  object_add type=cube
+       set_transform x=3 y=2 z=1
+       camera_look yaw=45 pitch=-20
+  help                -> 列出全部命令和一句话说明
+  空回车              -> 同 help
+  值总是字符串也行 (脚本底层会自动把 "false" 认成 假, "120" 认成数字)。
+
+--------------------------------------------------------------------
+§1 场景与物体 (编辑器最常用的 12 条)
+--------------------------------------------------------------------
+status                      看全景
+  返回: 场景名/物体清单/光源清单/相机清单/选中/是否播放/帧率/**dirty 是否
+  有未保存改动**/轨道相机参数。Agent 动手前先看它, 动手后看它验证。
+  例: status
+
+object_list                 带序号的清单
+  返回: 每类 (物体/光源/相机) 的 index 和名字, 以及谁挂在谁下面。
+  例: object_list
+  为什么要序号: 场景允许重名 (复制/Prefab 实例常见), 命令碰到重名会
+  拒绝并提示加 index= (不会瞎猜 —— 对上错对象比报错更糟)。
+
+object_add type=cube|sphere|plane     加一个物体
+object_select name=立方体1             选中 (也可 index=0)
+object_rename name=立方体1 new=立方体2 改名
+object_delete / object_duplicate       删 / 复制当前选中
+set_transform x=1 y=2 z=3              位置 (绝对)
+set_transform rx=90 rz=45              旋转 (度)
+set_transform sx=2 sy=2 sz=2           缩放
+set_visible on=false|true              显隐 (不给 on = 切换)
+set_saturation value=1.5               饱和度 0=灰 1=原色 >1 更艳
+inspect name=立方体1                   读回一个目标的全部状态
+  返回: 位置/旋转/缩放/显隐/材质/碰撞器/刚体/音频/动画/脚本及其参数/
+  光源三角度与截面/相机 FOV 与俯仰限制。写脚本做断言用这个兜底。
+
+一步撤销 (AGENT 写完 → 一键回退): undo / redo —— 命令和一整套编辑动作
+一样, 一条命令 = 一步撤销。
+
+--------------------------------------------------------------------
+§2 材质 / 组件 / 脚本
+--------------------------------------------------------------------
+materials                  列出场景全部材质 (index+名字)
+material_new               新建材质并挂给选中物体
+set_material index=0       换材质 (也是 material=<名字>)
+collider on=false          碰撞器开关 (无组件会拒绝)
+rigidbody action=add|remove|gravity   刚体 加/卸/切换受重力
+audio   action=add|remove|loop|play|clip|volume
+        clip=x.wav   volume=0.5       音频源全家 (引号场景注意路径写法)
+animator action=add|remove|loop|play|clip clip=walk   动画全家
+scripts                    列出可挂脚本清单 (id)
+script_add sid=first_person           挂脚本到选中
+script_remove index=0                 移除第几个脚本
+script_var index=0 key=speed value=3.2  改脚本参数
+  提示: 先 run scripts 看有哪些 id, 再 script_add; 参数名可 run
+  inspect 查脚本的 vars。
+
+--------------------------------------------------------------------
+§3 光源 / 相机 / 层级
+--------------------------------------------------------------------
+light_add kind=directional|point     加平行光/点光源
+light_set intensity=2.5              强度
+light_set r=1 g=0.5 b=0              颜色 (0..1)
+light_set azimuth=45 elevation=-30 roll=10   平行光三角度 (度)
+light_set shadow=false               阴影
+light_set mode=beam shape=rect size=3  光束模式/截面圆(r·true)/尺寸
+light_set x=1 y=5 z=-1               光源位置
+
+camera_add                           加摄像机
+camera_set yaw=90 pitch=-20 roll=5 fov=70   朝向 (度)/视野角
+camera_set pitch_lock=true pitch_min=-40 pitch_max=40  俯仰限制
+camera_set fov_lock=false            玩家视角锁 (false=玩家可调)
+camera_set x=2 y=3 z=4               位置
+camera_active name=摄像机1            设为激活相机 (播放自动从它看)
+camera_active                         取消激活
+camera_preview name=摄像机1           临场预览 (Esc/再跑一次退出)
+camera_preview off=true              退出预览
+camera_move x=1 y=2 z=3 distance=12   轨道相机目标+距离 (绝对)
+camera_move dx=1 dy=0 dz=0            轨道相机增量平移
+camera_look yaw=45 pitch=-30          轨道相机看的方向 (度)
+
+reparent child=子物体 parent=父物体   挂父 (世界位置不动)
+reparent child=子物体                 脱父 (变成根)
+  防呆: 不许挂到自己/自己的子孙上 (会成环), 会拒绝并写明原因。
+
+--------------------------------------------------------------------
+§4 场景保存/加载/导入/资产/发布/退出
+--------------------------------------------------------------------
+scene_save path=D:\my\场景.json    存盘到指定文件 (命令行不弹保存框)
+scene_save                          存回当前文件 (没有对应文件会拒绝)
+scene_load path=D:\my\场景.json    直接换场 (当前改动丢弃 = 恢复磁盘版)
+scene_new                           新建空场景
+  注: 有未保存改动时, load/new 系命令都是"直接丢"语义 —— 想保留先
+  scene_save。
+
+import_obj path=D:\my\model.obj     导入模型 (免文件对话框, 逻辑同按钮)
+prefab_save path=D:\prefabs\x.prefab    把选中存成模板
+prefab_place path=D:\prefabs\x.prefab   放一个实例
+prefab_unlink name=实例 index=1     实例断开模板 (名字重复时必须 index=)
+assets                     列出资源面板的资产 (type+key)
+asset_apply type=material key=mat.key name=立方体1  材质资产应用到物体
+asset_place type=mesh key=cube.key   资产放入场景视口中心
+asset_save what=material|mesh path=  当前选中存成资产
+
+play on=true / play on=false / play (切换)   播放模式开关
+gizmo mode=translate|rotate          视口操作手柄 移动/旋转
+screenshot file=D:\shot.png          视口截图 (Agent 读图判画面用)
+
+quit save=discard             退出编辑器, 丢弃未保存改动
+quit save=save path=D:\my\场景.json  先存盘再退出
+quit save=cancel              有事想不通, 中止退出
+  为什么要有 save=: 不保存直接关引擎, 人用的是弹框 (保存/不保存/取消);
+  命令化没有"人"在弹框那一步 —— 不给你 save= 选项, 命令会在弹框上
+  卡死。所以: 必有 dirty 时 (run status 能看到) 你必须决策这三个之一。
+
+settings_get key=fps_limit / settings_set key=fps_limit value=120
+  编辑器设置 (帧率档/移速等, 与设置面板同一份文件)。
+
+--------------------------------------------------------------------
+§5 哪些操作命令层**不做** (有意为之)
+--------------------------------------------------------------------
+① 右键滑动视角 / 中键平移 / 滚轮缩放 —— GUI 手感, 命令只给结果注入
+   (camera_move/camera_look), 连点两次就等于分两段推, 频率自控。
+② 拖动物体 (视口 gizmo)、拖数值块、长按 —— 同上。
+③ 弹窗交互 (打开/另存为按钮) —— 命令只给 path=, 没有对话框。
+④ 播放器全屏/鼠标锁定等运行时手感 —— 见 PlayerApp 场景脚本。
+
+--------------------------------------------------------------------
+§6 HUB-EAI — LoomHub 项目管理器命令行 (16 条)
+--------------------------------------------------------------------
+入口: LoomHub.py --agent (或 GUI 底部"命令行"); 启动后 .hub_agent_port.json。
+status                    摘要 (默认解释器/解释器数/项目数/设置)
+interpreter_list          解释器全量 (dir/version/kind/default)
+interpreter_add dir=D:\Loom\1.0.0          导入一个解释器目录
+interpreter_install_zip zip=D:\x.zip version=1.0.0   从 zip 装
+interpreter_remove dir=...  /  interpreter_default dir=...
+project_list              项目全量 (name/scene)
+project_create path=D:\my\游戏.json name=游戏    建空场景+登记
+project_import dir=D:\my\项目             扫目录找场景+登记
+project_open name=游戏  (或 path=)      启动 Loom 打开 (可加 agent=true)
+project_remove name=游戏                 移除登记 (不删文件)
+launch_engine scene=D:\my\游戏.json mode=open|run agent=true
+  启动 Loom (与 GUI 双击完全同一个启动条件); agent=true 时轮询端口文件
+  返回 port/token (判新鲜度, 不会拿到上次的残留端口)。
+engine_stop pid=1234     (不用 pid = 全停)  停掉上面启动的 Loom
+settings_get / settings_set key=open_py value=false
+  Hub 设置; value=false 会存成布尔 (GUI 复选框不串)。
+
+====================================================================
+附录 A: 远程命令协议 (写 Agent 脚本用)
+====================================================================
+启动: Loom.py --ui qt --agent → 读 <程序目录>\.agent_port.json:
+
+    {"port": 随机端口, "token": "hex", "pid": ..., "url": "http://127.0.0.1:端口"}
+
+调用 (每个请求头带 X-Agent-Token, 错 -> 401):
+    POST /cmd       {"cmd": "status", "args": {}} -> {"ok":true,"result":{...}}
+    GET  /logs?after=序号   -> {"seq":N,"lines":[["序号","时间","内容"],...]}
+    GET  /status     -> {"ok":true,"pid":...,"alive":true}
+    GET  /           -> 命令清单
+约定: ok=true 才可继续; ok=false 时 error 是人话错误 (参数不对/找不到/
+重名需 index=); 命令在编辑器主线程执行 (与界面一致, 无跨线程 bug)。
+LoomHub 同构 (文件名 .hub_agent_port.json, 命令直跑)。
+
+附录 B: 你作为 Agent 的推荐工作流 (做过端到端的)
+    1. interpreter_list / status 先摸清环境
+    2. project_create (或 scene_load 现成) → object_add/set_transform 摆场
+    3. camera_move/camera_look 架视点 → screenshot 读图, 不行再调
+    4. 组件: script_add/materials/audio/... 全命令操作
+    5. play on=true → screenshot → play on=false (截图判定运行效果)
+    6. scene_save 存盘 → 不玩了 quit save=discard; 要存档 quit save=save
+====================================================================
+(完)
+====================================================================

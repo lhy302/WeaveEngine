@@ -1,0 +1,210 @@
+====================================================================
+Loom 项目 安全漏洞扫描报告 (2026-08-20 首次)
+====================================================================
+背景: 用户看到 AI 代码安全漏洞视频 (每百行 ~3 漏洞, 传统工具常失效),
+      决定对从未做过安全扫描的 Loom 项目补一轮扫描与加固。
+
+一、使用的工具与范围
+- Bandit 1.9.4 (Python AST 静态分析, pip install bandit):
+  py -3.12 -m bandit -r "Loom(py源代码)\Loom" -x "tests,_tmp,__pycache__,backup" -f txt -q
+  py -3.12 -m bandit -r "Loom(py源代码)\LoomHub" -x "__pycache__" -f txt -q
+  扫描 12130 行生产代码 (Loom 引擎 + LoomHub, 排除测试/临时探针)。
+- 手动攻击面审查: subprocess / zip 解压 / 路径处理 / 动态加载 / 网络。
+- Semgrep 尝试安装超时 (依赖重, 本机网络拉不动), 未纳入本轮; 后续可选。
+
+二、扫描结果总览
+- High: 0     Medium: 0     Low: 52
+- 52 个 Low 全部高置信度, 构成:
+  * B110/B112 try/except/pass|continue (~47 处): 防御性容错 (GL 资源释放/
+    窗口操作/音频/可选功能失败不崩), 属设计选择, 非漏洞。
+  * B101 assert_used (5 处, 全在 mesh.py): -O 优化编译下 assert 会被移除。
+    已加 #nosec B101 注释说明 (开发期一致性校验, Loom 运行/打包不启用 -O)。
+
+三、攻击面逐项分析 (手动审查)
+| 攻击面 | 结论 |
+|---|---|
+| subprocess (hub_config:266 / hub_controller:245) | 安全: 全部列表参数, 无 shell=True, 无字符串拼接注入 |
+| .zip 解释器安装 (hub_install) | 安全: _safe_extract 防 Zip Slip (normpath+前缀校验), 有测试覆盖 (H03) |
+| .obj/.mtl 导入路径 (mesh.py load_obj) | 安全: mtllib 引用路径用 os.path.basename 取基名再拼同目录, 防目录穿越 |
+| 场景文件 (sceneio) | json.load 无代码执行; 加密场景是"压缩+XOR+base64"混淆 (M38), 防篡改门槛非密码学安全, 已文档化 |
+| 动态脚本加载 (scripts/, 插件, 游戏脚本目录) | 设计使然: 脚本=Python 代码执行面, 与 Unity 脚本系统同等信任模型 (只加载可信来源脚本) |
+| eval/exec/os.system/pickle.loads | 全部未使用 (grep 验证; exec 仅 Qt 事件循环 menu.exec/app.exec) |
+| 硬编码密码/密钥/弱哈希 | 未发现 |
+| 网络 (urlopen/requests/socket) | 生产代码无网络调用; LoomHub 远程下载接口是预留 stub 未实现 |
+| filedialog 系统对话框 | 无风险 (系统 API 弹窗) |
+
+四、本轮加固
+- mesh.py Mesh._validate: 5 处 assert 加 #nosec B101 注释 (说明意图, 避免后续
+  误改; 实际运行时校验始终生效)。
+
+五、结论与建议
+- 结论: 全项目无高危/中危静态漏洞; 低危项为防御容错噪音与 1 处已标注的
+  assert 使用。AI 生成的代码 (含 DSH 协作产物) 经 Bandit 复扫干净。
+- **2026-08-20 补充: Qoder Security 独立审查 (工具3)** —— 用户安装 QoderCN
+  (E:\Program Files\QoderCN), 对 Loom(py源代码) 全量人工静态审查, 报告存档
+  项目根《漏洞分析报告.txt》。结论: 0 高危 / 1 中危 / 5 低危 / 3 提示。
+  **已全部处理**:
+  * 低危2 Zip Slip 分隔符边界 (hub_install._safe_extract, 兄弟目录前缀
+    1.0.0evil 误放行) → 改 root+os.sep 边界校验 + test_hub 断言
+  * 中危1 三处投放式加载信任边界 → ①scripts.load_script_dir 文件名白名单
+    [A-Za-z0-9_]+\.py + test_scripts 断言; ②plugins\ scripts\ GUI\ 三个
+    README.txt 信任边界警告
+  * 低危5 OBJ 资源上限 (mesh.load_obj 顶点 100 万/面 200 万超限抛错,
+    防内存 DoS) + test_mesh_import 断言
+  * 提示9 editor_state.last_scene 仅接受 .json 扩展名
+  * 提示7 补 requirements.txt 版本锁定
+  * 低危3/4/6 与提示8: 文档化确认 (弱混淆已声明/路径来自对话框无风险/
+    PATH 兜底与解释器登记路径并存/探针留 tests\_tmp 不进交付包)
+  * 该报告同时确认了本轮我方修复 (_f1/_f3 容错、原子写、subprocess 列表
+    参数、无 pickle/SQL/网络面) 无问题。
+- **2026-08-20 续: Qoder 对 LoomHub 专项扫描, 报告已更新《漏洞分析报告.txt》**
+  (0 高危/2 中危/6 低危/4 提示; 中危 1/2、低危 3/6/7、提示 9/11 上轮已处理)。
+  本轮新增 4 项全部修复:
+  * 低危4 LoomHub 版本号路径拼接未清洗 (install_from_zip 仅 strip, 输入
+    "..\..\Desktop\evil" 可越权写任意目录; RemoteDownloader 预留路径)
+    → x.y.z 正则白名单 + test_hub 断言
+  * 低危5 解释器元数据无格式校验 (discover_interpreter 信任 main/main_exe
+    拼启动命令, 诱导安装恶意包即执行) → _MAIN_NAME_RE 白名单 + 版本号
+    格式校验 + test_hub 断言
+  * 低危8 default_python PATH 信任 → 优先 sys.executable (当前进程最可信)
+  * 提示12 projects.json 场景路径无校验 (open_project 直接 --open) →
+    isfile + .json 扩展名校验
+  * 全量 39 测试文件 FAIL=0。
+- 建议:
+  1) 每次新代码落地后复跑上面的 bandit 命令 (约 30 秒), 保持 0 High/0 Medium;
+  2) 后续可选 Semgrep 做跨文件污点分析 (本机网络受限未装成);
+  3) 可选 pip-audit 扫描第三方依赖 (当前依赖: pygame/moderngl/numpy/PySide6/
+     tkinter, 本地引擎依赖面小);
+  4) 信任模型提醒: 场景/脚本/插件文件与 Unity 相同 —— 只加载可信来源的
+     .json/.py/plugin, 不要打开陌生人游戏包。
+
+====================================================================
+六、2026-08-28 插件受限环境渗透靶场 (普通插件"释毒"实测)
+====================================================================
+背景: 2026-08-27 插件 L1 分级给普通插件 (plugins/editor/) 上了"受限执行环境"
+  (受限 builtins + import 白名单 + api.read_asset 只读)。按本报告第四节建议
+  的信任模型边界, 用户决定实测: **装一个带毒普通插件, 能否释放文件?**
+  (病毒以无害文档替身, 文档落 <靶场根>/pwned/ 即判渗透成功)
+
+【靶场工程】(遵守两条铁律: 引擎代码零改动 + 目录隔离)
+  - 引擎 20 个 .py 复制到独立的 D:\my-project\_attack_range_普通插件释毒实验\
+    \engine_src\ (与开发环境平级, 互不干扰)
+  - 每个渗透向量 = 真实插件目录 plugins\editor\vNN\ (plugin.json + entry.py,
+    与真实投放结构完全一致), 经 plugin_loader.load_plugins 真实受限链路加载
+  - 留档: attack_range.py (可复跑) + plugin_attack_range_result.txt (结果)
+
+【实测结果: 修复后 13/13 向量全部被拦截】
+  v01 直接 open()                          -> 拦 (受限 builtins 无 open)
+  v02 受限 builtins 检索 open/eval/exec    -> 拦 (确认全部移除)
+  v03 import 黑名单/拼接名/变体参数         -> 拦 (受限 __import__ 只认白名单)
+  v04 白名单模块命名空间 (import engine →
+      engine.os.open)                      -> 拦 (engine/scripts 已移白名单)
+  v05 元编程 __subclasses__ 链取 os         -> 拦 (AST 门禁)
+  v06 __import__.__globals__ 一行逃逸       -> 拦 (沙箱函数榨无可榨 + AST)
+  v07 engine.np.savetxt 写文件              -> 拦 (引擎模块移白名单)
+  v08 read_asset 越界读                    -> 拦 (root+os.sep 边界, 原有)
+  v09 eval/exec/compile 可用性             -> 确认全移除 (符合设计)
+  m01 混淆: type(())+getattr(拼接名)        -> 拦 (getattr 检索器整禁)
+  m02 混淆: getattr(__import__, 拼接名)     -> 拦 (同上 + 沙箱无物可榨)
+  m03 混淆: 白名单模块 __dict__[__builtins__] -> 拦 (.__dict__ 黑面 + 检索器禁)
+  m04 框架面: 异常 __traceback__.tb_frame.
+      f_builtins                            -> 拦 (f_builtins = 受限 builtins
+                                                本身, 无 open —— 全网关生效)
+
+【修复内容】(2026-08-28, 全部有测试守护)
+  1. plugin_sandbox.py (新): 受限 __import__ 检查函数+白名单/黑名单常量的
+     "家" —— 零模块级 import, 且受限加载时剥离其 __builtins__; 攻击者即使
+     拿到该函数 __globals__ 也"榨无可榨" (无 os/sys/__builtins__/模块对象)。
+     (V06 根因修复: 修复前 __import__.__globals__=plugin_loader 命名空间)
+  2. plugin_loader.py: 白名单移除 scripts/engine/matlib (命名空间真实含
+     os/sys/np/pygame = V04/V07 根因; 投影救不了, 引擎能力走 api.*);
+     新增 _entry_ast_check: 元编程黑面属性名 (__globals__/__subclasses__/
+     __builtins__/__class__/__bases__/__mro__/__dict__/__reduce*_/
+     __getattribute__/__setattr__/__getattr__) 与检索器函数
+     (vars/locals/globals/dir/getattr) 的**任何直写调用** 拒载。
+  3. test_plugin_loader 新增 5 个守护: T23b (SDK 模块 banned 回归 V04/V07) /
+     T23c (sandbox_globals_clean 自检) / T23d (V06 直写拒载) /
+     T23e (V05 AST 直写拒载); 全部用例 + 全量回归 43 文件绿。
+
+【残余边界 (诚实档位, 写进文档而非假装堵死)】
+  - 当前防护 = "门禁"档: 拦截全部直写/常见混淆形态 (上述 13 向量);
+  - AST 是静态检查, 刻意深层混淆 (动态合成属性名、更冷门的对象图路径) 在
+    理论上仍可构造绕过 —— Python 解释器内**不存在**可信的进程内沙箱
+    (语言机制: 任何对象属性链/异常回溯/类型元方法公开可触);
+  - 因此信任模型不变: 普通插件与游戏脚本同级 = **只投放可信来源**;
+    真正的恶意代码隔离方案 = 插件子进程最小权限 (IPC 只读 API), 列为
+    《Loom插件系统分级方案.txt》L2 设计项, 待用户决策投入。
+  - 判定 (用户规则): 靶场渗透路径全部失败 → 本漏洞面按"不生效"记录;
+    但防御的绝对性不承诺 (见上段)。
+
+====================================================================
+七、2026-08-28 第三轮复扫响应 (对《Loom修复后复扫安全报告》独立复核)
+====================================================================
+背景: 另一 Agent 的《Loom漏洞分析与安全报告》(4危) + 《Loom修复后复扫安全
+报告》(再复现1 实机穿透 + 高危3/4、中危2/3 未修; 两份原件已在修复闭环后
+清理存档, 本报告即是权威存档)。本报告为**我方独立复核**
+(自家靶场 _attack_range_普通插件释毒实验 + 真实 --agent 链路, py -3.12;
+靶场目录与 PoC 存档已在收尾清理, 复跑说明见记忆 plugin-sandbox-attack-range)。
+
+【复核结果 (按用户规则逐项标记)】
+  ★ 再复现1 (AST 门禁可绕, 受限环境再次释毒): **漏洞实际有效且危险**。
+    自家靶场加变换族向量实锤 (4/4 RELEASED):
+      m05 白名单模块**直挂属性** (dataclasses.sys.modules['os'] 纯语法
+          三行, 无检索器无黑面属性 —— 比报告别名化更简单的变体);
+      m06 别名化 (g=getattr + '__glob'+'als__' + dataclasses.field gadget);
+      m07 下标变体 ({f:getattr}[f](...), typing.cast gadget);
+      m08 闭包默认参 (def h(g=getattr) ...)。
+    根因确认: ①受限 builtins 仍保留 getattr/vars/globals 等**检索原语**;
+    ②白名单模块 dataclasses/typing 命名空间**直挂 sys** (全量探测实锤,
+    上轮只探了 engine/scripts/matlib, "纯 stdlib 干净"判定=未覆盖的盲区);
+    ③上轮 13/13 全拦 判定被修正: 13 个向量全是**直写形态**, 与门禁能力
+    边界重合 (方法论: 渗透向量集须含变换族, 每族至少一例)。
+  ★ 高危3 (EAI 写路径无白名单): **漏洞实际有效且危险**。真 Loom --agent
+    实测 (route_BC_runner.py): scene_save 任意路径 RELEASED +
+    asset_save RELEASED (同族)。
+  ★ 高危4 (HUB-EAI root 任意): **漏洞实际有效且危险**。真 LoomHub --agent
+    实测: interpreter_install_zip root=靶目录 RELEASED + project_create
+    任意路径 RELEASED。
+  ★ 高危2 (玩家链路恒全权 + .lpc 无签名): **实际存在** (设计缺陷级; 信任
+    模型声明未闭环, 详见第七段决策)。
+  ★ 中危2 (令牌 == 比较/端口文件明文/日志打 token): **实际存在** (本机
+    同用户攻击者可冒用 = 高危面的放大器)。
+  ★ 中危3 (插件信任.json 无完整性): **实际存在** (本机升级链: 普通插件
+    → 核心插件全权; 修复决策见第七段)。
+
+【修复决策 (本轮实施 + 待决策项)】
+  P0 受限环境三管齐下 (已修, 见测试 T23f/T23g + 变换族复测):
+    ①受限 builtins 移除全部检索原语 (getattr/setattr/delattr/hasattr/
+      dir/vars/locals/globals —— 普通插件 0 依赖); ②白名单移除
+      dataclasses/typing (命名空间直挂 sys 实锤); ③plugin_sandbox 加
+      **运行时快检**: 白名单放行前扫描模块命名空间, 有危险模块直挂即拒
+      (防 stdlib 版本漂移把漏洞悄悄带回来); AST 门禁保留作二层。
+  P1 EAI 写路径白名单 (已修): scene_save/screenshot/prefab_save/
+      asset_save/quit path 五处加 _safe_write_path (程序目录/场景目录/
+      用户目录, 越权路径明确拒绝)。
+  P1 HUB (已修): interpreter_install_zip 移除自定义 root (固定安装根);
+      project_create 收目录白名单。
+  P2 中危2 (已修): 令牌 hmac.compare_digest (EAI+HUB) + 启动日志不打
+      token + Host 头校验 (只认本机); 端口文件 ACL 收紧**不做**并记录
+      理由 (本机同用户模型, 同用户 ACL 可改回, 无实际提升)。
+  中危3 (待决策项): **不做 HMAC 伪加固** —— 攻击者经高危面已获本机执行
+      权, 密钥同文件可读, HMAC 无实际提升; 已用文档声明"信任闸=防误装/
+      防修改破坏, 不防本机已执行攻击者" + 核心插件加载时二次指纹展示
+      建议转 L2。若后续采用插件子进程隔离, 信任闸才有真实意义。
+  高危2 (待决策项): 维持"玩家层内容已由可信链路供给"则**文档闭环**
+      (plugins README/分级方案/代码注释已注明), .lpc 签名体系列 L2
+      (需要构建私钥+玩家端公钥核验, 工程项)。
+
+【复测结果 (2026-08-28 已闭环, 实测附录)】
+  A. 靶场 17 向量 (V 直写 9 + M1 混淆 4 + M2 变换族 4) **全部 BLOCKED**
+     (m05 运行时快检拒载 dataclasses.sys; m06-m08 检索原语已撤 = NameError);
+  B. 路线B 实机复测: scene_save/asset_save 越权路径 → 拒绝 (白名单外);
+     **白名单内 (系统临时目录) 正向保存正常** (护栏无误伤);
+  C. 路线C 实机复测: interpreter_install_zip root=自定义 → 拒绝
+     ("根已固定, 只允许 C:\Program Files\Loom"); project_create 越权 → 拒绝;
+  D. 全量回归 43 测试文件全绿 (test_plugin_loader +T23f/g 白名单收窄与
+     检索原语移除守护; test_agent_commands +t_write_whitelist;
+     test_hub_eai +t_hub_write_whitelist)。
+  判定终版: 本章列出的渗透路径在修复后**全部不生效** (按用户规则记录);
+  "门禁档非沙箱"的诚实边界不变 —— 刻意深层元编程新技巧理论上仍可构造,
+  根治 = 插件子进程最小权限 (L2 待办) 或"声明即全权+安装确认", 待决策。

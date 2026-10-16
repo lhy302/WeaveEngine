@@ -1,0 +1,1704 @@
+====================================================================
+Loom 代码架构文档 (2026-08-11 原名 3D引擎; 2026-08-14 晚: 无限网格 + 多核优化;
+                    2026-08-15: 异步GUI 离屏限频合成;
+                    2026-08-17: PySide6 Qt 视图重写 (pygame 视图删除);
+                    2026-08-29: Vulkan 双后端 + 播放器中间层 (P0-P5);
+                    2026-08-30: B1 物理换库(Jolt) + B2 音频换库 + 插件沙箱加固;
+                    2026-08-31: 性能优化组1/2/3 (实例数据批/微堵点/SoA+Numba三层);
+                    2026-09-01: 插桩批 + GC 批 (第十六节末);
+                    ★ 2026-09-09 本文档按工作区当前代码与 build_all 清单复核同步)
+====================================================================
+给后续开发者: 先读本文件, 再进代码。看完这份 + 《使用操作指南.txt》
+就能接手迭代, 不用每次从零读代码。
+
+目录结构 (2026-08-11 起: 解释器 / 项目管理器 分离; 2026-08-13 UI 模块化;
+          2026-08-14 晚: + 无限网格 / + 多核并行; 2026-08-17 Qt 视图;
+          2026-08-29: + Vulkan 双后端; 2026-08-30: + 物理/音频库桥接;
+          2026-08-31: + fastpath 公共静态化模块):
+    D:\my-project\Loom(py源代码-工作区)\   ← 唯一工作副本 (可编辑处;
+                                            验收后由用户手动整夹覆盖到稳定版备份区)
+        ├── Loom\            Loom 解释器 (引擎编辑器全部源码, 独立可跑)
+        │     ├── Loom.py            入口 (--editor/--run/--open/--benchmark/--ui)
+        │     ├── build_entry.py     Nuitka 打包入口 (产物 Loom.exe)
+        │     ├── game_player.py     纯玩家入口 (只 import runtime, 打包成玩家 exe)
+        │     ├── run_player.py      播放器渲染 API 选择入口 (vulkan|opengl|auto, P5)
+         │     ├── core_clock.py      单 accumulator 逻辑时钟 + 物理子步
+         │     ├── interp_state.py    逻辑快照 / 渲染插值与外推
+         │     ├── frame_buffer.py    TPS 预取记账 + FPS 离屏预画
+         │     ├── physics_pipe.py    常驻物理线程 v2 (pending/S1/永久降级)
+         │     ├── scheduler.py       NgilPool 常驻 nogil 分块工作池
+        │     ├── engine.py          GLEngine 核心 (渲染/输入/脚本/物理/动画/音频;
+        │     │                        2026-08-31: 桶实例化 + SoA 快照 + fastpath 接线)
+        │     ├── pipeline_glue.py    pipeline.dll ctypes 接线 (M2/M3)
+         │     ├── fastpath.py        公共静态化模块 (组3层2/3): depths/ancestry_dfs/
+        │     │                        aabbs_minmax — numba @njit 可选加速, 未装自动
+        │     │                        降级纯 Python 同源直译 (2026-08-31)
+         │     ├── ckernels\            loom_kernels.dll (AABB/SAP 碰撞 C 内核)
+         │     ├── core_components\     DLL ABI/注册表/加载器/回退与 pipeline.dll
+        │     ├── vk_renderer.py     Vulkan 渲染后端 (wgpu-py, 实例化批绘制 P4F)
+        │     ├── vk_player.py       Vulkan 播放器 (GLFW 窗口/循环)
+        │     ├── scene_driver.py    Vulkan 播放器中间层 (场景数据+每帧步进, 后端无关;
+        │     │                        与 GL PlayerApp 保持脚本/物理语义契约, B1 API)
+        │     ├── physics_bridge.py  B1 物理桥 (Culverin/Jolt 混合式架构, 零 GL;
+        │     │                        缺库自动禁用回退 legacy)
+        │     ├── audio_backend.py   B2 音频双后端适配 (game-audio 主 / pygame 兜底)
+        │     ├── editor.py          EditorApp 编辑器控制器 (命令层, UI 无关)
+        │     ├── runtime.py         PlayerApp 运行时 (只跑场景+脚本, GL 播放器)
+        │     ├── parallel.py        CPU 拓扑/亲和性 + ScriptRunner 脚本线程 + FramePool
+        │     ├── guiloader.py       可插拔 GUI 加载器 (GUI/ 扫描 + 设置.json)
+        │     ├── plugin_loader.py   插件加载器 (L1; plugins/ + core_plugins/ 分层)
+        │     ├── plugin_sandbox.py  受限沙箱内核 (防 __globals__ 逃逸, 渗透靶场修复)
+        │     ├── agent_commands.py  EAI 编辑器命令桥 (53 条命令, HTTP/控制台/按钮三通路)
+        │     ├── scripts.py         内置脚本注册表 + load_script_dir (游戏脚本目录)
+        │     ├── gui.py             即时模式 GUI 控件库 (minimal 视图持有; Qt 视图不用)
+        │     ├── sceneio.py         序列化 (v10/迁移/Prefab/场景加密/gravity 字段)
+        │     ├── undo.py            撤销管理器 + 命令类
+        │     ├── matlib.py          行向量矩阵库
+        │     ├── mesh.py            网格生成 (立方体/球/平面/obj 导入)
+        │     ├── filedialog.py      系统原生文件对话框 (ctypes comdlg32)
+        │     ├── build_game.py      游戏构建器 (材料 -> 发布夹, Unity BuildPipeline 对齐)
+        │     ├── game_pack.py       游戏包 .lsc 打包/解包 (LOOMSC1 混淆)
+         │     ├── crash_reporter.py  dbghelp MiniDump/场景备份 (LOOM_NO_CRASHDUMP 可关)
+         │     ├── 崩溃日志\          运行期崩溃转储目录 (不进发布包)
+        │     ├── ui\                编辑器 UI 层 (IEditorView 契约)
+        │     │    ├── editor_ui.py          IEditorView 接口契约
+        │     │    ├── loom_gui.py           LoomGUI 默认 UI (PySide6 原生 Qt 视图;
+        │     │    │                           QOpenGLWidget 承载 moderngl 视口)
+        │     │    ├── minimal_editor_view.py  MinimalEditorView 极简只读 (--ui minimal)
+        │     │    ├── qt_console.py         Qt 命令行坞 (EAI 命令, F12 开关)
+        │     │    └── grid.py              无限网格纯几何 (半宽固定 60, 成本恒定)
+        │     ├── GUI\               自定义 GUI 存放 (外部投放, 扫描加载; 2026-08-16 内置演示已删)
+        │     ├── plugins\           普通插件 (editor/player 子目录分层)
+        │     ├── core_plugins\      核心插件 (信任闸 SHA256, 重启安装)
+        │     ├── scripts\           游戏脚本目录 (exe 旁 scripts/ 动态注册, 随游戏分发)
+        │     ├── assets\            资源 (图像素材 / 资源面板资产输出)
+        │     ├── 保存\              默认场景保存目录
+        │     ├── 解释器.json         解释器元数据 (name/version/main/main_exe)
+        │     ├── 输入配置.json       输入动作层键位重映射
+         │     ├── 设置.json            GUI/限帧/时钟/重力/插值/缓冲/渲染 API 配置
+        │     ├── editor_state.json  编辑器状态 (记住上次保存/打开目录)
+        │     └── tests\             回归测试 (49 个 test_*.py + run_all.py 一键全跑)
+        ├── LoomHub\          LoomHub 项目管理器 (Unity Hub 角色)
+        │     ├── LoomHub.py          入口 (视图选择)
+        │     ├── LoomHubGUI.py       pygame 自绘视图 (IHubView 默认实现)
+        │     ├── hub_view_tk.py      tkinter 第二视图 (演示 UI 可换)
+        │     ├── hub_controller.py   控制器 (命令层, 含 IHubView 契约)
+        │     ├── hub_commands.py     HUB-EAI 命令桥 (16 条命令)
+        │     ├── hub_console.py      Hub 命令行挂载 (tk Entry+Text)
+        │     ├── hub_config.py       数据层: 解释器/项目配置 + 启动命令 (纯逻辑)
+        │     ├── hub_install.py      .zip 安装解释器 (防 Zip Slip)
+        │     ├── GUI\                自定义 GUI 存放 (外部投放, 扫描加载)
+        │     ├── interpreters.json   解释器列表配置
+        │     └── projects.json       项目列表配置
+        └── 文档 *.txt               项目根/工作区开发文档 (代码架构/使用指南/
+                                     进度与Unity对照/测试台账/堵点清单/任务清单/...)
+    D:\my-project\Loom(编译版本)\      ← 打包发布版 (Nuitka standalone exe, 可整目录迁移;
+                                        ★ 2026-08-31 已删除, 等用户指令重打)
+    D:\my-project\Loom(开源处理版本)\   ← 开源精简版 (删 tests/缓存/可重建配置, 保留运行必要;
+                                        ★ 2026-08-31 已删除, 等用户指令重打)
+
+====================================================================
+一、总览: 一张图看懂分层
+====================================================================
+依赖方向单向向下, 上层 import 下层, 下层绝不 import 上层。
+
+    ┌────────────────────────────────────────────────────────┐
+    │  LoomHub\  UI 实现层 (IHubView, 可替换)               │
+    │  LoomHub.py      pygame 自绘视图 (默认)                │
+    │  hub_view_tk.py  tkinter 极简视图 (第二实现, --ui tk)   │
+    │  hub_controller.py  控制器(命令层) + IHubView 契约     │
+    │  hub_commands.py   HUB-EAI 命令桥 (16 条, --agent)     │
+    │  hub_config.py / hub_install.py  数据层 (纯逻辑)       │
+    ├────────────────────────────────────────────────────────┤
+    │  Loom\  UI 实现层 (IEditorView, 可替换)               │
+    │  ui/loom_gui.py        LoomGUI 默认 UI (PySide6 原生   │
+    │                        Qt 视图: QOpenGLWidget 视口 +   │
+    │                        原生面板 + qt_console 命令行坞) │
+    │  ui/minimal_editor_view.py MinimalEditorView 极简只读(--ui minimal)│
+    │  ui/grid.py            无限网格纯几何 (LoomGUI/minimal 共用)│
+    │  agent_commands.py     EAI 编辑器命令桥 (53 条, --agent)│
+    ├────────────────────────────────────────────────────────┤
+    │  editor.py    EditorApp 编辑器控制器 (命令层, UI 无关)  │
+    │  ui/editor_ui.py   IEditorView 接口契约 (UI 接口标准)  │
+    │  runtime.py    PlayerApp 运行时(GL 播放器) ← 依赖 engine│
+    │  vk_player.py  Vulkan 播放器 ← vk_renderer + scene_driver│
+    │  scene_driver.py 播放器中间层 (数据+步进, 后端无关)     │
+    ├────────────────────────────────────────────────────────┤
+    │  Loom.py / build_entry.py  入口 (--editor / --run /     │
+    │                --open <场景> / --ui <视图>)             │
+    │  run_player.py  播放器 API 选择 (vulkan|opengl|auto)    │
+    ├────────────────────────────────────────────────────────┤
+    │  parallel.py  CPU 拓扑/亲和性 + ScriptRunner 脚本线程   │
+    │                + FramePool 预计算池 (零依赖 ctypes)     │
+    │  fastpath.py  公共静态化 (三级分派 C>numba>numpy):      │
+    │                depths/ancestry_dfs/aabbs_minmax/        │
+    │                collide_extract (C 内核 ctypes 接线)      │
+    ├────────────────────────────────────────────────────────┤
+    │  scripts.py    内置脚本注册表(rotate/orbit/bob/WASD/    │
+    │                camera_follow) ← 被 engine 懒加载       │
+    ├────────────────────────────────────────────────────────┤
+    │  engine.py     GLEngine + GameObject + LightState       │
+    │                (场景对象/渲染/输入/脚本调度 核心)       │
+    │                (含 RuntimeUI: 播放器 HUD, 不分离)      │
+    │                (2026-08-29: 桶实例化批绘制;             │
+    │                 2026-08-31: SoA 快照/桶键缓存/AABB 并行)│
+    ├────────────────────────────────────────────────────────┤
+    │  vk_renderer.py Vulkan 渲染后端 (wgpu-py 0.32 + WGSL)   │
+    │  physics_bridge.py B1 物理桥 (Culverin/Jolt, 缺库禁用)  │
+    │  audio_backend.py  B2 音频双后端 (game-audio/pygame)    │
+    ├────────────────────────────────────────────────────────┤
+    │  undo.py       UndoManager + 命令类(撤销)              │
+    │  sceneio.py    scene_to_dict / scene_from_dict (序列化 v10)│
+    │  gui.py        即时模式 GUI 控件库 (minimal 视图持有)   │
+    │  filedialog.py 保存/打开文件对话框 (ctypes comdlg32)     │
+    ├────────────────────────────────────────────────────────┤
+    │  matlib.py     行向量矩阵库 (OpenGL 风格)              │
+    │  mesh.py       内置网格生成 (立方体/球/平面/obj 导入)      │
+    └────────────────────────────────────────────────────────┘
+
+    tests/         49 个测试文件 (当前工作区), run_all.py 一键全跑
+
+关键分层原则:
+  * engine 不 import editor / runtime —— 保证打包版能只带 engine。
+  * editor 继承 GLEngine 并覆写 render()(编辑器专属画面)。
+  * runtime 继承 GLEngine, 不改渲染, 只跑场景 + 脚本 (GL 播放器)。
+  * Vk 播放器不依赖 GLEngine: scene_driver (数据+步进) 与 vk_renderer (绘制)
+    分离, 脚本 API 与 engine 保持同语义 (scene_driver 头注释有同步契约)。
+  * physics_bridge / audio_backend 零 GL: 缺库 (culverin/game-audio) 自动禁用
+    回退, 引擎其余部分行为不变。
+  * fastpath 被 engine 顶层 import, numba 未装自动降级纯 Python (数值同源)。
+   * scripts.py 由引擎初始化时加载注册表；内置脚本与 scripts/ 下游戏脚本均通过 @register
+     登记，挂载脚本在逻辑帧中执行。
+  * LoomHub 与解释器解耦: hub_config/hub_install 不 import 解释器模块;
+    启动解释器靠 subprocess 调 `python Loom\Loom.py --open <场景>`.
+
+====================================================================
+一·补 LoomHub 项目管理器 (LoomHub\ 目录, 2026-08-11)
+====================================================================
+角色: Unity Hub —— 项目管理 + 项目启动 + 解释器(编辑器)多版本管理。
+
+软件命名:
+  解释器名   = Loom          (解释器默认安装根 C:\Program Files\Loom\<版本>)
+  项目管理器 = LoomHub       (解释器名 + "Hub")
+
+解释器元数据 (每个版本目录内 解释器.json):
+  { name, version, python_version, main: "Loom.py", main_exe: "Loom.exe" }
+  - main/main_exe 分开记录 => .py 源码 / .exe 封装 双兼容; 封装后改 exe 名
+    只需更新 main_exe, LoomHub 靠它定位主程序。
+  - 多版本共存: 按版本号子目录安装, 类似 Python 的 python3.x 目录。
+
+hub_config.py (纯逻辑, 无 GUI 依赖, 可无头测试):
+  - discover_interpreter(dir)  读 解释器.json 分析版本/主程序, .exe 优先判 kind
+  - scan_install_root(root)    扫描 C:\Program Files\Loom 下版本子目录
+  - load/save/add/set_default/remove_interpreter   配置 interpreters.json
+  - load/save/add/remove_project                    配置 projects.json
+  - default_python()/python_version()   系统默认 python 检测 (PATH)
+  - build_launch_command(info, scene, mode) 启动命令构造:
+      .py  -> [python, 主程序, --open/--run, 场景];  .exe -> [exe, --open, 场景]
+  - 配置原子写 (save_json_atomic), 坏配置容错返回空。
+
+hub_install.py:
+  - install_from_zip(zip, version, root)  解压到 <root>/<version>/, 校验元数据,
+      登记配置; 防 Zip Slip; 支持 zip 顶层包一层目录(自动提升).
+  - RemoteDownloader.download(url, dir)  远程下载接口 (预留, NotImplementedError).
+
+UI 模块化 (2026-08-13): 业务动作全抽到 hub_controller.py 的 HubController
+  (命令层, 不 import pygame/tkinter, 可无头测试). 消息用 msg + msg_level
+  ('ok'/'err'/'dim'), UI 自行映射颜色. 文件对话框用系统原生 filedialog (跨 UI).
+  UI 只通过 HubController 公开 API 读写 (见 hub_controller.py 的 IHubView 契约).
+
+LoomHub.py 主 GUI 类 = LoomHubGUI (IHubView 默认实现, 2026-08-13 改名):
+  pygame 自绘 (不依赖 moderngl), 复用 Loom\filedialog.py 系统原生文件对话框.
+  界面: 左=解释器面板(扫描/导入/.zip
+  安装/远程[灰]/设默认/移除), 右=项目面板(新建/导入/打开/移除). 状态栏显示
+  默认 python 版本并提醒. 打开项目 = 用默认解释器 --open 启动编辑器.
+hub_view_tk.py (IHubView 第二实现): 极简 tkinter 视图, 同一 HubController
+  跑通全部动作 —— 证明"换 UI 只换实现类、业务零改动".
+
+启动:
+  py -3.12 LoomHub.py            (pygame 视图, 默认)
+  py -3.12 LoomHub.py --ui tk    (tkinter 视图)
+
+LoomHub 空闲 CPU 优化 (2026-08-15, 用户实测单开烧 60% 单核):
+  根因: ①_text 每帧对每条文字 font.render 重栅格化 (SDL_ttf, 60FPS×几十条 = 大头);
+       ②default_interpreter 每帧读磁盘 interpreters.json; ③主循环每帧全量重绘。
+  修 (LoomHubGUI.py + hub_controller.py):
+   - _text_cache: (text,color,font)->Surface 只栅格化一次 (blit 便宜), 上限 2000 防膨胀.
+   - run() 脏驱动重绘: 无事件且未强制时跳过整帧 draw+flip (启动器空闲近似 0 CPU);
+     事件帧后 _force_redraw=had_event 强制再绘一帧 —— 补"绘制顺序先于动作生效"的
+     侧效应 (底部按钮改列表/默认, 滚轮改 scroll, 选行改选中). _force_redraw 初始 True.
+   - HubController 缓存 default_interpreter (__init__ 取, _refresh 刷), 不每帧读磁盘.
+   - 设置面板 _gui_list_cache: scan_guis 开面板时扫一次目录 (每帧扫是磁盘 I/O).
+  实测 (tests/_tmp/hub_cpu_probe.py + 子进程采样): 空闲 CPU 60% -> 0.0%;
+  每帧事件全量重绘 ~6% (文字缓存代价). test_hub_gui 扩文字缓存/强制重绘断言.
+
+====================================================================
+二、数据模型 (engine.py)
+====================================================================
+【GameObject】场景物体 (≈ Unity 的 GameObject 合并版; 旧文档称 ModelState,
+  2026-08-30 类名已正式改 GameObject —— 组件化正名, 序列化/测试全量跟进)
+  - name / guid / visible            身份与可见性
+  - position / rotation / scale      Point3D (欧拉角, 度转弧度存内部)
+  - color / saturation               颜色与饱和度 (Material 持有时走 Material)
+  - parent / children                父引用 + 子列表 (M14 层次;
+                                    2026-08-16: set_parent 默认保世界挂父——换父后按新父空间
+                                    换算局部位置/旋转/缩放, 世界不变; 复制/播放还原走
+                                    preserve_world=False 局部原样)
+  - script_id / script_vars          M27 脚本挂载 (脚本id + 参数字典)
+  - scripts (list)                   M25 组件化: 多脚本组件数组 (含 script_id)
+  - renderer.material                M23 材质组件: 引用材质库共享资产 (Material)
+  - collider (ColliderComponent)     M28 碰撞体组件 (shape/enabled)
+  - rigidbody / audio_source / animator   M31/M34/M35 组件
+  - _script / _script_broken         运行时脚本实例缓存 / 坏脚本标记
+  - vbo / vao / _shadow_vao / _shadow_vbo  GPU 几何资源句柄 (首次渲染/建模时构建)
+  ★ 组1 缓存 (2026-08-30, 性能):
+  - _bucket_key (None|tuple)         桶键惰性缓存 (GL 3元/Vk 2元键形);
+                                    mesh/normal_mode/primitive/params 四 setter
+                                    置脏; params 原地 mutate 不置脏 = 引擎契约外
+                                    操作 (无库内用法, 注释备案)
+
+【Material】材质资产 (M23; 组1 加缓存)
+  - color ('#RRGGBB') / saturation    颜色与饱和度 (property: setter 算一次缓存)
+  - _rgba ((4,) f32|None)             颜色 f32 缓存 (_hex_rgba 同源转换, 逐位一致;
+                                    color=None 时 None); tuple 色走灰色回退同旧
+  - _sat_f32                          饱和度 f32 缓存
+  ★ 缓存挂 Material 单点 (不挂 GameObject): 共享材质一端改色另一端当帧跟变
+    是 M23 契约, 缓存必须随材质 (组1 修正清单原方案)
+
+【LightState】光源实体 (M21; M29 阴影/光束)
+  - kind        'directional' 平行光 | 'point' 点光源
+  - position / direction / color / intensity
+  - mode        M29: 'full' 全场景平行光 | 'beam' 光束(截面平行光)
+  - shape       M29: 'circle' | 'rect' 光束截面形状
+  - size        M29: 截面尺寸 (圆=半径 / 矩形=半边长)
+  - shadow      M29: 是否投射阴影 (物体遮挡光线, shadow mapping)
+  - name / guid
+  注意: 光源是"实体"但不出现在 models 列表 —— 层级面板单独列,
+        不渲染为网格、不参与射线拾取、可选中可撤销可序列化。
+
+【CameraState】摄像机实体 (Unity Camera 概念, 2026-08-11; M41 2026-08-16 度制+roll+限制)
+  - position / yaw / pitch / roll  位置 + 朝向 (M41 改**度制**: yaw [0,360) / pitch、roll
+        环绕 (-180,180]; roll=倾斜, 绕视线方向自旋); fov(度)/fov_locked
+  - pitch_lock / pitch_min / pitch_max  俯仰角限制 (M41): 玩家可调俯仰范围 [min,max] 含两端
+  - name / guid; direction/up_vector 派生 (度→向量, roll 方向标识用)
+  注意: 玩家视角 = active_camera 对应的摄像机; apply_camera(cam) 把它设为
+        相机位置+朝向+视角广度并关闭轨道相机 (M41: 度→弧度, 含 camera_roll);
+        视口图标 billboard+距离缩放, 选中画视角线 + **roll 方向小箭头** (朝向线中点
+        1/4 大小黄色箭头指向 up_vector); **位置可用 gizmo 平移 (旋转禁止, M41)**;
+        不渲染网格/不参与拾取.
+  M41 附身: 检查器"用此相机预览"(preview_camera) 编辑器视口切到该相机视角, Esc/再点退出,
+        预览期轨道操作禁用 (editor._update_camera 早退), 播放进入先退出预览;
+        "设为激活相机"(set_active_camera) -> active_camera, 播放时自动用该相机视角.
+  M41 俯仰角限制: first/third_person 脚本读 engine.player_pitch_limits() (激活相机
+        pitch_lock 时返回弧度 [min,max]) 夹俯仰角; 无限制兜底旧 ±1.5/±1.4rad.
+  ★ 相机物体化 (2026-08-16): 可挂父到普通 GameObject (如玩家). parent/children 字段;
+        **CameraState 存局部变换, 世界 = 局部 × 父链合成**:
+        - camera_world_position(cam): 局部 @ 父世界矩阵
+        - camera_world_basis(cam): 按 mat4_view_yaw_pitch 同 trig 建局部基(ex/ey/ez)含
+          roll, 再行向量 @ 父世界旋转 -> 世界基 (ez=前方, ey=roll 上)
+        - matlib.view_basis_to_angles(ex,ey,ez): 基的逆 -> 世界 yaw/pitch/roll 弧度
+        - apply_camera: 无父=原路径精确 (radians(cam.yaw/pitch/roll), 零漂移);
+          有父=合成世界基+反解世界朝向
+        - set_camera_parent(cam,new_parent,preserve_world): 挂父/脱父保世界 (Unity 语义),
+          维护 cam.parent 与 parent.camera_children
+        - GameObject.camera_children 独立列表 (不进 transform.children, 避免 models 的
+          children 迭代误伤); remove_model/remove_subtree 先脱相机再删节点
+        - 挂父激活相机播放期/预览期每帧重应用 = 随父移动 (Unity 父子语义, 脚本后写仍覆盖)
+        - 层级摄像机行树形缩进 + 拖到物体行=挂父/拖空白=脱父 (controller reparent_camera/
+          detach_camera -> ReparentCameraCommand)
+        - 序列化 v10: cameras 数组加 parent_id, scene_from_dict 在物体建链后连父
+          (_link_camera_parents); 撤销 camera_snapshot 含 parent(guid)
+
+【Point3D】三维向量/点
+  - .x/.y/.z, 运算重载(+ - * / @), 用于位置/旋转/缩放。
+
+引擎持有的核心状态 (GLEngine.__init__):
+  self.models         场景物体列表(渲染顺序 = 列表顺序)
+  self.lights         光源列表
+  self.cameras        摄像机实体列表 (Unity Camera)
+  self.active_camera  当前玩家视角摄像机 guid (None = 默认轨道相机)
+  self.camera         相机状态 (位置/旋转/视场/近远裁剪; 内部弧度, M41 加 camera_roll)
+  self.camera_target  脚本相机跟随目标 (camera_follow 写入)
+  self.script_keys    输入状态字典 (name->bool, 脚本读)
+  self.ctx            moderngl 上下文; self.prog/hud_prog 等 GL 程序与 VBO/VAO 句柄
+  self._vp             每帧相机 view-projection 矩阵（行向量约定）
+  self.gravity        可调重力 (2026-08-30, 默认 -9.8; 场景 'gravity' 字段/
+                      设置面板可覆盖; 脚本/物理全走它)
+  self._phys_bridge   B1 物理桥实例 (None=未建; 播放期惰性建, 退出销毁)
+
+多核/并行状态 (2026-08-14, 见第十三节 + parallel.py):
+  self.show_grid        无限网格开关 (默认 True, 设置.json 可关)
+  self.parallel_enable  并行总开关 (设置.json, 重启生效)
+  self.script_cores     脚本预留核心数 (默认 2, 设置.json)
+  self.parallel         parallel.get_parallel 单例 dict {topology, policy, applied}
+  self._script_runner   脚本专用线程 (ScriptRunner, 绑预留大核; None=内联)
+  self._collision_pool  碰撞检测线程池 (ThreadPoolExecutor, 大场景自适应)
+  self._frame_pool      预计算线程池 (FramePool, 2026-08-15)
+   self._sched_pool      NgilPool 常驻 nogil 分块池 (M3, 可禁用/超时永久降级)
+   self._logic_thread    Qt 宿主 loom-logic 逻辑线程 (M3-N3, _external_ctx 才启动)
+   self._phys_pipe       PhysicsPipeThread 常驻物理子步线程 (批6, 可禁用/异常降级)
+   self._frame_world     当帧逻辑世界矩阵 (N,4,4) f8 (逻辑更新/物理后，阴影/主 pass 共享)
+   self._render_world    渲染插值世界矩阵 (渲染专用, 不回写 GameObject)
+   self._prep_pub        异步逻辑线程单点发布 (logic_gen, pairs, light_vps)
+  self._light_bufs      _upload_lights 复用缓冲 (消除每帧 numpy 分配)
+  LOOM_NO_PARALLEL=1 环境变量 = 测试守卫 (不建线程/不设进程亲和, 保证确定性)
+
+★ 组3 SoA/Numba 状态 (2026-08-31, 详见第十六节):
+  self._struct_gen     场景结构代数 (实例属性; _bump_struct() 在 add/remove/
+                       attach/set_parent/clear 等失效点自增; 替代类级 _ANCESTRY_GEN)
+  GLEngine._LIVE_INSTANCES  引擎实例注册表 (多实例互不误伤; __del__ 清理)
+  self._soa_snap       变换快照缓存 ((stamp, keys, pos, rot, scl, cur), 组3层1)
+  GLEngine._ANCESTRY_CACHE 类级祖先区间缓存 (id(models)+gen 双键, 组2/3)
+  self._bucket_geo/_bucket_inst  桶几何/实例缓冲 (A2 实例化, 见第三节)
+
+====================================================================
+三、渲染管线 (engine.py render(), GL 后端)
+====================================================================
+每帧流程（按当前实现；旧绑死分支另列）：
+  当前目录树、模块摘要与下述历史批次记录并存：历史条目表示对应版本，
+  不等于当前默认执行路径。
+  （本节旧编号 1~12 的绑死流程仅描述 `LOOM_NO_SPLIT=1` 兼容路径。）
+  正常分离模式由 `core_clock.FixedStepClock` 驱动；Qt 宿主下逻辑工作由 `loom-logic`
+  线程承担，渲染线程只消费逻辑快照：`_logic_frame()` 依次执行脚本、物理子步、音频/动画、逻辑 prep、事件派发和插值翻页。
+  旧绑死模式（`LOOM_NO_SPLIT=1` 或 `logic_fps<=0`）才在 render 内执行下列逻辑步骤。
+  当前默认渲染阶段通过 `_logic_snapshot()` 消费逻辑结果；`_parallel_shadow_and_collision()`
+  在分离模式主要消费逻辑帧缓存，只有逃生/编辑态等分支才现场计算。
+  1. _run_scripts(dt)              ← M27 + 多核(2026-08-14): 脚本更新走 ScriptRunner
+                                      专用线程 (同步模型: 主线程信号→等它跑完→再渲染;
+                                      无 runner/线程异常回退内联). 玩家(PlayerApp)每帧跑,
+                                      编辑器(EditorApp)只在播放模式.
+  2. update_physics(dt)            ← B1 (2026-08-30): 完整 __init__ 实例走 Culverin(Jolt)
+                                      物理桥 _update_physics_bridge (pre→step→post 三段),
+                                      引擎几何碰撞管线全保留 (混合式); 测试桩/缺库走
+                                      legacy 路径 (M31 刚体步进 + 碰撞事件, 语义零变化)
+  3. update_audio / update_animations   ← M34/M35 (audio 委托 audio_backend 双后端)
+  4. 模型位姿由 scripts.py 的 rotate 等脚本更新；GameObject 没有 m.update(dt)。
+  5. self._frame_world = compute_world_matrices(self.models)
+                                     ← 批量世界矩阵 + 组3两层加速:
+                                      ① 层1 SoA: _transform_snapshot() 硬化快照
+                                       ((id(models),_struct_gen,len) 三件 id 键 +
+                                       对象钉住), 9 次属性链列取收拢成平面切片
+                                      ② 层2 numba/纯 Python: 深度 DP 循环 → fastpath.depths
+                                       (njit, 未装 numba 自动降级纯 Python 同源)
+  6. _parallel_shadow_and_collision ← 2026-08-15: 阴影 VP (只读) ‖ 碰撞检测 (只读)
+                                      池上并行重叠; AABB 批量归约走组3层3
+                                      _aabbs_batched → fastpath.aabbs_minmax
+                                      (★2026-08-31 组6 spin 治理: 默认串行 njit,
+                                      nogil 不触碰 numba 线程池 —— 消 18 worker
+                                      busy-wait 空烧; 仅单组模型数 ≥
+                                      _AABB_PAR_MIN_WORK=300000（n×V）切 prange 版；旧 _AABB_PAR_MIN_MODELS=512 仅兼容引用
+                                      aabbs_minmax_par 逃生门; 堆叠缓冲
+                                      thread-local 复用免每帧 3.3MB 分配;
+                                      _AABB_POOL_THRESHOLD=64 以下串行批量化)
+  6.5 _prepare_bucket_frame()       ← A2+组1 (2026-08-29/30): 当帧实例数据准备 ——
+                                      桶重排 (按 _mesh_key 分组) + f32 矩阵 + 桶级实例
+                                      缓冲写入 (staging 随桶持久, write 零拷贝);
+                                      颜色/饱和度消费 Material._rgba/_sat_f32 缓存
+  7. _render_shadow_maps()          ← M29: 先画完全部阴影贴图 (深度 pass, 桶式实例化)
+  8. clear 清屏
+  9. 重算 world_matrix(相机) + projection_matrix(相机投影)
+ 10. _upload_lights()              ← M21+M29+多核: 光源数组 + 阴影贴图/槽位/光束 uniform;
+                                      _light_bufs 复用缓冲 (每帧原地清零, 无 numpy 分配)
+ 11. _draw_main_buckets()          ← A2: 主 pass 实例化批绘制 —— 按桶一次 draw 全部
+                                      实例 (逐物体 uniform/upload 循环已取消);
+                                      桶键 _mesh_key = (primitive, params json,
+                                      normal_mode) + GameObject._bucket_key 惰性缓存
+                                      (组1: 每帧 json.dumps 降为创建后一次;
+                                      GL 3元键 / Vk 2元键, 消费端按 len 校验防串扰);
+                                      桶几何 _bucket_geo 共享 VBO/VAO, 实例缓冲
+                                      _bucket_inst 容量生长 (_grow_bucket_inst);
+                                      remove_model 不释放桶 (桶归属), clear_scene 才
+                                      _release_bucket_resources
+ 12. HUD/编辑器叠加 (2026-08-15 起异步化): 视口叠加(网格/选中框/gizmo/图标)
+      **每帧直绘屏幕 120FPS**; 各面板 —— **渲进离屏 FBO, 脏驱动+节流 (~30FPS),
+      每帧 blit_texture 全屏合成** (见第十三节异步GUI; Qt 视图 = 原生控件免此机制)
+
+矩阵约定 (matlib.py, 行向量, OpenGL 习惯):
+  - model 矩阵 = S @ R @ T   (先缩放→绕自身旋转→再平移到世界)
+  - view 矩阵  = 相机逆向 (camera 位置/旋转构成的 view)
+  - projection = perspective (视场角/FOV, 近远裁剪)
+  - 世界坐标 = local @ model;  裁剪坐标 = world @ view @ projection
+  - 顶点在 CPU 端 numpy 批量算好, 上传 GL_POINTS/GL_TRIANGLES。
+
+坐标系: OpenGL 右手系, +Y 向上, 相机默认朝 -Z。
+        (游戏物理里曾用 -Z 为上, 引擎渲染统一 +Y 为上)
+
+着色器: _FRAG_SRC 硬编码在 engine.py (GLSL), 关键常量:
+  - MAX_LIGHTS = 8
+  - 无光源时 u_ambient_scale = 0.2 (压暗, 提醒手动加光)
+  - gamma 校正 1/2.2 在片元末尾
+  - A2 实例化 (2026-08-29): 顶点着色器 per-instance 属性 a_w0..a_w3 (世界矩阵行,
+    GLSL mat4(列收) = M^T, 与旧 u_model 逐位一致) + a_sat.x (饱和度) +
+    a_col (rgb + w>0.5 材质色覆盖); /i 格式串 = 整串生效尾部单 /i
+  - M29 阴影: sampler2DShadow u_shadow_maps[16] 平铺 (平行光1张/点光6面),
+    u_shadow_slot 每光源起始槽位, u_light_ortho 平行光 view-proj,
+    u_light_mode/shape 光束截面掩码; PCF 3x3 软阴影;
+    ★ 深度方案 (2026-08-12 修正后为准): 阴影贴图存**真实深度** (近=小),
+    本驱动 (1050Ti) 实测做 stored>=ref 比较 (忽略 compare_func),
+    传 ref = depth - bias (stored>=depth-bias <=> 片元不被挡=照亮).
+    关键坑: moderngl VAO 与创建程序绑定, 阴影 pass 须用独立 _shadow_vao (positions-only);
+    gl_FragDepth 须无条件写 (分支不取时值未定义 -> 全变近面).
+
+---- Vulkan 双后端 (vk_renderer.py / vk_player.py / scene_driver.py, P0-P5 全完成 2026-08-29) ----
+选型: wgpu-py 0.32 + GLFW (rendercanvas); WGSL 着色器双源 (Vk=WGSL / GL=GLSL, 同语义)。
+  - 驱动死锁规避 (1050Ti/582.66 实测): 大 bind group 组合 / fragment 数组动态索引
+    → 整机卡死。P4F 形态 = 单 bind group (场景块 uniform + 阴影纹理 + 采样器),
+    4 灯固定展开无数组; 阴影 R32Float 手动比较; front_face='cw' (引擎绕序)。
+  - 实例化批绘制 (P4F): 按 mesh 分桶, 50 球 → 2 draw / 1 bind group;
+    矩阵走 instance 步进顶点缓冲 (world 132B/实例; 组1 改 160B 含 sat/color)。
+  - 组1 (2026-08-30): draw_frame 内联 int(col,16)/255 逐帧解析取消 → 消费
+    Material._rgba/_sat_f32 (getattr 防御回退旧解析); _inst_stage/_inst_sha_stage
+    持久复用 (容量生长重建); _mesh_key 消费 _bucket_key 缓存 (2 元组校验防串)。
+  - ★Vk 侧 np.linalg.inv(worlds) 法线逆转置**未优化** (A12, 归组5候选)。
+  - scene_driver.py: 中间层 = 场景数据 + 每帧步进 (脚本/物理/动画/轨道相机),
+    后端无关; Vk 播放器/GL 播放器 (PlayerApp) 共用语义; B1 补物理三段桥
+    + 脚本 API 最小面 (move_with_collision/get_collisions/输入/相机安全)。
+    ★ 与 engine.py 对应方法**逐位一致契约** — 勿分叉公式 (注释双向提醒)。
+  - run_player.py: 播放器 API 选择 (优先级: --backend 参数 > 设置.json render_api
+    > 默认 vulkan); auto = 先 Vk 初始化失败回退 GL。发布链 (game_player) 走同逻辑。
+
+---- 性能优化批次记录 (组1/2/3, 2026-08-30~31; 详见《任务清单.txt》+《库性能优化堵点清单.txt》) ----
+  组1 = 实例数据批 + 桶键缓存: Material._rgba/_sat_f32 (property setter 算一次,
+        _hex_rgba 同源) + GameObject._bucket_key 惰性缓存 (四 setter 置脏;
+        GL 3元/Vk 2元键形校验防串扰) + GL _prepare_bucket_frame staging 随桶持久
+        (write 吃 buffer 协议零拷贝) + Vk 同款。stress 125.6→140.0FPS。
+  组2 = 微堵点批 + D10: 事件派发 id2m dict (消 O(n²) next 扫) + get_collisions
+        models.index 消除 + _ancestry_ranges 类级缓存 (id(models)+双键; 失效点
+        = 增删/挂父/清场全接; 契约: 脚本直改 parent.children 不置脏) +
+        Light.direction/up_vector trig 缓存 + update_scripts 引用迭代 + D10
+        draw_lines 持久 VBO (4KB 起 2x 生长, dynamic) + VAO 缓存。NCC 1.000。
+  组3 = 公共算法层 + SoA + Numba 三层 (详见第十六节):
+        层1 SoA 快照 / 层2 fastpath njit (depths/ancestry_dfs/动画A6) /
+        层3 aabbs_minmax njit+prange。stress 140.0→146.6, shadow_prep -22%。
+        ★教训: "轻计算重调用"负载 (每顶点 9乘6加) 纯 numpy 批量化全负收益
+        (0.23-0.99x: 堆叠拷贝+batched matmul 比 N 次独立 dgemm 还慢),
+        numba 标量循环 23.8x 才是正解。
+
+====================================================================
+四、编辑器 (editor.py)
+====================================================================
+EditorApp(GLEngine) = 编辑器控制器 (命令层, UI 无关). 继承引擎, 承担全部
+"编辑逻辑" (命令/选中/撤销/gizmo 交互/相机/场景操作). UI 层是注入的独立视图.
+  render()            引擎场景渲染 (批量矩阵 _frame_world + 播放期 _run_scripts) +
+                      调 view.draw(self, delta) 画全部 UI
+                      (2026-08-15 异步GUI: 视口叠加直绘屏幕 120FPS; 面板离屏FBO脏驱动
+                       限频, LoomGUI.draw 内部自管, editor 只调 view.draw 不变)
+  _update_gizmo()     视口交互: gizmo 拖拽 > 点选 (读 view.input_state() 是否被 UI 抢点击)
+  on_key_event()      键盘: 先转 view.handle_key_event (输入框吃键), 再处理快捷键
+  grid_geometry()     无限网格几何 (2026-08-14): 转 ui/grid.build_grid_lines, 视图层调用
+  命令方法 (2026-08-13 UI 模块化新增) —— 面板全部写操作都走这里 (内部自动撤销),
+    UI 不直接 push undo: edit_model/commit_model/rename / edit_light/commit_light/
+    rename_light / edit_camera/commit_camera/rename_camera / set_gizmo_mode /
+    toggle_visible / reparent/detach / add_script/remove_script/set_script_var /
+    add_rigidbody/remove_rigidbody/toggle_rigidbody_gravity / toggle_collider /
+    add_audio_source/remove_audio_source/toggle_audio_playing/toggle_audio_loop/
+    set_audio_clip / add_animator/remove_animator/toggle_anim_playing/toggle_anim_loop/
+    play_anim / new_material / unlink_prefab / toggle_cam_fov_locked
+
+==== 编辑器 UI 接口标准 (IEditorView, ui/editor_ui.py, 2026-08-13) ====
+三层解耦 (依赖单向向下):
+    UI 实现层  ui/loom_gui.py (LoomGUI, PySide6 原生 Qt 视图, 默认) /
+               ui/minimal_editor_view.py (只读)
+    UI 接口层  ui/editor_ui.py   IEditorView 契约 (UI 接口标准)
+    控制器层   editor.py EditorApp (引擎能力 + 命令层 + 状态 + 撤销)
+换 UI = 新写一个类实现 IEditorView, 注入控制器:
+    EditorApp(width, height, scene_path, view=<你的实现>)     # 代码注入
+    Loom.py --ui qt          # 入口按名切换 (默认 LoomGUI, Qt 原生)
+    Loom.py --ui minimal     # 极简只读第二实现
+★ 2026-08-17 视图重写定案: pygame(SDL) 窗口会进程级污染中文输入法 (IME) 候选框
+  (tkinter 弹框/系统文件对话框全中招, 补丁无解) → 编辑器 = PySide6 原生 Qt 控件
+  全重写: QOpenGLWidget 承载 moderngl 视口 (外部 ctx 嵌入模式) + QTreeWidget/
+  QDoubleSpinBox 等原生面板; 旧 pygame 即时模式视图已删除 (2026-08-28 更名:
+  ui/loom_gui.py = LoomGUI 核心视图)。GUI/ 可插拔机制保留。
+IEditorView 契约方法:
+    attach(controller)    绑定控制器 (__init__ 自动完成)
+    input_state() -> {mouse_pos, buttons, pressed, released, wheel,
+                      click_captured, focus_id}    控制器 gizmo/相机交互用
+    handle_key_event(ev) -> bool   UI 键盘 (输入框吃键), True=已消费
+    reset_interaction()   清跨帧交互 (播放边界/系统对话框返回后)
+    draw(controller, delta)  画全部 UI (视口叠加 + 各面板 + 播放期游戏 HUD)
+      (Qt 视图: 视口叠加在 GLViewport.paintGL 后走 engine draw_lines/
+       draw_screen_rect; 面板 = 原生控件, 无离屏 FBO 机制 —— 异步 GUI 仅
+       pygame 系视图需要, Qt 原生控件自绘不走 GL draw call)
+UI 读/写约定 (关键):
+    - UI 通过 controller 公开 API 读写 (只读状态 + 命令), 不 import undo/sceneio.
+    - 引擎对象引用 (models/lights/cameras) 仅用于只读显示与作为命令参数.
+    - 所有"会改变引擎状态"的写操作必须经 controller 命令 (内部自动撤销),
+      UI 不直接 push undo. 例如检查器数值行 (Qt):
+          valueChanged 实时应用 (edit_model active=True); editingFinished
+          压撤销栈 (对齐旧 drag_float 右键键入-Enter提交-压栈语义)
+    - 注意: 引擎 self.ui 是运行时 HUD (M33 RuntimeUI, 播放器 UI 不分离),
+      编辑器视图统一命名 self.view 避免冲突.
+
+面板 (LoomGUI = ui/loom_gui.py, PySide6 原生控件; 旧 pygame 即时模式"每帧从零画"
+      已成历史 —— Qt 面板只在状态变化时重绘, 事件映射到引擎字段):
+  - _build_toolbar()   工具栏: 新建/保存/加载/播放/...
+  - 层级面板            QTreeWidget 物体树 + 光源区 + 摄像机区 (右键菜单:
+                       重命名/复制/删除/脱父/预览/激活; 拖拽挂父带 5px 阈值)
+  - 资源面板            AssetListWidget + 预览 (M24 语义同旧)
+  - 检查器              DraggableSpin/DragBlock 数值拖拽块 (2026-08-22b 通用
+                       _spin 入口; 拖 X 联动 XYZ namedtuple)
+  - 状态栏              相机坐标/物体数/光源数/播放标记 + [命令行] 按钮 (F12)
+  - qt_console.py       ConsoleDock 命令行坞 (EAI 同一张命令表, 单一事实)
+  - 设置对话框           网格/并行/脚本核数/重力/渲染API/插件挂载区等
+  分隔条/收起: Qt 原生 QDockWidget/QSplitter 语义 (旧自绘分隔条已成历史)。
+
+资源浏览器 (M24) —— "像 Unity Project 窗口":
+  _scan_assets(assets_dir=None)   列资产 (只用 os.listdir 列文件名, 不逐帧读 JSON):
+     内置 ◆立方体/球体/平面 恒在 + assets/meshes|materials/*.json + assets/*.prefab
+  _draw_resources()               行渲染 (照搬层级拖拽模式: g._register 按下武装
+     _res_drag, 松开解析); 底部预览条 + [放入场景]/[应用到选中] 按钮
+  _resolve_resource_drag(g, rows) 松开时命中视口 rect -> _asset_drop_to_scene
+  _mouse_to_ground(px,py)         鼠标射线 ∩ y=0 地面 (复用 _ray_from_mouse)
+  _asset_drop_to_scene(it, pos)   mesh -> AddObjectCommand 在落点; prefab ->
+     PrefabPlaceCommand + 根贴地 offset (gx,-root_y,gz); material -> 应用到选中
+  _apply_material_asset(it, m)    按 guid 复用库中材质, 无则 add_material(guid=..),
+     再 m.renderer.material = mat + StateCommand (共享引用语义)
+  _save_material_asset/_save_mesh_asset  检查器按钮 -> assets/ 落盘;
+     同 guid 已存在 = 覆盖更新 (_asset_file_by_guid), 否则 unique_default_name 新建
+  拖放/落盘全部 is_playing guard 拦截 (播放期禁用)。
+
+编辑状态 (EditorApp 专有):
+  selected_index / selected_light_index   当前选中
+  is_playing / _play_*                    播放模式快照 (M26)
+
+播放模式 (M26) —— "所见即所得"闭环:
+  toggle_play():
+    进入: 快照场景(物体+光源+父链+顺序) -> 清空撤销 -> is_playing=True
+    退出: 丢弃运行时改动 -> 恢复快照 -> 清脚本实例 -> 重建 GPU
+  播放期间: 编辑动作(增删/保存/撤销...)全部被 is_playing guard 拦截,
+           只能跑脚本, 退出自动还原。
+
+脚本检查器 (M27):
+  - 显示脚本下拉列表(scripts.script_options), ✓ 标记当前脚本
+  - 参数区: 每参数一个 drag_float, 改动走 undo_snapshot + StateCommand
+
+====================================================================
+五、脚本系统 (scripts.py + engine.update_scripts) (M27)
+====================================================================
+设计: 类 MonoBehaviour 的轻量版 —— 一个物体挂一个脚本。
+
+注册与查表:
+  SCRIPTS = {}                    id -> 类
+  @register                       装饰器, cls.script_id 为注册键
+  get_script(id) / script_options()
+
+脚本基类 (Script):
+  script_id / name / params       元信息; params = (key,label,默认值,min,max,fmt)
+  on_start()                      进入/挂载时调用一次
+  update(dt)                      每帧调用
+
+挂载数据流:
+  ModelState.script_id + script_vars   (可序列化, 在 sceneio 存成
+                                        {"script":{"id","vars"}})
+  update_scripts(dt) 每帧:
+    - 无 script_id      -> 清实例缓存
+    - 坏脚本(_script_broken) -> 跳过
+    - 实例未构建         -> 查注册表建实例, 套用 script_vars,
+                            调 on_start() (失败 -> broken)
+    - 每帧调 update(dt)  (抛异常 -> 打印 + broken, 不崩引擎)
+  _run_scripts(dt)  分发器 (2026-08-14 多核): 有 _script_runner 则交脚本专用线程
+    (ScriptRunner.run_frame 同步等待, 线程绑预留大核), 否则/线程异常回退内联
+    update_scripts —— 测试直调 update_scripts 行为零变化。
+    同步模型线程安全: 主线程阻塞等脚本跑完才进 physics/render -> 一帧内无并发写;
+    脚本实例由同一 worker 线程连续持有 (on_start/update 同线程)。
+
+输入 (供脚本读):
+  engine.is_key(name)  <->  pygame.key.get_pressed() 刷新到 script_keys
+  键名用 _KEYMAP 里的名字: 'w'/'a'/'s'/'d'/'space'/'Left'/'Right'/...
+  注: WASD 移动是"世界轴"移动 (相机朝向无关)。
+
+内置脚本 (11 个，注册表当前实现；另可从 scripts/ 动态加载自定义脚本；实际由逻辑帧驱动):
+  rotate          自转 (sx/sy/sz 度/秒)
+  orbit           公转 (绕中心点, 半径/高度/角度在 on_start 捕获)
+  bob             浮动 (y 正弦, on_start 捕获 base_y)
+  wasd_move       WASD 移动 (世界轴, speed)
+  camera_follow   相机跟随 (把 camera_target 设为 物体世界位置+偏移)
+   first_person    第一人称移动/鼠标视角/跳跃
+   third_person    第三人称移动/鼠标视角/角色朝向
+   jump            刚体跳跃
+  fall            重力落地 (g 重力加速度; 每帧 move_with_collision 向下移,
+                  被挡停 = 落地)
+  bounce          弹跳 (g 重力 + rest 弹性 0~1; 触地且速度向下 -> 反转速度)
+  count_touch     触碰计数彩球 + RuntimeUI 教学示例
+
+====================================================================
+五·补 物理碰撞 (M28) —— engine.py 纯数学, 不碰 GPU
+====================================================================
+设计: AABB 级"够用"物理 —— 不是刚体系统, 是"碰撞查询 + 推出"。
+  - 碰撞体自动派生: 球体网格 -> sphere, 其他 -> box (平面 -> box 零厚度)。
+  - 同一棵父子树的物体之间永不碰撞 (防止零件互撞/自撞)。
+  - 用"严格 <"判定相交: 恰好贴边不算碰撞, 静止物体不会被反复推。
+
+数据结构 (engine.py):
+  ColliderComponent(Component): ctype='collider',
+    shape = 'box'|'sphere'|'none', enabled = bool
+  GameObject.collider             每个物体必有一个 (add_model 时自动派生)
+
+关键方法 (全部在 GLEngine 上, 世界空间):
+  collider_bounds(m, M=None) -> ('box',(mn,mx)) | ('sphere',(center,r))
+    盒 = AABB; 球 = AABB 中心 + 最大半长 (对球体网格正好=真实半径)。
+    M 可选: 传入批量世界矩阵避免重算 (多核优化)。
+  _pair_overlap(ba,bb) 静态纯几何相交: 盒-盒 严格< / 球-球 距<和 / 盒-球
+    球心到盒最近点距离<半径 (球在盒内也算)。
+  _pair_overlap_vec(ai,bj,bmn,bmx,scn,rad,kind)  向量化版 (多核 2026-08-14):
+    一次 numpy 算 K 对相交, 与 _pair_overlap 逐位等价 (test_parallel 随机等价回归)。
+  _related(a,b)   a/b 是否同树 (祖先/后代/同一对象) -> 是则不算碰撞。
+  collider_hit(a,b)   单对判定 (同树/禁用/none 一律 False)。
+  get_collisions(m)   查询 m 当前和谁相交 (脚本里拿它做"碰到就..."事件)。
+  _push_out(a,b)      把 a 推出 b (只改 a.position):
+    盒-盒走"最小穿透轴"(每轴算把 a 沿 +/- 推到刚分开的最小位移, 取最小;
+    相等朝远离对方中心) —— 这样零厚度平面也能得到真实穿透量, 且滑墙自然。
+    含球沿两中心连线推出 (need = ra+rb-距离)。
+  resolve_collisions(m, max_iter=4)   迭代把 m 推干净, 返回是否被挡。
+  move_with_collision(m, dx,dy,dz)    带碰撞的位移, 返回是否被挡:
+    ★ 子步防穿透: 把位移拆成 <= 碰撞体特征尺寸 (盒=最小半边长, 球=半径,
+      下限 0.02) 的 N 步, 每步移动 + resolve —— 大位移不会跳过薄地面。
+    脚本里禁止直接改 position 做"带碰撞"移动 —— 那是瞬移, 会穿透。
+
+多核碰撞并行 (2026-08-14, _COLLISION_PAR_THRESHOLD=32 模型数以下走内联零线程开销):
+  _update_collision_events(dt)  有池且 >=阈值 -> _collision_events_parallel, 否则内联
+  _collision_events_parallel    一次算全部碰撞对 -> 建邻接集 -> 串行派发 start/end 事件
+                                (事件改脚本状态必须串行; current 集与内联逐位一致)
+  _collision_pairs_parallel     只读检测: 候选对过滤(enabled/shape≠none/非同树/i<j) ->
+                                碰撞体数组(用 compute_world_matrices 现算) ->
+                                np.array_split 切 chunk -> 线程池 map 向量化判定 -> 合并
+  _ensure_collision_pool        ThreadPoolExecutor(initializer= 设 pool_mask 亲和, Py3.9+)
+  ★ 碰撞体数组必须"现算当帧矩阵", 不能复用 self._frame_world (它在渲染前算、事件在
+    update_physics 内部跑, 物理已移动物体 -> 复用会用到过期位形)。内联 get_bounding_box
+    每帧现算, 二者必须一致 (test_parallel 含物体移动后等价回归)。
+
+序列化: sceneio v6 每个对象加 "collider": {"shape", "enabled"};
+  旧场景 (v5) 无该字段 -> 加载时按网格类型自动派生, 无需迁移改写。
+撤销: snapshot 含 'collider' -> 检查器切换碰撞体可 Ctrl+Z 撤销。
+
+====================================================================
+五·补2 B1 物理换库 (physics_bridge.py, 2026-08-30 P2 落地; B2 音频 audio_backend.py)
+====================================================================
+B1 = Culverin 0.14.0 (Jolt 物理封装) **混合式架构** —— Jolt 只接管*刚体动力学*
+  (速度/重力/接触解算/摩擦滚动/睡眠), 引擎几何碰撞管线 (M28 全部: move_with_
+  collision/get_collisions/事件/同树不互撞/编辑-播放快照) **全部保留**。
+  桥 = "模型 <-> Jolt 世界"每帧翻译 (pre/step/post 三段), 零 GL (只依赖 numpy
+  + culverin try/except; 缺库 -> 桥不建, update_physics 走 legacy 路径语义零变)。
+  关键方案 (硬性, 勿回退):
+  - R1: 世界重力=(0,0,0), 桥手动复制引擎累积次序 (use_gravity 才 v.y += g*dt;
+    gravity 走引擎实例 self.gravity 可调)。
+  - 策略 R: 每帧写速度仅当 (a) 脚本改过 velocity 或 (b) 体唤醒; 睡眠体跳过写
+    (性能红利); post_step 对睡眠体**回读速度归 0** (Jolt 残速会破坏 |v|<0.01 契约)。
+  - 静态升级 = 销毁重建 (★culverin 0.14 set_motion_type(STATIC→KINEMATIC)+step
+    = 原生崩溃 0xC0000005, 已绕行, **勿回退**)。
+  - create_bodies_batch 默认=幽灵不互撞且无 filter 参数 -> P2 用逐体 create_body。
+  - B1 后入口: engine.gravity 可调 (场景 'gravity' 字段/设置面板行, G01);
+    apply_snapshot/toggle_play 清运行时状态 (velocity/_colliding/动画/音频, G02);
+    检查器摩擦/弹性字段; scene_driver 补物理+脚本 API 最小面 (Vk 播放器缺口修复)。
+B2 = audio_backend.py 双后端适配层: 主 = game-audio 2.1.0 (miniaudio, wav/mp3/
+  flac + per-句柄音量), 兜底 = pygame.mixer; LOOM_AUDIO_BACKEND=auto|game_audio|
+  pygame; per-file 回退 (game-audio 不支持 ogg -> 自动 pygame 播); 句柄缓存
+  (path, owner=id(组件)); ★中文路径 bug 修: _ga_open_path 传 mbcs bytes;
+  ★铁律: 退出必须 shutdown() (miniaudio 设备线程不关会挂死进程), 引擎退出链
+  + atexit 双保险。AudioSystem (engine) 委托本模块, update_audio owner=id(组件)。
+
+====================================================================
+六、序列化 (sceneio.py)
+====================================================================
+格式: JSON, SCENE_VERSION = 10。
+  {
+    "version": 10,
+    "camera": {...},
+    "gravity": -9.8,                                             # 2026-08-30 可调重力 (场景级覆盖)
+    "materials": [ { "id","name","color","saturation" }, ... ],  # M23 材质资产库
+    "lights":  [ { "id","name","kind","position","direction",
+                   "color","intensity",
+                   "mode","shape","size","shadow" }, ... ],       # M29 阴影/光束
+    "cameras": [ { "id","name","position","yaw","pitch","roll",
+                   "fov","fov_locked",
+                   "pitch_lock","pitch_min","pitch_max",
+                   "parent_id" }, ... ], # Unity Camera (M41 度制+roll+限制; 2026-08-16 相机物体化 parent_id)
+    "active_camera": "<玩家视角摄像机 id | null>",
+    "objects": [ { "id","name","type","params","position","rotation",
+                   "scale","color","material_id","normal_mode",
+                   "saturation","visible","parent_id","prefab_ref",
+                   "scripts": [ {"id","vars"}, ... ],
+                   "collider": { "shape","enabled" },
+                   "rigidbody": { "mass","use_gravity","is_kinematic",
+                                  "friction","restitution" } }, ... ]  # M31+B1 摩擦弹性透传
+  }
+
+scene_to_dict / scene_from_dict:  引擎状态 <-> dict (再 json 落盘)。
+migrate(): 老版本(v1..v9)自动升级到 v10 —— 旧场景可加载。
+  v4->v5 (M23): 旧对象无 material_id, 加载时按颜色/饱和度自建材质。
+  v5->v6 (M28): 旧对象无 collider 字段 -> 加载时按网格类型自动派生碰撞体。
+  v6->v7 (摄像机): 旧场景补 cameras:[] + active_camera:null。
+  v7->v8 (M29): 旧光源补 mode/shape/size/shadow 默认 (full/circle/5/true)。
+  v8->v9 (M41 摄像机): 旧摄像机 yaw/pitch 由弧度转度 (math.degrees+环绕), 补 roll=0
+     与俯仰角限制默认; **顶层轨道 "camera" dict 不迁移 (仍弧度, 那是导航相机)**。
+  v9->v10 (相机物体化): 旧摄像机补 parent_id=None。加载顺序: 摄像机在物体之前创建
+     (_apply_cameras 返回 links), 物体建链后 _link_camera_parents 连父。
+容错: 加载时未知字段/坏数据降级处理, 不整体崩。
+Prefab: 单独 .prefab 文件 (sceneio 里同一套 emit/apply, 不含光源)。
+M23 材质资产语义: 物体按 material_id 引用材质库, 改一个共享材质 -> 所有引用物体一起变。
+
+M24 资源资产 (独立资产文件, 供资源面板列出/预览/拖放):
+  material_to_dict(mat) / save_material_asset(path,mat) / load_material_asset(path)
+    -> assets/materials/*.json: {id, name, color, saturation, version}
+  save_mesh_asset(path, primitive, params) / load_mesh_asset(path)
+    -> assets/meshes/*.json: {version, id, type, params}
+  ASSET_VERSION = 1; 全部走 save_json_atomic 原子写 + 自动建目录。
+  load_* 容错: 损坏/缺 id|type 返回 None (面板跳过坏文件不崩)。
+  跨文件引用统一走 guid: 材质资产按 guid 应用/复用, 再存同 guid = 覆盖更新。
+
+====================================================================
+七、撤销系统 (undo.py) —— 命令模式
+====================================================================
+UndoManager: 栈式, limit=100, push/undo/redo/can_undo/can_redo。
+新 push 自动清空 redo 栈。
+
+快照式命令:
+  snapshot(m) / apply_snapshot(m, snap)   物体全字段(含 script_id/vars)
+  light_snapshot(l) / apply_light_snapshot()  光源全字段
+  StateCommand(标签, 引擎, 物体, 改前快照, 改后快照)  do/undo 都还原
+
+结构命令:
+  AddObjectCommand / DeleteObjectCommand / ReparentCommand
+  AddLightCommand / DeleteLightCommand / AddMaterialCommand
+  do() 真正执行, undo() 精确回滚 (含父子链/顺序/GPU 重建)。
+M23: snapshot 含 'material' 引用 (换材质可撤销); AddMaterialCommand 新建材质
+  (撤销: 物体还原原材质 + 移出库)。
+
+编辑器用法模式 (检查器里高频出现):
+  before = undo_snapshot(obj)     # 拖拽开始前记一次
+  ... 改值 ...
+  after = undo_snapshot(obj)      # 拖拽结束后记一次
+  um.push(StateCommand("改X", eng, obj, before, after))
+
+注意: GLEngine 里也有 engine.undo 管理器? 不 —— undo 只在编辑器侧。
+      引擎不加 undo (Player 不需要撤销)。见 editor.py 持有 UndoManager。
+
+====================================================================
+八、立即模式 GUI (gui.py) + 文件对话框 (filedialog.py)
+====================================================================
+gui.py = 即时模式 GUI 控件库 (ImGui 风格, 无保留状态, 每帧从零画):
+  button/drag_float/text_field/window_begin/end_frame/render 等原语。
+  交互状态(按下/悬停)记在本地变量, 每帧结算; 风格常量集中管理(颜色/字号)。
+  ★ 2026-08-17 后现状: 默认 LoomGUI 已是 PySide6 原生 Qt 视图 (不再用 gui.py);
+    gui.py 现仅 ui/minimal_editor_view.py 持有 (极简只读视图叠加用) + 兼容
+    自定义 GUI/ 投放件。LoomHub 不用它 (pygame 2D 自绘, 见 LoomHubGUI.py)。
+
+filedialog.py: Windows 系统原生文件对话框 (ctypes 调 comdlg32 的
+  GetSaveFileNameW / GetOpenFileNameW, 与记事本/Office 同款),
+  不依赖 tkinter (pygame/SDL 窗口会污染 tkinter 窗口的 IME, 见坑)。
+  供编辑器保存/加载场景、Prefab 存模板/放实例、LoomHub 导入等。
+
+====================================================================
+九、测试架构 (tests/)
+====================================================================
+run_all.py: 一键跑全部, glob test_*.py, 集成测试最后跑。
+约定: 每个测试文件独立；单文件通常打印自身 PASS/ALL PASS，run_all.py 汇总成功标志为“全部测试完成 ✅”。
+
+无 GPU 桩 (headless):
+  GLEngine.__new__(GLEngine) + 手动补 self.models 等属性
+  -> 绕过 __init__ 的 GL 初始化
+  测试可 patch GLEngine._build_gpu 跳过 GPU 构建
+  -> 不开窗口也能测引擎逻辑 (mesh/undo/sceneio/scripts)
+  FakeEngine/FakeObj (test_scripts) -> 脚本只依赖 is_key/world_position
+
+集成测试 (test_integration.py):
+  - 真实开窗口, 跑若干帧, 读回像素/状态断言
+  - EditorApp 播放模式: 进 play -> 脚本转物体 -> 停 -> 还原 (7.8)
+  - PlayerApp --run: 加载带脚本场景, 帧数推进旋转 (8.5)
+
+49 个测试文件分工 (run_all.py glob test_*.py, 集成测试最后跑; 当前工作区):
+  test_decompose      matlib 矩阵数学 (分解/合成)
+  test_hierarchy      父子层次/世界变换
+  test_reparent_preserve  保世界挂父 (2026-08-16 语义) 回归
+  test_lighting       光照数学 (shade 镜像新着色器)
+  test_light_occlusion M29: mat4_ortho/mat4_view_forward 数值, LightState 新字段,
+                       light_snapshot+undo, sceneio v8 迁移
+  test_sceneio        序列化 v10 / 脚本字段 / 材质共享 / Prefab / 碰撞体 round-trip
+  test_scene_load     场景加载容错
+  test_camera         摄像机实体: 度制状态/roll/环绕/apply/v9迁移/direction/roll矩阵/俯仰限制/undo
+  test_fullscreen     F11 假全屏 (NOFRAME 不切分辨率) 无头
+  test_camera_control 相机控制方向回归 (滚轮/右键/圆锥几何/_select_model)
+  test_camera_gizmo   摄像机 gizmo 平移 (目标/世界位置/旋转被挡/拖完撤销)
+  test_camera_preview 摄像机预览/激活 (进入/切换/退出还原/播放应用激活相机)
+  test_camera_parent 相机物体化: 世界合成/反解/挂父/撤销/序列化/跟随
+  test_undo           撤销命令 (含脚本/材质/碰撞体撤销)
+  test_scripts        脚本注册/数学/调度/容错
+  test_collision      碰撞: 形状派生/盒盒/球球/盒球/同树排除/查询/
+                      子步防穿透/重力落地/弹跳
+  test_collision_edges  A1-A3 边界: 旋转/缩放 AABB, 盒球边界, 堆叠/斜向/极大位移
+  test_scripts_collision A4/A7: 脚本×碰撞 (wasd_move 撞墙被挡), 多脚本边界
+  test_physics        M31 刚体步进/重力/运动学
+  test_physics_runtime 物理运行时边界 (G02: 停播放速度/碰撞残留清零)
+  test_physics_bridge B1 物理桥 (Jolt vs legacy 对拍/桥生命周期)
+  test_audio          B2 音频双后端 (game-audio 主/pygame 兜底, 中文路径断言)
+  test_animation      M35 动画 (含组3 A6 快/慢双路径 12 项)
+  test_assets         A5/A6: 材质池孤儿回收, Prefab 材质/碰撞继承
+  test_playmode_edges A8: 播放模式增删/改参完整性
+  test_assetbrowser   M24 资源面板: 资产扫描/落盘 round-trip/同 guid 覆盖/
+                      按 guid 应用材质/拖放落点/_mouse_to_ground 数学
+  test_filedialog_helpers  文件对话框辅助函数
+  test_grid           无限网格纯几何 (2026-08-14; 卡2后半宽固定 60: 断言
+                      距离无关 + 与旧版 dist=10 逐位一致)
+  test_guiswitch      可插拔 GUI 切换 (guiloader/设置回退)
+  test_ui             UI 模块化通用
+  test_editor_ui      Loom 编辑器 UI 模块化 (2026-08-13): 命令层 edit_*/commit_*/
+                      rename 撤销流 / IEditorView 契约 / 视图注入 / 入口 --ui
+  test_scrollbar      滚动条控件
+  test_mesh_import    obj 导入 (vn/vt/MTL/平滑法线, Blender 对齐)
+  test_gamepack       game_pack .lsc 打包/解包 + build_game 发布链
+  test_engine_safety  引擎安全边界 (坏文件/空场景)
+  test_parallel       多核并行 (矩阵批量等价/碰撞向量化等价/含物体移动回归;
+                      环境项 1 FAIL 已知 = 探针归属, 非回归)
+  test_plugin_loader  插件加载器 (清单/入口/信任闸/沙箱)
+  test_hub            LoomHub 数据层 (hub_config/hub_install): 发现/扫描/配置/zip 安装
+  test_hub_controller HubController 命令层 (2026-08-13 UI 模块化): 动作/消息等级/
+                      配置效果 全无头; IHubView 契约
+  test_hub_gui        LoomHubGUI (文字缓存/强制重绘)
+  test_agent_commands EAI 桩层 (2026-08-27): FakeWin/FakeEditor 命令契约/异常隔离/
+                      日志环/HTTP 端到端; 2026-08-28 扩 quit 三态/布尔归一/脏场景
+  test_core_clock     分离时钟单 accumulator/暂停/单步/物理子步
+   test_interp_state   双快照、插值、外推、增量物体与缓冲复用
+   test_frame_pacing   帧节拍与限帧调度
+   test_frame_buffer   TPS 预取/FPS 离屏缓冲开关与消费语义
+   test_xform_sync     Transform setter 触发编辑态插值同步
+   test_eai_real      EAI 真层 (当前 53 条命令): 真 EditorApp 跑命令表**全部 53 条** +
+                      覆盖率闸门 (新命令不写测试直接 FAIL) + API 契约扫描
+                      (命令调用的 EditorApp 方法皆存在, 防桩漂移)
+  test_hub_eai       HUB-EAI (2026-08-27, 28 扩容): 16 条全覆盖 + launch_spec 与
+                      GUI 同构断言 + 陈旧端口文件不误取 + settings 归一 + quit 钩子
+  test_integration    真实窗口端到端 (编辑器/播放/Player); M29/7.6 采样前
+                      show_grid=False 防无限网格线污染像素
+
+组3 对拍网/探针 (tests/_tmp/, 常驻可复跑, 非 run_all 成员; 性能验收数据源):
+  soa_val_check / soa_bench       SoA 快照 6 树形逐位 + 采集段基准
+  numba_par_check                 depths/ancestry_dfs numba↔纯Python 对拍
+  ancestry_wire_check             D1 接线 6 树形 wire check
+  anim_np_check                   A6 动画采样 10 场景对拍 (含崩溃奇偶)
+  aabb_par_check / aabb_bench     AABB 批量对拍 + numpy 批量化反模式微基准
+  stress_probe / real_loop_probe  真实循环 FPS/阶段耗时 (性能基线工具)
+  probe_draw_lines_reuse          D10 draw_lines 缓冲复用 61 断言回归网
+
+
+====================================================================
+十七、逻辑帧/渲染帧分离 + 帧缓冲实验 (2026-09-05/06)
+====================================================================
+分离架构 (批1-6, 详见 实现报告_逻辑帧渲染帧分离_2026-09-05.txt):
+  core_clock.py    FixedStepClock 单 accumulator (logic_fps 可调，当前设置默认20Hz，
+                   phys_substep_dt 自动子步 N=ceil(fdt/sdt)); advance 排
+                   0..N 逻辑帧; alpha=渲染帧在 curr 逻辑帧内进度。
+  interp_state.py  InterpState prev/curr 快照 + render_pose(alpha) 插值
+                   平面 (R3 不回写 GameObject); interp_mode 设置键:
+                   interpolate(默认)/extrapolate (a'=1+alpha 封顶 1.5)。
+  physics_pipe.py  帧内流水线: 脚本->连发物理子步(不等待)->音频动画重叠
+                   ->S1 等待->prep->派发->插值翻页; 管线异常自动降级。
+  engine            _logic_frame (最高同步点) / _logic_prep (AABB/光源VP/
+                   碰撞对按逻辑帧缓存 _prep_*) / advance_logic (F9 暂停
+                   F10 步进) / get_tps / get_frame_jitter (帧长 std 滑窗)。
+  F9/F10           _QT_TO_PG 键表同步 (新功能键必须进表, 漏=按键失效)。
+  逃生门            LOOM_NO_SPLIT=1 / logic_fps<=0 = 旧绑死模式逐位。
+  性能账            逻辑帧 42.6->15.53ms (三刀: aabbs 行级缓存 34x / pairs
+                   SAP 向量化 / set_position SoA 批量); 限帧器校准
+                   (loom_gui._wait_until 混合等待, 档位帧首对齐节拍网格,
+                   precise_limit:false 逃生门; 无上限档不做 pacing)。
+
+frame_buffer.py — 帧缓冲实验 (2026-09-06, 双独立开关):
+  FrameBufferLedger (TPS 缓冲): 逻辑帧预取记账器。渲染帧尾富余 (预算红线
+    12ms) 预跑 _logic_frame (深度 2), 产物落引擎既有 _prep_*/interp 缓存
+    零搬运; advance 轮到预取帧跳重跑只翻记账; 时间轴/alpha 零变化。
+  RenderFrameBuffer (FPS 缓冲): Qt 档位 _on_tick 帧首 wait_until 空窗内
+    预画下一渲染帧进离屏 FBO; paintGL copy_framebuffer 上屏; 仅播放态;
+    _preframing 标志 (不进 TPS 预取/不虚计 FPS/不污染帧长窗)。
+  设置键            frame_buffer_tps / frame_buffer_fps (默认 false);
+    闸门: TPS 需 logic_fps>=30, FPS 需 fps_limit>=60 且非 unlimited/auto;
+    不达标灰置 (loom_gui _fb_lazy_refresh 联动)。LOOM_NO_FRAMEBUF=1 逃生门。
+  观测面            engine_metrics 增 frame_buffer/render_buffer 度量 +
+    stage_times 快照 (LOOM_PROFILE=1 时)。
+  边界              平均负载饱和=无富余自然停 (无负收益); TPS 侧输入延迟
+    最多 +1 逻辑帧 (30Hz=33ms)。
+
+TransformComponent._xform_gen — 编辑态插值失同步修复 (2026-09-06):
+  position/rotation/scale property 化 (写入 bump 类级 _xform_gen);
+  engine._consume_xform_gen (仅编辑态!) 检测变化 -> _interp.align() +
+  _render_world/_prep_sig/_frame_world 失效。播放态由逻辑帧 advance
+  翻页天然同步 (若播放态也消费会每帧失效全部缓存 — 编译版 9FPS 教训)。
+
+AABB 行级缓存层级定案 (2026-09-06 编译版 9FPS 事故, 重要):
+  行级缓存放 _model_aabbs_par 本层 (整 fw 查/写): 键=(stamp3, n, 
+  visible_only=False), 行级变化=值比较 (np.any(fw!=c_fw), 对象身份无关)。
+  命中: 静止行抄缓存 + dirty 行子列表送池/串行重算填回。
+  _aabbs_batched 内不再持缓存 (池分块时 worker 拿 fw 切片判/写会恒 miss +
+  互相覆盖 — 源码 numba 快被掩盖 15 天, 编译 numpy 暴露 26-37ms/帧)。
+  战果: 源码 numba 15.8->68.5FPS (4.3x) / 模拟冻结 18->58.3 / 编译
+  9->16.4 (TPS 29.99 精确) / 编译编辑态 37->140-150FPS。
+  fastpath LOOM_NO_NUMBA=1: 源码模拟冻结降级 (A/B 诊断旗标)。
+
+====================================================================
+十、入口与打包
+====================================================================
+Loom.py  /  build_entry.py:
+  参数:
+    (无)         -> 打开编辑器 (默认 --ui qt = LoomGUI Qt 视图)
+    --editor     -> 显式启动编辑器
+    --run 路径   -> 直接运行场景 (PlayerApp, 跑脚本)
+    --open 路径  -> 编辑器打开指定场景 (LoomHub"打开项目"走这里)
+    --ui <视图>  -> 编辑器视图: qt (默认 LoomGUI) / minimal / default (走
+                    guiloader 设置, GUI/ 自定义件)
+    --benchmark N I -> 无头数学基准 (matlib vs 旧标量自检)
+    --agent      -> EAI: 启动命令桥 HTTP 服务 (.agent_port.json)
+run_player.py (P5, 2026-08-29):
+  播放器渲染 API 选择入口: --backend vulkan|opengl|auto (优先级: 参数 >
+  设置.json render_api > 默认 vulkan); auto = Vk 初始化失败自动回退 GL。
+  vk_player.run_vk (wgpu+GLFW) / runtime.PlayerApp (pygame) 两路实现;
+  发布链 game_player.py 走同一 resolve_backend。
+  game_player.py: 打包玩家 exe 入口 (旁 游戏配置.json -> 解 .lsc -> 喂后端)。
+build_game.py (2026-08-22): 游戏构建器 (Unity BuildPipeline 对齐) ——
+  场景.json + 脚本目录 -> 发布夹 (MyGame.exe + 游戏包.lsc 加密, 与 exe
+  同夹不可分离); --build-runtime 先 Nuitka 打玩家运行时。
+game_pack.py: .lsc 打包/解包 (LOOMSC1 混淆)。
+打包: Nuitka standalone exe (py3.12 + build_entry.py)。
+      详情见记忆 3d-engine-packaging-nuitka。
+      ★ 2026-09-07 现状: 编译版重编第 8 次 (增量流程仅 Loom; 含相机统一+
+        speed 行+sync_script_keys+C 内核 DLL)。**C 内核 DLL (2026-09-07,
+        一切以编译版为最终目标定案)**: ckernels\loom_kernels.dll (MSVC
+        /O2 /LD, ctypes 朴素 C ABI), 现有内核 = loom_aabbs_minmax(串行)/
+        _par(Win32 线程; 本机 MSVC OpenMP 前端坏弃用)/loom_collide_pairs
+        (SAP 排序+扫描+yz+ancestry+精判一体); fastpath.py 三级分派
+        C>numba>numpy, 逃生门 LOOM_NO_CKERNELS=1, DLL 缺失静默降级。
+        重编配方 --nofollow-import-to=numba 不变; **dist 投放必须含
+        ckernels\loom_kernels.dll** (exe 同级 ckernels\ 夹, assemble
+        脚本已含)。编译版账目定基: 播放态瓶颈 80% 在逻辑帧 (FPS 公式
+        FPS=(1000−30×L)/R 三侧命中, 详见 tests/_tmp/编译版性能定基报告
+        _20260906.txt), aabbs 17.6→1.6ms + collide_pairs 4.2→1.27ms 后
+        logic_step 26.4→~21ms。源码冻结模拟 = LOOM_NO_NUMBA=1。
+requirements.txt: pygame>=2.5 / moderngl>=5.8 / numpy>=1.24 / PySide6>=6.6;
+  可选加速库: numba (fastpath 静态编译) / culverin (B1 物理) / game-audio
+  (B2 音频) / wgpu (Vulkan 后端) —— 缺哪个都自动降级, 正确性不受影响。
+
+core_components\ (DLL 化战役 M1 落地, 2026-09-08 — 核心组件注册表+加载器):
+  ★地位: 所有核心组件 DLL 与 Python 基座之间的唯一耦合点。
+  loom_module.h      C ABI 契约 v1.0 (魔数 0x4D4F4F4C / LOOM_MODULE_INFO
+                     104 字节 / LOOM_TENSOR / 7 导出最小函数集 / 错误码公约);
+                     主版本不符=拒绝加载, 次版本向上兼容。
+  注册表格式与契约设计说明.txt  规则权威 (218 行): 槽位模型/校0-校8/§7 回退
+                     矩阵/§8 LOOM_NO_DLL/§9 运行期自愈; 改格式先改本文再动代码。
+  registry.json     机读清单 (现 3 条官方: module_ref / ckernels / pipeline; 条目字段
+                     module_id/path/official/enabled/provides/depends/sha256)。
+  module_loader.py  机械层 (M1-3): LoadLibrary → 6 必需导出验在 → magic/ABI
+                     双口 → 严格 utf-8 身份 → provides/depends 枚举防呆 →
+                     expected_module_id; hot_reload = deinit→unload→load→init;
+                     LOOM_NO_DLL 解析 (no_dll_skips)。不 import 引擎任何模块。
+  module_registry.py 策略层 (M1-2): assemble() 按槽位组装 (注入优先→官方兜底)
+                     + sha256 前置闸 (LoadLibrary 之前) + 接口冲突消解 (保官方
+                     弃歧义) + 依赖满足/环检测 + 拓扑序 init + 回退矩阵
+                     (用户注入坏=弹出+enabled 回写+官方顶回; 官方坏=AssemblyError
+                     绝不静默降级) + 运行期 pop_and_fallback 自愈。
+  探针专用靶 (绝不发行, 不进 registry.json): badvector.dll (空指针写 0xC0000005
+     → 自愈链验证) / ambiguous.dll (不同 module_id 同接口 → 校6 歧义注入验证)。
+  build_all.bat     统一构建入口: 锁 MSVC 工具链 + 5 DLL 编译 + 当前 21 项对拍/验收探针
+                     (EXIT=0 才算过); skip_checks 参数=只编译。
+  对拍网 (tests\_tmp): accept1_e2e_check (6, 验收①端到端) / module_contract_check (29) /
+     module_registry_check (36) / pipeline_prep_check (56, 绞杀者对拍逐位) /
+     module_fuzz_check (20, 崩溃自愈)。
+  验收: M1 三条全过 (见 D:\my-project\M1验收报告_DLL化战役_20260908.txt);
+     build_all EXIT=0; 当前基线包含 M1/M2/M3 DLL、调度、插值和归因探针。
+
+  ★M2a (2026-09-08): pipeline.dll = 逻辑帧 prep 链 C 实现, 已接入基座。
+    core_components\loom_pipeline.h   组件接口 (LOOM_LIGHT / 8 计算函数 / LOOM_PIPE_API; pipeline.dll 当前 15 导出)
+    core_components\pipeline\loom_pipeline.c  372 行:
+        loom_pipeline_scene_bounds  ← engine._scene_light_bounds_par (逐位一致)
+        loom_pipeline_light_vps     ← _dir_light_vp/_point_light_vp (逐位一致)
+        loom_pipeline_aabbs         ← ckernels._aabb_one_row 同序副本
+        loom_pipeline_shadow_prep / loom_pipeline_mat4_mul_ref (对拍辅助)
+    pipeline_glue.py   基座↔DLL 适配层: 惰性句柄 (module_registry.assemble) +
+                       数据搬运 + 逃生门 LOOM_NO_PIPELINE=1; 失败静默降级。
+    engine.py          _pipeline_light_vps() 新增; _compute_light_vps 优先走
+                       DLL, 条件不满足/调用失败自动回退现行 Python 路径。
+    数值口径: 纯逐元素运算逐位 0; 矩阵乘法 (numpy BLAS 求和序) ≤1 ULP —
+                       已由 pipeline_val_check C3 / pipeline_base_check C1b 钉死。
+    实测: 光源 VP n=501+3光源 DLL 0.0783ms vs Python 1.1015ms (14.07×)。
+     对拍网新增（M2a 当时的 4 项）：pipeline_val_check (15) / pipeline_base_check (15) /
+                engine_pipeline_check (8) / pipeline_fuzz_check (33)；当时阶段合计 14 项，当前
+                build_all 活跃清单为 21 项。
+     build_all.bat 现状: 5 DLL 编译 + 14 项探针（M2a 阶段历史记录；当前清单为 21 项）。
+
+  ★M2 验收 (2026-09-08): ①端到端 100 逻辑帧对拍 √ (pipeline_e2e_check 11/11:
+    AABB/碰撞对逐帧逐位 0, 光源 VP 摘要一致) ③FPS √ (57.3→60.1, +4.9%)
+    ④回归 √ (build_all EXIT=0, 15 项探针（M2 阶段历史记录；当前清单为 21 项）) ⑤坏注入自愈 √ (33/33)
+    ②每核负载 △ 未达标 (主线程每帧 CPU 6.64→5.20ms, 但 Jolt 物理+GL 提交
+    仍在主线程 → 核0 ≤45% 属 M2b culverin C ABI 包装)。
+    真实场景 shadow_bounds 2.564 → 0.768 ms/帧 (3.34×)。
+     build_all.bat 现状: 5 DLL 编译 + **15 项探针**（M2 验收阶段历史记录；当前清单为 21 项）。
+    报告: D:\my-project\M2验收报告_pipeline_20260908.txt
+
+  ★M3 收尾 (2026-09-09): 主线程与渲染链重构
+     （以下为当前实现摘要；旧 M2/M3 分阶段记录保留在本节相邻条目中）
+     - M3-P1~P4: argsort/父链/桶/材质/Transform 快照缓存，稳定态跳过逐帧 Python 对象访问。
+     - M3-N2: AABB 脏行少于 2048 时主线程串行，避免小块线程池开销。
+     - M3-N3: Qt 宿主默认启动 loom-logic 专用逻辑线程；主线程仅同步 alpha 与消费
+       _prep_pub 单点快照。无头测试/探针保持同步；LOOM_LOGIC_SYNC=1 强制同步。
+     - M3-N4/N6: pipeline.dll 新增 interp_pose(导出14) 与 interp_world(导出15)，
+       插值、行映射、父链世界矩阵合并为一次 C 调用；不可用时回退 numpy/拆分路径。
+     - M3-N5: 平行光仅在 shadow 或 beam 模式计算 VP，修复关阴影每帧重算 AABB 的性能悬崖。
+     - M3 归因: perf_counter + stage calls/frames + mt_profile；build_all 当前 21 探针。
+     - M3 权威状态: 混合500 播放态 FPS 158~160、GPU 97~98% 饱和、paint_total 约 2.78~3.04ms；
+       关阴影变体 214.4 FPS。瓶颈已从 CPU/同步等待转为 GPU 光照阴影片元负载。
+
+   ★M2 续 (2026-09-08): world_matrices 入 pipeline.dll —
+    loom_pipeline_world_matrices(rot,scl,pos,parent,depth,n,max_depth,...) =
+    局部 S@R@T (逐位对齐 scheduler.sched_wm_chunk) + 按 depth 升序父链合成
+    (对齐 engine.compute_world_matrices); engine 静止缓存未命中时优先走 DLL。
+    pipeline_glue.world_matrices() 适配; 对拍 pipeline_world_check 7/7
+    (全局缩放误差 ≤7.4e-16 @ n=501 链长 12; 深链 199 层 1.1e-15);
+    性能 0.090ms vs Python 0.771ms (**8.57×**)。
+    ★端到端对拍当场拦下 glue 参数顺序错 (AABB rel 3.2 / collide 71ms/帧)。
+    ★探针口径重写: percore_check 改「进程内每线程绝对 ms/帧 + 线程分类」
+    (旧「主线程 CPU%」在新架构下被帧率波动淹没); 新口径主线程 5.260 vs
+    5.104 ms/帧 (持平), 进程合计 -0.625ms, shadow_bounds -1.870ms。
+     build_all.bat 现状: 5 DLL + **17 项探针**（M2 中间阶段历史记录；当前清单为 21 项）。
+
+====================================================================
+十一、踩过的坑 (重要, 改代码前必读)
+====================================================================
+□ 矩阵顺序: model = S @ R @ T, 写成 T@R@S 会让物体绕世界原点而非
+  自身中心旋转 (旋转"绕自身"bug 的根源)。
+□ 行向量 vs 列向量: matlib 是行向量(向量在矩阵左边, v @ M), 别混入
+  列向量写法的 M * v。
+□ gamma: 片元末尾 pow(col, 1/2.2), 测试断言亮度要按 gamma 后取值。
+□ 饱和度: 在 shader 里做 (顶点色 -> 灰阶混合), 别在 CPU 端改色。
+□ 光源实体: 加光源不要加进 self.models —— 那会变成可见网格、被拾取。
+  光源单独 lights 列表, 单独 uniform 上传 (定长 numpy 数组整块写)。
+□ 播放模式: 退出播放必须恢复 物体+光源+父链+顺序, 少恢复一样下次
+  播放就会叠加脏状态。脚本实例(_script)必须清空, 否则复跑 on_start
+  不会重新执行。
+□ update_scripts 容错: 单个坏脚本抛异常不能崩掉整帧, 标记 broken
+  并打印, 同帧其他脚本继续。
+□ scripts.py 懒加载: engine 内 `from scripts import get_script` 放在
+  方法内部, 避免无脚本场景也 import 脚本模块。
+□ 碰撞用"严格 <"判相交: 恰好贴边(touching)不算碰撞 —— 这是"静止后
+  不再被推"的正确行为, 别改成 <=。
+□ 碰撞必须走 move_with_collision / resolve_collisions: 直接改 position
+  是瞬移, 会穿透薄物体。move_with_collision 内部有子步拆分防穿透
+  (盒=最小半边长/球=半径), 大位移也不会跳过薄地面。
+□ 同树物体不互相碰撞: _related 排除祖先/后代 —— 挂到同一父物体下的
+  零件互相重叠也不会被推开。想互撞就把它们挂到不同的根。
+□ 球体碰撞体取 AABB 中心+最大半长: 对球体网格正好=真实半径; 但
+  collider.shape='sphere' 的盒形网格(立方体改球形碰撞体)只是近似, 别
+  拿它当精确盒-盒用。
+□ undo 快照含脚本/collider/material 字段: 改了而不进快照, 撤销会丢。
+□ GUI 无保留状态: 拖拽值中途不能依赖控件"记住" —— 用 _insp_undo_start
+  模式(开始记快照, 结束时压命令)提交给撤销。
+□ 资源面板扫描用 os.listdir 列文件名 (惰性加载 JSON): 逐帧读文件又慢又抖。
+□ 资源面板拖放照搬层级拖拽模式 (按下武装 _res_drag / 松开解析), 但材质
+  拖放分支不需要 _mouse_to_ground —— gpos 只在 mesh/prefab 分支算 (无头测试
+  桩没有 width/height)。
+□ 材质资产"再存=覆盖更新"靠 _asset_file_by_guid 按 guid 找同文件; 无匹配
+  才 unique_default_name 新建, 绝不覆盖陌生文件。
+□ 资源面板与层级面板的点击归属: 两个面板 rect 不重叠, 各自 _register 按下
+  已设 click_captured, 互不误触发。
+□ Windows 路径: 测试用完整路径 `py -3.12 "...\tests\test_xxx.py"`,
+  PowerShell cwd 默认在 D:\my-project, 相对路径会解析到错误目录。
+□ .bat 文件必须 CRLF 换行 (LF 会让 cmd 解析错乱)。
+
+(多核/无限网格, 2026-08-14)
+□ 无限网格别用"视锥足迹"定范围/做 step 分级 (2026-08-14 两轮返工): ①足迹按相机俯仰
+  变化 -> 抬头时足迹退化兜底网格消失; ②足迹定范围+step 分级 -> 抬头/缩放时间距肉眼可见
+  变化 (1→2→5→10)。正确 = 相机 XZ 为中心 (吸附整数格) + **恒定 step=1** + 范围只随
+  相机距离 + 远处淡出盖住边界。网格环绕相机, 前方一半在视野内, 抬头 (相机绕到目标下方
+  eye.y<0) 网格在头顶照常渲染, 无需任何射线求交。
+□ CPU set 亲和位 = LogicalProcessorIndex, 不是 Id: GetSystemCpuSetInformation 的
+  Id 是 CPU set 标识 (本机实测 256+), 直接当掩码位会得到 0 或错位; 用组内
+  LogicalProcessorIndex。Group!=0 (>=64 核多组) 掩码表达不了 -> 放弃绑定。
+□ E 核判定 = EfficiencyClass 高于全场最小 (数据驱动): 不能硬编码 ">0" (P 核
+  EfficiencyClass 可能不是 0), 也不能看 AllFlags (那只是 Parked/Allocated 位)。
+□ 防锁死铁律: 亲和掩码永不空、至少留 1 个大核给主线程 (混合: min(script_cores,
+  len(P)-1)); 任一逻辑核 id>=64 -> mask 归 0 整体放弃绑定。
+□ 脚本线程 affinity 必须在**线程函数体内**调 pin_current_thread (线程亲和是线程
+  局部的), 不能在创建线程的线程里调。
+□ ScriptRunner._done.set() 必须放 finally: 脚本抛不抛异常都要唤醒主线程, 否则
+  一帧脚本炸了整帧卡死。
+□ 碰撞事件检测必须"现算当帧矩阵": _collision_pairs_parallel 内部
+  compute_world_matrices(models) 现算, 不能复用 self._frame_world (它在渲染前算、
+  事件在 update_physics 内部跑, 物理已移动物体 -> 复用会用到过期位形)。
+□ 矩阵批量 compute_world_matrices 与逐模型 model_world_matrix 必须数值等价 (含父链),
+  改旋转顺序/矩阵布局前先跑 test_parallel 等价回归。
+□ _upload_lights 缓冲复用后, 每帧开头必须把 slots 清零成 -1 再填 (不复位会残留
+  上一帧槽位); sampler_units 也须整表复位。
+□ moderngl scope enable_only 位或有效 (DEPTH_TEST | BLEND), 元组写法报错
+  "invalid enable_flags"。
+□ 测试环境变量 LOOM_NO_PARALLEL=1 守卫: 不加的话集成测试会建脚本线程/设进程亲和,
+  影响确定性与子进程调度。
+
+(异步GUI, 2026-08-15)
+□ 不能多线程 GL (上下文非线程安全) —— "异步GUI"= 离屏 FBO 合成, 不是开线程。
+□ 输入正确性铁律: pressed/released 每帧清空 (engine._handle_events), GUI _register
+  会消费 —— 任何离散事件(按键/点击/滚轮/resize)必须**当帧**跑面板 pass, 否则丢输入。
+  判定 need = gui_dirty or had_input or _gui_fbo is None or 心跳;
+  had_input=bool(ctl.pressed or ctl.released or ctl.mouse_wheel) 兜底测试直改字段。
+□ MOUSEMOTION 仅无按键按下才置脏 (not any(pygame.mouse.get_pressed()))——轨道/拖动期
+  不置脏 GUI 保持省钱; 空闲悬停仍更新。
+□ gui.active_id/_focus 拖动每帧重渲: 顶部 draw 检查置脏 (gui.py 拖拽代码只能在自己
+  pass 里跑、无法调度下一帧, 这是唯一正确挂点)。
+□ had_input 后保持 gui_dirty 再渲一帧: 反映点击后的状态翻转(设置面板/播放切换/高亮)。
+□ moderngl 5.12: ctx.scope(framebuffer=None) 绑屏幕非当前 FBO, 处处显式传 FBO。
+□ GUI FBO 必须 = engine.width/height (scissor y-flip 用 engine.height), 渲前
+  fbo.clear(0,0,0,0) 透明底(面板不透明、视口透出场景); 尺寸驱动重建覆盖 resize/F11。
+
+====================================================================
+十二、给接手者的一句话
+====================================================================
+核心思路 = "Unity 哲学, Python 落地": 场景树 + 组件化思维 + 编辑器 + 命令式
+撤销 + 数据即内容。别为性能预优化(几百个物体不需要 ECS), 先让"能做出东西"
+的闭环(摆->挂脚本->播放->打包)每一步都顺手。
+下一个大方向见《现代游戏引擎设计.txt》9.2 第二梯队
+(M23/M24 已 ✅, M29 光照遮挡/阴影/光束 2026-08-12 完成, 其余远期暂缓)。
+性能优化现状: 组1/2/3/6 已完成 (组6=spin 治理, 2026-08-31 实施验收, 待用户
+实测备份), 下一轮 = 主线程串行段细拆; 组4 视锥剔除/组5 物理桥收尾等用户拍板。
+流程铁律: 双文件夹工作流 (工作区改 → 用户实测 → 用户手动覆盖稳定版);
+编译/打包只在用户明确指令时做; 每组改动 = 改前测试绿+基线 → 只动工作区 →
+改后全量测试+A/B 截图 → 汇报待实测。
+
+====================================================================
+十三、本次新增模块 (2026-08-12 M30b~M39 补全; 2026-08-13 UI 模块化;
+                2026-08-14 可插拔 GUI + 无限网格 + 多核并行;
+                2026-08-15 8核并行流水线 + 主线程调度 + 字体免回退 +
+                LoomHub 空闲CPU + 播放模式修复)
+====================================================================
+按《开发进度与Unity对照.txt》差距逐项补全"做游戏"深度能力。历史模块已打包;
+**2026-08-15 源码改动后编译版需重打包 (X01, 等待用户明确指令再打)。**
+
+[组件/系统] (engine.py)
+  RigidbodyComponent   刚体(质量/受重力/运动学/速度), add_rigidbody/remove
+  ColliderComponent    碰撞体(已有) 配合刚体 = Unity 动态物体
+  AudioSourceComponent 音频源(clip/loop/volume/playing), add_audio_source
+  AnimatorComponent    动画(clips dict/current/time/playing/loop + play/stop)
+  AnimationClip        关键帧列表[{time,position|rotation|scale}], sample(t)插值
+                       (组3 A6: 快/慢双路径 — 资格闸门全过走 numpy searchsorted
+                       向量化, 否则旧循环保底; _np_rebuild() 显式重建契约)
+  AudioSystem          音频封装 (B2 2026-08-30: 委托 audio_backend 双后端,
+                       不再直用 pygame.mixer)
+  RuntimeUI            运行时 UI: 脚本 engine.ui.text/button/bar, render 末尾画
+  HUD 着色器加 u_color + draw_screen_rect(1x1 白纹理画纯色矩形)
+
+[引擎核心方法]
+  get_action(name)     输入动作层: 动作->键名列表映射, 可重映射(输入配置.json)
+  update_physics(dt)   B1 桥路径 (Jolt 三段) / legacy 路径 (重力->速度->带碰撞移动,
+                       被挡停) + 碰撞事件
+  _update_collision_events  on_collision_start/end 触发(Unity OnCollisionEnter)
+  update_animations    动画推进(关键帧插值应用变换)
+  update_audio         AudioSource 播放状态同步 (owner=id(组件))
+  load_scene(path)     运行时切场景(明文 JSON 或 LOOMSC 加密, 自动解密)
+  set_mouse_locked/_apply_mouse_lock/toggle_mouse_locked/set_ui_capture_mouse
+                       鼠标锁定机制(解锁意图+特殊场景强制回锁, FPS 标准)
+  mouse_rel            鼠标相对移动(玩家控制器转向)
+
+[入口]
+  game_player.py       纯 Player 入口(只 import runtime 不含 editor):
+                       打包成玩家 exe, 双击读 exe 旁 游戏配置.json 的 scene 进游戏
+  build_entry.py/Loom.py  加"游戏配置启动": 无参数且旁有 游戏配置.json -> PlayerApp
+  runtime.PlayerApp    锁定鼠标 + 屏蔽引擎调试 HUD(玩家只见游戏 UI)
+
+[可插拔 GUI] (guiloader.py, 2026-08-14)
+  GUI/ 文件夹自定义界面: Loom 收 *GUI.py(不含 *HubGUI.py) / LoomHub 收 *HubGUI.py;
+    文件头部前 8 行内 `# gui: loom|loomhub` 前部标识(仅文本解析不 import), 实现
+    IEditorView(IHubView) + `build_gui(controller)` 工厂
+  scan_guis(program, base)  官方项恒在 + GUI/ 下后缀与标识都合法的自定义(只显示合法, 避免坏文件崩溃)
+  load_gui(program, id, ctrl, base)  官方懒 import 实例化 / 自定义 importlib 加载+build_gui; 任何错误上抛
+  resolve_gui(program, ctrl, base)   读设置选 GUI, 加载失败: 打印+写回设置改官方+回退官方
+  设置.json (程序目录, 原子写): Loom {gui, save_dir, parallel_enable, script_cores,
+    show_grid, fps_limit, precise_limit, cam_speed, gravity, logic_fps, interp_mode,
+     frame_buffer_tps, frame_buffer_fps, render_api, physics_fps} / LoomHub {gui, open_py}。
+     默认设置与兼容旧键由 guiloader.DEFAULT_SETTINGS/load_settings 管理。
+  程序目录 = sys.argv[0] 目录 (源码=程序目录 / 编译版=exe 目录, exe 旁 GUI/ 同样生效)
+  入口: Loom._make_editor_view('default') / LoomHub.main() 走 resolve_gui
+  LoomGUI 状态栏"设置" + LoomHubGUI 右上"设置" -> 设置面板(换 GUI 重启后生效/保存目录/.py-.exe)
+  gui.py 加 modal: 模态面板(设置等)打开时, 面板外点击不认领并吞掉(防误操作底层/相机)
+  内置演示自定义 GUI 已删 (2026-08-16: GUI 大改后 OrangeGUI/MiniHubGUI 废弃);
+  自定义界面 = 外部投放 XXXGUI.py 到 GUI/ (符合契约 + 头部标识 + build_gui 工厂)
+
+[无限网格] (ui/grid.py + LoomGUI/minimal, 2026-08-14; 卡2 性能修 2026-08-30)
+  build_grid_lines(eye, cam_dist=None, ...) -> (verts(N,3), cols(N,4)) 纯几何无 GL, 永不 None:
+    **相机 XZ 为中心** (origin floor 吸附整数格, 线恒为世界整数格坐标, 相机移动不"游泳"),
+    **恒定步长 step=1 世界单位** (间距不随视角/缩放变化, 经典无限网格),
+    **范围只随相机距离** (旧版 half = clamp(dist*6, 20, 250); 淡出盖住边界),
+    远处按离相机水平距离淡出 (fade_start=0.4*half / fade_end=half,
+    垂直格线 |x-eye.x| 水平格线 |z-eye.z|)。抬头 (相机绕到目标下方 eye.y<0) 时网格在
+    头顶上方照常渲染, 不消失、不跑到视角后面 (网格环绕相机, 前方一半可见)。
+  2026-08-14 两轮修复 (用户实测): ①首版用"视锥足迹"定范围+按足迹 step 分级 -> 抬头时
+    足迹退化兜底网格消失; ②改足迹但不分级仍随抬头变范围/间距 -> 彻底改为相机为中心+
+    恒定 step+范围随距离。grid_geometry() 传 self.camera_distance。
+  ★ 卡2 性能修 (2026-08-30, 已实装): **半宽固定 60** (_GRID_HALF, 与相机距离无关 —
+    旧版远距 Python 逐线生成 1.75ms/帧且内容随距离变) + 全 numpy 生成 0.056ms
+    (各距离持平); 输出与旧版 dist=10 逐位同源; 用户实测验收 = 距离无关帧率 +
+    网格内容稳定 (P22)。
+  EditorApp.grid_geometry() 便捷方法; LoomGUI/minimal 视图统一接入
+    + show_grid 开关 (EditorApp 属性, 设置面板即时切换)。
+  淡出走 RGBA: draw_lines 支持 (N,4), 线 shader 输出 alpha; scope 须
+    enable_only=moderngl.DEPTH_TEST | moderngl.BLEND (位或有效, 元组写法报错)。
+
+[多核并行优化] (parallel.py + engine.py, 2026-08-14; 详见记忆 parallel-cpu-affinity-multicore)
+  parallel.py (零依赖 ctypes, 重点 Intel 12 代+ P/E 大小核调度):
+    - GetSystemCpuSetInformation 真实结构体 (本机 SDK 10.0.22621.0 核对): _CPU_SET 24
+      字节 / _SYSTEM_CPU_SET_INFORMATION 32 字节。★逻辑核号 = LogicalProcessorIndex
+      (组内索引), 不是 Id (Id 是 CPU set 标识, 本机实测 256+ 不可作掩码位);
+      Group!=0 (多组>=64核) -> idx+4096 强制放弃绑定。E 核判定 =
+      EfficiencyClass > 全场最小 (Intel 12代 P=0/E=1), 数据驱动不靠厂商字符串。
+    - compute_policy(cores, script_cores=2) 纯函数 (可 mock 单测): 混合 -> 进程绑 P 核、
+      脚本预留 min(script_cores, len(P)-1) 个 P 核 (至少留 1 P 给主线程)、池 = P 减预留;
+      均质(AMD/Xeon) -> 进程全核、n>=8 才预留最高 2 逻辑核; 任一 id>=64 -> 放弃绑定。
+      防锁死: process_mask!=0 / script⊆process / pool⊆process。
+    - apply_process_policy / pin_current_thread (SetProcessAffinityMask /
+      SetThreadAffinityMask(GetCurrentThread 伪句柄))。
+    - ScriptRunner: 脚本专用线程, 同步模型 (run_frame: submit -> Event.wait(释放 GIL)
+      -> 等完成); affinity 在线程函数体内设; _done.set() 放 finally 防卡死;
+      异常回抛后 worker 仍存活。
+  engine.py 接入:
+    - _run_scripts(dt) 分发器 (有 runner 走线程/无则内联/线程异常回退内联);
+      run() 退出 _stop_parallel() (停脚本线程 + 关碰撞池); 两入口 (PlayerApp/EditorApp)。
+    - compute_world_matrices(models) 批量世界矩阵: 局部 S@R@T 全向量化 + 沿父链按
+      层级每层一次批量 matmul, 与 model_world_matrix 逐位等价 (含父链, max_err=0);
+      _frame_world 当帧批量逻辑矩阵（逻辑更新/物理后、阴影前算），阴影/主 pass 共享。
+    - 碰撞并行: _pair_overlap_vec 向量化 (与标量逐位等价) + _collision_pairs_parallel
+      (候选对过滤 -> 碰撞体数组现算当帧矩阵 -> chunk 丢线程池) + _collision_events_parallel
+      (串行派发) ; _COLLISION_PAR_THRESHOLD=32 以下内联零开销; 池线程 initializer 绑
+      pool_mask。
+    - _upload_lights 缓冲复用 (_light_bufs 惰性建一次, 每帧原地清零, numpy 分配~9->0)。
+    - 设置.json 新键: parallel_enable(默认True) / script_cores(默认2) / show_grid(默认True);
+      LOOM_NO_PARALLEL=1 测试守卫。
+      当前可调/诊断环境变量补充：LOOM_NO_CRASHDUMP、LOOM_NO_SCHED、LOOM_SCHED_WORKERS、
+   LOOM_NO_PIPE、LOOM_NO_PREP、LOOM_NO_INTERP_POSE_DLL、LOOM_NO_INTERP_WORLD_DLL、
+   LOOM_NO_INTERP_DLL、LOOM_VERIFY_INTERP、LOOM_AABB_DIRTY_POOL_MIN、LOOM_AABB_PAR_MIN_WORK、
+   LOOM_SWITCH_INTERVAL、LOOM_PROFILE_POSE、LOOM_FLICKER_DEBUG；各自作用见第十七节/M3收口。
+  LoomGUI 设置面板新增: 网格开/关 (即时生效) + 并行开/关 + 脚本预留核数 1/2/4 (重启生效)。
+
+[8核并行流水线] (parallel.py + engine.py, 2026-08-15; 详见记忆 loom-multicore-optimization-direction)
+  CPython GIL 现实: 纯 Python 线程串行, 真并行只在释放 GIL 的 numpy/GL 调用.
+    所以"8 核均摊"的落点 = 把每帧 numpy 重活分块丢预计算池; 脚本留专用线程(1 核);
+    GL/事件留主线程; 物理步进/事件派发等纯 Python 属"拆不动的任务", 允许个别核偏高.
+  parallel.py:
+    - FramePool(n_workers, mask): 每帧预计算线程池 (ThreadPoolExecutor + initializer 绑
+      pool_mask). run_parallel(jobs) 并行执行独立任务; map_indexed(n_items, func,
+      batches_per_thread) 把下标空间分块并行 (executor.map chunksize=1 = 工作窃取),
+      结果按序拼接 (确定性). frame_workers(policy, target=8) = min(8, 逻辑核-脚本核-主).
+  engine.py:
+    - self._frame_pool 预计算池 (8 worker 目标); _stop_parallel 关闭。
+     - M3 另有 scheduler.NgilPool 常驻 nogil 分块池；它与 FramePool 是两套不同机制。
+    - get_bounding_box: 顶点->齐次数组按 id(mesh) 缓存 (_bb_cache, _homogeneous_vertices,
+      网格不可变; 高面数球省每帧重复 asarray) + 只算 3 列 vh@M[:,:3] + 转置连续归约
+      (ascontiguousarray((vh@M[:,:3]).T).min/max(axis=1), 微基准比 strided axis=0 快 4 倍).
+    - _model_aabbs_par(models, fw, visible_only=True): 模型世界 AABB, 模型数>=
+      _AABB_POOL_THRESHOLD(64) 才池上分块 (实测 51 模型池 5.4ms > 串行 2.3ms, 池开销>收益),
+      结果与逐模型一致; visible_only=False 返回全量对齐 (阴影与碰撞共享那份).
+    - _scene_light_bounds_par(view, aabbs): 全部 AABB 8 角拼 (n*8,4) 一次批量 matmul.
+    - _compute_light_vps(aabbs=None): 每帧一次算全部阴影光源 view-proj 缓存 self._light_vps,
+      _render_shadow_maps 与 _upload_lights 复用 (旧代码每帧对同一光源算两遍包围盒);
+      传入全量 aabbs 时过滤可见再算平行光包围.
+    - _collision_pairs_parallel: 碰撞对 < _COLLISION_POOL_PAIRS(10万) 单次向量化
+      _pair_overlap_vec (实测线程池分块比单次慢 300 倍), 超大才分块.
+    - **阴影与碰撞共享一次全量 AABB** (2026-08-15): `_parallel_shadow_and_collision`
+      用 `_model_aabbs_par(visible_only=False)` 一次算好全部模型包围盒 (池上分块并行),
+      阴影 `_compute_light_vps(aabbs)` 过滤可见, 碰撞 `_collision_pairs_parallel(aabbs)`
+      从 AABB 派生碰撞体数据 (`_collider_from_aabb`) —— 消除"阴影+碰撞各算一遍包围盒"
+      的重复顶点变换 (50 高面数球曾 ~7ms 重复). `_collision_pairs_parallel` 加
+      **根-根对 `_related` 快路径** (双方 parent=None 恒不相关, 直接加入候选对, 免祖先
+      遍历). 真实循环复测: 播放 72.6 -> 110.7 FPS (不再下跌).
+    - _collision_events_inline (小场景<32): **每物体只算一次碰撞体包围盒** (传当帧
+      _frame_world), 逐对用缓存走纯几何 _pair_overlap —— 播放期碰撞事件曾 53ms/帧
+      (逐对重算 model_world_matrix + 变换全部顶点), 修后 19->342FPS. collider_hit/
+      get_collisions 加可选 fw 矩阵 (默认 None=旧行为).
+    - _parallel_shadow_and_collision(dt, with_events): 阴影 VP(只读) ‖ 碰撞检测(只读)
+      池上并行重叠 (独立任务并行), 事件派发 _dispatch_collision_events 回主线程串行;
+      update_physics(dt, events=) 加参数 (渲染路径 events=False, 直调默认 True 不变).
+    - 压测: tests/_tmp/stress_scene.py (50 高面数球 36x54) + real_loop_probe.py
+      (真实运行循环 编辑/播放 FPS + 阶段耗时; vsync-off 不限帧用 stress_probe.py).
+      **最终实测 (真实循环, 压测50球): 编辑 109.6 / 播放 110.7 FPS, 播放不再下跌
+      (修前 72.6); 50 高面数球场景主线程 ~9ms/帧 (GL+GUI+阴影AABB, 接近 120 上限).**
+    - LOOM_PROFILE=1: render 内 _profile(name, fn) 累计 self._stage_times (诊断用).
+
+[主线程核心调度] (parallel.py, 2026-08-15)
+  问题: 重负载主线程 (GL/事件/调度) 随机落核, 常撞上系统静态负载最高的核 (如 CPU1) ->
+  单核瓶颈. 修: 启动时测每核 busy%, 把主线程锁到**负载最低的大核 (P核)**.
+  - measure_core_busy(count, window=0.15): NtQuerySystemInformation
+    (SystemProcessorPerformanceInformation=8) 两次采样算每核 busy% = (kernel+user-idle)/
+    (kernel+user), 系统级含其他进程; _SPPI 结构 x64 48 字节. 单组系统 (<=64 核) SPPI
+    下标 = 亲和位; 多组系统不映射 (安全跳过).
+  - MainThreadCoreScheduler(topology, interval=20, margin=15, window=0.15,
+    exclude_bits, busy_probe, disable_pin): 启动同步 _rebalance 选 P 核中 busy 最低者
+    SetThreadAffinityMask 锁主线程 (threading.get_ident 记主线程 tid, OpenThread
+    SET|QUERY 权限改亲和). EfficiencyClass 判 P/E, E 核绝不选 (12 代+ 大小核); exclude_bits
+    排除脚本预留核. disable_pin 测试模式 (只算不绑).
+  - **interval**: >0 启 watchdog 每 interval 秒重测, 当前核差最佳 < margin(15%) 不迁移
+    (防抖), >= margin 迁移; **interval=0 只启动锁一次, 不周期重选**.
+  - 接入差异: **Loom (engine.GLEngine.__init__, 排除 script_mask) interval=0 —— 引擎负载
+    高, 周期跳核=周期性卡顿, 只锁一次保稳定; LoomHub (LoomHubGUI.__init__) interval=20 ——
+    本身负载低, 周期重选不受影响**. 均打印锁定核号.
+  - 探针: tests/_tmp/main_core_probe.py (打印各 P 核负载排序 + 真锁核验证).
+
+[游戏脚本目录] (scripts.py)
+  load_script_dir(dir) 动态加载 exe 旁 scripts/ 的 .py 脚本并 @register,
+                       引擎启动扫描(Unity 项目脚本机制), 随游戏分发
+
+[场景加密] (sceneio.py)
+  save_scene_data(path, data, encrypt=True)  明文 JSON 或 LOOMSC 混淆(压缩+XOR+base64)
+  load_scene_data(path)  自动识别明文/混淆并解密, 坏文件返回 None
+
+[坑]
+  部署 dist 到编译版本必须用复制(copytree/copy2) 不用 Move(会丢 numpy/pygame 目录)
+  场景加密后 PlayerApp 必须用 load_scene_data(原 json.load 不支持加密)
+  鼠标锁定用 unlock_requested + ui_capture 双标志, 特殊场景强制回锁
+  **测性能必须抓真实运行时数据且先核对数据源 (2026-08-15 教训)**: 探针路径少算一层
+  会加载 0 物体, 测出空场景假 FPS. 必须: 真实运行循环 (clock.tick+事件, 非裸 render 紧
+  循环) + 加载真实场景后核对 models 数量 + measure_core_busy/GetThreadTimes/LOOM_PROFILE
+  直接采样. 详见记忆 probe-verify-runtime-data. 工具 real_loop_probe.py.
+
+[字体渲染 · 免回退] (2026-08-15; 删除 M40 逐字符回退)
+  问题: M40 字体回退 (每字符 pygame.freetype.get_metrics 判字形有无, 缺字用 Segoe UI
+  Symbol 补齐) 是 GUI CPU 瞬时负载源, 打多少补丁都卡在 CPU 上 (雅黑缺符号触发回退路径).
+  修: **删除整个回退机制** (engine._fallback_render/_measure/_choose/_char_has_glyph/
+  oracle/缓存), _render_text/_measure_text 改**雅黑单字体直渲染** (font.render/size).
+  因系统无"中文+全部GUI符号"单字体 (全字体扫描: MS Gothic 含全部符号但缺 37 个简体常用字;
+  雅黑含全部中文但缺 ✓✗☀◉▣▨▶◀🔒🔓), 做法 = **GUI 符号全换成雅黑含的语义等价字符**:
+    ✓→√  ✗→×  ✕→×  ☀→◎(平行光)  ◉→◇(摄像机)  ▣→□(网格)  ▨→■(材质)  ▶→→(播放)
+    ◀→←  🔒→锁  🔓→开   (◆★●○■«»° 等雅黑本就有, 不动)
+  font_scan_probe.py / font_symbol_scan.py 可复扫确认渲染源码无雅黑缺字符。
+  draw_text_quad LRU 缓存 (text,color,size) 仍有效; LoomHub 的 _text 本就没回退不受影响.
+
+[异步GUI · 离屏限频合成] (2026-08-15; 编辑器面板 250-400 draw call 卡舞台 → 舞台回 120FPS)
+  背景: 编辑器每帧 250-400 个 GUI draw call 卡舞台; 用户要求 GUI 与舞台异步
+  (GUI 30/15FPS 够用, 返回多帧相同帧, CPU 让给舞台区)。
+  设计 (GL 安全单上下文, 非多线程):
+    - **每帧同步 g.mouse_pos = ctl.mouse_pos (2026-08-15)**: 面板 pass 脏驱动跳过时
+      g.mouse_pos 只在 begin_frame 更新 -> 视口交互 (_gizmo_drag_apply 读
+      input_state()['mouse_pos']) 用过期的 -> 拖动卡顿 (1秒才跳). draw 顶部无条件同步.
+    - LoomGUI.draw 拆两段 (editor.py 契约 view.draw 不变):
+      ① LIVE pass 每帧直绘屏幕 (120FPS): _draw_grid/_draw_selection_box/_draw_gizmo/
+        _draw_gizmo_caps_live/_draw_light_icons_live/_draw_camera_icons_live
+        (图标原走 g 队列, 改 ctl.draw_screen_rect 直绘, 色×255; 均不注册输入, 已核验)
+      ② 面板 pass 脏驱动/节流渲进离屏 FBO: begin_frame → [设置态?_draw_settings_panel
+        : _handle_panel_resizers + _draw_toolbar/_hierarchy/_resources/_inspector/
+        _status/_panel_overlay] → end_frame → fbo.clear(0,0,0,0) → g.render(target=fbo)
+        (gui.render 本已支持 target) → blit_texture 每帧全屏合成 → RuntimeUI 每帧 LIVE
+    - engine.py: gui_dirty=True 初始; _handle_events 离散事件置脏 + MOUSEMOTION
+      仅无按键; blit_texture 全屏 quad (复用 hud_prog/_quad_vao, 显式 ctx.screen)
+    - FBO 生命周期: _ensure_gui_fbo 尺寸驱动重建 (ctx.texture+color_attachments),
+      shutdown() 释放 (EditorApp.run 结束调 view.shutdown)
+    - 关键机制: had_input 兜底测试直改字段; active_id/_focus 顶部置脏让拖动每帧重渲;
+      had_input 后保持脏再渲一帧反映状态翻转; reset_interaction 置脏 (播放/系统对话框)
+  验证: vsync-off 探针 空闲 522FPS / 轨道 499FPS vs 异步前 55FPS; 读回探针面板
+  不透明+视口中心透明; test_asyncgui 3 断言全过; 全套 33 测试绿。
+  可调: LoomGUI._gui_heartbeat=0.5 (心跳重绘间隔, 调大可更省).
+
+====================================================================
+十四、插件加载器 (L1, 2026-08-20; 承接《Loom模块化插件化分析.txt》五/八节)
+====================================================================
+设计: "一切皆插件" —— 核心部件 = 官方实现全内置, 插件 = 外部挂载替换/扩展;
+  坏插件自动回退官方 (同 guiloader 机制: 扫描验明正身 → 加载失败禁用 → 其余照常)。
+  管理 (2026-08-20): 设置对话框"插件"挂载区 —— 每插件行状态 (●已加载/○未加载/
+  ×有问题+原因) + [加载][卸载] 两按钮 (卸载=会话禁用 _DISABLED, 重启恢复;
+  加载=取消禁用重新加载) + [重新扫描] (差量: 新增加载/已删目录清理卸载, 不动
+  手动禁用的)。不做 LoomHub 插件面板。
+
+[插件目录结构]  <程序目录>\plugins\<任意目录名>\
+    plugin.json   {"id","name","version","entry","min_engine"?, "deps"?}
+      id = 反向域名风格 (^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$), version = x.y.z,
+      entry = 仅合法 .py 文件名 (防路径穿越), min_engine = x.y (超当前跳过)
+    entry.py     模块级 def register(api): ... (必需钩子, 缺失/抛异常 → 插件禁用)
+  <程序目录>: 源码 = plugin_loader.py 所在目录 (不随 cwd, 2026-08-20 修: 曾用
+    sys.argv[0] 目录, 从别的目录启动 Loom.py 会找错) / 编译版 = exe 目录 (sys.frozen)。
+  当前引擎版本 CURRENT_VERSION = '1.0.0' (与 解释器.json version 同步)。
+
+[加载流程]  plugin_loader.load_plugins(base=None)  (入口 Loom.py / build_entry.py
+  启动时调用; base 仅供测试覆盖):
+    _parse_manifest (清单 JSON/必填字段/格式/入口存在/min_engine)
+    → _load_one (importlib 动态 import entry.py, 模块名 loom_plugin_<id 消毒>,
+      调 register(api)) → 成功记 _LOADED, 失败记 broken + 打印, 不中断其余。
+
+[PluginAPI 注册表]  register(kind, item) 通用入口:
+    kind='script' → register_script(cls) → scripts.SCRIPTS[sid]=cls (检查器可挂);
+    其余扩展点 (menu/panel/importer/shader/postprocess/inspector/tool) → 记
+    api.pending, L2+ 开放 (调用不崩, 插件照常加载)。
+  约束: register_script 的类必须 script_id 非空字符串, 否则抛 ValueError →
+    该插件 broken (坏插件回退语义)。
+
+[测试]  tests/test_plugin_loader.py (临时 base 目录, 全无头):
+  合法加载进 SCRIPTS / 坏清单各形态 / 坏入口各形态 / 重复 id / min_engine /
+  pending 不崩 / register_script 校验 / 散文件忽略 / 返回结构。见台账 P32。
+[编译版] 需重打包 (build_entry.py 已同步改动)。
+
+====================================================================
+十四·A、插件 L1 分级重设计 (2026-08-27; 详见《Loom插件系统分级方案.txt》)
+====================================================================
+用户方向: 核心插件与普通插件不同权 —— 普通插件限制危险权限; 替换核心 = 重启
+安装 + 信任提醒 (未来 L2-L6 扩展点注册表); 只改插件挂载结构, 引擎本体零改动
+(engine/editor/sceneio 未动)。现有 GUI 体系保持独立 (guiloader 不动)。
+
+[目录分层]  <程序目录>\plugins\{editor,player}\<插件> (普通插件 = 目录即声明注入层)
+       <程序目录>\core_plugins\<类别>\<插件>    (核心插件)
+  core_plugins 清单必填: layer(core 不得写 editor/player)/capability/desc;
+  信任闸三分: untrusted(未在信任表)/modified(文件被改)/trusted ——
+  _confirm_core_trust 全文件 SHA256 写入 插件信任.json (atomic);
+  未信任/被改 = 不加载记 untrusted → UI 弹窗红字警告 (全权限/来源可信/先读源码,
+  "确认信任"写表) → **本次仍不加载, 提示重启生效**。
+
+[执行环境分层] _MODE:
+  editor (普通插件): _load_entry_restricted —— 受限 builtins (保留 __build_class__
+   等语言机制, 只删 os/sys/subprocess/socket/ctypes/threading/importlib/shutil/
+   pathlib/urllib/pickle 等危险面 + __import__ 拦拼接名) + 白名单 import
+   (math/itertools/re/collections/functools/random/copy/json) + 文件只走 api.read_asset；
+    scripts/engine/matlib 不在白名单（插件能力统一走 api.*）
+   (限插件目录只读越界拒)。**诚实档位**: 防误用, 不是沙箱 (元编程绕道防不住)。
+  player (封装/MOD 内容): 全权 (内容已经可信链路供给)。
+
+[跨层按钮]  api.register_editor_button(text, cb) → _EDITOR_BUTTONS = GUI「插件」
+  菜单 (路 A 界面补充) + EAI plugin_button 命令两条通路同一回调 (卸载清理)。
+
+[封装链路]  build_game --protection secure|open (--no-encrypt-content 仅 open):
+  secure = 插件包 .lpc (fmt loom-plugins-1, files base64 入 JSON) + SHA256 写入
+  .lsc config.plugins_sha256 (缺包/被改 SystemExit 同"缺包不可分离"语义);
+  open = 明文拷贝发布夹 plugins/player/ + 允许非原版插件 (install_game_plugins
+  MOD 分支 load_plugins(base=发布夹) mode=player)。game_player/Loom.py 双启接入。
+
+====================================================================
+十五、Agent 友好化 — EAI / HUB-EAI (2026-08-27~28)
+====================================================================
+定位 (用户拍板 2026-08-27): 让 Agent (Claude Code) 像人一样操作 / 排查 / 交接
+引擎; **GUI 操作是面向人的, EAI 只作辅助/复现/发现, 不替代人判** (台账规则)。
+
+[EAI — Loom 编辑器命令桥]  Loom\agent_commands.py (纯标准库, 无 Qt/Pygame 依赖):
+  核心 = 命令执行器 (`_COMMANDS` 私有注册字典) + 一个实现三处使用:
+    工具栏按钮/检查器控件 ─┐
+    GUI 命令行坞 (qt_console) ─┼→ dispatch → EditorApp/窗口方法
+    HTTP 127.0.0.1:随机端口 ─┘
+  命令集当前 53 条 (以 agent_commands.py @command 注册表为准):
+    系统: status(含 dirty)/engine_metrics/inspect/screenshot/plugins/plugin_button/quit(save=三态)
+    场景: scene_new/scene_save(低层 _save_scene 带路径, 不弹框)/scene_load
+    物体: object_add/list(带序号, 重名 index=)/select/rename/delete/duplicate/
+          set_transform(一步撤销)/set_visible/set_saturation/import_obj
+    材质: materials/set_material/material_new/asset_save
+    组件: collider/rigidbody/audio/animator
+    脚本: scripts/script_add/script_remove/script_var
+    光源: light_add/light_set(强度/颜色/三角度/阴影/模式/截面/尺寸/位置)
+    相机: camera_add/set(朝向/FOV/俯仰限制/位置)/active/preview/move/look
+    层级: reparent(防成环, 相机独立链)
+    Prefab/资产: prefab_save/place/unlink/assets/asset_apply/asset_place
+    设置: settings_get/set(值归一)+编辑/播放: undo/redo/gizmo/play
+  协议: 启动 --agent → <程序目录>\.agent_port.json {port,token,pid,url};
+    POST /cmd {cmd,args} → {ok,result|error} / GET /logs?after=N /
+    GET /status / GET /(命令清单); 鉴权头 X-Agent-Token (错 -> 401);
+    **命令全部在 Qt 主线程执行** (HTTP 线程 submit 入队 → QTimer 4ms drain →
+    主线程 dispatch → 回填; 与 UI 一致, 无跨线程危险)。
+  契约 (2026-08-28 统一): 命令内 {'error': …} 一律外层 ok=False;
+    as_bool/as_float 归一字符串 (控制台/HTTP 全给字符串, 裸 bool('false')=True
+    曾让 play on=false 反而开始播放); 重名歧义 _Ambiguous 拒绝并提示 index=。
+
+[连贯操作双链原则 (用户拍板, 写入 agent_commands 头注释)]:
+  滑动/拖拽/长按/滚轮旋转 = GUI 老链路 (editor 事件处理直接向引擎发连贯操作)
+  保留专用; 命令层只暴露"结果注入" (camera_move 绝对目标 / camera_look
+  绝对角度 / set_* 注值), 不模拟连贯操作 —— camera_drive 已拆除 (曾与 GUI
+  拖动并发写同一相机字段致视角滑动异常, 用户实测发现)。
+
+[命令行坞 — Loom 编辑器]  Loom\ui\qt_console.py: ConsoleDock(QDockWidget)
+  底部坞, 默认隐藏; 状态栏 [命令行] 按钮 / F12 (应用级事件过滤器判, 先于
+  QShortcut) 开关; 输入语法 "cmd key=value" (与 hub_console.parse_line
+  同语法), ↑↓ 翻历史; 输出 = 命令 JSON 结果 + 日志环增量泵 (500ms, 与远程
+  /logs?after=N 同源); 命令与远程 Agent 走**同一张命令表** (单一事实)。
+
+[HUB-EAI — LoomHub 命令桥]  LoomHub\hub_commands.py (16 条):
+  status / interpreter_list / project_list / interpreter_add /
+  interpreter_install_zip / interpreter_remove / interpreter_default /
+  project_create / project_import / project_open / project_remove /
+  launch_engine / engine_stop / settings_get / settings_set / quit。
+  命令在**请求线程直跑** (Hub 命令全是文件/配置/子进程操作, 无 UI 一致性需求;
+  唯一例外 quit → 置 _QUIT + 延时 os._exit —— tk mainloop 无法跨线程安全打断)。
+  **launch_spec 与 GUI 双击逐字段同构** (本命令存在的意义):
+    prefer=读 open_py 设置 (不读会启动另一个可执行体) → build_launch_command
+    → 场景校验 (不存在/非 .json 拒, GUI 同款防台账篡改) → cwd=解释器目录 →
+    env=环境副本 → Popen 无 shell (GUI 同款, 免 cmd.exe 引号歧义) →
+    agent=true 追加 --agent + 轮询端口文件**判新鲜度** (pid=子进程 或
+    mtime≥启动时刻, 防止读到上次运行的残留 port/token 假成功)。
+  LoomHub\hub_console.py: TkHubView/NovaHubGUI 底部"命令行"挂载 (tkinter
+  Entry+只读 Text), 本地 dispatch 与远程同路。协议同构 EAI
+  (.hub_agent_port.json + X-Agent-Token)。
+
+[Agent 驱动工作流]  Agent: 启动 LoomHub --agent → launch_engine agent=true
+  拿 port/token → POST /cmd 全链路 (项目创建→场景编辑→截图读图判定→play→
+  quit) → hub 侧 engine_stop 清理。AI 侧助手: 见项目根《Loom-EAI与HUB-EAI说明书.txt》。
+
+[测试]  test_eai_real.py (真 EditorApp 全 53 条 + 覆盖率闸门) /
+  test_agent_commands.py (桩层+契约) / test_hub_eai.py (16 条+同构断言) /
+  tests\_tmp\qt_eai_ui_probe.py (真 Qt 窗口: 控制台派发/层级刷新/检查器
+  回写/F12 开关/真截图)。
+
+====================================================================
+十六、性能优化三层架构 (组1/2/3, 2026-08-30~31; 用户实测已备份)
+====================================================================
+背景: "为期几天的性能极致优化" (2026-08-28 启动)。判据 (用户定): Nuitka 编译后
+  仍动态执行的部分换静态编译库直接跑; nogil + 线程池真并行突破单核。
+  逐堵点定性框架 (Case1 优化到头/Case2 算法层/Case3 执行器/Case4 两者都有)
+  见《库性能优化堵点清单.txt》; 分组实施流程见《任务清单.txt》。
+
+[组1 = 实例数据批 + 桶键缓存] (2026-08-30, stress 125.6→140.0FPS)
+  - Material._rgba/_sat_f32: color/saturation 转 property, setter 算一次 f32
+    缓存 (与 _hex_rgba 同源, 逐位一致)。★缓存挂 Material 单点不挂 GameObject:
+    共享材质一端改色另一端当帧跟变是 M23 契约。
+  - GameObject._bucket_key 惰性缓存: mesh/normal_mode/primitive/params 四 setter
+    置脏; ★跨后端键形不同 (GL 3元/Vk 2元), 消费端按 len 校验不匹配重算。
+  - GL _prepare_bucket_frame: 桶 staging 随桶持久 (np.zeros 生命周期=桶),
+    write(memoryview 部分写入) 免 tobytes 拷贝; _grow_bucket_inst 扩容作废 stage。
+  - Vk draw_frame: _inst_stage/_inst_sha_stage 持久复用 + Material 缓存消费
+    (getattr 防御回退旧解析); naga/WGSL 零改动。
+
+[组2 = 微堵点批 + D10 draw_lines 复用] (2026-08-30, ±2% 抖动带内, 收益在
+  事件多/层级深/光源多场景)
+  - _dispatch_collision_events/_update_collision_events: id2m dict 一次建
+    (消每事件 next() O(n) 扫); get_collisions: models.index 消除。
+  - _ancestry_ranges: 类级缓存 (id(models)+_ANCESTRY_GEN 双键); 失效点 =
+    add/attach/remove/clear_scene/set_parent/remove_camera + parent setter 旁路;
+    ★契约: 脚本直改 parent.children 列表不置脏 (引擎契约外操作)。
+  - Light.direction: (角度元组, d) 自校验缓存; up_vector 复用消重复 trig。
+  - update_scripts: list(m.scripts) 拷贝 → 引用迭代 (契约: update 不增删本
+    物体脚本组件); engine + scene_driver 同改。
+  - D10 draw_lines: 持久 VBO (4KB 起 2x 生长, dynamic) + VAO 缓存 (换缓冲才
+    重建); render(vertices=N) 只读前 N 顶点, 余量旧字节无害; 字节布局/着色器/
+    uniform 逐位同旧。回归网 probe_draw_lines_reuse.py 61 断言常驻。
+
+[组3 = 公共算法层 + SoA + Numba 三层] (2026-08-31, stress 140.0→146.6FPS,
+  shadow_prep 4.10→3.18ms -22%, A/B 截图 NCC 1.000 双端)
+  层1 SoA 数据平面化:
+    - engine._transform_snapshot: 硬化快照 ((id(models), _struct_gen, len) 三件
+      id 键 + 对象引用钉住防陈旧读); compute_world_matrices 的 9 次属性链列取
+      收拢成平面切片; 采集段 1.25x (层数越深收益越大, 链10层 1.65x)。
+    - _bump_struct() 实例属性结构代数守卫 (替代类级 _ANCESTRY_GEN, 多引擎实例
+      互不误伤); GLEngine._LIVE_INSTANCES 注册表 (__del__ 清理)。
+  层2 numba 静态编译 (fastpath.py):
+    - _njit_or_py(**kw) 工厂: 装了 numba → njit(cache=True, **kw); 没装 →
+      functools.wraps 透传降级, **同一算法直译数值同源** (装/不装结果逐位同)。
+    - depths (深度DP, compute_world_matrices 接线) / ancestry_dfs (DFS+CSR,
+      _ancestry_ranges 接线) / aabbs_minmax (层3) — 全 nogil=True。
+    - 动画采样 A6 (D2): AnimationClip 快/慢双路径 — 资格闸门 (None/bool/
+      np数/str/nan/乱序/超精度 int 全挡慢路) 过了走 numpy searchsorted 向量化;
+      (id(frames), len) 缓存失效; 改帧须显式 _np_rebuild() (全工程无此用法)。
+      崩溃奇偶保持 (None 通道旧代码 TypeError, 新慢路径同崩)。
+  层3 nogil+prange 真并行:
+    - fastpath.aabbs_minmax: ★2026-08-31 组6 spin 治理后 = **串行** njit (nogil,
+      无 prange —— 帧路径不触碰 numba 线程池); prange 并行版独立为
+      aabbs_minmax_par (逃生门, 同算法逐位同源)。
+    - engine._aabbs_batched: 按顶点数 V 分组堆叠 (混合网格防广播错) + fastpath
+      调用; M 缺失/形态异常兜底旧 get_bounding_box; _model_aabbs_par 池路径分块。
+      ★组6: 默认走串行版; 单组模型数 ≥ _AABB_PAR_MIN_MODELS=512 才切
+      aabbs_minmax_par (工作量摊得开 spin 税); 堆叠缓冲 (vhN/m3N/mn/mx)
+      thread-local 按 (组序号,n,V) 键复用, 免每帧 ~3.3MB np.empty 分配。
+    - 数值: numba 标量求和 vs BLAS dgemm ~4 ULP (8.9e-16) 舍入差 (SIMD 分块
+      求和顺序), D6 标准 "逐位/1e-7 内" 合格; A/B 截图 NCC 1.000 零视觉影响。
+  ★★关键教训 (aabb_bench.py 拆解实证): "轻计算重调用"负载 (每顶点 9乘6加)
+    纯 numpy 批量化**全负收益** (stack+batched matmul 0.52x; out= 预分配
+    0.23-0.99x) —— 堆叠拷贝 1.1ms + 批 matmul 比 N 次独立 dgemm 慢 + transpose
+    0.9ms; numba 标量平坦循环 104µs vs 旧 2471µs (23.8x) 才是正解。
+  ★组3 后实测判读 (2026-08-31, 用户): CPU 多核调度大提升, 帧率 +20 至 170
+    (编辑器真实场景), GPU 降到 ~25%。"18 prange 线程 87-96% CPU"≠真并行铺开
+    —— AABB 工作量摊每线程 <2%, 90% CPU 几乎全是 numba 线程池 spin-wait 空转
+    (omp/tbb worker 等待时烧核)。
+  ★组6 spin 治理 (2026-08-31, 用户拍板方案B 治本, 已实施验收):
+    - 取证 (numba_spin_probe.py): 51球×2035顶点单次 prange 调用真实工作仅
+      ~54µs, 但 NUMBA_NUM_THREADS=18 默认 + 未设 OMP_WAIT_POLICY → worker
+      每次调用后 busy-wait 不睡眠; 模拟帧节奏窗内 CPU 消耗 8969ms ≈ 21 核
+      全程 vs 真实工作 3.2ms = 99.96% 无效负载。
+    - 修复 = 结构治本 (方案B): AABB 帧路径默认**串行** njit (0 worker 接触,
+      spin 税归零); prange 保留为 512 模型闸门后的逃生门 (NUMBA_NUM_THREADS/
+      OMP_WAIT_POLICY 环境变量方案被否 —— 仍有空转且依赖环境)。
+    - 验收: stress 153.5 → 167.1FPS (+8.9%) / 18 worker 85-93% → 全部归零
+      (最高 13.9%) / MainThread 82.4% → 72.3% / aabbs 阶段 1.25ms/帧 +
+      shadow_prep 3.07 → 2.67ms / NCC 1.000 / 全量回归绿。
+    - 经验: prange 适用于"单次工作量大到摊得开线程池自旋成本"的负载; 小
+      工作量高频调用场景 spin 税 >> 并行收益, 串行编译版才是正解 —— 判据 =
+      窗口内 (非主线程 CPU 消耗) vs (真实工作总量) 之比。
+
+[组4/组5 待办] 组4 视锥剔除 A11 (需用户重新拍板; 主 pass 6 平面 × 世界 AABB
+  保守判定, <32 物体闸门, 阴影 pass 不剔) / 组5 物理桥收尾 (post_step 数学
+  向量化 + pre_step 脏传播缓存; 红线: 睡眠/唤醒语义一行不能变; 动前 V02 实测)。
+
+[插桩批 + GC 批] (2026-09-01, 已实施验收; ★含在待备份改动里)
+  插桩批 (第 0 步, 纯诊断零行为变化):
+    - physics 桥 4 段针 (phys_bridge_ensure/pre_step/step/post) + buckets 针 +
+      shadow_prep 内 3 针 (shadow_bounds/collide_pairs/shadow_jobs+dispatch)
+      + 角点 vs matmul 细分; LOOM_PROFILE 关闭零开销。
+    - 500 球 300 帧校准数据: 帧 63.08ms = physics 23.37 (ensure 7.09 +
+      pre_step 15.71★最大单项 + step 0.31 + post 0.24) + shadow_prep 34.61
+      (aabbs 10.86 + shadow_jobs 23.02 = collide_pairs 19.52 + shadow_bounds
+      5.20) + world_matrices 2.51 + buckets 1.22 + 残段 ~2.4ms。
+      ★Jolt C step 仅 0.31ms → physics 慢全在 Python 侧 (ensure O(N²) +
+      pre_step 每体 ~31µs); "GL 段 8ms" 旧口径 = aabbs 双重计数假象。
+  GC 批 (流畅度批, 1% low 治理):
+    - 根因: 500 球 A/B 实锤 LEGACY 基线 gen2 全收集 2 次单次 78ms, 尖刺帧
+      135/140ms 落 GC 比例 100%。
+    - A0 engine.py: gc_play_enter/exit + 播放态阈值 (50000,50,200) +
+      LOOM_GC_LEGACY=1 逃生门 + ★禁 gc.disable 铁律 (脚本实例天然成环,
+      disable=内存单调上涨); A1 runtime.py PlayerApp 场景加载后 freeze +
+      load_scene 包裹; A3 editor.py toggle_play 进/出播放 freeze/unfreeze;
+      C 项 _fw32 持久容量缓冲 + gather 复用 (消 ~3.4MB/帧)。
+    - 验收: GC 事件 0 / 尖刺帧 0 / p99-max 差 77→11ms; 50 球守护 169.3FPS
+      (≥167.1); 全量回归 EXIT=0; 用户实测 500 球 40→50FPS。
+    - 探针: LOOM_GC_PROBE=1 (对账) / LOOM_GC_LEGACY=1 (基线复跑)。
+  下一步 = 组7 多物体批 7 步 (规格=_engine_study\考察报告\报告_多物体批实施
+    规格.md; 角点向量化/post_step 早退/ensure dict 化/SAP 剪枝/AABB 指纹缓存
+    /_pick 读缓存) + GPU P0/P1 (报告_GPU专项排查.md) + 考察落地 (Panda3D/
+    批处理缓冲/Ren'Py 三报告), 统一路线见《下阶段优化工作引导.txt》。
+
+[组7 多物体批 7 步 + 可移植件批 4 件] (2026-09-02 夜间自主批, 已落地验收;
+  ★含在待备份改动里; 台账=Loom\bench_result_对比台账.txt)
+  落地清单 (engine.py / physics_bridge.py / editor.py / fastpath.py):
+    - 项D 角点向量化: _scene_light_bounds_par numpy tile/repeat 展开 n×8
+      角点 (shadow_bounds 段, 数学对拍逐位一致)
+    - 项E1 post_step 早退: physics_bridge post_step 全动态判定前移到四数组
+      读取前 (非动态场景直接 return)
+    - 项A ensure 查找表: ensure_models by_model dict O(n²)→O(n);
+      7.28→0.90ms (编译版 4.27→0.70) ★8倍
+    - 项C SAP 剪枝: _collision_pairs_parallel x轴 sweep-and-prune 物体级
+      粗筛 (sphere 粗筛盒=[c−r,c+r]³ 真超集; 候选重过 ancestry tin/tout;
+      12.4万对→305 候选; collide_pairs 17.08→5.01 编译版 19.62→5.24 ★3.4倍;
+      LOOM_NO_SAP=1 逃生门 + _SAP_FALLBACK_PAIRS=50000 熔断回退旧路;
+      _AABB_PAR_MIN_MODELS 闸门未动)
+    - 项B1 staging 容量复用: _aabbs_batched 缓冲键 (gi,n,V)→(gi,V)
+      grow-only 容量 cap≥n 切片视图 (消 32.6MB/帧逐球堆叠拷贝);
+      shadow_jobs 20.47→6.53 (编译 23.22→6.72) ★3.1-3.5倍
+    - 项B2 = 可移植件件4 (矩阵静止缓存, 同物)
+    - 项B3 _pick 批量读: editor._pick 改 _frame_world+_model_aabbs_par
+      批量读 (500球点击 ~30ms→~1ms)
+  可移植件批 (考察落地, 规格=落地_B_可移植件实施.md):
+    - 件1 桶 _dirty 总闸: GameObject._appearance_gen 类级计数器
+      (Material.color/saturation + GameObject.mesh/visible setter bump)
+      + _prepare_bucket_frame 签名闸 (struct_gen+appearance_gen+keys)
+      → 静止帧整桶跳过上传 (pyglet 镜像+脏合并模式)
+    - 件2 零拷贝留档: moderngl Buffer.write numpy 直取首地址 (不改代码)
+    - 件3 uniform 句柄+值差分: _u 句柄缓存 + _u_last 值差分 (灯光 8 组
+      + VP + 相机同值跳过 GL 调用); draw_lines 持久句柄消 tobytes
+    - 件4 world_matrices 静止缓存: _fw_cache 四元组 (stamp,keys,parent,world)
+      命中返回同一对象; 失效面=结构/变换/父链变更 (按构造穷尽)
+  500球 300帧验收 (源码): 17.2→26.4 FPS = 1.54×; 编译版: 13.4→18.1 FPS
+    = 1.35× (ws_build2; 编译源 MD5 逐字节核验); 50球守护 183.7 ≥ 163.8 ✓;
+    全量回归绿 ×3 / aabb 对拍 ALL PASS / SAP 对拍一致 (305 对)。
+  ★numba×Nuitka 冻结四连坑 (完整证据链在台账): standalone 默认
+    numba-disable-jit=yes → njit(cache=True) no locator → njit 对 Nuitka
+    编译函数无字节码 → 源码投放后 llvmlite 死锁; ⇒ 定案: _FROZEN 根本不
+    import numba, fastpath.aabbs 走 numpy 批量内核 (_aabbs_minmax_np,
+    threading.local (n,V) 键缓冲复用消 24.5MB/帧 page-fault 风暴);
+    编译配方 build5+: --nofollow-import-to=numba。
+  ★编译版冒烟链配方: exe 运行必须带 --bench 旗标 (不带落 Qt 编辑器路径:
+    缺平台插件秒退 / 拷入插件后空转窗口永不退出 — build4/5 "卡死"真根因);
+    dist 手动补 tests\_tmp\stress_*.json + assets。
+
+[基线数据 (stress_probe 300帧, 50高面数球+Jolt51体)]
+  A2 期 189.6 → B1 桥后 125.6 (物理帧成本) → 组1 140.0 → 组2 138.1 (±2%) →
+  组3 146.6 → 组6 (spin 治理) 167.1; 用户编辑器真实场景 ~170FPS / GPU ~25%。
+  绝对值跨探针不可直比, 看 delta。
+  ★09-01 追加 (GC 批后): 50 球守护 169.3FPS; 500 球扩展压测 (101.75 万顶点
+  501 体) 16.4→20FPS (GC 批后), 堵点 = physics 23.37ms + shadow_prep 非
+  AABB 段 23.02ms (见上方插桩批校准数据); 组7 多物体批即针对此开。
+  ★09-02 追加 (组7 落地后): 500球源码 17.2→26.4FPS (1.54×) / 编译版
+  13.4→18.1FPS (1.35×); 剩余大头 = phys_bridge_pre 15.5-17.5 (pre_step
+  主体, 规格红线不动) + aabbs 编译地板 ~24ms (冻结环境无 numba) +
+  bounds ~6 + shadow_jobs ~6.7。下一轮候选 = GPU P0 四件套 + 组5 物理桥
+  收尾 (pre_step 向量化需用户拍板)。
+====================================================================
+(完)
+====================================================================

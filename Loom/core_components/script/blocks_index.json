@@ -1,0 +1,85 @@
+{
+  "module": "loom_script",
+  "blocks": [
+    {
+      "block_id": "imports",
+      "category": "hoisted",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "c": "loom_script.spec.c.dsl"
+        },
+        "code": {
+          "c": "loom_script.c"
+        }
+      },
+      "symbols_defined": [],
+      "symbols_used": [],
+      "status": "draft"
+    },
+    {
+      "block_id": "batch_rotate",
+      "category": "emitting",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "c": "loom_script.spec.c.dsl"
+        },
+        "code": {
+          "c": "loom_script.c"
+        }
+      },
+      "symbols_defined": [],
+      "symbols_used": [],
+      "status": "draft"
+    },
+    {
+      "block_id": "batch_move",
+      "category": "emitting",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "c": "loom_script.spec.c.dsl"
+        },
+        "code": {
+          "c": "loom_script.c"
+        }
+      },
+      "symbols_defined": [],
+      "symbols_used": [],
+      "status": "draft"
+    },
+    {
+      "block_id": "names",
+      "category": "declaration-only",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "c": "loom_script.spec.c.dsl"
+        },
+        "code": {}
+      },
+      "symbols_defined": [],
+      "symbols_used": [],
+      "status": "draft"
+    },
+    {
+      "block_id": "lua_vm",
+      "category": "emitting",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "c": "loom_script.spec.c.dsl"
+        },
+        "code": {
+          "c": "loom_script.c"
+        }
+      },
+      "symbols_defined": [
+        "vm"
+      ],
+      "symbols_used": [],
+      "status": "draft"
+    }
+  ]
+}

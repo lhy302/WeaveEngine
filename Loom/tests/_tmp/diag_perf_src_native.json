@@ -1,0 +1,956 @@
+{
+  "side": "src_native",
+  "base": "D:\\my-project\\Loom(py源代码-工作区)\\Loom",
+  "scene": "D:\\my-project\\Loom(py源代码-工作区)\\Loom\\保存\\压测500混合.json",
+  "env_LOOM_PROFILE": "1",
+  "env_LOOM_NO_NUMBA": null,
+  "cmd": [
+    "C:\\Users\\<USER>\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+    "-u",
+    "D:\\my-project\\Loom(py源代码-工作区)\\Loom\\Loom.py",
+    "--open",
+    "D:\\my-project\\Loom(py源代码-工作区)\\Loom\\保存\\压测500混合.json",
+    "--agent"
+  ],
+  "started": "01:11:58",
+  "edit_models": 501,
+  "edit_settings_readback": {
+    "gui": "LoomGUI",
+    "save_dir": "",
+    "parallel_enable": true,
+    "script_cores": 4,
+    "show_grid": true,
+    "fps_limit": "unlimited",
+    "precise_limit": true,
+    "cam_speed": 1.0,
+    "gravity": -9.8,
+    "logic_fps": 30,
+    "interp_mode": "interpolate",
+    "frame_buffer_tps": false,
+    "frame_buffer_fps": false,
+    "render_api": "vulkan",
+    "physics_fps": 30
+  },
+  "edit_samples": [
+    {
+      "t": 1788714727.2669537,
+      "fps": 163,
+      "tps": 0.0,
+      "jit_std": 10.31428111391907,
+      "jit_max": 116.25194549560547,
+      "clock": {
+        "logic_fps": 30.0,
+        "alpha": 0.0,
+        "steps": 0,
+        "phys_steps": 0
+      },
+      "frame_buffer": {
+        "enabled": false,
+        "outstanding": 0,
+        "max_depth": 2,
+        "prefetches": 0,
+        "hits": 0,
+        "rejected": 0
+      },
+      "render_buffer": {
+        "enabled": false,
+        "fps_limit": null,
+        "state": "idle",
+        "preframes": 0,
+        "blit_hits": 0,
+        "rejected": 0
+      },
+      "stage_times": {
+        "shadow_prep": 1461.6413116455078,
+        "world_matrices": 1117.896318435669,
+        "aabbs": 975.1052856445312,
+        "shadow_cornerfill": 295.424222946167,
+        "shadow_matmul": 124.31144714355469,
+        "buckets": 15.080928802490234,
+        "interp": 2.0067691802978516
+      }
+    },
+    {
+      "t": 1788714729.281387,
+      "fps": 170,
+      "tps": 0.0,
+      "jit_std": 1.2504333514539063,
+      "jit_max": 11.000871658325195,
+      "clock": {
+        "logic_fps": 30.0,
+        "alpha": 0.0,
+        "steps": 0,
+        "phys_steps": 0
+      },
+      "frame_buffer": {
+        "enabled": false,
+        "outstanding": 0,
+        "max_depth": 2,
+        "prefetches": 0,
+        "hits": 0,
+        "rejected": 0
+      },
+      "render_buffer": {
+        "enabled": false,
+        "fps_limit": null,
+        "state": "idle",
+        "preframes": 0,
+        "blit_hits": 0,
+        "rejected": 0
+      },
+      "stage_times": {
+        "shadow_prep": 1923.694372177124,
+        "world_matrices": 1381.1423778533936,
+        "aabbs": 999.7572898864746,
+        "shadow_cornerfill": 561.0368251800537,
+        "shadow_matmul": 233.08610916137695,
+        "buckets": 32.10806846618652,
+        "interp": 2.0067691802978516
+      }
+    },
+    {
+      "t": 1788714731.3014326,
+      "fps": 172,
+      "tps": 0.0,
+      "jit_std": 1.2118433563148274,
+      "jit_max": 10.631084442138672,
+      "clock": {
+        "logic_fps": 30.0,
+        "alpha": 0.0,
+        "steps": 0,
+        "phys_steps": 0
+      },
+      "frame_buffer": {
+        "enabled": false,
+        "outstanding": 0,
+        "max_depth": 2,
+        "prefetches": 0,
+        "hits": 0,
+        "rejected": 0
+      },
+      "render_buffer": {
+        "enabled": false,
+        "fps_limit": null,
+        "state": "idle",
+        "preframes": 0,
+        "blit_hits": 0,
+        "rejected": 0
+      },
+      "stage_times": {
+        "shadow_prep": 2397.38130569458,
+        "world_matrices": 1629.7082901000977,
+        "aabbs": 1029.1721820831299,
+        "shadow_cornerfill": 826.235294342041,
+        "shadow_matmul": 351.6707420349121,
+        "buckets": 39.19243812561035,
+        "interp": 2.0067691802978516
+      }
+    },
+    {
+      "t": 1788714733.3218799,
+      "fps": 167,
+      "tps": 0.0,
+      "jit_std": 1.6869737490828711,
+      "jit_max": 15.024185180664062,
+      "clock": {
+        "logic_fps": 30.0,
+        "alpha": 0.0,
+        "steps": 0,
+        "phys_steps": 0
+      },
+      "frame_buffer": {
+        "enabled": false,
+        "outstanding": 0,
+        "max_depth": 2,
+        "prefetches": 0,
+        "hits": 0,
+        "rejected": 0
+      },
+      "render_buffer": {
+        "enabled": false,
+        "fps_limit": null,
+        "state": "idle",
+        "preframes": 0,
+        "blit_hits": 0,
+        "rejected": 0
+      },
+      "stage_times": {
+        "shadow_prep": 2874.476671218872,
+        "world_matrices": 1867.473840713501,
+        "shadow_cornerfill": 1071.7930793762207,
+        "aabbs": 1060.6253147125244,
+        "shadow_matmul": 486.2961769104004,
+        "buckets": 50.2629280090332,
+        "interp": 2.0067691802978516
+      }
+    },
+    {
+      "t": 1788714735.346443,
+      "fps": 165,
+      "tps": 0.0,
+      "jit_std": 1.3823565315274402,
+      "jit_max": 11.751413345336914,
+      "clock": {
+        "logic_fps": 30.0,
+        "alpha": 0.0,
+        "steps": 0,
+        "phys_steps": 0
+      },
+      "frame_buffer": {
+        "enabled": false,
+        "outstanding": 0,
+        "max_depth": 2,
+        "prefetches": 0,
+        "hits": 0,
+        "rejected": 0
+      },
+      "render_buffer": {
+        "enabled": false,
+        "fps_limit": null,
+        "state": "idle",
+        "preframes": 0,
+        "blit_hits": 0,
+        "rejected": 0
+      },
+      "stage_times": {
+        "shadow_prep": 3324.5887756347656,
+        "world_matrices": 2127.840757369995,
+        "shadow_cornerfill": 1353.1575202941895,
+        "aabbs": 1078.7863731384277,
+        "shadow_matmul": 581.3987255096436,
+        "buckets": 60.40048599243164,
+        "interp": 2.0067691802978516
+      }
+    },
+    {
+      "t": 1788714737.366566,
+      "fps": 171,
+      "tps": 0.0,
+      "jit_std": 1.5224638738901648,
+      "jit_max": 11.023283004760742,
+      "clock": {
+        "logic_fps": 30.0,
+        "alpha": 0.0,
+        "steps": 0,
+        "phys_steps": 0
+      },
+      "frame_buffer": {
+        "enabled": false,
+        "outstanding": 0,
+        "max_depth": 2,
+        "prefetches": 0,
+        "hits": 0,
+        "rejected": 0
+      },
+      "render_buffer": {
+        "enabled": false,
+        "fps_limit": null,
+        "state": "idle",
+        "preframes": 0,
+        "blit_hits": 0,
+        "rejected": 0
+      },
+      "stage_times": {
+        "shadow_prep": 3793.8613891601562,
+        "world_matrices": 2369.6248531341553,
+        "shadow_cornerfill": 1612.3321056365967,
+        "aabbs": 1107.771396636963,
+        "shadow_matmul": 695.9574222564697,
+        "buckets": 76.93362236022949,
+        "interp": 2.0067691802978516
+      }
+    },
+    {
+      "t": 1788714739.3808024,
+      "fps": 165,
+      "tps": 0.0,
+      "jit_std": 1.2858202335576403,
+      "jit_max": 11.878490447998047,
+      "clock": {
+        "logic_fps": 30.0,
+        "alpha": 0.0,
+        "steps": 0,
+        "phys_steps": 0
+      },
+      "frame_buffer": {
+        "enabled": false,
+        "outstanding": 0,
+        "max_depth": 2,
+        "prefetches": 0,
+        "hits": 0,
+        "rejected": 0
+      },
+      "render_buffer": {
+        "enabled": false,
+        "fps_limit": null,
+        "state": "idle",
+        "preframes": 0,
+        "blit_hits": 0,
+        "rejected": 0
+      },
+      "stage_times": {
+        "shadow_prep": 4263.76748085022,
+        "world_matrices": 2626.0740756988525,
+        "shadow_cornerfill": 1886.699914932251,
+        "aabbs": 1125.1194477081299,
+        "shadow_matmul": 805.9530258178711,
+        "buckets": 94.39301490783691,
+        "interp": 2.0067691802978516
+      }
+    },
+    {
+      "t": 1788714741.4082685,
+      "fps": 170,
+      "tps": 0.0,
+      "jit_std": 1.2141527953074038,
+      "jit_max": 11.35110855102539,
+      "clock": {
+        "logic_fps": 30.0,
+        "alpha": 0.0,
+        "steps": 0,
+        "phys_steps": 0
+      },
+      "frame_buffer": {
+        "enabled": false,
+        "outstanding": 0,
+        "max_depth": 2,
+        "prefetches": 0,
+        "hits": 0,
+        "rejected": 0
+      },
+      "render_buffer": {
+        "enabled": false,
+        "fps_limit": null,
+        "state": "idle",
+        "preframes": 0,
+        "blit_hits": 0,
+        "rejected": 0
+      },
+      "stage_times": {
+        "shadow_prep": 4747.312784194946,
+        "world_matrices": 2882.3649883270264,
+        "shadow_cornerfill": 2172.8034019470215,
+        "aabbs": 1148.611307144165,
+        "shadow_matmul": 915.7431125640869,
+        "buckets": 113.04569244384766,
+        "interp": 2.0067691802978516
+      }
+    }
+  ],
+  "edit_fps_mean": 167.9,
+  "play_cmd": {
+    "playing": true
+  },
+  "play_samples": [
+    {
+      "t": 1788714750.1154156,
+      "fps": 39,
+      "tps": 29.983375944910076,
+      "jit_std": 10.782872697513067,
+      "jit_max": 42.000532150268555,
+      "clock": {
+        "logic_fps": 30.0,
+        "alpha": 0.1444,
+        "steps": 1,
+        "phys_steps": 2
+      },
+      "frame_buffer": {
+        "enabled": false,
+        "outstanding": 0,
+        "max_depth": 2,
+        "prefetches": 0,
+        "hits": 0,
+        "rejected": 0
+      },
+      "render_buffer": {
+        "enabled": false,
+        "fps_limit": null,
+        "state": "idle",
+        "preframes": 0,
+        "blit_hits": 0,
+        "rejected": 0
+      },
+      "stage_times": {
+        "shadow_prep": 5295.082569122314,
+        "logic_step": 4173.76708984375,
+        "world_matrices": 3503.2010078430176,
+        "aabbs": 2752.2497177124023,
+        "shadow_cornerfill": 2577.1267414093018,
+        "pipe_wait": 1560.704231262207,
+        "collide_pairs": 1218.2707786560059,
+        "shadow_matmul": 1091.277837753296,
+        "buckets": 400.38347244262695,
+        "interp": 256.1159133911133,
+        "shadow_bounds": 222.78237342834473,
+        "dispatch": 53.55048179626465
+      }
+    },
+    {
+      "t": 1788714752.1527152,
+      "fps": 42,
+      "tps": 29.96544293225686,
+      "jit_std": 11.160505421974982,
+      "jit_max": 44.00348663330078,
+      "clock": {
+        "logic_fps": 30.0,
+        "alpha": 0.4445,
+        "steps": 1,
+        "phys_steps": 2
+      },
+      "frame_buffer": {
+        "enabled": false,
+        "outstanding": 0,
+        "max_depth": 2,
+        "prefetches": 0,
+        "hits": 0,
+        "rejected": 0
+      },
+      "render_buffer": {
+        "enabled": false,
+        "fps_limit": null,
+        "state": "idle",
+        "preframes": 0,
+        "blit_hits": 0,
+        "rejected": 0
+      },
+      "stage_times": {
+        "logic_step": 5494.549989700317,
+        "shadow_prep": 5319.097280502319,
+        "world_matrices": 3653.456926345825,
+        "aabbs": 3378.4518241882324,
+        "shadow_cornerfill": 2629.223585128784,
+        "pipe_wait": 2110.3291511535645,
+        "collide_pairs": 1461.5371227264404,
+        "shadow_matmul": 1107.4597835540771,
+        "buckets": 512.2294425964355,
+        "interp": 349.14636611938477,
+        "shadow_bounds": 299.2563247680664,
+        "dispatch": 76.56526565551758
+      }
+    },
+    {
+      "t": 1788714754.177171,
+      "fps": 38,
+      "tps": 30.14642687387313,
+      "jit_std": 10.840045378710556,
+      "jit_max": 44.00348663330078,
+      "clock": {
+        "logic_fps": 30.0,
+        "alpha": 0.0888,
+        "steps": 1,
+        "phys_steps": 2
+      },
+      "frame_buffer": {
+        "enabled": false,
+        "outstanding": 0,
+        "max_depth": 2,
+        "prefetches": 0,
+        "hits": 0,
+        "rejected": 0
+      },
+      "render_buffer": {
+        "enabled": false,
+        "fps_limit": null,
+        "state": "idle",
+        "preframes": 0,
+        "blit_hits": 0,
+        "rejected": 0
+      },
+      "stage_times": {
+        "logic_step": 6843.989133834839,
+        "shadow_prep": 5338.049411773682,
+        "aabbs": 4027.468204498291,
+        "world_matrices": 3798.466205596924,
+        "shadow_cornerfill": 2680.8488368988037,
+        "pipe_wait": 2671.128988265991,
+        "collide_pairs": 1705.4100036621094,
+        "shadow_matmul": 1123.2643127441406,
+        "buckets": 613.1613254547119,
+        "interp": 437.5588893890381,
+        "shadow_bounds": 377.90727615356445,
+        "dispatch": 94.51770782470703
+      }
+    },
+    {
+      "t": 1788714756.2096515,
+      "fps": 35,
+      "tps": 30.022432876738478,
+      "jit_std": 9.26723629855532,
+      "jit_max": 41.346073150634766,
+      "clock": {
+        "logic_fps": 30.0,
+        "alpha": 0.1226,
+        "steps": 1,
+        "phys_steps": 2
+      },
+      "frame_buffer": {
+        "enabled": false,
+        "outstanding": 0,
+        "max_depth": 2,
+        "prefetches": 0,
+        "hits": 0,
+        "rejected": 0
+      },
+      "render_buffer": {
+        "enabled": false,
+        "fps_limit": null,
+        "state": "idle",
+        "preframes": 0,
+        "blit_hits": 0,
+        "rejected": 0
+      },
+      "stage_times": {
+        "logic_step": 8212.151765823364,
+        "shadow_prep": 5357.064008712769,
+        "aabbs": 4704.551219940186,
+        "world_matrices": 3930.999994277954,
+        "pipe_wait": 3231.8313121795654,
+        "shadow_cornerfill": 2727.8995513916016,
+        "collide_pairs": 1948.5318660736084,
+        "shadow_matmul": 1144.8144912719727,
+        "buckets": 708.4779739379883,
+        "interp": 523.0364799499512,
+        "shadow_bounds": 460.7229232788086,
+        "dispatch": 113.53230476379395
+      }
+    },
+    {
+      "t": 1788714758.2427874,
+      "fps": 40,
+      "tps": 30.04315615077219,
+      "jit_std": 10.283007916894078,
+      "jit_max": 45.00126838684082,
+      "clock": {
+        "logic_fps": 30.0,
+        "alpha": 0.1301,
+        "steps": 1,
+        "phys_steps": 2
+      },
+      "frame_buffer": {
+        "enabled": false,
+        "outstanding": 0,
+        "max_depth": 2,
+        "prefetches": 0,
+        "hits": 0,
+        "rejected": 0
+      },
+      "render_buffer": {
+        "enabled": false,
+        "fps_limit": null,
+        "state": "idle",
+        "preframes": 0,
+        "blit_hits": 0,
+        "rejected": 0
+      },
+      "stage_times": {
+        "logic_step": 9520.71499824524,
+        "shadow_prep": 5376.082897186279,
+        "aabbs": 5334.711074829102,
+        "world_matrices": 4080.14178276062,
+        "pipe_wait": 3780.156373977661,
+        "shadow_cornerfill": 2777.7583599090576,
+        "collide_pairs": 2188.535213470459,
+        "shadow_matmul": 1161.475658416748,
+        "buckets": 820.6064701080322,
+        "interp": 613.410234451294,
+        "shadow_bounds": 534.9752902984619,
+        "dispatch": 131.54959678649902
+      }
+    },
+    {
+      "t": 1788714760.277508,
+      "fps": 39,
+      "tps": 30.148897010594837,
+      "jit_std": 11.002476032291375,
+      "jit_max": 45.003414154052734,
+      "clock": {
+        "logic_fps": 30.0,
+        "alpha": 0.1112,
+        "steps": 1,
+        "phys_steps": 2
+      },
+      "frame_buffer": {
+        "enabled": false,
+        "outstanding": 0,
+        "max_depth": 2,
+        "prefetches": 0,
+        "hits": 0,
+        "rejected": 0
+      },
+      "render_buffer": {
+        "enabled": false,
+        "fps_limit": null,
+        "state": "idle",
+        "preframes": 0,
+        "blit_hits": 0,
+        "rejected": 0
+      },
+      "stage_times": {
+        "logic_step": 10846.524238586426,
+        "aabbs": 5972.808361053467,
+        "shadow_prep": 5406.027317047119,
+        "pipe_wait": 4321.836233139038,
+        "world_matrices": 4227.359771728516,
+        "shadow_cornerfill": 2817.4753189086914,
+        "collide_pairs": 2431.642770767212,
+        "shadow_matmul": 1191.751480102539,
+        "buckets": 917.0324802398682,
+        "interp": 704.8983573913574,
+        "shadow_bounds": 615.1103973388672,
+        "dispatch": 159.49368476867676
+      }
+    },
+    {
+      "t": 1788714762.314241,
+      "fps": 39,
+      "tps": 30.04868408028306,
+      "jit_std": 11.027064795863634,
+      "jit_max": 39.550065994262695,
+      "clock": {
+        "logic_fps": 30.0,
+        "alpha": 0.1404,
+        "steps": 1,
+        "phys_steps": 2
+      },
+      "frame_buffer": {
+        "enabled": false,
+        "outstanding": 0,
+        "max_depth": 2,
+        "prefetches": 0,
+        "hits": 0,
+        "rejected": 0
+      },
+      "render_buffer": {
+        "enabled": false,
+        "fps_limit": null,
+        "state": "idle",
+        "preframes": 0,
+        "blit_hits": 0,
+        "rejected": 0
+      },
+      "stage_times": {
+        "logic_step": 12170.420169830322,
+        "aabbs": 6596.606969833374,
+        "shadow_prep": 5427.005052566528,
+        "pipe_wait": 4872.608184814453,
+        "world_matrices": 4374.175310134888,
+        "shadow_cornerfill": 2869.3320751190186,
+        "collide_pairs": 2673.98738861084,
+        "shadow_matmul": 1205.8055400848389,
+        "buckets": 1020.9634304046631,
+        "interp": 802.9642105102539,
+        "shadow_bounds": 695.1658725738525,
+        "dispatch": 180.47142028808594
+      }
+    },
+    {
+      "t": 1788714764.3455677,
+      "fps": 39,
+      "tps": 30.05970101556956,
+      "jit_std": 10.50012706004364,
+      "jit_max": 40.9998893737793,
+      "clock": {
+        "logic_fps": 30.0,
+        "alpha": 0.1786,
+        "steps": 1,
+        "phys_steps": 2
+      },
+      "frame_buffer": {
+        "enabled": false,
+        "outstanding": 0,
+        "max_depth": 2,
+        "prefetches": 0,
+        "hits": 0,
+        "rejected": 0
+      },
+      "render_buffer": {
+        "enabled": false,
+        "fps_limit": null,
+        "state": "idle",
+        "preframes": 0,
+        "blit_hits": 0,
+        "rejected": 0
+      },
+      "stage_times": {
+        "logic_step": 13524.697303771973,
+        "aabbs": 7235.176801681519,
+        "shadow_prep": 5449.999809265137,
+        "pipe_wait": 5439.072847366333,
+        "world_matrices": 4517.117500305176,
+        "shadow_cornerfill": 2917.1178340911865,
+        "collide_pairs": 2915.3378009796143,
+        "shadow_matmul": 1227.7474403381348,
+        "buckets": 1114.1963005065918,
+        "interp": 892.038106918335,
+        "shadow_bounds": 781.2471389770508,
+        "dispatch": 203.46617698669434
+      }
+    },
+    {
+      "t": 1788714766.3758178,
+      "fps": 38,
+      "tps": 30.045559818899356,
+      "jit_std": 10.508287374370433,
+      "jit_max": 37.99700736999512,
+      "clock": {
+        "logic_fps": 30.0,
+        "alpha": 0.0896,
+        "steps": 1,
+        "phys_steps": 2
+      },
+      "frame_buffer": {
+        "enabled": false,
+        "outstanding": 0,
+        "max_depth": 2,
+        "prefetches": 0,
+        "hits": 0,
+        "rejected": 0
+      },
+      "render_buffer": {
+        "enabled": false,
+        "fps_limit": null,
+        "state": "idle",
+        "preframes": 0,
+        "blit_hits": 0,
+        "rejected": 0
+      },
+      "stage_times": {
+        "logic_step": 14857.191801071167,
+        "aabbs": 7884.487867355347,
+        "pipe_wait": 5989.433288574219,
+        "shadow_prep": 5472.694396972656,
+        "world_matrices": 4668.335914611816,
+        "collide_pairs": 3158.7910652160645,
+        "shadow_cornerfill": 2967.8168296813965,
+        "shadow_matmul": 1246.8242645263672,
+        "buckets": 1218.573808670044,
+        "interp": 981.0411930084229,
+        "shadow_bounds": 858.095645904541,
+        "dispatch": 224.15971755981445
+      }
+    },
+    {
+      "t": 1788714768.4088776,
+      "fps": 41,
+      "tps": 30.1493773965065,
+      "jit_std": 10.76923832939561,
+      "jit_max": 38.58137130737305,
+      "clock": {
+        "logic_fps": 30.0,
+        "alpha": 0.0994,
+        "steps": 1,
+        "phys_steps": 2
+      },
+      "frame_buffer": {
+        "enabled": false,
+        "outstanding": 0,
+        "max_depth": 2,
+        "prefetches": 0,
+        "hits": 0,
+        "rejected": 0
+      },
+      "render_buffer": {
+        "enabled": false,
+        "fps_limit": null,
+        "state": "idle",
+        "preframes": 0,
+        "blit_hits": 0,
+        "rejected": 0
+      },
+      "stage_times": {
+        "logic_step": 16189.671277999878,
+        "aabbs": 8510.867357254028,
+        "pipe_wait": 6543.997287750244,
+        "shadow_prep": 5488.685369491577,
+        "world_matrices": 4813.914775848389,
+        "collide_pairs": 3396.798849105835,
+        "shadow_cornerfill": 3011.896848678589,
+        "buckets": 1325.4544734954834,
+        "shadow_matmul": 1271.559715270996,
+        "interp": 1082.707166671753,
+        "shadow_bounds": 941.1470890045166,
+        "dispatch": 240.15069007873535
+      }
+    },
+    {
+      "t": 1788714770.4398751,
+      "fps": 37,
+      "tps": 30.079339302742337,
+      "jit_std": 10.989819015330003,
+      "jit_max": 39.00575637817383,
+      "clock": {
+        "logic_fps": 30.0,
+        "alpha": 0.0596,
+        "steps": 1,
+        "phys_steps": 2
+      },
+      "frame_buffer": {
+        "enabled": false,
+        "outstanding": 0,
+        "max_depth": 2,
+        "prefetches": 0,
+        "hits": 0,
+        "rejected": 0
+      },
+      "render_buffer": {
+        "enabled": false,
+        "fps_limit": null,
+        "state": "idle",
+        "preframes": 0,
+        "blit_hits": 0,
+        "rejected": 0
+      },
+      "stage_times": {
+        "logic_step": 17531.247854232788,
+        "aabbs": 9160.926818847656,
+        "pipe_wait": 7097.931861877441,
+        "shadow_prep": 5507.71689414978,
+        "world_matrices": 4961.938142776489,
+        "collide_pairs": 3631.5619945526123,
+        "shadow_cornerfill": 3052.0694255828857,
+        "buckets": 1429.3882846832275,
+        "shadow_matmul": 1299.3698120117188,
+        "interp": 1178.7009239196777,
+        "shadow_bounds": 1022.8731632232666,
+        "dispatch": 259.1822147369385
+      }
+    },
+    {
+      "t": 1788714772.4749541,
+      "fps": 41,
+      "tps": 30.078119335059746,
+      "jit_std": 10.462419464553232,
+      "jit_max": 39.96872901916504,
+      "clock": {
+        "logic_fps": 30.0,
+        "alpha": 0.0817,
+        "steps": 1,
+        "phys_steps": 2
+      },
+      "frame_buffer": {
+        "enabled": false,
+        "outstanding": 0,
+        "max_depth": 2,
+        "prefetches": 0,
+        "hits": 0,
+        "rejected": 0
+      },
+      "render_buffer": {
+        "enabled": false,
+        "fps_limit": null,
+        "state": "idle",
+        "preframes": 0,
+        "blit_hits": 0,
+        "rejected": 0
+      },
+      "stage_times": {
+        "logic_step": 18870.817184448242,
+        "aabbs": 9794.215202331543,
+        "pipe_wait": 7650.148868560791,
+        "shadow_prep": 5531.925439834595,
+        "world_matrices": 5102.720499038696,
+        "collide_pairs": 3875.086545944214,
+        "shadow_cornerfill": 3096.2603092193604,
+        "buckets": 1529.674768447876,
+        "shadow_matmul": 1322.524070739746,
+        "interp": 1268.1846618652344,
+        "shadow_bounds": 1104.5176982879639,
+        "dispatch": 283.39076042175293
+      }
+    }
+  ],
+  "play_fps_mean": 39.0,
+  "play_tps_mean": 30.06,
+  "play_stage_account": {
+    "logic_step": {
+      "ms_per_wall_s": 657.31,
+      "ms_per_frame": 16.908,
+      "ms_per_logic": 21.861
+    },
+    "aabbs": {
+      "ms_per_wall_s": 314.95,
+      "ms_per_frame": 8.104,
+      "ms_per_logic": 10.475
+    },
+    "pipe_wait": {
+      "ms_per_wall_s": 272.35,
+      "ms_per_frame": 7.005,
+      "ms_per_logic": 9.058
+    },
+    "collide_pairs": {
+      "ms_per_wall_s": 118.82,
+      "ms_per_frame": 3.056,
+      "ms_per_logic": 3.952
+    },
+    "world_matrices": {
+      "ms_per_wall_s": 71.54,
+      "ms_per_frame": 1.839,
+      "ms_per_logic": 2.379
+    },
+    "buckets": {
+      "ms_per_wall_s": 50.5,
+      "ms_per_frame": 1.299,
+      "ms_per_logic": 1.68
+    },
+    "interp": {
+      "ms_per_wall_s": 45.26,
+      "ms_per_frame": 1.163,
+      "ms_per_logic": 1.505
+    },
+    "shadow_bounds": {
+      "ms_per_wall_s": 39.43,
+      "ms_per_frame": 1.014,
+      "ms_per_logic": 1.312
+    },
+    "shadow_cornerfill": {
+      "ms_per_wall_s": 23.22,
+      "ms_per_frame": 0.597,
+      "ms_per_logic": 0.772
+    },
+    "shadow_prep": {
+      "ms_per_wall_s": 10.59,
+      "ms_per_frame": 0.272,
+      "ms_per_logic": 0.352
+    },
+    "shadow_matmul": {
+      "ms_per_wall_s": 10.34,
+      "ms_per_frame": 0.266,
+      "ms_per_logic": 0.344
+    },
+    "dispatch": {
+      "ms_per_wall_s": 10.28,
+      "ms_per_frame": 0.264,
+      "ms_per_logic": 0.342
+    }
+  },
+  "edit_stage_account": {
+    "shadow_prep": {
+      "ms_per_wall_s": 232.34,
+      "ms_per_frame": 1.382
+    },
+    "shadow_cornerfill": {
+      "ms_per_wall_s": 132.75,
+      "ms_per_frame": 0.79
+    },
+    "world_matrices": {
+      "ms_per_wall_s": 124.78,
+      "ms_per_frame": 0.743
+    },
+    "shadow_matmul": {
+      "ms_per_wall_s": 55.97,
+      "ms_per_frame": 0.333
+    },
+    "aabbs": {
+      "ms_per_wall_s": 12.27,
+      "ms_per_frame": 0.073
+    },
+    "buckets": {
+      "ms_per_wall_s": 6.93,
+      "ms_per_frame": 0.041
+    },
+    "interp": {
+      "ms_per_wall_s": 0.0,
+      "ms_per_frame": 0.0
+    }
+  }
+}

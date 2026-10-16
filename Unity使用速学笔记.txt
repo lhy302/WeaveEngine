@@ -1,0 +1,896 @@
+﻿====================================================================
+ Unity 使用速学笔记
+ （根据 unitykit.cn《Unity游戏开发者联盟》教程整理，非自编）
+====================================================================
+来源站点：https://www.unitykit.cn/
+教程版本基线：Unity 6（6000.3.11f1 LTS），2026 年录制
+说明：本文按站点《UnityLesson》课程顺序，把每课要点和关键代码
+摘出来整理成速学笔记。每个主题都标了对应课程名，看不懂的地方
+回站里搜同名课看原视频/原文。带 参考 的代码都是站内原文示例。
+
+目录
+ 01. 课程地图：这个站教什么、怎么排的
+ 02. 引擎是什么（课：1.引擎是什么、2.初识Unity引擎）
+ 03. 安装 + 建项目 + 项目文件（课：5、6、7）
+ 04. 编辑器界面：窗口/菜单/快捷键/右键创建（课：8、9、10、12）
+ 05. 核心思想：对象组件系统（课：000.对象组件系统）
+ 06. 坐标与变换（课：005.坐标与变换系统）
+ 07. 脚本系统（课：14.初识脚本系统、14-0.什么是API、001.深入理解脚本系统）
+ 08. 输入系统（课：006.输入系统、输入1/2/3）
+ 09. 物理系统（课：007.物理系统、物理1.物理系统）
+ 10. 相机（课：13.初识Camera摄像机）
+ 11. 场景系统（课：002.场景系统、场景1.场景是什么）
+ 12. 资源系统（课：003.资源系统）
+ 13. 预制体系统（课：004.预制体系统）
+ 14. 渲染系统（课：009.渲染系统）
+ 15. 数据与存档（课：数据2.PlayerPrefs）
+ 16. 构建发布（课：016.构建发布系统）
+ 17. 实战项目：程序化赛车（Gamecode/ProceduralRacing）
+ 18. 主线之后：C#基础 / 其他子系统 / 面试题库 / Offer案例
+ 19. 一周学习路径（照这个顺序走最快）
+
+
+====================================================================
+01. 课程地图：这个站教什么、怎么排的
+====================================================================
+站点结构（约 400 页）：
+  /Lesson/UnityLesson/    核心教程主线
+     入门主线（0~42 课）       手把手：装环境→建项目→认界面→写脚本→UI
+     系统总览（000~016 课）    每课讲一个引擎系统
+     子系统目录                CSharp / UI / Physics / Input / Scene /
+                               Animator / Audio / Particle / NavAI /
+                               Data / Building
+  /Gamecode/ProceduralRacing/  实战项目：无尽隧道赛车（有源码）
+  /interview/xz/               面试题库 135+ 篇（C#/Unity/C++/图形学/算法）
+  /getoffer/                   大厂 Offer 案例、求职面经
+
+建议阅读顺序（站内推荐）：
+  1) 入门主线 0~10：装环境、认界面
+  2) 11~14：导资源、建对象、写第一个脚本
+  3) 000 对象组件、001 脚本系统：把核心思想吃透
+  4) 005 坐标 / 006 输入 / 007 物理：玩法三件套
+  5) 想深挖哪块，进对应子系统目录
+  6) 全程配合 实战项目 练手
+
+
+====================================================================
+02. 引擎是什么（课：1.引擎是什么、2.初识Unity引擎）
+====================================================================
+游戏引擎 = 制作游戏的底层开发框架 + 可视化工具箱。
+帮你处理好：画面渲染、物理模拟（重力/碰撞）、声音输入（键盘/手柄）、
+动画、脚本逻辑、场景编辑、资源管理。你专注玩法、关卡、角色、剧情。
+
+没引擎 vs 有引擎（站内原表）：
+  拖个Cube进场景          VS  写几百行渲染代码才看到一个方块
+  挂个Collider            VS  手写AABB/SAT碰撞检测
+  调参数就行              VS  改一行可能重编半小时
+
+常见引擎：
+  Unity       手游、独立游戏多（本教程学这个）
+  Unreal      3A 大作、高画质
+  Cocos       2D 游戏、H5 引擎
+  Godot       开源轻量
+  3A 自研     大厂为特定游戏极致优化、能改源码
+
+重点误区（课2）：
+  Unity ≠ 只做手游。Unity 本质是实时 3D 引擎（Real-Time 3D Engine），
+  游戏只是最大应用场景。还能做：AR/VR/MR/XR、数字孪生、汽车行业、
+  建筑可视化、影视预演、仿真系统、教育软件、元宇宙/虚拟空间、AI 应用。
+
+
+====================================================================
+03. 安装 + 建项目 + 项目文件（课：5、6、7）
+====================================================================
+硬件建议（课5 原文）：CPU i5-14600KF；内存 16G+；独立显卡（3060 档）；
+硬盘固态 1TB。
+
+安装步骤：
+  1. 装 Unity Hub（官网 unity.com/download）
+     - 注意：装 Unity 6 需要科学上网；没条件用官方给的百度网盘离线包
+     - 在 Hub 里装 汉化包，打开 Unity 后 Edit>Preferences 里选 简体中文
+  2. 在 Hub 里装 Unity 6.3.x（教程用 6000.3.11f1，建议装同版本，
+     这样按钮位置、默认设置和教程一致；学通了再随便换版本）
+  3. 装代码编辑器：Rider（站里推荐，2026.1.1）或 VS Code
+  4. 装浏览器翻译插件（沉浸式翻译），方便看国际文档
+
+创建项目（课6）：
+  1. Unity Hub > New Project
+  2. 选模板：SRP Universal 3D（即 URP 模板，新项目默认推荐）
+  3. 输入项目名、选位置、创建
+  第一次创建较慢很正常。
+
+Unity 项目文件（课7，重点记）：
+  🔴 核心三件套（发给别人只带这三个）：
+     Assets          所有素材/脚本/场景，天天打交道
+     ProjectSettings 全局配置（输入、物理、画质、标签层）
+     Packages        依赖的 UPM 包及版本
+  🟡 自动生成（了解即可，体积大，别发）：
+     Library  Unity 本地缓存（导入中间文件）
+     obj      脚本编译中间文件（出问题删了重建）
+     Logs     日志和崩溃记录
+  🟢 个人/临时（可忽略）：
+     UserSettings  个人编辑器布局
+     Temp          临时文件，重启自动清
+  .gitignore 一般只留 Assets、ProjectSettings、Packages。
+
+
+====================================================================
+04. 编辑器界面（课：8.菜单栏介绍、9.窗口介绍、10.快捷键、12.创建游戏对象）
+====================================================================
+七大窗口（课9）：
+  Hierarchy 层级窗口   展示管理当前场景所有对象，点选可编辑
+  Scene     场景窗口   Unity 的 3D 工作区，摆物体、调视角、预览光照
+  Inspector 检查器窗口  显示并编辑当前选中对象的详细属性（组件参数）
+  Game      游戏窗口   模拟玩家最终看到的画面和屏幕比例，测视角/UI
+  Simulator 模拟器窗口  带手机外观框架，预览移动端效果和适配
+  Project   项目窗口   整个项目的资源管理中心（场景/脚本/贴图/模型）
+  Console   控制台窗口  日志/警告/报错，出 Bug 先看这里
+  顶部工具栏右侧 Layout 下拉：切换/保存/重置编辑器布局（默认、2x3 等）
+
+菜单栏要点（课8）：
+  File    新建场景Ctrl+N / 保存场景Ctrl+S / 构建配置文件Ctrl+Shift+B
+  Edit    复制对象Ctrl+D / 运行模式Ctrl+P / 项目设置(输入/物理/画质/标签层)
+  Assets  导入新资产 / 刷新Ctrl+R / 打开C#项目
+  GameObject  创建空对象Ctrl+Shift+N / 3D对象 / 灯光 / 摄像机 / UI(Canvas)
+  Component   物理(Rigidbody/Collider) / 2D物理 / 脚本Scripts / UI(Canvas)
+  Window  布局 / 面板 / 包管理(Package Management)
+  记住：Scene 是场景文件，Project 是资源仓库，两个概念别混。
+
+快捷键（课10 原文）：
+  Ctrl+S 保存   Ctrl+D 拷贝副本   Ctrl+C/V 复制粘贴   Ctrl+A 全选
+  Alt+鼠标左键    环绕观察游戏物体
+  鼠标右键        原地环绕观察
+  鼠标中键        移动视角
+  滚轮            切换视野远近
+  右键+W/S/A/D    前后左右移动观察视角
+  右键+Q/E        下/上移动观察
+  右键+Shift+滚轮 改变移动观察速度
+  选中窗口+Shift+空格  窗口撑满全屏
+
+Hierarchy 右键菜单（课12）：
+  上半部分=操作已有对象：Cut/Copy/Paste/选择性粘贴/重命名/副本Ctrl+D/Delete
+  下半部分=创建新对象：
+     创建空对象、2D对象、3D对象(Cube/Sphere/Capsule/Plane/Terrain)、
+     效果(粒子)、灯光(Directional/Point/Spot/Area)、音频、
+     UI(Canvas)、AI(导航)、渲染、体积(Volume后处理)、摄像机
+  最常用：创建空对象、3D对象、灯光、摄像机、UI(Canvas)。
+
+
+====================================================================
+05. 核心思想：对象组件系统（课：000.对象组件系统）
+====================================================================
+一句话（站内原句）：
+  Unity 里的每一个东西都是一个 GameObject，但 GameObject 本身几乎
+  什么都不会做；它靠身上挂的 Component 获得能力。
+
+例如一个玩家角色，不是一个"玩家类"，而是一棵组件树：
+  Player GameObject
+  ├─ Transform        位置、旋转、缩放
+  ├─ SpriteRenderer   负责显示图片
+  ├─ Rigidbody2D      负责物理运动
+  ├─ Collider2D       负责碰撞范围
+  ├─ Animator         负责动画
+  ├─ AudioSource      负责播放声音
+  └─ PlayerController 你自己写的控制脚本
+核心思想：组合，而不是单纯继承。
+
+1. GameObject = 对象容器
+   可以是玩家/敌人/相机/灯光/子弹/地面/UI按钮/空对象/出生点。
+   注意：GameObject 不一定看得见。空对象（GameObject>Create Empty）
+   常用来当：出生点、摄像机跟随目标、物体分组、脚本管理器、关卡控制器。
+
+2. Component = 能力模块
+   一个 Cube 默认组件：
+     Transform        位置/旋转/缩放
+     Mesh Filter      用什么模型形状
+     Mesh Renderer    怎么被渲染出来
+     Box Collider     盒子碰撞体
+   删掉 Mesh Renderer → Cube 还在但看不见；
+   删掉 Box Collider → 还看得见但不能正常碰撞；
+   加 Rigidbody → 受重力、物理影响。
+   通过加/删/调组件参数改变对象能力。
+
+3. Transform 必带、删不掉
+   position 位置 / rotation 旋转 / scale 缩放
+   3D 轴：X左右、Y上下、Z前后。
+   transform 是脚本所挂对象的 Transform：
+     transform.position = new Vector3(0, 1, 0);
+
+4. 父子关系
+   Hierarchy = GameObject 父子树。子对象位置/旋转/缩放受父对象影响。
+   position = 世界坐标；localPosition = 相对父对象坐标。
+   例：Player.position=(10,0,0)，Weapon.localPosition=(1,0,0)，
+   Weapon 世界位置 ≈ (11,0,0)。
+
+5. 脚本也是组件
+   继承 MonoBehaviour 的类就是组件，挂到 GameObject 上才运行。
+   (见 07 节脚本系统)
+
+6. 组件互相访问
+   GetComponent<T>()            自己身上的组件
+   GetComponentInChildren<T>()  子对象里的组件
+   GetComponentInParent<T>()    父对象里的组件
+   Inspector 拖拽引用           最推荐新手
+   Find()                       能用但别常用
+
+7. Inspector = 组件参数编辑器
+   [SerializeField] private float speed = 5f;
+   → 代码里保持 private，Inspector 里还能调参数。推荐新手多用。
+
+8. 新手最容易混的（课000 原文）：
+   GameObject 是对象，Component 是对象身上的功能。
+   Transform 不是"位置属性"，它是组件（里面含 position/rotation/scale）。
+   脚本不是独立程序，要挂到对象上才随生命周期运行。
+   看不见的对象也很有用。
+   一个对象不要什么都负责（GameManager 不该同时管移动+AI+UI+存档）。
+
+记住一句话：GameObject 负责"是谁"，Component 负责"能做什么"，
+Transform 负责"在哪里"。
+
+练习清单（课000）：
+  建 Cube 观察默认组件 → 删 Mesh Renderer 看消失 → 加 Rigidbody 看下落
+  → 建空对象 → 建父子对象看跟随 → 写脚本移动 → GetComponent
+  → [SerializeField] 调参 → 做简单 Player(显示/移动/碰撞/跳跃) → 做成 Prefab。
+
+
+====================================================================
+06. 坐标与变换（课：005.坐标与变换系统）
+====================================================================
+每个 GameObject 的 Transform 负责：Position 位置 / Rotation 旋转 / Scale 缩放。
+坐标轴：X左右(红)、Y上下(绿)、Z前后(蓝)。
+
+最容易混的：
+  transform.position       // 世界坐标
+  transform.localPosition // 相对父对象的局部坐标
+
+常用代码（站内）：
+  transform.position = new Vector3(0, 1, 0);
+  transform.localScale = new Vector3(2, 2, 2);
+  transform.rotation = Quaternion.Euler(0, 90, 0);
+
+  Vector3 world = transform.TransformPoint(local);       // 局部→世界
+  Vector3 local = transform.InverseTransformPoint(world); // 世界→局部
+
+
+====================================================================
+07. 脚本系统（课：14、14-0.什么是API、001.深入理解脚本系统）
+====================================================================
+核心观念：
+  Unity 不是"写个 main 函数从 main 开始跑"。脚本 = 挂在 GameObject
+  上的 C# 组件，Unity 在合适时机自动调用里面的函数。
+  继承 MonoBehaviour → 才能挂到对象上，才有生命周期/GetComponent 等能力。
+
+API 是什么（课14-0）：别人写好的功能入口。
+  你写代码 → 调用 API → Unity 内部真正执行。
+  例：Debug.Log("你好") / SceneManager.LoadScene("Game") / Instantiate(prefab)。
+  学 Unity 编程 = 知道有哪些 API + 什么时候用 + 怎么正确调用。
+
+生命周期（顺序，课001）：
+  Awake()     对象加载时最早执行 → 初始化变量、获取组件
+  OnEnable()  脚本/对象启用时执行 → 监听事件、重置状态
+  Start()     第一次 Update 前执行一次 → 依赖其他对象初始化的逻辑
+  Update()    每帧一次 → 输入、普通逻辑、计时
+  FixedUpdate() 固定时间间隔（默认约 50 次/秒）→ 物理移动、Rigidbody 操作
+  LateUpdate()  Update 后执行 → 摄像机跟随、收尾
+  OnDisable() 禁用时 → 取消监听
+  OnDestroy() 销毁时 → 清理资源
+
+Update vs FixedUpdate（重点）：
+  Update 帧率不定（高配 120 次/秒，低配 30 次/秒）→ 放输入/UI/普通逻辑
+  FixedUpdate 固定步长 → 放物理
+  口诀：输入放 Update，物理放 FixedUpdate。
+
+最常用写法（课001 完整例子）：
+  using UnityEngine;
+
+  public class PlayerController : MonoBehaviour
+  {
+      [SerializeField] private float speed = 5f;
+      private Rigidbody2D rb;
+      private float moveX;
+
+      void Awake()
+      {
+          rb = GetComponent<Rigidbody2D>();
+      }
+
+      void Update()
+      {
+          moveX = Input.GetAxisRaw("Horizontal");   // 读输入
+      }
+
+      void FixedUpdate()
+      {
+          rb.linearVelocity = new Vector2(moveX * speed, rb.linearVelocity.y); // 物理
+      }
+  }
+
+每帧移动都要乘 Time.deltaTime（上一帧耗时），否则帧率影响速度：
+  transform.position += new Vector3(1, 0, 0) * Time.deltaTime;
+
+碰撞与触发（课001）：
+  有 Collider 才会被自动调用。
+  void OnCollisionEnter(Collision collision)  // 撞到
+  void OnTriggerEnter(Collider other)         // Collider 勾了 Is Trigger 用触发
+  Collision 会真实阻挡；Trigger 只检测进入，不阻挡（金币、传送门、检测区）。
+
+生成与销毁：
+  [SerializeField] private GameObject bulletPrefab;
+  Instantiate(bulletPrefab, transform.position, transform.rotation);
+  Destroy(gameObject);   // gameObject = 当前脚本挂的对象
+
+协程 Coroutine（延迟/分步）：
+  IEnumerator WaitAndPrint()
+  {
+      Debug.Log("开始等待");
+      yield return new WaitForSeconds(2f);
+      Debug.Log("2 秒后执行");
+  }
+  用于：延迟、技能冷却、波次刷怪、渐隐渐现。
+
+脚本通信（新手先掌握前两种）：
+  1) [SerializeField] private Health health; → health.TakeDamage(10)
+  2) Health health = GetComponent<Health>();
+  3) 事件系统（进阶，玩家死亡通知 UI/音效/任务）
+
+脚本分类习惯：控制(PlayerController) / 状态(Health) / 生成(EnemySpawner) /
+  管理(GameManager) / UI(UIManager) / 数据(ItemData) / 相机(CameraFollow)。
+  一个脚本只负责一类清晰的事。
+
+新手 5 大错误（课001）：
+  文件名和类名不一致
+  脚本没挂到 GameObject 上
+  物理移动写在 Update 里（应 FixedUpdate）
+  到处用 Find()
+  一个脚本塞太多功能
+
+
+====================================================================
+08. 输入系统（课：006.输入系统、输入1/2/3）
+====================================================================
+核心流程：玩家操作设备 → Unity 读输入 → 转成游戏动作 → 脚本控制角色/UI/镜头。
+
+Unity 有两套输入系统：
+  旧系统 Input Manager / UnityEngine.Input —— 简单，老教程/快速练习用
+  新系统 Input System Package —— 新项目、多平台、手柄、触屏、改键、多人
+
+一句话区别（站内原句）：
+  旧输入系统是在问"哪个键被按了"。
+  新输入系统是在问"玩家想做什么动作"。
+
+【旧系统常用 API】：
+  Input.GetKey(KeyCode.A)        按住期间每帧 true
+  Input.GetKeyDown(KeyCode.Space) 按下那一帧 true（一帧事件）
+  Input.GetKeyUp(KeyCode.Space)   松开那一帧 true
+  Input.GetAxis("Horizontal")     平滑轴，-1~1（适合摇杆/连续移动）
+  Input.GetAxisRaw("Horizontal")  原始轴 -1、0、1（适合像素风/立即响应）
+  Input.GetButtonDown("Jump")     虚拟按钮（名字来自 Input Manager）
+  Input.GetMouseButtonDown(0)     0左键 / 1右键 / 2中键
+  Input.mousePosition             鼠标屏幕坐标
+  鼠标视角：Input.GetAxis("Mouse X"/"Mouse Y")，值是移动增量不是 -1~1。
+  Down/Up 是一帧事件，所以输入放 Update() 里读。
+
+旧系统改键：Edit>Project Settings>Input Manager，展开 Axes 改
+  Positive/Negative Button（如 Horizontal = a/d + 方向键），代码只写
+  Input.GetAxis("Horizontal")，玩家按什么键不用管。
+
+旧系统完整案例（课输入2，2D 移动+跳跃）：
+  using UnityEngine;
+
+  public class PlayerMove2D : MonoBehaviour
+  {
+      public float moveSpeed = 6f;
+      public float jumpForce = 8f;
+      private Rigidbody2D rb;
+      private float moveX;
+      private bool jumpPressed;
+
+      void Awake() { rb = GetComponent<Rigidbody2D>(); }
+
+      void Update()
+      {
+          moveX = Input.GetAxisRaw("Horizontal");
+          if (Input.GetButtonDown("Jump")) jumpPressed = true;   // 读输入
+      }
+
+      void FixedUpdate()
+      {
+          rb.linearVelocity = new Vector2(moveX * moveSpeed, rb.linearVelocity.y);
+          if (jumpPressed)
+          {
+              rb.AddForce(Vector2.up * jumpForce, ForceMode2D.Impulse);
+              jumpPressed = false;
+          }
+      }
+  }
+
+【新系统】核心链条：
+  Device → Control → Binding → Action → Action Map → PlayerInput → 代码
+  Device    设备：Keyboard、Mouse、Gamepad
+  Control   设备控件：space、leftStick、leftButton
+  Binding   绑定：<Keyboard>/space → Jump
+  Action    游戏动作：Move、Jump、Fire、Look
+  Action Map 动作组：Gameplay、UI、Vehicle
+  Input Action Asset 保存配置的 .inputactions 文件
+
+搭建流程（课输入3）：
+  1. Package Manager 装 Input System
+  2. Project Settings>Player>Active Input Handling 选 Input System 或 Both
+  3. Assets>Create>Input Actions 建 PlayerControls.inputactions
+  4. 建 Action Map：Gameplay
+  5. 建动作：Move(Value/Vector2)、Jump(Button)、Fire(Button)、Look(Value/Vector2)
+  6. 给 Move 加 2D Vector Composite(WASD + 方向键 + <Gamepad>/leftStick)
+  7. 给 Jump 加 <Keyboard>/space、<Gamepad>/buttonSouth
+  8. 玩家物体挂 PlayerInput 组件：Actions 拖 .inputactions、
+     Default Map=Gameplay、Behavior 新手选 Invoke Unity Events
+
+新系统移动案例（站内原文）：
+  using UnityEngine;
+  using UnityEngine.InputSystem;
+
+  public class PlayerController : MonoBehaviour
+  {
+      [SerializeField] private float moveSpeed = 5f;
+      private Vector2 moveInput;
+
+      public void OnMove(InputAction.CallbackContext context)
+      {
+          moveInput = context.ReadValue<Vector2>();
+      }
+
+      public void OnJump(InputAction.CallbackContext context)
+      {
+          if (!context.performed) return;
+          Debug.Log("Jump");
+      }
+
+      private void Update()
+      {
+          Vector3 move = new Vector3(moveInput.x, 0f, moveInput.y);
+          transform.Translate(move * moveSpeed * Time.deltaTime, Space.World);
+      }
+  }
+  然后在 PlayerInput 的 Events 里绑定：
+  Gameplay/Move → PlayerController.OnMove，Gameplay/Jump → OnJump。
+  重点：Move 是持续值，只存进 moveInput，在 Update/FixedUpdate 里持续用，
+  别只在 performed 里移动一次（否则角色只动一下）。
+
+started / performed / canceled（动作阶段）：
+  started 开始触发；performed 触发成功；canceled 结束或取消。
+  跳跃只看 performed；蓄力攻击三个都用（started 蓄力、performed 释放、
+  canceled 松太早取消）。
+
+Interactions（怎么按才算触发）：Press、Hold、Tap、SlowTap、MultiTap
+  （如 Fire+Tap 普通射击、Fire+Hold 蓄力、Dash+MultiTap 双击冲刺）
+Processors（输入值怎么处理）：Deadzone、Normalize、Invert、Scale、Clamp
+  （如视角上下反了，给 Look 的 Y 轴加 Invert）
+
+Action Map 切换（暂停时用，比到处写 if(isPaused) 干净）：
+  playerInput.SwitchCurrentActionMap("UI");     // 开菜单
+  playerInput.SwitchCurrentActionMap("Gameplay"); // 关菜单
+
+UI 输入：新系统要用 Input System UI Input Module，不是旧的
+  Standalone Input Module，否则按钮点不了。
+
+新系统常见错误（课输入1）：
+  忘 using UnityEngine.InputSystem / Action 没 Enable
+  Move 设成 Button 却 ReadValue<Vector2>()
+  PlayerInput 没拖 .inputactions / Default Map 没选
+  UI 还在用旧 Standalone Input Module
+  performed 里直接移动导致只动一下 / 重复注册回调触发多次
+
+学习顺序（站内建议）：先旧系统 GetKeyDown/GetAxis 看懂老教程 →
+  重点学新系统 Input Action Asset + PlayerInput → 先做 Move/Jump/Fire →
+  再学 UI 与 Action Map 切换 → 最后学 Hold/Tap/改键/多人。
+
+
+====================================================================
+09. 物理系统（课：007.物理系统、物理1.物理系统）
+====================================================================
+管什么：重力、受力、速度、碰撞、触发器、射线检测、摩擦、反弹、关节约束。
+最核心三件套：Rigidbody（运动）、Collider（形状）、FixedUpdate（节奏）。
+
+记忆公式（站内原文）：
+  物理对象 = GameObject + Transform + Collider + Rigidbody
+  碰撞事件 = Collider + Rigidbody + OnCollisionEnter
+  触发事件 = Collider(Is Trigger) + Rigidbody + OnTriggerEnter
+  移动物理对象 = Rigidbody 速度 / AddForce / MovePosition
+
+3D 和 2D 是两套系统，别混用：
+  3D：Rigidbody + Box/Sphere/Capsule/Mesh Collider + Physics.Raycast
+  2D：Rigidbody2D + Box/Circle/Capsule Collider2D + Physics2D.Raycast
+
+Rigidbody 常见属性：
+  Mass 质量 / Use Gravity 是否受重力 / Is Kinematic 是否脚本/动画控制
+  Linear Damping 线性阻尼(空气阻力) / Angular Damping 旋转阻尼
+  Constraints 冻结位置或旋转 / Collision Detection 碰撞检测模式
+  Interpolation 平滑显示防抖动
+  Unity 6 里推荐 linearVelocity（老教程常用 velocity）。
+
+Collider 常见类型：Box / Sphere / Capsule（角色常用）/ Mesh（更贵）。
+  Collider ≠ 模型外形，是物理系统看的碰撞形状，越简单越好。
+
+三类物体：
+  静态物体  有 Collider 无 Rigidbody（地面、墙）
+  动态物体  有 Collider + Rigidbody，Kinematic 关（箱子、球、掉落物）
+  运动学物体 有 Collider + Rigidbody，Kinematic 开（移动平台、电梯、机关门）
+
+Collision vs Trigger：
+  Collision 阻挡、真实接触 → OnCollisionEnter
+  Trigger（Collider 勾 Is Trigger）不阻挡、只检测进出 → OnTriggerEnter
+  金币用 Trigger 示例：
+    private void OnTriggerEnter(Collider other)
+    {
+        if (other.CompareTag("Player")) Destroy(gameObject);
+    }
+
+移动物理对象三种 API 怎么选（站内）：
+  AddForce          真实物理感（推箱子、爆炸、弹跳）
+  linearVelocity    直接改速度（跳跃瞬间）
+  MovePosition      可控移动（角色、移动平台）
+  Transform.position 非物理物体可以用；物理物体慎用（绕开物理系统）
+  跳跃：rb.AddForce(Vector3.up * jumpForce, ForceMode.Impulse);
+
+Raycast 主动探测（地面检测示例）：
+  public LayerMask groundLayer;
+  public float checkDistance = 1.1f;
+  private bool IsGrounded()
+  {
+      return Physics.Raycast(transform.position, Vector3.down,
+                             checkDistance, groundLayer);
+  }
+  用途：检测地面、鼠标选物体、射击命中、敌人视线、前方是否有墙。
+  LayerMask 很重要，别让射线乱打所有东西。
+
+Physics Material（物理材质）：Friction 摩擦 / Bounciness 弹性。
+  （冰面低摩擦、橡胶球高弹性、泥地高摩擦；3D 用 Physic Material，
+   2D 用 Physics Material 2D）
+
+Layer Collision Matrix：Edit>Project Settings>Physics 里的碰撞矩阵，
+  控制哪些 Layer 之间能碰撞（如 Player 不打 PlayerBullet）。大项目必设。
+
+最常见错误（课物理1）：
+  有 Collider 没 Rigidbody 却期待自己掉下来
+  2D/3D 组件混用
+  用 Transform.position 移动物理物体导致穿墙抖动
+  AddForce 写在 Update 里
+  Trigger 没反应：双方都没有 Rigidbody
+  高速子弹穿墙：没设连续碰撞检测
+  角色旋转倒下：忘了冻结 X/Z Rotation
+  Raycast 没设 LayerMask
+
+
+====================================================================
+10. 相机（课：13.初识Camera摄像机）
+====================================================================
+Camera 不是"真实拍摄"，而是告诉引擎：从哪个位置、哪个角度、用什么规则，
+把 3D/2D 场景投影成一张 2D 画面。
+
+三件事：确定观察位置方向（Transform 的 Position/Rotation）→
+  决定能看到哪些（前方视锥体 Frustum，范围内的才渲染）→
+  把 3D 世界投影到屏幕。
+
+常见参数：
+  Field of View    视野角度（越大范围越广但边缘变形，类似广角）
+  Projection       Perspective 透视(近大远小，3D 游戏)
+                   Orthographic 正交(无近大远小，2D/等距/UI/策略)
+  Clipping Planes  Near/Far 裁剪面（太近太远都不显示，Far 别无脑调大）
+  Culling Mask     决定渲染哪些 Layer（UI 相机只渲染 UI 层）
+  Depth            多相机渲染顺序，值越大越后渲染
+  Clear Flags/Background  背景处理（天空盒/纯色/保留上一帧）
+  Viewport Rect    画面显示区域（分屏、小地图、画中画）
+  正交相机最重要的参数是 Size（垂直方向能看到多大范围）
+
+渲染每帧流程（简化）：找 Camera → 按位置方向生成观察范围 →
+  Culling Mask 和视锥体剔除不可见物体 → 按材质/光照/Shader/深度渲染 →
+  应用后处理 → 输出到屏幕/Render Texture。
+
+多摄像机：主相机(世界)、UI相机(界面)、小地图相机(俯视)、
+  武器相机(第一人称单独渲染手和武器)、监控屏相机(渲染到 Render Texture)。
+
+一句话：Camera 是场景的"观察者"和"渲染入口"——决定从哪看、看多远、
+  看哪些层、透视还是正交，最后把三维世界变二维画面。
+
+
+====================================================================
+11. 场景系统（课：002.场景系统、场景1.场景是什么）
+====================================================================
+Scene = "一个舞台"或"一个关卡文件"。
+一句话：Scene 负责装东西，GameObject 是被装进去的东西，
+Component 决定 GameObject 能做什么。
+
+不同功能拆不同场景：MenuScene 主菜单 / GameScene 正式关卡 /
+  ResultScene 结算 / Level01、Level02 关卡 / LoadingScene 加载界面。
+
+场景里保存：GameObject、Camera、Light、UI、Terrain、Player、Enemy、
+  Audio、环境设置、光照数据、物体间引用关系。
+
+切换场景：
+  using UnityEngine.SceneManagement;
+  SceneManager.LoadScene("GameScene");   // 加载并卸载旧场景(Single)
+  SceneManager.LoadScene("UI", LoadSceneMode.Additive); // 叠加，不卸载当前
+
+要点：
+  要能被加载的场景，必须先进 File>Build Settings>Scenes In Build。
+  大部分对象切场景会被销毁；想保留音乐/存档管理器/全局管理器用：
+  DontDestroyOnLoad(gameObject);
+
+创建场景流程（场景1）：
+  Project 里右键 Create>Scene → 命名 Level01 → 双击打开 →
+  在 Hierarchy 加相机/灯光/玩家/UI/敌人 → Ctrl+S 保存 →
+  加入 Build Settings 的 Scenes In Build（第 7 步很重要，
+  打包后通常只能加载 Build Settings 里的场景）。
+
+Project 和 Scene 的区别：
+  Project = 资源仓库（图片/音频/材质/脚本/Prefab/动画）
+  Scene = 当前运行的世界；资源被拖进场景后才是场景里的对象。
+  Hierarchy = 当前 Scene 里的对象列表。
+
+
+====================================================================
+12. 资源系统（课：003.资源系统）
+====================================================================
+管理 Assets 文件夹里的文件，让它们能被场景、组件、脚本使用。
+  Assets = 资源仓库
+  Scene = 当前世界
+  GameObject = 场景里的对象
+  Component = 对象身上的功能
+  Asset = 给组件使用的资源文件
+
+常见资源类型：图片(Texture/Sprite)、模型(FBX/OBJ)、声音(AudioClip)、
+  材质(Material)、动画(Animation Clip)、预制体(Prefab)、场景(Scene)、
+  脚本(C# Script)。
+
+最重要区别：Asset 是文件，GameObject 是场景里的对象。
+  比如 Player.prefab 是资源文件，拖进场景后才出现真正的 Player 对象。
+
+加载方式（新手按此顺序掌握）：
+  1. [SerializeField] private GameObject enemyPrefab;
+     Instantiate(enemyPrefab);      // Inspector 拖引用，最推荐新手
+  2. var prefab = Resources.Load<GameObject>("Enemy");
+     Instantiate(prefab);           // Resources.Load，简单但别滥用
+  3. Addressables.LoadAssetAsync<GameObject>(key);  // 大项目方式，后面学
+
+几个坑（课003）：
+  别随便删 .meta 文件（Unity 靠它记录资源引用）
+  AssetDatabase 只能在编辑器用，打包后的游戏不能用
+  Resources 文件夹别什么都塞，会让构建体积和内存管理变乱
+  Destroy(gameObject) 只销毁场景对象，不等于立刻释放所有资源内存
+
+
+====================================================================
+13. 预制体系统（课：004.预制体系统、场景4.预制件）
+====================================================================
+Prefab = 可复用的 GameObject 模板（敌人、子弹、道具、UI 面板、爆炸特效）。
+
+核心区别：
+  Prefab Asset    = Project 面板里的模板文件
+  Prefab Instance = 场景里从模板拖出来的对象
+
+规则：改 Prefab Asset → 所有没单独覆盖的实例跟着变；
+  只改场景里某个实例 → 那是 Override 覆盖。
+
+常用操作：
+  Override 只改当前实例
+  Apply    把当前实例改动写回 Prefab 模板
+  Revert   放弃当前实例的覆盖，恢复模板默认
+  Unpack   断开和 Prefab 的连接，变成普通 GameObject
+
+脚本生成 Prefab（运行时生成敌人/子弹/特效）：
+  [SerializeField] private GameObject bulletPrefab;
+  void Shoot()
+  {
+      Instantiate(bulletPrefab, transform.position, transform.rotation);
+  }
+  销毁：Destroy(gameObject);
+
+学习顺序：做一个 Enemy Prefab → 拖多个实例进场景 →
+  改其中一个看 Overrides → 练 Apply/Revert → 用 Instantiate 运行时生成。
+
+
+====================================================================
+14. 渲染系统（课：009.渲染系统）
+====================================================================
+渲染系统 = 把"场景里的东西"变成"屏幕画面"的系统。
+核心公式（站内原文）：
+  渲染系统 = Renderer 画什么
+           + Camera 看哪里
+           + Material/Shader 怎么画
+           + Light 怎么照
+           + Render Pipeline 怎么组织
+           + Post FX 最后润色
+
+一个对象能被看见，通常需要：Transform(在哪) + Mesh/Sprite(形状/图片)
+  + Renderer(要被画) + Material(表面颜色/贴图/透明/金属感)
+  + Shader(GPU 上算最终颜色) + Camera(从哪个角度看)。
+
+新手最容易混的三个：
+  Renderer 是"我要被画"
+  Material 是"我看起来是什么材质"
+  Shader 是"怎么算出最终颜色"
+
+渲染管线：
+  URP       普通新项目建议优先学
+  HDRP      高画质、高端平台
+  Built-In  老管线，Unity 6.5 文档已标 deprecated，旧教程常见，新项目别首选
+
+
+====================================================================
+15. 数据与存档（课：数据2.PlayerPrefs）
+====================================================================
+PlayerPrefs = Unity 内置"小型本地偏好存储"。
+适合：音量、画质、语言、最高分、新手引导是否完成、上次选择的关卡。
+不适合：完整背包、任务进度、地图状态、账号密码、付费凭证、重要反作弊数据。
+（只能存 int/float/string，本地无加密，别存敏感数据）
+
+常用 API：
+  PlayerPrefs.SetInt("HighScore", 100);
+  PlayerPrefs.SetFloat("MusicVolume", 0.8f);
+  PlayerPrefs.SetString("Language", "zh-CN");
+
+  int score = PlayerPrefs.GetInt("HighScore", 0);   // 第二个参数是默认值
+  float volume = PlayerPrefs.GetFloat("MusicVolume", 1f);
+  string language = PlayerPrefs.GetString("Language", "en");
+
+  bool exists = PlayerPrefs.HasKey("HighScore");
+  PlayerPrefs.DeleteKey("HighScore");
+  PlayerPrefs.DeleteAll();   // 很危险，只在调试/重置用
+  PlayerPrefs.Save();
+
+bool 没有 SetBool，用 int 代替：
+  PlayerPrefs.SetInt("TutorialDone", true ? 1 : 0);
+  bool done = PlayerPrefs.GetInt("TutorialDone", 0) == 1;
+
+推荐封装 Key（别到处手写字符串，容易拼错）——站内给了完整 GamePrefs
+  静态类示例（属性 Get/Set 封装 + Save()），照抄即可。
+
+何时 Save：音量滑条松开后 / 确认设置后 / 通关写最高分 / 引导完成 /
+  退出设置菜单时。别放 Update() 里每帧保存。
+
+口诀：PlayerPrefs 存小设置；完整存档用 JSON 文件；Key 用常量；
+  Get 要默认值；重要时刻 Save；敏感数据别放。
+
+
+====================================================================
+16. 构建发布（课：016.构建发布系统）
+====================================================================
+把 Unity 工程变成"玩家真正能运行的程序"。
+流程链（站内）：
+  Unity 工程 → Build Profile → Scene List → Player Settings →
+  Build Pipeline → 平台产物 → 测试 → 商店发布
+
+关键概念：
+  Build Profile    一套构建方案（Android 测试版/正式版、Windows 版）
+  Scene List       决定哪些场景打进包、启动场景是谁
+  Player Settings  应用身份（包名、公司名、图标、版本、分辨率、签名）
+  Development Build 开发测试包，方便调试，不适合上架
+  Release Build    正式包，重点检查性能/签名/版本/权限/商店规则
+  Platform Module  目标平台模块（Android/iOS/Web Build Support）
+  Signing/Keystore 尤其 Android 重要，签名密钥丢了影响后续更新
+
+学习顺序（站内）：
+  1. 先打 Windows 包，理解 Build 和 Play 的区别
+  2. 再学 Scene List，知道为什么有些场景打包后打不开
+  3. 再学 Player Settings（包名/版本/图标/分辨率）
+  4. 再学 Android AAB/APK、Keystore、Development/Release
+  5. 最后学命令行构建和 CI 自动化
+
+
+====================================================================
+17. 实战项目：程序化赛车（Gamecode/ProceduralRacing）
+====================================================================
+站点自带一个完整小游戏源码，边学边拆最好。
+页面：/Gamecode/ProceduralRacing/（0.游戏介绍 / 1.源码下载与启动 / 2.问题考点）
+
+它是一个"无尽隧道赛车"小游戏，已实现功能（站内原文清单）：
+  · 程序化赛道生成：Perlin Noise 起伏、前后段平滑衔接、只保留前后两段
+    （旧段销毁新段生成）形成无限前进
+  · 随机障碍和得分门：撞障碍失败，过 Gate 加分+音效
+  · 车辆操控：鼠标点屏左右 / 键盘 A/D 或方向键；同步轮子模型和
+    WheelCollider 位置、轮子旋转表现
+  · 车辆特效：后轮接地草地/摩擦特效、转向出刹车痕迹、失败生成
+    ragdoll 破碎车体
+  · 世界移动与旋转联动：赛道向玩家移动、随转向同步旋转赛道和灯光
+  · 计分/计时/最高分/失败流程：最高分用 PlayerPrefs 保存、
+    Game Over 动画、失败音效、重开流程
+  · 主菜单与转场：点击/回车开始、转场动画、加载 Game 场景、静音按钮
+  · 音乐持久化：单例 + DontDestroyOnLoad 跨场景播音乐，避免重复对象
+  · 跟随相机：平滑第三人称相机，开局缓慢过渡
+  · UI 与本地化：菜单/结算面板/分数/最佳分/重试提示已译成中文
+  · 编辑器调试工具：Window/Delete PlayerPrefs 清空存档
+
+建议：把源码跑起来，对照上面的功能清单，在代码里找到对应实现，
+  比空看教程快很多。
+
+
+====================================================================
+18. 主线之后：C#基础 / 其他子系统 / 面试题库 / Offer案例
+====================================================================
+CSharpSystem/（57 页，C# 相关，三条支线）：
+  Base/C#基础：注释、变量、常量、运算符、条件判断、循环、方法、
+    作用域、闭包
+  Object/面向对象：class类、对象、字段、属性、方法、构造函数、
+    访问修饰符、继承、封装、多态、抽象类、接口
+  UnityLife/Unity相关：生命周期、组件API、集合与数据结构、泛型、
+    委托事件Action、协程、async/await、序列化与Inspector、内存与性能、
+    设计模式、反射与特性、编辑器扩展、网络、资源加载、数据与存档
+
+其他子系统目录（想深挖哪块点哪块）：
+  UISystem/   UI 全组件（Canvas/Image/TextMeshPro/Button/InputField/
+              Mask/LayoutGroup/ScrollView 等，对应主线 15~41）
+  PhysicsSystem/ 物理（1.物理系统、2.2D物理系统）
+  InputSystem/   输入（1.输入系统、2.旧版、3.新版）
+  SceneSystem/   场景（场景是什么/模板/常见API/预制件）
+  AnimatorSystem/ 动画（基础/AnimationClip/Transition/Trigger/
+              BlendTree/RootMotion/AnimationEvent）
+  AudioSystem/  音频系统
+  ParticleSystem/ 粒子系统
+  NavAISystem/  导航系统与AI基础
+  DataSystem/   数据存档（PlayerPrefs/JSON/ScriptableObject）
+  BuildingSystem/ 构建发布（Windows/WebGL/Android/IOS）
+
+面试题库 /interview/xz/（135+ 篇，想找工作再刷）：
+  主线：类型系统、面向对象、集合与泛型、委托事件Lambda、生命周期、
+    GameObject/Component/Transform、输入移动相机、物理、UGUI、
+    资源加载、热更新、性能优化、渲染管线、Unity渲染、Shader手写、
+    战斗系统、角色与AI、C++基础、算法、数学基础、图形学……
+  题海扩展 + 手写题 + 1分钟快答 + 5分钟追问 + 初面/二面/引擎岗/图形岗
+  套卷，以及"大厂喜欢的表达""面试前1天速记"。
+
+Offer案例 /getoffer/：2024~2026 各期大厂 Offer 案例、topoffer 总结。
+
+
+====================================================================
+19. 一周学习路径（照这个顺序走最快）
+====================================================================
+第 1 天：环境 + 认界面
+  课 5/6/7（装环境、建项目、认文件）→ 课 8/9/10/12（窗口/菜单/快捷键）
+  → 目标：能建项目、认识七大窗口、会 Ctrl+S 保存、会右键创建物体。
+
+第 2 天：核心思想
+  课 000 对象组件系统（把 GameObject/Component/Transform/父子吃透）
+  → 课 005 坐标变换
+  → 目标：说出"一个玩家由哪些组件组成"，能摆父子结构。
+
+第 3 天：脚本
+  课 14 初识脚本 + 课 001 深入脚本系统（生命周期、Update/FixedUpdate、
+  GetComponent、[SerializeField]）
+  → 目标：写一个脚本让 Cube 动起来，学会 Inspector 调参。
+
+第 4 天：输入 + 玩家控制（你的方向）
+  课 006 输入 + 输入2/3（先旧系统 GetAxis，再新系统 PlayerInput）
+  → 做 WASD 移动 + 跳跃的角色（抄 07/08 节的完整案例即可跑通）
+  → 键位绑定就是：旧系统改 Input Manager 的 Axes，新系统改
+    .inputactions 里的 Binding。
+
+第 5 天：物理
+  课 007 + 物理1（Rigidbody/Collider/Trigger/Raycast）
+  → 目标：物体掉地上、金币触发、地面检测、用 FixedUpdate 移动物理体。
+
+第 6 天：场景 + 预制体 + 资源 + 相机
+  课 002/场景1、004、003、13
+  → 目标：做一个"菜单场景→游戏场景"切换；把角色/敌人做成 Prefab；
+    相机学会跟随（LateUpdate）。
+
+第 7 天：综合一个小游戏
+  把上面串起来做一个"角色收集金币"：菜单 → 玩法（移动+触发捡金币+
+  计分）→ 结算。数据用 PlayerPrefs，最终打 Windows 包（课 016）。
+
+之后按缺口补：UI 多了刷 UISystem，敌人 AI 刷 NavAISystem，
+  动画多刷 AnimatorSystem，想看完整游戏拆 17 节赛车源码。
+
+用站时记住：
+  这站以操作演示为主（怎么点、拖什么、参数填什么），原理讲得浅；
+  看不懂原理时回本文对应章节看公式/记忆点，两边对照着学。
+  教程基于 Unity 6.3.x，按钮位置和旧版不同，对不上先确认版本。
+  代码报错先看 Console 窗口，把错误原文复制去搜，比盲试快。
+
+====================================================================
+ 五个必会（每天用）
+====================================================================
+  1. 场景里加东西    Hierarchy 右键 / GameObject 菜单
+  2. 给物体加行为    选中 → Inspector → Add Component（或拖 .cs 上去）
+  3. 让代码可调      脚本里写 [SerializeField] 字段 → Inspector 拖拽赋值
+  4. 每帧跑逻辑      void Update() + Time.deltaTime
+  5. 保存/运行        Ctrl+S 保存场景，Ctrl+P 运行
+====================================================================

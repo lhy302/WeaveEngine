@@ -1,0 +1,14 @@
+{
+  "interpreters": [
+    {
+      "name": "Loom",
+      "version": "1.0.0",
+      "kind": "py",
+      "dir": "Loom",
+      "main": "Loom.py",
+      "path": "Loom/Loom.py",
+      "main_py": "Loom/Loom.py",
+      "main_exe": "Loom/Loom.exe"
+    }
+  ]
+}

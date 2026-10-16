@@ -1,0 +1,62 @@
+{
+  "module": "loom_gui",
+  "blocks": [
+    {
+      "block_id": "names",
+      "category": "declaration-only",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "python": "loom_gui.spec.python.dsl"
+        },
+        "code": {}
+      },
+      "symbols_defined": [],
+      "symbols_used": [],
+      "status": "draft"
+    },
+    {
+      "block_id": "imports",
+      "category": "hoisted",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "python": "loom_gui.spec.python.dsl"
+        },
+        "code": {
+          "python": "loom_gui.py"
+        }
+      },
+      "symbols_defined": [],
+      "symbols_used": [],
+      "status": "draft"
+    },
+    {
+      "block_id": "wait_until",
+      "category": "emitting",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "python": "loom_gui.spec.python.dsl"
+        },
+        "code": {
+          "python": "loom_gui.py"
+        }
+      },
+      "symbols_defined": [
+        "_wait_until",
+        "target",
+        "min_sleep=0.0015",
+        "undershoot=0.001",
+        "remain",
+        "end"
+      ],
+      "symbols_used": [
+        "target",
+        "min_sleep=0.0015",
+        "undershoot=0.001"
+      ],
+      "status": "draft"
+    }
+  ]
+}

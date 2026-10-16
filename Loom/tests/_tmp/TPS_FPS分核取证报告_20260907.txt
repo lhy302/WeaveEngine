@@ -1,0 +1,57 @@
+# TPS/FPS 分核取证报告 (2026-09-07, 主线程收编自干)
+
+**用户问题**: "播放模式下管 FPS 的核心和管 TPS 的核心是不是在同一个循环里?
+是不是单核跑死, 其他核心打酱油?"
+
+**取证方法**: tests\_tmp\tps_fps_core_probe.py (常驻, 可复跑) — LoomHub 同款
+链路启动 混合500 → 播放态稳态 12s → ①每核 busy% (NtQuerySystemInformation
+SPPI 增量, parallel.measure_core_busy) ②线程级 GetThreadTimes 增量 (63 线程
+全量快照差分) ③engine_metrics。两次独立采样结果一致 (65.3/64.9%)。
+
+## 结论一: TPS 和 FPS 确实在同一个线程 (主线程), 没有分核 — 实锤
+
+代码事实: advance_logic 在 paintGL 帧内调 (ui\loom_gui.py:197, editor.py:1785),
+逻辑推进 (TPS) 与渲染 (FPS) 串行执行于 Qt GUI 主线程。Qt 架构锁死 paintGL
+必须在主线程 → FPS 渲染不可搬; TPS 逻辑理论可搬但 Python 段持 GIL。
+
+## 结论二: "单核跑死"基本实锤 — 主线程独占 65% 单核算力
+
+播放态稳态 (TPS 20.2, FPS 76):
+- **主线程 tid=59128: 65.3% 单核算力** — 一骑绝尘, 是第二名的 3.5 倍
+- 第二梯队 (临时工): tid=62784 18.7% / tid=65804 17.1% (帧池 worker +
+  numba/C 内核线程, 干完就散)
+- 其余 60 个线程全部 <3%
+- 每核 busy: 核0=67% (主线程钉在此, parallel.MainThreadCoreScheduler
+  启动锁核生效), 核4=23% / 核2=22% / 核15=20% (临时工飘移), 其余 <12%
+- 总量 227% ≈ 2.3 核当量 / 18 核 — **87% 的算力闲置**
+
+对照用户截图 (任务管理器): 核1 持续中高负载+少数格间歇尖刺+其余贴地 —
+与探针完全吻合。编辑态同主线程模式但逻辑工作缺席 → GPU 97%; 播放态主线程
+被 advance/prep/组装吃掉 ~13-22ms/帧 → GL 提交密度下降 → GPU 54% 饿肚子。
+
+## 结论三: 分核可行性判定 (用户"主线程发信号+工作核心分任务"构想)
+
+| 路径 | 可行性 | 说明 |
+|---|---|---|
+| FPS 渲染搬核 | **不可行** | Qt paintGL 锁死 GUI 主线程 |
+| TPS 全量搬工作线程 | **不可行 (GIL)** | 脚本/物理桥 Python 胶水/interp 快照持 GIL, 搬走不变并行还会与渲染乱抢 GIL |
+| **TPS 重段外包 (活口)** | **可行 — 推荐方向** | 已 nogil 的段: C 内核 DLL (ctypes 调用释放 GIL) / numba nogil 内核 / Jolt step / 大 numpy — 可真正并行 |
+| pipe_wait 等待期预取 | **可行 (无线程也行)** | 单线程内空窗复用 (frame_buffer.py 记账器模式), 批4C |
+
+收益上限推算 (以编译版 TPS20 账目 27.2ms/逻辑帧):
+- 可外包 nogil 段: aabbs C 内核 5.2 (并行化后 ~2.5) + collide 1.4 +
+  Jolt step + world_matrices 4.2 + shadow 族 ~1 ≈ 8-10ms 可移出主线程
+  (待架构代理逐段确认 GIL 归属后精确化)
+- 主线程剩余: Python 胶水 ~5-8ms + 渲染提交 — 预期主线程帧负载降 40-60%,
+  GL 提交密度回升, GPU 有望从 54% 回到 80-95% 带
+
+## 线程明细 (采样窗 CPU 前列)
+tid=59128 65.3% (主线程: Qt+逻辑+渲染) / tid=62784 18.7% / tid=65804 17.1%
+(帧池+numba 临时工) / 其余 61 线程 <3%。线程总数 63。
+
+## 探针坑 (本次实证)
+1. parallel.measure_core_busy 返回 {核号: busy%} dict — enumerate 拿到的是
+   键不是值 (首轮 0..17 等差假数据); 必须按 .items() 取值。
+2. GetThreadTimes 的 FILETIME 数组不能 *ft 解包 (4 参数各要 byref)。
+3. EAI engine_metrics 返回 {"ok","result"} 包装要解包。
+4. 探针文档字符串写 \_ 会 SyntaxWarning (无害)。

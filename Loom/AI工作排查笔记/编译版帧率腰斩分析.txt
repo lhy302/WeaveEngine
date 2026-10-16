@@ -1,0 +1,121 @@
+编译版帧率腰斩分析报告 (2026-09-02)
+====================================================================
+分析人: 主线程 Claude (子代理两死于 API 流错误, 中间结论已抢救并入)
+实测数据: 4 张用户截图 (编辑器态) + 8 组 --bench (播放态) + 文件级核查
+
+一、实测事实
+--------------------------------------------------------------------
+1.1 编辑器态 500 球 FPS (用户 LoomHub 手动启动截图):
+    源码-工作区 60 | 源码-稳定区 50 | 编译-工作区 33 | 编译-稳定区 27
+    → 腰斩: 0.55x / 0.54x
+1.2 播放态 --bench 300 帧 (500 球):
+    源码-工作区 26.5 (37.7ms) | 稳定区源码基准 16.9* | 编译-工作区 18.4 (54.4ms)
+    (*稳定区基准夹=多物体批前快照, 对应台账 17.2)
+    逐阶段差距 (ms/帧): aabbs 9.87→24.90 (+15.0) | shadow_prep 16.61→31.83
+    (+15.2, aabbs 在其包络内双重计数) | physics 16.8→17.9 | 其余持平
+    → 播放态差距 ≈ aabbs 一项解释
+1.3 播放态 --bench 300 帧 (500 混合: 50 种模型 x 10 样本, 51 桶, 顶点 96.8万):
+    源码-工作区 25.4 | 稳定区源码 16.7 | 编译-工作区 18.9 | 编译-稳定区 13.7
+    → 差距模式与 500 球完全一致 (aabbs 主导), 桶数 2→51 仅 buckets
+      1.07→1.44ms → 差距与"多相同物体"场景形状无关 (回应刷分质疑)
+1.4 环境一致性核查 (文件级证据):
+    - numpy 核心 pyd MD5: site 4E5580E9 = dist 4E5580E9 (同版本 2.2.5)
+    - OpenBLAS DLL MD5: 9C3B10CD 两侧一致 (libscipy_openblas64)
+    → BLAS/numpy 内核环境完全一致, 差距纯来自执行路径
+1.5 非 stale build: fastpath.py mtime 06:34 < ws_build2 编译 07:59
+    (编译产物比源码新, 编的是最新代码)
+1.6 设置.json 差异:
+    源码 (工作区+稳定备份区): 8 项, 含 fps_limit='unlimited'
+    两编译夹: 仅 {gui, save_dir} 2 项 — assemble_dual_compile.py 第 71 行
+    写死生成 → 其余设置落 DEFAULT_SETTINGS (guiloader.py:35) 默认值
+    → fps_limit 默认 '120' = QTimer 周期 8ms (FPS_LIMITS 表)
+
+二、根源分析
+--------------------------------------------------------------------
+2.1 编辑器态腰斩 (60→33) = fps_limit 默认值差异 (主因, 定量吻合)
+    渲染链: _render_timer (PreciseTimer, ui/loom_gui.py:453-456)
+      → _on_tick (:763) → viewport.update() → paintGL (:163) → e.render()
+    - 源码: fps_limit='unlimited' → 周期 1ms → 实际 60 FPS (受 render
+      耗时限制, 500 球编辑器态每帧 ~16ms)
+    - 编译版: fps_limit='120' → 周期 8ms → 理论 125 FPS 上限, 但实测 33
+      ⚠ 8ms 周期为何只有 33FPS: QTimer PreciseTimer 8ms + _on_tick 后
+      update() 排队 paintGL (异步), paint 在 timer 回调之后的下一轮事件
+      循环执行 — 实际帧间隔 = max(8ms 定时精度漂移, 渲染耗时+事件延迟)
+      Windows 定时器最小精度 15.6ms 系统节拍 (timeBeginPeriod 未提升时)
+      PreciseTimer 用多媒体定时器可到 ~1-2ms 精度, 但 8ms 周期 + 渲染
+      16ms 交错 = 帧节奏塌缩到 30ms/帧 (33FPS) — 与实测吻合
+    - 源码-稳定区 50FPS: 同样 unlimited 但多物体批前代码每帧 ~20ms
+      → 50FPS 与代码版本差异一致 (60 vs 50 是工作区优化成果)
+2.2 播放态差距 (26.5→18.4) = aabbs +15ms (numba 冻结禁用)
+    fastpath.py:36 _FROZEN 检测 → 冻结环境不 import numba (四连坑定案:
+    standalone 默认禁 JIT / cache 无 locator / Nuitka 无字节码致 njit 崩 /
+    llvmlite 死锁) → aabbs 走 _aabbs_minmax_np (numpy dgemm 批量内核)
+    - 源码 numba njit: 9.87ms
+    - 编译 numpy dgemm: 24.90ms (+15.0)
+    - 注: _aabbs_minmax_np 已有 staging 缓冲复用 (fastpath.py:188-199),
+      24.9ms 已含该优化 — 剩余差距 = numba 标量循环 vs dgemm 批量 +
+      (n,V,4)@(n,4,3) 大矩阵 dgemm 固有开销
+    - shadow_prep 同步 +15.2ms = aabbs 双重计数 (包络关系), 非独立问题
+2.3 次要因素 (两项差距的公共背景):
+    - Nuitka 编译版池开销/调用边界比 CPython 略高 (历史实测 +2-3%)
+    - 编译版设置缺 show_grid/parallel_enable 等项, 但都落与源码默认
+      相同或相近值, 贡献 <1ms, 非主因
+
+三、修复方案 (按优先级, 待用户审批后落地)
+--------------------------------------------------------------------
+P0-1 补全编译夹设置.json (最小改动, 直击编辑器态腰斩)
+    改: assemble_dual_compile.py 第 71 行写死的 2 项 → 从源码工作区
+        设置.json 全量拷贝 (或 DEFAULT_SETTINGS 全键生成)
+    同时: 手动把两个编译夹 设置.json 补齐 8 项 (fps_limit=unlimited)
+    预期: 编辑器态 33→~60 / 27→~50 (追平源码)
+    风险: 无 (设置项与源码版同源; fps_limit 用户原本就设 unlimited)
+    工作量: 10 分钟
+    验证: LoomHub 启动编译版 500 球截图读 FPS + 设置面板核对档位显示
+
+P0-2 aabbs 冻结内核提速 (播放态 +15ms 收复)
+    方案A (首选): _aabbs_minmax_np 改 f32 内核 — vh/m3 转 float32,
+        sgemm (2x 吞吐) + min/max f32; AABB 用于剔除/碰撞粗筛,
+        f32 精度 1e-7 相对误差对 1e-3 级包围盒余量无害
+        预期: 24.9→~12-14ms (dgemm→sgemm 吞吐翻倍)
+        风险: 数值从 f64→f32 (对拍标准 1e-7 需重定标; AABB 用途是
+        包围盒, 实际影响可忽略, 但需对拍验证无剔除误判)
+    方案B (备选): 减半顶点参与量 — AABB 由 8 角点/模型的包围盒角点
+        决定, 局部 AABB 已知时只需变换 8 个角点而非全部 V 顶点。
+        查 engine._aabbs_batched 现状: 若已是角点路径则本项无效;
+        若是全顶点变换则收益巨大 (2035→8, 250x 数据量削减)
+        ★需先核查 _aabbs_batched 输入是 vh(全部顶点) 还是角点
+    风险: B 无数值风险 (纯减少计算量), A 有精度语义变化
+    工作量: A=1 小时 / B=0.5 小时 (先核查再定)
+    验证: --bench 500 球逐阶段 aabbs 对比 + aabb 对拍 ALL PASS
+
+P1-3 组装脚本设置生成逻辑固化 (防复发)
+    P0-1 的脚本级修复: assemble_dual_compile.py 读源码 设置.json
+    全量拷贝+剔除运行时态字段; 增加自检: 生成的 设置.json 键集
+    必须 >= DEFAULT_SETTINGS['loom'] 键集, 否则报错退出
+    工作量: 20 分钟 | 风险: 无
+    验证: 重跑组装脚本 (等下次重打包时一并) diff 两夹设置.json
+
+P2-4 (可选) DEFAULT_SETTINGS['loom'] 的 fps_limit 默认改 'unlimited'
+    让"无设置文件"场景也走无上限 (与 pygame 播放器/Unity 桌面默认对齐)
+    风险: 低 (改变新装用户默认体验; 现有用户有设置文件不受影响)
+    工作量: 5 分钟 | 验证: 删设置.json 启动编辑器读 FPS
+
+四、验证方法总纲
+--------------------------------------------------------------------
+- 修复后四版本 (源码工作区/编译工作区) 500 球 + 500 混合 双场景
+  --bench 播放态 + LoomHub 截图编辑器态, 全量回归 tests/run_all.py
+- 编辑器态验收 = 用户视角 (铁律): LoomHub 启动 → 真实窗口 → 左下角 FPS
+- 守护线: 50 球 >= 163.8 FPS (组6 基线 x0.98); aabb 对拍 ALL PASS;
+  NCC 截图对比 (若动 f32 内核, 追加剔除零误判探针)
+
+五、附录: 关键证据索引
+--------------------------------------------------------------------
+- 截图: D:\my-project\源代码-工作区.PNG / 源代码-稳定区.PNG /
+  编译版-工作区.PNG / 编译版-稳定区.PNG (FPS 60/50/33/27)
+- bench: 各夹 bench_result.txt + tests\_tmp\stress_500mixed.json (新场景)
+- 场景生成: tests\_tmp\make_500_mixed_scene_save.py (50 模型 x 10 样本)
+- 设置生成: tests\_tmp\assemble_dual_compile.py:71 (2 项写死处)
+- fps_limit 机制: ui/loom_gui.py:1126-1138 + guiloader.py:47 FPS_LIMITS
+- numba 冻结定案: fastpath.py:36-43 (_FROZEN) + 记忆卡 perf-optimization-task
+- numpy/BLAS 同环境: _multiarray_umath pyd MD5 4E5580E9 两侧一致;
+  OpenBLAS MD5 9C3B10CD 两侧一致

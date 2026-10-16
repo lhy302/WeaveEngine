@@ -1,0 +1,80 @@
+====================================================================
+Qt 视口黑屏排查记录 (2026-08-18 深夜 -> 08-19 凌晨已解决)
+====================================================================
+问题: Qt 编辑器 (PySide6 + QOpenGLWidget + moderngl) 视口
+      —— 空场景 (0 物体) 全黑; 有物体场景"正常" (物体可见);
+      网格消失/转动闪烁; 后期修好网格后物体又消失 (转动时顶点闪烁).
+      用户从 LoomHub 打开空项目 (如"测试") 即触发.
+
+【状态: 已解决 2026-08-19 凌晨, 用户实测通过 (网格/物体/遮挡/保存全正常)】
+
+====================================================================
+一、最终根因链 (5 个独立问题叠加, 全部已修)
+====================================================================
+1. moderngl scope 退出把 GL framebuffer 绑定破坏成 0 (窗口默认 FBO)
+   —— 无 scope 的绘制 (draw_lines 等) 全部画到 id 0, 看不见.
+   [修] qt_view.paintGL 每帧缓存 widget FBO -> engine._external_fb;
+       引擎所有绘制统一走 _screen_fb() (外部模式返回缓存, pygame 返回 ctx.screen).
+
+2. 绑定被破坏成 0 -> ctx.clear 清的是 id 0 -> 背景/深度从未被清.
+   —— 之前"ctx.clear 在 Qt 多采样 FBO 无效"是【误判】!
+     实测: 绑定缓存 FBO 后 ctx.clear(颜色+深度) 完全有效.
+   [修] _clear_main_fbo 外部模式: _screen_fb().use() + ctx.clear(r,g,b,a, depth=1.0).
+       深度每帧清到 far = 物体稳定渲染的前提.
+
+3. 深度缓冲从不清理 (初始 0 / 残留) -> 物体/网格线静止时深度测试
+   LESS vs 自身上一帧深度 (相等) 失败 -> 静止消失 / 转动时位置变
+   -> 部分通过 = 闪烁. (用户实测"转动闪烁、静止消失"的机制)
+   [修] 根修 = #2 (每帧清深度); 网格额外: 深度依赖已恢复, 物体正确遮挡网格.
+
+4. moderngl scope 在 Qt 上下文把 GL_LINE_WIDTH 破坏为 0 -> LINES 图元
+   线宽 0 光栅化失败, 一切线 (网格/选中框/gizmo) 全不可见.
+   —— 与 MSAA (samples 4/0) 无关; TRIANGLES/POINTS 不受影响.
+   [修] draw_lines 每次画线前显式 self.ctx.line_width = 2.0.
+
+5. 恢复上次保存的相机姿态可能是仰视/平视 -> 网格 (XZ 平面线框)
+   全部在视锥外, 几何上不可见 (用户拖动时才闪出).
+   [修] editor._apply_camera 恢复时 clamp pitch 到 [-1.55, 0] (俯视).
+
+====================================================================
+二、走过的弯路 (别再重复)
+====================================================================
+- 方案 A/B/C (ctx.clear / Framebuffer.clear / ctypes glClear): 无效的
+  结论是"绑定 0"造成的假象, 真正修复是缓存 FBO 绑定 (见一.1/2).
+- depth quad 绘制路径清深度 (_DEPTH_CLEAR_VERT z=1.0/0.99 quad):
+  深度写入在 Qt 上下文实测不可靠, 已废弃 (函数保留注释, 不再调用).
+- scope(enable_only=0): 在 Qt 上下文产生 GL_INVALID_ENUM (moderngl C 层
+  把 0 当非法 capability), 不用 enable_only, 改手动 enable/disable.
+- enable_only=DEPTH_TEST|BLEND / depth_func='lequal' 字符串: 被 C 层拒绝.
+- color_mask/depth_mask 是 Framebuffer 属性 (非 Context); scope 不保存/
+  恢复 mask, 手动改必须手动恢复 (残留 False 会让深度写入全失效).
+- grabFramebuffer 返回 Format_ARGB32 (内存字节序 BGRA), numpy 按 RGBA
+  读会 R/B 交换 (误读); 亮度统计 (R+G+B)/3 不受影响. Qt 存 PNG 正确.
+
+====================================================================
+三、最终修复清单 (2026-08-19)
+====================================================================
+engine.py:
+  - _screen_fb(): 外部模式优先返回缓存 _external_fb (宿主每帧写入)
+  - _clear_main_fbo(): 外部模式 = _screen_fb().use() + ctx.clear(depth=1.0)
+  - draw_lines(): LINES 前显式 line_width=2.0; 外部模式绘制前 _screen_fb().use()
+  - draw_screen_rect / draw_text_quad / blit_texture: fb = _screen_fb()
+  - _clear_depth_quad(): 已废弃 (注释保留)
+  - _DEPTH_CLEAR_VERT/_DEPTH_CLEAR_FRAG: 保留未用
+ui/loom_gui.py:
+  - paintGL: 每帧缓存 e._external_fb = ctx.detect_framebuffer()
+  - draw() 网格: scope(framebuffer=_screen_fb()) + enable(DEPTH_TEST|BLEND)
+    (物体正确遮挡网格, 对齐 pygame 语义)
+editor.py:
+  - _draw_selection_box: scope(framebuffer=_screen_fb())
+  - _apply_camera: pitch 恢复 clamp 到 [-1.55, 0]
+
+====================================================================
+四、验证方式 (以数值为准, 探针在 _work_Loom\)
+====================================================================
+- qt_rotate_probe.py: 空场景/有物体 + 静止/转动抓帧统计 bright 占比
+  (静止/转动都稳定 ~30%+ 有物体、~9% 空场景网格 = 正常)
+- qt_editor_probe.py: 有物体/空场景两阶段 (empty 阶段 max≈97 = 网格线)
+- qt_save_close_probe*.py: 关闭保存流程 (真实 QMessageBox 自动点 Yes)
+- 全部无头测试 (tests/run_all.py) 绿.
+====================================================================

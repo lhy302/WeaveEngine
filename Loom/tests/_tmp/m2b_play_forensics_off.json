@@ -1,0 +1,679 @@
+{
+  "mode": "off",
+  "tag": "play_off",
+  "secs": 12.0,
+  "ts": "2026-09-08T21:26:46",
+  "scene": "D:\\my-project\\Loom(py源代码-工作区)\\Loom\\保存\\压测500混合.json",
+  "warmup_s": 8.0,
+  "steady_s": 10.0,
+  "env": {
+    "LOOM_NO_PIPELINE": "1"
+  },
+  "errors": [],
+  "pid": 75688,
+  "log": "D:\\my-project\\Loom(py源代码-工作区)\\Loom\\tests\\_tmp\\m2b_play_forensics_off.log",
+  "port": 62997,
+  "play_result": {
+    "ok": true,
+    "result": {
+      "playing": true
+    }
+  },
+  "wall": 12.039446800015867,
+  "n_core_samples": 20,
+  "per_core": [
+    2.8234970674486806,
+    21.091153470185727,
+    5.9375,
+    3.4378054740957964,
+    2.8077651515151514,
+    66.30208333333333,
+    6.212121212121213,
+    16.41190127077224,
+    9.17644183773216,
+    4.053030303030303,
+    6.72883064516129,
+    2.842741935483871,
+    19.34185606060606,
+    4.233870967741935,
+    4.839320625610948,
+    14.176136363636363,
+    6.255956744868035,
+    3.5943609481915937
+  ],
+  "total_core": 200.2663734115347,
+  "core_equiv": 2.002663734115347,
+  "top_core_index": 5,
+  "top_core_pct": 66.30208333333333,
+  "n_cores_over_10": 5,
+  "n_cores_over_20": 2,
+  "sum_others": 133.96429007820137,
+  "threads": [
+    {
+      "tid": 70184,
+      "cpu_s": 7.640625,
+      "pct_of_core": 63.46325646781321
+    },
+    {
+      "tid": 71856,
+      "cpu_s": 2.359375,
+      "pct_of_core": 19.597038295786902
+    },
+    {
+      "tid": 75768,
+      "cpu_s": 1.390625,
+      "pct_of_core": 11.55057224056314
+    },
+    {
+      "tid": 69124,
+      "cpu_s": 0.203125,
+      "pct_of_core": 1.6871622373856272
+    },
+    {
+      "tid": 73716,
+      "cpu_s": 0.203125,
+      "pct_of_core": 1.6871622373856272
+    },
+    {
+      "tid": 75252,
+      "cpu_s": 0.203125,
+      "pct_of_core": 1.6871622373856272
+    },
+    {
+      "tid": 70692,
+      "cpu_s": 0.203125,
+      "pct_of_core": 1.6871622373856272
+    },
+    {
+      "tid": 70572,
+      "cpu_s": 0.1875,
+      "pct_of_core": 1.557380526817502
+    },
+    {
+      "tid": 66748,
+      "cpu_s": 0.1875,
+      "pct_of_core": 1.557380526817502
+    },
+    {
+      "tid": 74416,
+      "cpu_s": 0.171875,
+      "pct_of_core": 1.427598816249377
+    },
+    {
+      "tid": 70444,
+      "cpu_s": 0.140625,
+      "pct_of_core": 1.1680353951131266
+    },
+    {
+      "tid": 74040,
+      "cpu_s": 0.125,
+      "pct_of_core": 1.0382536845450014
+    },
+    {
+      "tid": 67984,
+      "cpu_s": 0.078125,
+      "pct_of_core": 0.6489085528406259
+    },
+    {
+      "tid": 72936,
+      "cpu_s": 0.078125,
+      "pct_of_core": 0.6489085528406259
+    },
+    {
+      "tid": 75584,
+      "cpu_s": 0.078125,
+      "pct_of_core": 0.6489085528406259
+    },
+    {
+      "tid": 73968,
+      "cpu_s": 0.0625,
+      "pct_of_core": 0.5191268422725007
+    }
+  ],
+  "n_threads_sampled": 28,
+  "main_tid": 70184,
+  "main_is_primary": false,
+  "main_pct": 63.46325646781321,
+  "metrics": {
+    "fps": 66,
+    "is_playing": true,
+    "logic_paused": false,
+    "logic_steps": 0,
+    "interp_mode": "interpolate",
+    "gravity": -9.8,
+    "get_tps": 19.39213732060882,
+    "get_frame_jitter": [
+      19.321936166720807,
+      184.6015999908559,
+      120
+    ],
+    "clock": {
+      "logic_fps": 20.0,
+      "alpha": 0.8068,
+      "steps": 0,
+      "phys_steps": 0
+    },
+    "frame_buffer": {
+      "enabled": false,
+      "outstanding": 0,
+      "max_depth": 2,
+      "prefetches": 0,
+      "hits": 0,
+      "rejected": 0
+    },
+    "render_buffer": {
+      "enabled": false,
+      "fps_limit": null,
+      "state": "idle",
+      "preframes": 0,
+      "blit_hits": 0,
+      "rejected": 0
+    },
+    "sched_pool": {
+      "batches": 424,
+      "packages": 0,
+      "timeouts": 0,
+      "worker_errors": 0,
+      "degraded": 0,
+      "n_workers": 3
+    }
+  },
+  "fps": 66,
+  "tps": 19.39213732060882,
+  "jitter": [
+    19.321936166720807,
+    184.6015999908559,
+    120
+  ],
+  "is_playing": true,
+  "main_ms_per_frame": 9.615644919365637,
+  "main_ms_per_frame_formula": "cpu_s*1000/(fps*wall)",
+  "gpu_rc": 0,
+  "gpu": {
+    "n_samples": 12,
+    "n_rows": 4560,
+    "by_engtype_all": {
+      "3d": {
+        "n_samples": 12,
+        "mean": 39.81908402166642,
+        "max": 45.13019885018212,
+        "series": [
+          41.552,
+          41.064,
+          41.32,
+          44.153,
+          41.47,
+          41.415,
+          45.13,
+          28.623,
+          40.893,
+          31.198,
+          41.36,
+          39.65
+        ]
+      },
+      "copy": {
+        "n_samples": 12,
+        "mean": 0.2662149824848533,
+        "max": 0.6311205478517995,
+        "series": [
+          0.383,
+          0.188,
+          0.339,
+          0.136,
+          0.162,
+          0.161,
+          0.159,
+          0.187,
+          0.171,
+          0.51,
+          0.631,
+          0.165
+        ]
+      },
+      "compute_1": {
+        "n_samples": 12,
+        "mean": 0.0,
+        "max": 0.0,
+        "series": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "vr": {
+        "n_samples": 12,
+        "mean": 0.0,
+        "max": 0.0,
+        "series": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "compute_0": {
+        "n_samples": 12,
+        "mean": 0.0,
+        "max": 0.0,
+        "series": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "legacyoverlay": {
+        "n_samples": 12,
+        "mean": 0.0,
+        "max": 0.0,
+        "series": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "videodecode": {
+        "n_samples": 12,
+        "mean": 0.0,
+        "max": 0.0,
+        "series": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "security": {
+        "n_samples": 12,
+        "mean": 0.0,
+        "max": 0.0,
+        "series": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "videoencode": {
+        "n_samples": 12,
+        "mean": 0.0,
+        "max": 0.0,
+        "series": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "graphics_1": {
+        "n_samples": 12,
+        "mean": 0.0,
+        "max": 0.0,
+        "series": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "cuda": {
+        "n_samples": 12,
+        "mean": 0.0,
+        "max": 0.0,
+        "series": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    "by_engtype_loompid": {
+      "3d": {
+        "n_samples": 12,
+        "mean": 37.574189642654765,
+        "max": 42.3377585156142,
+        "series": [
+          39.574,
+          38.78,
+          38.784,
+          41.703,
+          39.03,
+          39.005,
+          42.338,
+          26.616,
+          38.466,
+          28.629,
+          39.736,
+          38.231
+        ]
+      },
+      "compute_1": {
+        "n_samples": 12,
+        "mean": 0.0,
+        "max": 0.0,
+        "series": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "vr": {
+        "n_samples": 12,
+        "mean": 0.0,
+        "max": 0.0,
+        "series": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "copy": {
+        "n_samples": 12,
+        "mean": 0.0,
+        "max": 0.0,
+        "series": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "compute_0": {
+        "n_samples": 12,
+        "mean": 0.0,
+        "max": 0.0,
+        "series": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "legacyoverlay": {
+        "n_samples": 12,
+        "mean": 0.0,
+        "max": 0.0,
+        "series": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "videodecode": {
+        "n_samples": 12,
+        "mean": 0.0,
+        "max": 0.0,
+        "series": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "security": {
+        "n_samples": 12,
+        "mean": 0.0,
+        "max": 0.0,
+        "series": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "videoencode": {
+        "n_samples": 12,
+        "mean": 0.0,
+        "max": 0.0,
+        "series": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "graphics_1": {
+        "n_samples": 12,
+        "mean": 0.0,
+        "max": 0.0,
+        "series": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "cuda": {
+        "n_samples": 12,
+        "mean": 0.0,
+        "max": 0.0,
+        "series": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    "top_instances_max": [
+      {
+        "instance": "pid_75688_luid_0x00000000_0x0001679d_phys_0_eng_0_engtype_3d",
+        "max": 42.3377585156142
+      },
+      {
+        "instance": "pid_1812_luid_0x00000000_0x0001679d_phys_0_eng_0_engtype_3d",
+        "max": 2.09831376404017
+      },
+      {
+        "instance": "pid_4_luid_0x00000000_0x0001679d_phys_0_eng_12_engtype_copy",
+        "max": 0.582659013992496
+      },
+      {
+        "instance": "pid_66776_luid_0x00000000_0x0001679d_phys_0_eng_0_engtype_3d",
+        "max": 0.551668978706759
+      },
+      {
+        "instance": "pid_1008_luid_0x00000000_0x0001679d_phys_0_eng_0_engtype_3d",
+        "max": 0.170992082692632
+      },
+      {
+        "instance": "pid_11468_luid_0x00000000_0x0001679d_phys_0_eng_0_engtype_3d",
+        "max": 0.0680232971973587
+      },
+      {
+        "instance": "pid_9004_luid_0x00000000_0x0001679d_phys_0_eng_0_engtype_3d",
+        "max": 0.065615896126141
+      },
+      {
+        "instance": "pid_1812_luid_0x00000000_0x0001679d_phys_0_eng_6_engtype_copy",
+        "max": 0.0552016395046557
+      },
+      {
+        "instance": "pid_66776_luid_0x00000000_0x0001679d_phys_0_eng_6_engtype_copy",
+        "max": 0.0285163087558495
+      },
+      {
+        "instance": "pid_4_luid_0x00000000_0x0001679d_phys_0_eng_0_engtype_3d",
+        "max": 0.0209340807589477
+      },
+      {
+        "instance": "pid_9004_luid_0x00000000_0x0001679d_phys_0_eng_6_engtype_copy",
+        "max": 0.00386700644510552
+      },
+      {
+        "instance": "pid_1008_luid_0x00000000_0x0001679d_phys_0_eng_10_engtype_compute_1",
+        "max": 0.0
+      }
+    ]
+  },
+  "shot_stdout": "[DPI] aware=True physical=1920x1080 bounds=1920x1080 ratio=1.000\r\n[WINDOW] title=任务管理器 hwnd=12717152 pid=57620\r\n[RECT] raw left=15 top=98 right=982 bottom=968 w=967 h=870\r\n[RECT] CLIPPED x=15 y=98 w=967 h=870\r\n[STATE] before: page=performance logical=True panes=17 gpu=False title=[CPU]\r\n=== view: cpu ===\r\n[NAV] already in logical-processor view; skip graph-type menu\r\n[SHOT] D:\\my-project\\Loom(py源代码-工作区)\\Loom\\tests\\_tmp\\tm_cpu_play_off_20260908_212752.png\r\n[SIZE] 967x870\r\nVIEW=cpu(logical) panes=17 title=[CPU]\r\n=== view: gpu ===\r\n[SHOT] D:\\my-project\\Loom(py源代码-工作区)\\Loom\\tests\\_tmp\\tm_gpu_play_off_20260908_212821.png\r\n[SIZE] 967x870\r\nNAV_FAIL: gpu view not reached\r\nVIEW=unknown(page=performance title=[CPU])\r\n",
+  "shot_stderr": "",
+  "shot_rc": 0,
+  "shots": [
+    "D:\\my-project\\Loom(py源代码-工作区)\\Loom\\tests\\_tmp\\tm_cpu_play_off_20260908_212752.png",
+    "D:\\my-project\\Loom(py源代码-工作区)\\Loom\\tests\\_tmp\\tm_gpu_play_off_20260908_212821.png"
+  ],
+  "shot_views": [
+    "VIEW=cpu(logical) panes=17 title=[CPU]\r",
+    "VIEW=unknown(page=performance title=[CPU])\r"
+  ]
+}

@@ -1,0 +1,79 @@
+{
+  "module": "accept1_e2e_check",
+  "blocks": [
+    {
+      "block_id": "names",
+      "category": "declaration-only",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "python": "accept1_e2e_check.spec.python.dsl"
+        },
+        "code": {}
+      },
+      "symbols_defined": [],
+      "symbols_used": [],
+      "status": "draft"
+    },
+    {
+      "block_id": "imports",
+      "category": "hoisted",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "python": "accept1_e2e_check.spec.python.dsl"
+        },
+        "code": {
+          "python": "accept1_e2e_check.py"
+        }
+      },
+      "symbols_defined": [],
+      "symbols_used": [],
+      "status": "draft"
+    },
+    {
+      "block_id": "main_check",
+      "category": "emitting",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "python": "accept1_e2e_check.spec.python.dsl"
+        },
+        "code": {
+          "python": "accept1_e2e_check.py"
+        }
+      },
+      "symbols_defined": [
+        "main",
+        "reg",
+        "inj",
+        "a",
+        "h",
+        "pd",
+        "fn",
+        "rng",
+        "vh",
+        "m3",
+        "rc1",
+        "d1",
+        "d2",
+        "hr",
+        "src",
+        "dst",
+        "ef",
+        "rc2",
+        "de",
+        "a2",
+        "ok_escape",
+        "bad",
+        "_raises",
+        "exc"
+      ],
+      "symbols_used": [
+        "exc",
+        "fn"
+      ],
+      "status": "draft"
+    }
+  ]
+}

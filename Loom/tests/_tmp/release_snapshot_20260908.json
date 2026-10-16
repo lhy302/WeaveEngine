@@ -1,0 +1,258 @@
+{
+  "_format": "loom-release-snapshot/1.0",
+  "_doc": "Loom 投放时刻快照。硬判据 = 大小 + 导出符号集合 (+文本 SHA256); DLL 的 SHA256 因 PE 时间戳可能两侧不同, 属预期, 仅供追溯。",
+  "generated_at": "2026-09-08 21:05:56",
+  "generated_by": "tests/_tmp/verify_release.py --snapshot",
+  "src_root": "D:\\my-project\\Loom(py源代码-工作区)\\Loom",
+  "dst_root": "D:\\my-project\\Loom(编译版)\\Loom",
+  "items": [
+    {
+      "rel": "core_components/pipeline/pipeline.dll",
+      "kind": "dll",
+      "module_id": "pipeline",
+      "src": {
+        "path": "D:\\my-project\\Loom(py源代码-工作区)\\Loom\\core_components\\pipeline\\pipeline.dll",
+        "exists": true,
+        "size": 20480,
+        "sha256": "06f583a9ab9ef0757b22c41bfeac1e13ad76d7fecc43896ca4258f35b56f1a87",
+        "mtime": "2026-09-08 20:47:34",
+        "exports": [
+          "loom_module_abi",
+          "loom_module_deinit",
+          "loom_module_depend",
+          "loom_module_has",
+          "loom_module_info",
+          "loom_module_init",
+          "loom_module_provide",
+          "loom_pipeline_aabbs",
+          "loom_pipeline_light_vps",
+          "loom_pipeline_mat4_mul_ref",
+          "loom_pipeline_scene_bounds",
+          "loom_pipeline_shadow_prep",
+          "loom_pipeline_world_matrices"
+        ]
+      },
+      "dst": {
+        "path": "D:\\my-project\\Loom(编译版)\\Loom\\core_components\\pipeline\\pipeline.dll",
+        "exists": true,
+        "size": 20480,
+        "sha256": "d7b8954b55359f326cf1159b7e3dffc4a1b46903acf2f9a30dcc1e22e513dc7f",
+        "mtime": "2026-09-08 20:22:31",
+        "exports": [
+          "loom_module_abi",
+          "loom_module_deinit",
+          "loom_module_depend",
+          "loom_module_has",
+          "loom_module_info",
+          "loom_module_init",
+          "loom_module_provide",
+          "loom_pipeline_aabbs",
+          "loom_pipeline_light_vps",
+          "loom_pipeline_mat4_mul_ref",
+          "loom_pipeline_scene_bounds",
+          "loom_pipeline_shadow_prep",
+          "loom_pipeline_world_matrices"
+        ]
+      },
+      "size_equal": true,
+      "exports_equal": true,
+      "sha256_equal": false,
+      "verdict": "PASS"
+    },
+    {
+      "rel": "core_components/module_ref.dll",
+      "kind": "dll",
+      "module_id": "module_ref",
+      "src": {
+        "path": "D:\\my-project\\Loom(py源代码-工作区)\\Loom\\core_components\\module_ref.dll",
+        "exists": true,
+        "size": 10240,
+        "sha256": "2411aaedabbff50ae86632634a9fc97b66b6073f136f40cab9188974a10c0588",
+        "mtime": "2026-09-08 20:47:28",
+        "exports": [
+          "loom_module_abi",
+          "loom_module_deinit",
+          "loom_module_depend",
+          "loom_module_has",
+          "loom_module_info",
+          "loom_module_init",
+          "loom_module_provide",
+          "module_ref_echo"
+        ]
+      },
+      "dst": {
+        "path": "D:\\my-project\\Loom(编译版)\\Loom\\core_components\\module_ref.dll",
+        "exists": true,
+        "size": 10240,
+        "sha256": "4103d98a96bd57d8134bd2553ed34501c54706a32caaa27a6d23537459e61bfd",
+        "mtime": "2026-09-08 20:22:25",
+        "exports": [
+          "loom_module_abi",
+          "loom_module_deinit",
+          "loom_module_depend",
+          "loom_module_has",
+          "loom_module_info",
+          "loom_module_init",
+          "loom_module_provide",
+          "module_ref_echo"
+        ]
+      },
+      "size_equal": true,
+      "exports_equal": true,
+      "sha256_equal": false,
+      "verdict": "PASS"
+    },
+    {
+      "rel": "ckernels/loom_kernels.dll",
+      "kind": "dll",
+      "module_id": "ckernels",
+      "src": {
+        "path": "D:\\my-project\\Loom(py源代码-工作区)\\Loom\\ckernels\\loom_kernels.dll",
+        "exists": true,
+        "size": 16896,
+        "sha256": "5db416e55b53e686ccb9bca9e5ed4ea0d7ffd8cd65f3888bdedd89f8b4743440",
+        "mtime": "2026-09-08 20:47:26",
+        "exports": [
+          "loom_aabbs_minmax",
+          "loom_aabbs_minmax_par",
+          "loom_collide_pairs",
+          "loom_module_abi",
+          "loom_module_deinit",
+          "loom_module_depend",
+          "loom_module_has",
+          "loom_module_info",
+          "loom_module_init",
+          "loom_module_provide"
+        ]
+      },
+      "dst": {
+        "path": "D:\\my-project\\Loom(编译版)\\Loom\\ckernels\\loom_kernels.dll",
+        "exists": true,
+        "size": 16896,
+        "sha256": "7305c1bbbd7b70932b45762a0b8e41948045a043b9aa60a3ddb8f03713d6f941",
+        "mtime": "2026-09-08 20:22:23",
+        "exports": [
+          "loom_aabbs_minmax",
+          "loom_aabbs_minmax_par",
+          "loom_collide_pairs",
+          "loom_module_abi",
+          "loom_module_deinit",
+          "loom_module_depend",
+          "loom_module_has",
+          "loom_module_info",
+          "loom_module_init",
+          "loom_module_provide"
+        ]
+      },
+      "size_equal": true,
+      "exports_equal": true,
+      "sha256_equal": false,
+      "verdict": "PASS"
+    },
+    {
+      "rel": "core_components/registry.json",
+      "kind": "text",
+      "module_id": "",
+      "src": {
+        "path": "D:\\my-project\\Loom(py源代码-工作区)\\Loom\\core_components\\registry.json",
+        "exists": true,
+        "size": 1819,
+        "sha256": "e04c68a71acb5e2c358836a87856d58c805f647e15aff201195bb3b23982978d",
+        "mtime": "2026-09-08 19:25:21",
+        "exports": []
+      },
+      "dst": {
+        "path": "D:\\my-project\\Loom(编译版)\\Loom\\core_components\\registry.json",
+        "exists": true,
+        "size": 1819,
+        "sha256": "e04c68a71acb5e2c358836a87856d58c805f647e15aff201195bb3b23982978d",
+        "mtime": "2026-09-08 19:25:21",
+        "exports": []
+      },
+      "size_equal": true,
+      "exports_equal": false,
+      "sha256_equal": true,
+      "verdict": "PASS"
+    },
+    {
+      "rel": "core_components/module_loader.py",
+      "kind": "text",
+      "module_id": "",
+      "src": {
+        "path": "D:\\my-project\\Loom(py源代码-工作区)\\Loom\\core_components\\module_loader.py",
+        "exists": true,
+        "size": 16093,
+        "sha256": "e27160ab8650759a60bfdf3b6eeef4d78586ad5f38634bd6c58fcb48b5a91800",
+        "mtime": "2026-09-08 18:25:40",
+        "exports": []
+      },
+      "dst": {
+        "path": "D:\\my-project\\Loom(编译版)\\Loom\\core_components\\module_loader.py",
+        "exists": true,
+        "size": 16093,
+        "sha256": "e27160ab8650759a60bfdf3b6eeef4d78586ad5f38634bd6c58fcb48b5a91800",
+        "mtime": "2026-09-08 18:25:40",
+        "exports": []
+      },
+      "size_equal": true,
+      "exports_equal": false,
+      "sha256_equal": true,
+      "verdict": "PASS"
+    },
+    {
+      "rel": "core_components/module_registry.py",
+      "kind": "text",
+      "module_id": "",
+      "src": {
+        "path": "D:\\my-project\\Loom(py源代码-工作区)\\Loom\\core_components\\module_registry.py",
+        "exists": true,
+        "size": 20409,
+        "sha256": "ba34882353f88a436d7440176d1c8ea96c6cd1a00673f45ce6dfb94615aa3771",
+        "mtime": "2026-09-08 18:29:09",
+        "exports": []
+      },
+      "dst": {
+        "path": "D:\\my-project\\Loom(编译版)\\Loom\\core_components\\module_registry.py",
+        "exists": true,
+        "size": 20409,
+        "sha256": "ba34882353f88a436d7440176d1c8ea96c6cd1a00673f45ce6dfb94615aa3771",
+        "mtime": "2026-09-08 18:29:09",
+        "exports": []
+      },
+      "size_equal": true,
+      "exports_equal": false,
+      "sha256_equal": true,
+      "verdict": "PASS"
+    },
+    {
+      "rel": "pipeline_glue.py",
+      "kind": "text",
+      "module_id": "",
+      "src": {
+        "path": "D:\\my-project\\Loom(py源代码-工作区)\\Loom\\pipeline_glue.py",
+        "exists": true,
+        "size": 10629,
+        "sha256": "d0aadc517b43c5b2bfbdc55b7673fc8c44f0a21af6644d1b969f2505a5934d9a",
+        "mtime": "2026-09-08 19:25:14",
+        "exports": []
+      },
+      "dst": {
+        "path": "D:\\my-project\\Loom(编译版)\\Loom\\pipeline_glue.py",
+        "exists": true,
+        "size": 10629,
+        "sha256": "d0aadc517b43c5b2bfbdc55b7673fc8c44f0a21af6644d1b969f2505a5934d9a",
+        "mtime": "2026-09-08 19:25:14",
+        "exports": []
+      },
+      "size_equal": true,
+      "exports_equal": false,
+      "sha256_equal": true,
+      "verdict": "PASS"
+    }
+  ],
+  "summary": {
+    "total": 7,
+    "pass": 7,
+    "fail": 0
+  }
+}

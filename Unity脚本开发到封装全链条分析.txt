@@ -1,0 +1,231 @@
+====================================================================
+ Unity 脚本系统 · 从"开发者写脚本"到"游戏完整封装"全链条分析
+ (2026-08-12 整理; 供 Loom 设计"纯 Player 游戏封装"与脚本系统对照)
+====================================================================
+主线: 一条链看懂 ——
+  写脚本 → 挂载到物体 → Inspector 调参 → 场景保存(序列化)
+  → 编译(原生化) → 打包(剥离编辑器) → 玩家双击 → 运行时引擎调度脚本
+本文件按"开发者视角"逐环节拆解 Unity 机制, 每环节末尾对照 Loom 现状与差距。
+
+参考来源:
+  - Unity 脚本序列化手册 (docs.unity3d.com 脚本序列化 / 内置序列化)
+  - Unity Direct reference asset management (资源引用 GUID 机制)
+  - Unity 脚本生命周期 (速学笔记 07 节, unitykit.cn 教程)
+  - Unity IL2CPP 反编译/保护分析 (腾讯游戏安全 / 社区逆向文章)
+
+====================================================================
+一、总览: 一条链看懂 (从写脚本到玩家双击)
+====================================================================
+  [开发者]                        [引擎内部]                      [玩家]
+  1. 写 C# 脚本(.cs, MonoBehaviour) ──→ 脚本是"资产"(Asset, 带 GUID)
+  2. 拖/Add Component 挂到 GameObject ──→ 场景里生成 MonoBehaviour 组件(引用脚本)
+  3. Inspector 调参数(SerializeField) ──→ 写进序列化后备字段
+  4. Ctrl+S 保存场景 ──→ .unity YAML 文本, 组件按 m_Script+guid 引用脚本
+  5. 点 Build ──→ C# 编译成原生码(IL2CPP) + 纯 Player(无编辑器) + 数据文件夹
+  ------------------------------------------------------------------
+  [玩家] 双击 exe ──→ 运行时反序列化场景 → 重建 GameObject/组件
+                     → 引擎每帧调度脚本生命周期(Update/FixedUpdate/消息)
+                     → 玩家看到游戏
+
+关键哲学: 脚本不自己跑, 由引擎驱动; 脚本是"挂在物体上的数据+逻辑",
+          代码负责逻辑, 场景负责"谁挂了什么脚本、参数是多少"(数据)。
+
+====================================================================
+二、环节 1: 写脚本 (C# MonoBehaviour)
+====================================================================
+Unity 脚本 = 继承 MonoBehaviour 的 C# 类, 不是独立程序。
+  文件命名须与类名一致; 脚本是 .cs 资产文件, 项目里每个 .cs 有 .meta(GUID)。
+
+生命周期(引擎自动调用, 脚本不写 main):
+  Awake()       对象加载最早执行 → 初始化变量/GetComponent
+  OnEnable()    启用时 → 监听/重置
+  Start()       第一次 Update 前一次 → 依赖其他对象初始化的逻辑
+  Update()      每帧 → 输入/普通逻辑/计时 (帧率不定)
+  FixedUpdate() 固定步长(~50次/秒) → 物理 (口诀: 输入放Update, 物理放Fixed)
+  LateUpdate()  Update 后 → 相机跟随/收尾
+  OnDisable()/OnDestroy() 禁用/销毁 → 清理
+
+API(别人写好的功能入口):
+  GetComponent<T>()  自己/子/父身上的组件
+  transform.position 物体变换
+  Instantiate/Destroy 生成/销毁
+  Input.GetAxis 输入
+  消息回调 OnCollisionEnter/OnTriggerEnter 等(有 Collider 才触发)
+
+[对照 Loom]
+  Loom 脚本 = Python 类 + @register 注册进 SCRIPTS 表; 类成员:
+    script_id/name/params(参数规格) + on_start()(挂载/播放进入一次)
+    + update(dt)(每帧) + on_collision_start/end(碰撞事件, M31 加)
+  生命周期只有 on_start/update(+碰撞事件), 无 FixedUpdate/LateUpdate 等细分。
+  Loom 优势: 改脚本→按播放 立即生效(免编译); 引擎即解释器。
+
+====================================================================
+三、环节 2: 挂载 (把脚本挂到 GameObject)
+====================================================================
+Unity 里"挂脚本" = 在 GameObject 上 Add Component, 选一个脚本类。
+  一个 GameObject = 容器 + 多个组件(Transform 必带 + Renderer/Collider/
+  Rigidbody/任意脚本), 组件决定物体"能干什么" (组合优于继承)。
+  挂载后, 场景里生成一个 MonoBehaviour 组件, 它引用磁盘上的 .cs 脚本资产。
+
+  脚本是"资产"(Asset), 组件是"场景对象"(Scene Object):
+    - Asset: .cs 文件在 Project 面板, 被多个场景/物体引用, 身份 = GUID
+    - Scene Object: 场景里那个组件实例, 存"它引用了哪个脚本 + 参数是多少"
+
+[对照 Loom]
+  Loom 挂载 = 检查器"脚本"区下拉选脚本名(script_id), 一个物体可挂多个。
+  场景里存 ScriptComponent(script_id + script_vars), 运行时引擎实例化脚本。
+  Unity 用"脚本资产 GUID 引用", Loom 用"注册的 script_id 字符串"——更简单,
+  但换脚本文件不改 id 即可(本质是注册表查表, 无 GUID 依赖)。
+
+====================================================================
+四、环节 3: Inspector 调参 (序列化字段)
+====================================================================
+脚本里的字段要能被 Inspector 显示/保存, 必须:
+  - public 或 [SerializeField] private
+  - 非 static/const/readonly
+  - 类型可序列化(int/float/bool/string/Vector3/枚举/[Serializable] 自定义类/
+    UnityEngine.Object 引用/数组等)
+
+关键机制:
+  - Inspector 直接读写"序列化后备字段", 不走属性的 getter/setter
+    (你改 Inspector 的值, 就是改序列化数据, 再反序列化回对象)。
+  - [SerializeField] private float speed → 代码里 private 但检查器能调。
+  - 改值 → 序列化数据更新 → 反序列化 → 对象字段更新。
+
+[对照 Loom]
+  Loom 脚本参数 = params 元组 ((key,label,默认值,min,max,fmt)) → 检查器画
+  拖拽条/右键输入框, 值存进 script_vars, 随场景序列化。
+  参数走"脚本类声明 params + 检查器自动生成", 和 Unity [SerializeField]
+  同思想, 但 Loom 参数声明在脚本里(数据驱动检查器), Unity 靠反射字段。
+
+====================================================================
+五、环节 4: 场景保存 (m_Script / GUID / YAML)
+====================================================================
+场景 .unity 是 YAML 文本。每个 MonoBehaviour 在场景里序列化成一段:
+  --- !u!114 &65078850
+  MonoBehaviour:
+    m_GameObject: {fileID: 65078845}        # 挂在哪
+    m_Script: {fileID: 11500000, guid: 9cbd8cdf..., type: 3}  # 引用哪个脚本
+    speed: 5                                 # [SerializeField] 字段值
+    ...参数...
+
+引用脚本的方式 = PPtr 指针(GUID + fileID):
+  - GUID: 128 位, 唯一标识磁盘资源文件(.cs/.prefab/.png), 存在 .meta 里
+  - fileID: 64 位, 资源文件内部唯一标识对象(脚本的 MonoBehaviour fileID 固定)
+  - type: 3 = 脚本/prefab 资源
+运行时引擎把 (GUID,fileID) 解析成内存里的脚本对象。
+
+字段序列化限制(官方):
+  不支持多维/交错数组、嵌套容器; 自定义类按值内联(不支持 null, 7 级深度);
+  多态只对 UnityEngine.Object 引用有效。
+
+场景保存只发生在编辑器(运行时不能写 YAML); 运行时靠反序列化重建。
+
+[对照 Loom]
+  Loom 场景 = JSON 明文 (sceneio v8)。
+  物体序列化: {"id","type","params","position",...,"scripts":[{"id","vars"}]}
+  脚本引用 = script_id 字符串(注册表查表), 不依赖 GUID。
+  Loom 用 JSON(人类可读/易迁移/容错), Unity 用 YAML 文本 + GUID。
+  差异: Loom 场景是明文可读 → 玩家能看(需后续加密/混淆); Unity YAML 打进
+  data 文件夹二进制化(有提取门槛)。
+
+====================================================================
+六、环节 5: 编译 (C# → IL → 原生码)
+====================================================================
+Unity 脚本编译链路(打包时):
+  C# 源码 → Roslyn 编译成 IL(Assembly-CSharp.dll)
+  → 选后端:
+     - Mono: 直接带 IL(dll), 可用 dnSpy/ILSpy 完整反编译成 C# (泄密风险高)
+     - IL2CPP(默认推荐): IL 转 C++ → 原生机器码(GameAssembly.dll/libil2cpp.so)
+       + global-metadata.dat(类/方法/字符串符号表)
+
+IL2CPP 反编译现状(重要):
+  - IL2CPP 本身不能防逆向: global-metadata.dat 是明文符号表,
+    Il2CppDumper 可重建出可读类结构。
+  - 需额外保护: 加密 metadata(腾讯 UPS/Mfuscator)、字符串加密、
+    字节码虚拟化(ByteHide)、反调试。 → "提高门槛"而非绝对保密。
+
+[对照 Loom]
+  Loom 脚本 = Python 源码(明文)。Nuitka 打包时把 Python 编译成 C → exe
+  原生码(脚本逻辑进 exe, 不是独立源码文件)。→ 比"带 .py 源码"好一档。
+  但 Python 逻辑仍可被逆向分析(调试器/内存), 且 scene 是明文 JSON。
+  Loom 的"脚本免编译"优势 = 运行时解释, 代价 = 打包后才能隐藏逻辑。
+
+====================================================================
+七、环节 6: 打包发布 (剥离编辑器 / Scene List / Player)
+====================================================================
+Build Settings:
+  - Scenes in Build: 打进包的所有场景列表, 第一个 = 启动场景(玩家先看到)
+  - Player Settings: 应用身份/图标/分辨率/平台
+  - Build: 生成 Player(纯运行时) + 数据文件夹(场景/资源二进制)
+
+核心: 游戏 exe = 纯 Player, 不含编辑器。
+  玩家拿到的 exe 里没有场景视图/层级/检查器 → 物理上无法打开编辑器看场景。
+  这就是"引擎/编辑器分层"的直接结果(引擎不依赖编辑器, 打包剥掉编辑器)。
+
+[对照 Loom]
+  Loom 现状: Loom.exe 含 EngineApp(编辑器) + PlayerApp(播放器) 一个 exe,
+  无参数开编辑器, --run 跑游戏。→ 玩家拿到 Loom.exe 能开编辑器(臃肿+泄密)。
+  差距: 缺"纯 Player 游戏封装"(剥离编辑器, 双击 exe 只能玩不能编辑)。
+
+====================================================================
+八、环节 7: 运行时 (引擎调度脚本)
+====================================================================
+玩家双击 exe → 引擎启动 → 加载主场景(Scene List[0]) → 反序列化场景
+(重建 GameObject/组件, 按 m_Script 解析脚本) → 每帧调度:
+  - 引擎主循环调用每个 MonoBehaviour 的 Update/FixedUpdate/LateUpdate
+  - 物理系统触发消息回调(OnCollisionEnter 等)
+  - 脚本不自己跑 main, 全由引擎驱动(引擎= 调度器)
+
+消息系统(事件驱动):
+  OnCollisionEnter/OnTriggerEnter: 有 Collider 才被调用;
+  Collision 真实阻挡, Trigger 只检测进入(金币/传送门)。
+
+[对照 Loom]
+  Loom 运行时: PlayerApp --run 场景 → update_scripts 每帧实例化+调度脚本
+  (on_start 一次 + update 每帧); 碰撞事件 on_collision_start/end(M31);
+  刚体 update_physics(M31); 动画 update_animations(M35); 音频 update_audio(M34);
+  UI RuntimeUI(M33); 场景切换 load_scene(M37)。
+  调度框架与 Unity 同构(引擎驱动脚本), 但事件/消息面窄(仅碰撞, 无触发
+  Trigger/动画事件等)。
+
+====================================================================
+九、完整链条串联 (开发者→玩家)
+====================================================================
+  写 C#(MonoBehaviour) → 挂组件(Add Component) → [SerializeField] 调参
+  → Ctrl+S(场景 YAML, m_Script+GUID 引用脚本) → Build(编译 IL2CPP 原生 +
+    剥离编辑器 + Scene List 启动场景 + 数据文件夹) → 双击 exe
+  → 运行时反序列化场景 → 引擎调度生命周期 → 玩家玩到游戏。
+
+  数据与代码分离: 场景=数据(谁挂了什么/参数), 脚本=代码(逻辑),
+  代码解释数据 → 换场景不重编译, 换脚本逻辑要重打包。
+
+====================================================================
+十、对照 Loom: 现状差距表 (用于设计纯 Player 游戏封装)
+====================================================================
+┌──────────┬────────────────────┬──────────────────────────┬──────┐
+│ 环节      │ Unity               │ Loom 现状                 │ 差距 │
+├──────────┼────────────────────┼──────────────────────────┼──────┤
+│ 写脚本    │ C# MonoBehaviour   │ Python @register Script   │ ✅    │
+│ 挂载      │ Add Component(资产)│ 检查器脚本区(script_id)    │ ✅    │
+│ 调参      │ [SerializeField] 反射│ params 元组驱动检查器      │ ✅    │
+│ 场景保存  │ YAML + m_Script/GUID│ JSON + script_id          │ ✅/🟡 │
+│ 编译      │ IL2CPP 原生(可反编) │ Nuitka 编译进 exe(可逆)    │ 🟡    │
+│ 打包      │ 纯 Player 剥编辑器  │ ⚠️ exe 含编辑器            │ ❌    │
+│ 运行时    │ 引擎驱动生命周期     │ 引擎驱动 update/碰撞事件    │ ✅/🟡 │
+│ 内容保护  │ 二进制资源+加密+混淆 │ ⚠️ 场景明文 JSON + 脚本可逆 │ ❌    │
+└──────────┴────────────────────┴──────────────────────────┴──────┘
+
+结论:
+  1. Loom 的"脚本系统 + 挂载 + 调参 + 序列化 + 运行时调度" 已与 Unity 同构,
+     差距在"深度"(生命周期细分/消息系统/编译保护)。
+  2. 最大缺口 = "打包剥编辑器"(纯 Player 封装) + "场景/脚本内容保护"。
+     这正是下一阶段"游戏封装"要做的: 玩家 exe 只能玩游戏, 不能开编辑器
+     看场景/脚本; 场景数据做混淆/加密提高门槛。
+
+====================================================================
+(完) 一句话: Unity 的核心是把"脚本=数据+逻辑、场景=谁挂什么+参数"这条链
+  通过 序列化→编译→剥编辑器→运行时调度 组织起来, 玩家只拿到"纯 Player +
+  二进制数据"; Loom 已复刻这条链的前后两端, 中间"剥离编辑器 + 内容保护"
+  是下一步封装的关键。
+====================================================================

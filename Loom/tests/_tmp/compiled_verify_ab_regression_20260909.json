@@ -1,0 +1,41 @@
+{
+  "gate": "M2 验收③ FPS: compiled pipeline ON fps_mean >= OFF fps_mean",
+  "ts": "2026-09-09T19:34:04+08:00",
+  "mode": "both",
+  "exe": "D:\\my-project\\Loom(编译版)\\Loom\\Loom.exe",
+  "exe_size": 27504640,
+  "exe_mtime": "2026-09-08T20:41:56+08:00",
+  "scene": "D:\\my-project\\Loom(编译版)\\Loom\\保存\\压测500混合.json",
+  "on": {
+    "json": "D:\\my-project\\Loom(py源代码-工作区)\\Loom\\tests\\_tmp\\compiled_verify_on.json",
+    "valid": true,
+    "env_LOOM_NO_PIPELINE": false,
+    "summary": {
+      "fps_mean": 71.7,
+      "fps_min": 47,
+      "tps_mean": 20.12,
+      "jit_std_mean": 11.53,
+      "fb_prefetch_max": 0
+    }
+  },
+  "off": {
+    "json": "D:\\my-project\\Loom(py源代码-工作区)\\Loom\\tests\\_tmp\\compiled_verify_off.json",
+    "valid": true,
+    "env_LOOM_NO_PIPELINE": true,
+    "summary": {
+      "fps_mean": 66.3,
+      "fps_min": 61,
+      "tps_mean": 20.13,
+      "jit_std_mean": 11.95,
+      "fb_prefetch_max": 0
+    }
+  },
+  "fps_mean_on": 71.7,
+  "fps_mean_off": 66.3,
+  "delta_pct": 8.1,
+  "criterion": "on_fps_mean >= off_fps_mean",
+  "pass": true,
+  "both_valid": true,
+  "strict_fps": false,
+  "exit_code": 0
+}

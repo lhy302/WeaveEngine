@@ -1,0 +1,1216 @@
+{
+  "module": "interp_state",
+  "blocks": [
+    {
+      "block_id": "names",
+      "category": "declaration-only",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "python": "build_game.spec.python.dsl"
+        },
+        "code": {}
+      },
+      "symbols_defined": [],
+      "symbols_used": [],
+      "status": "draft"
+    },
+    {
+      "block_id": "imports",
+      "category": "hoisted",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "python": "loom_mcp.spec.python.dsl"
+        },
+        "code": {
+          "python": "loom_mcp.py"
+        }
+      },
+      "symbols_defined": [],
+      "symbols_used": [],
+      "status": "confirmed"
+    },
+    {
+      "block_id": "advance",
+      "category": "emitting",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "python": "interp_state.spec.python.dsl"
+        },
+        "code": {
+          "python": "interp_state.py"
+        }
+      },
+      "symbols_defined": [
+        "advance",
+        "self",
+        "planes=None",
+        "models",
+        "n",
+        "ids",
+        "m"
+      ],
+      "symbols_used": [
+        "self",
+        "planes=None"
+      ],
+      "status": "draft"
+    },
+    {
+      "block_id": "pack_bucket_instances",
+      "category": "emitting",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "python": "engine.spec.python.dsl"
+        },
+        "code": {
+          "python": "engine.py"
+        }
+      },
+      "symbols_defined": [
+        "packed",
+        "mc",
+        "sat",
+        "rgba"
+      ],
+      "symbols_used": [],
+      "status": "draft"
+    },
+    {
+      "block_id": "dirty_mask",
+      "category": "emitting",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "python": "pipeline_glue.spec.python.dsl"
+        },
+        "code": {
+          "python": "pipeline_glue.py"
+        }
+      },
+      "symbols_defined": [
+        "dirty_mask",
+        "cur_rows",
+        "old_rows",
+        "pidx",
+        "out_mask",
+        "h",
+        "cur",
+        "old",
+        "par",
+        "out",
+        "n",
+        "pd",
+        "pi64",
+        "pu8",
+        "fn",
+        "p_par",
+        "rc"
+      ],
+      "symbols_used": [
+        "cur_rows",
+        "old_rows",
+        "pidx",
+        "out_mask"
+      ],
+      "status": "draft"
+    },
+    {
+      "block_id": "local_matrices",
+      "category": "emitting",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "python": "pipeline_glue.spec.python.dsl"
+        },
+        "code": {
+          "python": "pipeline_glue.py"
+        }
+      },
+      "symbols_defined": [
+        "local_matrices",
+        "rot",
+        "scl",
+        "pos",
+        "out_m",
+        "h",
+        "r",
+        "s",
+        "p",
+        "om",
+        "n",
+        "pd",
+        "fn",
+        "rc"
+      ],
+      "symbols_used": [
+        "rot",
+        "scl",
+        "pos",
+        "out_m"
+      ],
+      "status": "draft"
+    },
+    {
+      "block_id": "local_matrices_batch",
+      "category": "emitting",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "python": "physics_bridge.spec.python.dsl"
+        },
+        "code": {
+          "python": "physics_bridge.py"
+        }
+      },
+      "symbols_defined": [
+        "out",
+        "c_ok",
+        "cx",
+        "cy",
+        "cz",
+        "S",
+        "Rx",
+        "Ry",
+        "Rz",
+        "T"
+      ],
+      "symbols_used": [],
+      "status": "draft"
+    },
+    {
+      "block_id": "dirty_mask_batch",
+      "category": "emitting",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "python": "physics_bridge.spec.python.dsl"
+        },
+        "code": {
+          "python": "physics_bridge.py"
+        }
+      },
+      "symbols_defined": [
+        "id2idx",
+        "pidx",
+        "c_ok",
+        "out_mask",
+        "cur_flat",
+        "old_flat",
+        "pidx_arr",
+        "dirty",
+        "ne",
+        "mask",
+        "pmask",
+        "added",
+        "has_parent",
+        "pi"
+      ],
+      "symbols_used": [],
+      "status": "draft"
+    },
+    {
+      "block_id": "glue_functions",
+      "category": "emitting",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "python": "physics_glue.spec.python.dsl"
+        },
+        "code": {
+          "python": "physics_glue.py"
+        }
+      },
+      "symbols_defined": [
+        "pre_step",
+        "lin_vel",
+        "ang_vel",
+        "is_dynamic",
+        "use_gravity",
+        "is_active",
+        "friction",
+        "rolling_fric",
+        "gravity_y",
+        "dt",
+        "h",
+        "n",
+        "pd",
+        "pu8",
+        "post_step",
+        "substep_loop",
+        "sub_dt",
+        "num_substeps",
+        "step_cb=None",
+        "user_ctx=None"
+      ],
+      "symbols_used": [
+        "lin_vel",
+        "ang_vel",
+        "is_dynamic",
+        "use_gravity",
+        "is_active",
+        "friction",
+        "rolling_fric",
+        "gravity_y",
+        "dt",
+        "sub_dt",
+        "num_substeps",
+        "step_cb=None",
+        "user_ctx=None"
+      ],
+      "status": "confirmed"
+    },
+    {
+      "block_id": "register_001",
+      "category": "emitting",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "python": "scripts.spec.python.dsl"
+        },
+        "code": {
+          "python": "scripts.py"
+        }
+      },
+      "symbols_defined": [
+        "register",
+        "cls",
+        "_SCRIPT_FNAME_RE"
+      ],
+      "symbols_used": [
+        "cls"
+      ],
+      "status": "draft"
+    },
+    {
+      "block_id": "load_script_dir_001",
+      "category": "emitting",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "python": "scripts.spec.python.dsl"
+        },
+        "code": {
+          "python": "scripts.py"
+        }
+      },
+      "symbols_defined": [
+        "load_script_dir",
+        "directory",
+        "count",
+        "path",
+        "spec",
+        "mod"
+      ],
+      "symbols_used": [
+        "directory"
+      ],
+      "status": "draft"
+    },
+    {
+      "block_id": "register_sources_001",
+      "category": "emitting",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "python": "scripts.spec.python.dsl"
+        },
+        "code": {
+          "python": "scripts.py"
+        }
+      },
+      "symbols_defined": [
+        "register_sources",
+        "sources",
+        "count",
+        "isinstance",
+        "mod_name",
+        "mod"
+      ],
+      "symbols_used": [
+        "sources"
+      ],
+      "status": "draft"
+    },
+    {
+      "block_id": "get_script_001",
+      "category": "emitting",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "python": "scripts.spec.python.dsl"
+        },
+        "code": {
+          "python": "scripts.py"
+        }
+      },
+      "symbols_defined": [
+        "get_script",
+        "script_id"
+      ],
+      "symbols_used": [
+        "script_id"
+      ],
+      "status": "draft"
+    },
+    {
+      "block_id": "script_options_001",
+      "category": "emitting",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "python": "scripts.spec.python.dsl"
+        },
+        "code": {
+          "python": "scripts.py"
+        }
+      },
+      "symbols_defined": [
+        "script_options"
+      ],
+      "symbols_used": [],
+      "status": "draft"
+    },
+    {
+      "block_id": "Script_001",
+      "category": "emitting",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "python": "scripts.spec.python.dsl"
+        },
+        "code": {
+          "python": "scripts.py"
+        }
+      },
+      "symbols_defined": [
+        "script_id",
+        "name",
+        "params",
+        "__init__",
+        "self",
+        "on_start",
+        "update",
+        "dt"
+      ],
+      "symbols_used": [
+        "self",
+        "dt"
+      ],
+      "status": "draft"
+    },
+    {
+      "block_id": "RotateScript_001",
+      "category": "emitting",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "python": "scripts.spec.python.dsl"
+        },
+        "code": {
+          "python": "scripts.py"
+        }
+      },
+      "symbols_defined": [
+        "RotateScript",
+        "script_id",
+        "name",
+        "params",
+        "update",
+        "self",
+        "dt",
+        "o"
+      ],
+      "symbols_used": [
+        "self",
+        "dt"
+      ],
+      "status": "draft"
+    },
+    {
+      "block_id": "OrbitScript_001",
+      "category": "emitting",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "python": "scripts.spec.python.dsl"
+        },
+        "code": {
+          "python": "scripts.py"
+        }
+      },
+      "symbols_defined": [
+        "OrbitScript",
+        "script_id",
+        "name",
+        "params",
+        "on_start",
+        "self",
+        "c",
+        "p",
+        "update",
+        "dt"
+      ],
+      "symbols_used": [
+        "self",
+        "dt"
+      ],
+      "status": "draft"
+    },
+    {
+      "block_id": "BobScript_001",
+      "category": "emitting",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "python": "scripts.spec.python.dsl"
+        },
+        "code": {
+          "python": "scripts.py"
+        }
+      },
+      "symbols_defined": [
+        "BobScript",
+        "script_id",
+        "name",
+        "params",
+        "on_start",
+        "self",
+        "update",
+        "dt",
+        "o"
+      ],
+      "symbols_used": [
+        "self",
+        "dt"
+      ],
+      "status": "draft"
+    },
+    {
+      "block_id": "WASDMoveScript_001",
+      "category": "emitting",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "python": "scripts.spec.python.dsl"
+        },
+        "code": {
+          "python": "scripts.py"
+        }
+      },
+      "symbols_defined": [
+        "WASDMoveScript",
+        "script_id",
+        "name",
+        "params",
+        "update",
+        "self",
+        "dt",
+        "a",
+        "dx",
+        "dz",
+        "s"
+      ],
+      "symbols_used": [
+        "self",
+        "dt"
+      ],
+      "status": "draft"
+    },
+    {
+      "block_id": "CameraFollowScript_001",
+      "category": "emitting",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "python": "scripts.spec.python.dsl"
+        },
+        "code": {
+          "python": "scripts.py"
+        }
+      },
+      "symbols_defined": [
+        "CameraFollowScript",
+        "script_id",
+        "name",
+        "params",
+        "update",
+        "self",
+        "dt",
+        "p"
+      ],
+      "symbols_used": [
+        "self",
+        "dt"
+      ],
+      "status": "draft"
+    },
+    {
+      "block_id": "FallScript_001",
+      "category": "emitting",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "python": "scripts.spec.python.dsl"
+        },
+        "code": {
+          "python": "scripts.py"
+        }
+      },
+      "symbols_defined": [
+        "FallScript",
+        "script_id",
+        "name",
+        "params",
+        "on_start",
+        "self",
+        "update",
+        "dt",
+        "hit"
+      ],
+      "symbols_used": [
+        "self",
+        "dt"
+      ],
+      "status": "draft"
+    },
+    {
+      "block_id": "BounceScript_001",
+      "category": "emitting",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "python": "scripts.spec.python.dsl"
+        },
+        "code": {
+          "python": "scripts.py"
+        }
+      },
+      "symbols_defined": [
+        "BounceScript",
+        "script_id",
+        "name",
+        "params",
+        "on_start",
+        "self",
+        "update",
+        "dt",
+        "hit"
+      ],
+      "symbols_used": [
+        "self",
+        "dt"
+      ],
+      "status": "draft"
+    },
+    {
+      "block_id": "FirstPersonScript_001",
+      "category": "emitting",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "python": "scripts.spec.python.dsl"
+        },
+        "code": {
+          "python": "scripts.py"
+        }
+      },
+      "symbols_defined": [
+        "FirstPersonScript",
+        "script_id",
+        "name",
+        "params",
+        "on_start",
+        "self",
+        "sml",
+        "update",
+        "dt",
+        "e",
+        "tab",
+        "getattr",
+        "lim",
+        "fwd",
+        "right",
+        "a",
+        "dx",
+        "dz",
+        "s",
+        "rb"
+      ],
+      "symbols_used": [
+        "self",
+        "dt"
+      ],
+      "status": "draft"
+    },
+    {
+      "block_id": "ThirdPersonScript_001",
+      "category": "emitting",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "python": "scripts.spec.python.dsl"
+        },
+        "code": {
+          "python": "scripts.py"
+        }
+      },
+      "symbols_defined": [
+        "ThirdPersonScript",
+        "script_id",
+        "name",
+        "params",
+        "on_start",
+        "self",
+        "sml",
+        "update",
+        "dt",
+        "e",
+        "tab",
+        "getattr",
+        "lim",
+        "fwd",
+        "right",
+        "a",
+        "dx",
+        "dz",
+        "s"
+      ],
+      "symbols_used": [
+        "self",
+        "dt"
+      ],
+      "status": "draft"
+    },
+    {
+      "block_id": "JumpScript_001",
+      "category": "emitting",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "python": "scripts.spec.python.dsl"
+        },
+        "code": {
+          "python": "scripts.py"
+        }
+      },
+      "symbols_defined": [
+        "JumpScript",
+        "script_id",
+        "name",
+        "params",
+        "update",
+        "self",
+        "dt",
+        "rb"
+      ],
+      "symbols_used": [
+        "self",
+        "dt"
+      ],
+      "status": "draft"
+    },
+    {
+      "block_id": "CountTouchScript_001",
+      "category": "emitting",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "python": "scripts.spec.python.dsl"
+        },
+        "code": {
+          "python": "scripts.py"
+        }
+      },
+      "symbols_defined": [
+        "CountTouchScript",
+        "script_id",
+        "name",
+        "params",
+        "on_start",
+        "self",
+        "update",
+        "dt",
+        "e",
+        "total"
+      ],
+      "symbols_used": [
+        "self",
+        "dt"
+      ],
+      "status": "draft"
+    },
+    {
+      "block_id": "RotateScript",
+      "category": "emitting",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "python": "scripts.spec.python.dsl"
+        },
+        "code": {
+          "python": "scripts.py"
+        }
+      },
+      "symbols_defined": [
+        "RotateScript",
+        "script_id",
+        "name",
+        "params",
+        "update",
+        "self",
+        "dt",
+        "o"
+      ],
+      "symbols_used": [
+        "self",
+        "dt"
+      ],
+      "status": "draft"
+    },
+    {
+      "block_id": "depths",
+      "category": "emitting",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "python": "pipeline_glue.spec.python.dsl"
+        },
+        "code": {
+          "python": "pipeline_glue.py"
+        }
+      },
+      "symbols_defined": [
+        "depths",
+        "parent",
+        "out_depth=None",
+        "h",
+        "par",
+        "n",
+        "out",
+        "pi",
+        "fn",
+        "rc"
+      ],
+      "symbols_used": [
+        "parent",
+        "out_depth=None"
+      ],
+      "status": "draft"
+    },
+    {
+      "block_id": "ancestry_dfs",
+      "category": "emitting",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "python": "pipeline_glue.spec.python.dsl"
+        },
+        "code": {
+          "python": "pipeline_glue.py"
+        }
+      },
+      "symbols_defined": [
+        "ancestry_dfs",
+        "parent",
+        "out_tin=None",
+        "out_tout=None",
+        "h",
+        "par",
+        "n",
+        "tin",
+        "tout",
+        "pi",
+        "fn",
+        "rc"
+      ],
+      "symbols_used": [
+        "parent",
+        "out_tin=None",
+        "out_tout=None"
+      ],
+      "status": "draft"
+    },
+    {
+      "block_id": "c_graph_dispatch",
+      "category": "emitting",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "python": "fastpath.spec.python.dsl"
+        },
+        "code": {
+          "python": "fastpath.py"
+        }
+      },
+      "symbols_defined": [
+        "_depths_py_or_jit",
+        "_ancestry_dfs_py_or_jit",
+        "_depths_dispatch",
+        "parent",
+        "res",
+        "_ancestry_dfs_dispatch",
+        "depths",
+        "ancestry_dfs"
+      ],
+      "symbols_used": [
+        "parent"
+      ],
+      "status": "draft"
+    },
+    {
+      "block_id": "update_scripts",
+      "category": "emitting",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "python": "engine.spec.python.dsl"
+        },
+        "code": {
+          "python": "engine.py"
+        }
+      },
+      "symbols_defined": [
+        "update_scripts",
+        "self",
+        "delta_time",
+        "models",
+        "has_scripts",
+        "struct_gen",
+        "cache_gen",
+        "use_c",
+        "rot_items",
+        "move_items",
+        "generic_items",
+        "s",
+        "cls",
+        "valid_rot",
+        "v",
+        "sx",
+        "sy",
+        "sz",
+        "r",
+        "n_rot",
+        "rot_buf",
+        "cap",
+        "speeds_buf",
+        "out_rot_buf",
+        "c_out",
+        "valid_mov",
+        "vx",
+        "vy",
+        "vz",
+        "p",
+        "n_mov",
+        "pos_buf",
+        "vel_buf",
+        "out_pos_buf"
+      ],
+      "symbols_used": [
+        "self",
+        "delta_time"
+      ],
+      "status": "draft"
+    },
+    {
+      "block_id": "lua_glue",
+      "category": "emitting",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "python": "script_glue.spec.python.dsl"
+        },
+        "code": {
+          "python": "script_glue.py"
+        }
+      },
+      "symbols_defined": [
+        "__init__",
+        "self",
+        "code=\"\"",
+        "_init_vm",
+        "h",
+        "fn_new",
+        "fn_do",
+        "rc",
+        "bind_entity",
+        "pos",
+        "rot",
+        "name=\"\"",
+        "fn_bind",
+        "set_key",
+        "key",
+        "pressed",
+        "fn_key",
+        "set_action",
+        "action",
+        "active",
+        "fn_act",
+        "bind_camera",
+        "cam_target",
+        "fn_cam",
+        "call_start",
+        "fn_start",
+        "call_update",
+        "dt",
+        "fn_upd",
+        "get_error",
+        "fn_err",
+        "res",
+        "close",
+        "fn_free"
+      ],
+      "symbols_used": [
+        "self",
+        "code=\"\"",
+        "pos",
+        "rot",
+        "name=\"\"",
+        "key",
+        "pressed",
+        "action",
+        "active",
+        "cam_target",
+        "dt"
+      ],
+      "status": "draft"
+    },
+    {
+      "block_id": "transform_snapshot",
+      "category": "emitting",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "python": "engine.spec.python.dsl"
+        },
+        "code": {
+          "python": "engine.py"
+        }
+      },
+      "symbols_defined": [
+        "_transform_snapshot",
+        "self",
+        "models",
+        "n",
+        "stamp",
+        "gen",
+        "snap",
+        "getattr",
+        "cur",
+        "keys",
+        "bufs",
+        "cur_cap",
+        "cap",
+        "slot",
+        "pos",
+        "rot",
+        "scl"
+      ],
+      "symbols_used": [
+        "self",
+        "models"
+      ],
+      "status": "draft"
+    },
+    {
+      "block_id": "lua_loader",
+      "category": "emitting",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "python": "scripts.spec.python.dsl"
+        },
+        "code": {
+          "python": "scripts.py"
+        }
+      },
+      "symbols_defined": [
+        "make_lua_script_class",
+        "script_id",
+        "name",
+        "lua_code",
+        "DynamicLuaScript",
+        "__init__",
+        "self",
+        "on_start",
+        "p",
+        "r",
+        "cam",
+        "update",
+        "dt",
+        "e",
+        "hasattr",
+        "buf_p",
+        "buf_r",
+        "buf_c"
+      ],
+      "symbols_used": [
+        "script_id",
+        "name",
+        "lua_code",
+        "self",
+        "dt"
+      ],
+      "status": "draft"
+    },
+    {
+      "block_id": "assemble_player",
+      "category": "emitting",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "python": "build_game.spec.python.dsl"
+        },
+        "code": {
+          "python": "build_game.py"
+        }
+      },
+      "symbols_defined": [
+        "s",
+        "d",
+        "s_dir",
+        "d_dir"
+      ],
+      "symbols_used": [],
+      "status": "draft"
+    },
+    {
+      "block_id": "setup",
+      "category": "emitting",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "python": "physics_glue.spec.python.dsl"
+        },
+        "code": {
+          "python": "physics_glue.py"
+        }
+      },
+      "symbols_defined": [
+        "disabled",
+        "handle"
+      ],
+      "symbols_used": [],
+      "status": "confirmed"
+    },
+    {
+      "block_id": "status_fn",
+      "category": "emitting",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "python": "physics_glue.spec.python.dsl"
+        },
+        "code": {
+          "python": "physics_glue.py"
+        }
+      },
+      "symbols_defined": [
+        "status"
+      ],
+      "symbols_used": [],
+      "status": "confirmed"
+    },
+    {
+      "block_id": "main",
+      "category": "emitting",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "python": "test_mcp_stub.spec.python.dsl"
+        },
+        "code": {
+          "python": "test_mcp_stub.py"
+        }
+      },
+      "symbols_defined": [
+        "hello"
+      ],
+      "symbols_used": [],
+      "status": "confirmed"
+    },
+    {
+      "block_id": "constants",
+      "category": "emitting",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "python": "loom_mcp.spec.python.dsl"
+        },
+        "code": {
+          "python": "loom_mcp.py"
+        }
+      },
+      "symbols_defined": [],
+      "symbols_used": [],
+      "status": "confirmed"
+    },
+    {
+      "block_id": "engine_client",
+      "category": "emitting",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "python": "loom_mcp.spec.python.dsl"
+        },
+        "code": {
+          "python": "loom_mcp.py"
+        }
+      },
+      "symbols_defined": [],
+      "symbols_used": [],
+      "status": "confirmed"
+    },
+    {
+      "block_id": "mcp_definitions",
+      "category": "emitting",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "python": "loom_mcp.spec.python.dsl"
+        },
+        "code": {
+          "python": "loom_mcp.py"
+        }
+      },
+      "symbols_defined": [],
+      "symbols_used": [],
+      "status": "confirmed"
+    },
+    {
+      "block_id": "mcp_handler",
+      "category": "emitting",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "python": "loom_mcp.spec.python.dsl"
+        },
+        "code": {
+          "python": "loom_mcp.py"
+        }
+      },
+      "symbols_defined": [],
+      "symbols_used": [],
+      "status": "confirmed"
+    },
+    {
+      "block_id": "stdio_loop",
+      "category": "emitting",
+      "migration_class": "verbatim",
+      "files": {
+        "spec": {
+          "python": "loom_mcp.spec.python.dsl"
+        },
+        "code": {
+          "python": "loom_mcp.py"
+        }
+      },
+      "symbols_defined": [],
+      "symbols_used": [],
+      "status": "confirmed"
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+# Loom 引擎运行时依赖 (2026-08-20 安全加固: 版本锁定, Qoder 报告提示7)
+# 安装: py -3.12 -m pip install -r requirements.txt
+pygame>=2.5
+moderngl>=5.8
+numpy>=1.24
+PySide6>=6.6        # Qt 编辑器 (qt_view.py)
+# cupy 仅 --benchmark 可选使用, 不强制

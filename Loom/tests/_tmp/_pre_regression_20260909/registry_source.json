@@ -1,0 +1,47 @@
+{
+  "_format": "loom-core-registry/1.0",
+  "_doc": "Loom 核心组件注册表 v1.0 (DLL化战役 M1)。字段说明见同目录 注册表格式与契约设计说明.txt。registry 按序组装: 先核心后插件; DLL 条目指向磁盘文件, 基座加载器逐一校验 (magic/abi/provides/depends/冲突) 后 init。enabled=false 的组件不加载 (回退=官方版), official=1 才算官方组件。",
+  "registry_version": "1.0",
+  "components": [
+    {
+      "module_id": "module_ref",
+      "path": "core_components/module_ref.dll",
+      "official": true,
+      "enabled": true,
+      "provides": [
+        "module_ref.echo"
+      ],
+      "depends": [],
+      "sha256": "3cf5fc9cfc1cabe97306ed308035b358fe9a11e5d43ea6f578a2c5262734b793",
+      "note": "契约参考实现 (脚手架模板+探针无害靶); 首个真实组件 pipeline.dll 在 M2 落地后追加于此"
+    },
+    {
+      "module_id": "ckernels",
+      "path": "ckernels/loom_kernels.dll",
+      "official": true,
+      "enabled": true,
+      "provides": [
+        "ckernels.aabbs",
+        "ckernels.collide"
+      ],
+      "depends": [],
+      "sha256": "df810fc5652ee238d020c448b2c6e06dce745a2b59acb2542f37a26d1d45d37b",
+      "note": "C 数值内核 (aabbs/collide), 2026-09-08 M1-4 契约化: loom_module.h v1.0 七导出末尾无侵入追加, 原三内核签名/求和序不动, fastpath ctypes 直调链不受影响"
+    },
+    {
+      "module_id": "pipeline",
+      "path": "core_components/pipeline/pipeline.dll",
+      "official": true,
+      "enabled": true,
+      "provides": [
+        "pipeline.light_vps",
+        "pipeline.scene_bounds",
+        "pipeline.aabbs",
+        "pipeline.world_matrices"
+      ],
+      "depends": [],
+      "sha256": "902d5f29e2b952f4d05b280c4be2f7ccc57336d786474f85aad7be8c18433329",
+      "note": "逻辑帧 prep 链 C 实现 (M2a, 2026-09-08): 光源 VP 批量/场景光照包围盒/AABB 归约/世界矩阵; 逐元素运算与 engine 现行 Python 实现逐位一致, 矩阵乘法链 ≤ depth×1e-15 (pipeline_val_check 15/15 + pipeline_world_check 7/7)"
+    }
+  ]
+}

@@ -1,0 +1,41 @@
+D2/A6 动画采样 numpy 化 验收报告 (主线程接管验收, 2026-08-31)
+====================================================================
+实施: DSH (会话中断前已改完 engine.py AnimationClip, 验证环节崩)
+验收: 主线程 (用户指示"自行干所有任务")
+
+一、改动范围 (仅 engine.py, 460-590 行附近, 类 AnimationClip)
+  - __init__ 建缓存字段 (_np_key/_np_fast/_np_times/_np_vals) + _np_rebuild()
+  - _np_rebuild: 快路径资格闸门 —— F>=2 / time 与三分量值只认纯 Python
+    int/float (None/bool/np数/str/nan 一律慢路径) / 时间非降序 / int 时间
+    超 f64 精度拦截 / 非3分量值拦截; 建缓存 _np_times (F,)f64 + 三通道 (F,3)f64
+  - sample: 快路径 = searchsorted 定段 + 向量化插值 (a+(b-a)*f 同序 IEEE754)
+    + tolist() 转 Python float tuple; 慢路径 _sample_slow = 旧逐帧线性扫原样
+    保留 (语义基准); 特殊 t 类型走慢路径
+  - _np_sync: sample 入口 (id(frames), len(frames)) 缓存失效校验
+  - frames 数据结构/序列化/sceneio/undo 全部未动
+
+二、验收结果 (全部亲测)
+  1. anim_np_check.py 对拍网 (tests/_tmp/, 我写): 10 场景 × 16 个采样点,
+     新实现 vs 改前旧实现直译 ref_sample, float == 逐位断言:
+     ①三帧标准 ②全通道+非整点 ③span=0重帧 ④首帧>0+循环取模 ⑤大int通道
+     (2^53+3, f64 舍入风险点, 实证两路径逐位相等) ⑥None通道(旧=TypeError
+     崩溃, 新慢路径原样复现同一崩溃=语义一致) ⑦乱序时间(闸门挡下走慢路径)
+     ⑧单帧 ⑨空帧 ⑩int通道值+int时间
+     → ALL PASS (0 FAIL)
+  2. 缓存契约边界 (快路径真启用前提): 同长度原地改帧 → 采样仍旧缓存值
+     (docstring 明示契约) → _np_rebuild() 显式重建 → 新值生效
+     → PASS
+  3. tests/test_animation.py 既有回归 12 项 → ALL PASS
+  4. engine.py AST 完整性 → OK (4120 行)
+
+三、结论
+  D2 实现合格, 数值逐位一致 (含崩溃奇偶), 缓存契约清晰, 回归全绿。
+  遗留说明: 大 int 通道值 (>2^53) 闸门豁漏经实证无差异 (⑤场景), 不补闸门,
+  原因见 anim_np_check.py ⑤ 注释。
+
+产物清单
+  - tests/_tmp/anim_np_check.py        (对拍网, 常驻可复跑)
+  - tests/_tmp/anim_np_report.txt      (本报告)
+  - tests/_tmp/ancestry_wire_report.txt (D1 报告, 已验收)
+  - tests/_tmp/soa_verify_report.txt   (任务V 报告, 已验收)
+====================================================================

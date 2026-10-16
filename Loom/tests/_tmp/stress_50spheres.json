@@ -1,0 +1,2205 @@
+{
+ "version": 8,
+ "camera": {
+  "target": [
+   0.0,
+   2.0,
+   0.0
+  ],
+  "distance": 32.0,
+  "yaw": 0.7,
+  "pitch": -0.38
+ },
+ "materials": [],
+ "lights": [
+  {
+   "id": "be3043cb229540a08ec73bdf97ad9631",
+   "name": "太阳",
+   "kind": "directional",
+   "position": [
+    0.0,
+    12.0,
+    0.0
+   ],
+   "direction": [
+    0.0,
+    -1.0,
+    0.0
+   ],
+   "azimuth": 30.0,
+   "elevation": -55.0,
+   "roll": 0.0,
+   "color": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "intensity": 1.1,
+   "mode": "full",
+   "shape": "circle",
+   "size": 8.0,
+   "shadow": true
+  },
+  {
+   "id": "d36d347f12584e4ea6e0d65be684d6a3",
+   "name": "补光",
+   "kind": "point",
+   "position": [
+    10.0,
+    6.0,
+    10.0
+   ],
+   "direction": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "azimuth": null,
+   "elevation": null,
+   "roll": null,
+   "color": [
+    0.9,
+    0.9,
+    1.0
+   ],
+   "intensity": 0.9,
+   "mode": "full",
+   "shape": "circle",
+   "size": 5.0,
+   "shadow": false
+  }
+ ],
+ "cameras": [],
+ "active_camera": null,
+ "objects": [
+  {
+   "id": "6f06da2f0f9a439da5f1d576000815c7",
+   "parent_id": null,
+   "prefab_ref": null,
+   "name": "球0",
+   "type": "sphere",
+   "params": {
+    "radius": 0.8,
+    "stacks": 36,
+    "slices": 54
+   },
+   "position": [
+    -8.0,
+    0.8,
+    -5.0
+   ],
+   "rotation": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "scale": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "color": "#e05a5a",
+   "material_id": null,
+   "normal_mode": "vertex",
+   "saturation": 1.0,
+   "visible": true,
+   "scripts": [
+    {
+     "id": "rotate",
+     "vars": {
+      "sx": 90.0,
+      "sy": 40.0,
+      "sz": 0.0
+     }
+    }
+   ],
+   "collider": {
+    "shape": "sphere",
+    "enabled": true
+   },
+   "rigidbody": null,
+   "audio_source": null,
+   "animator": null
+  },
+  {
+   "id": "022f66e526554929b152580040e8ff50",
+   "parent_id": null,
+   "prefab_ref": null,
+   "name": "球1",
+   "type": "sphere",
+   "params": {
+    "radius": 0.8,
+    "stacks": 36,
+    "slices": 54
+   },
+   "position": [
+    -6.0,
+    0.8,
+    -5.0
+   ],
+   "rotation": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "scale": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "color": "#e05a5a",
+   "material_id": null,
+   "normal_mode": "vertex",
+   "saturation": 1.0,
+   "visible": true,
+   "scripts": [],
+   "collider": {
+    "shape": "sphere",
+    "enabled": true
+   },
+   "rigidbody": null,
+   "audio_source": null,
+   "animator": null
+  },
+  {
+   "id": "78b46b8866414243bd70fc9f2a0ae785",
+   "parent_id": null,
+   "prefab_ref": null,
+   "name": "球2",
+   "type": "sphere",
+   "params": {
+    "radius": 0.8,
+    "stacks": 36,
+    "slices": 54
+   },
+   "position": [
+    -4.0,
+    0.8,
+    -5.0
+   ],
+   "rotation": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "scale": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "color": "#e05a5a",
+   "material_id": null,
+   "normal_mode": "vertex",
+   "saturation": 1.0,
+   "visible": true,
+   "scripts": [],
+   "collider": {
+    "shape": "sphere",
+    "enabled": true
+   },
+   "rigidbody": null,
+   "audio_source": null,
+   "animator": null
+  },
+  {
+   "id": "62c3e92035ae402f8f4e00a593e18176",
+   "parent_id": null,
+   "prefab_ref": null,
+   "name": "球3",
+   "type": "sphere",
+   "params": {
+    "radius": 0.8,
+    "stacks": 36,
+    "slices": 54
+   },
+   "position": [
+    -2.0,
+    0.8,
+    -5.0
+   ],
+   "rotation": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "scale": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "color": "#e05a5a",
+   "material_id": null,
+   "normal_mode": "vertex",
+   "saturation": 1.0,
+   "visible": true,
+   "scripts": [],
+   "collider": {
+    "shape": "sphere",
+    "enabled": true
+   },
+   "rigidbody": null,
+   "audio_source": null,
+   "animator": null
+  },
+  {
+   "id": "52643648246043219ebd5a4a1f831b00",
+   "parent_id": null,
+   "prefab_ref": null,
+   "name": "球4",
+   "type": "sphere",
+   "params": {
+    "radius": 0.8,
+    "stacks": 36,
+    "slices": 54
+   },
+   "position": [
+    0.0,
+    0.8,
+    -5.0
+   ],
+   "rotation": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "scale": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "color": "#e05a5a",
+   "material_id": null,
+   "normal_mode": "vertex",
+   "saturation": 1.0,
+   "visible": true,
+   "scripts": [],
+   "collider": {
+    "shape": "sphere",
+    "enabled": true
+   },
+   "rigidbody": null,
+   "audio_source": null,
+   "animator": null
+  },
+  {
+   "id": "c9cf4c9fa65c4783aaa91413694314c3",
+   "parent_id": null,
+   "prefab_ref": null,
+   "name": "球5",
+   "type": "sphere",
+   "params": {
+    "radius": 0.8,
+    "stacks": 36,
+    "slices": 54
+   },
+   "position": [
+    2.0,
+    0.8,
+    -5.0
+   ],
+   "rotation": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "scale": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "color": "#e05a5a",
+   "material_id": null,
+   "normal_mode": "vertex",
+   "saturation": 1.0,
+   "visible": true,
+   "scripts": [
+    {
+     "id": "rotate",
+     "vars": {
+      "sx": 90.0,
+      "sy": 40.0,
+      "sz": 0.0
+     }
+    }
+   ],
+   "collider": {
+    "shape": "sphere",
+    "enabled": true
+   },
+   "rigidbody": null,
+   "audio_source": null,
+   "animator": null
+  },
+  {
+   "id": "59b3275bb68e423580b24ad59ea367b6",
+   "parent_id": null,
+   "prefab_ref": null,
+   "name": "球6",
+   "type": "sphere",
+   "params": {
+    "radius": 0.8,
+    "stacks": 36,
+    "slices": 54
+   },
+   "position": [
+    4.0,
+    0.8,
+    -5.0
+   ],
+   "rotation": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "scale": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "color": "#e05a5a",
+   "material_id": null,
+   "normal_mode": "vertex",
+   "saturation": 1.0,
+   "visible": true,
+   "scripts": [],
+   "collider": {
+    "shape": "sphere",
+    "enabled": true
+   },
+   "rigidbody": null,
+   "audio_source": null,
+   "animator": null
+  },
+  {
+   "id": "ef60e72e70da45079cea5bda377cf4d8",
+   "parent_id": null,
+   "prefab_ref": null,
+   "name": "球7",
+   "type": "sphere",
+   "params": {
+    "radius": 0.8,
+    "stacks": 36,
+    "slices": 54
+   },
+   "position": [
+    6.0,
+    0.8,
+    -5.0
+   ],
+   "rotation": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "scale": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "color": "#e05a5a",
+   "material_id": null,
+   "normal_mode": "vertex",
+   "saturation": 1.0,
+   "visible": true,
+   "scripts": [],
+   "collider": {
+    "shape": "sphere",
+    "enabled": true
+   },
+   "rigidbody": null,
+   "audio_source": null,
+   "animator": null
+  },
+  {
+   "id": "5c7368b235534d3383b322456def1e27",
+   "parent_id": null,
+   "prefab_ref": null,
+   "name": "球8",
+   "type": "sphere",
+   "params": {
+    "radius": 0.8,
+    "stacks": 36,
+    "slices": 54
+   },
+   "position": [
+    8.0,
+    0.8,
+    -5.0
+   ],
+   "rotation": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "scale": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "color": "#e05a5a",
+   "material_id": null,
+   "normal_mode": "vertex",
+   "saturation": 1.0,
+   "visible": true,
+   "scripts": [],
+   "collider": {
+    "shape": "sphere",
+    "enabled": true
+   },
+   "rigidbody": null,
+   "audio_source": null,
+   "animator": null
+  },
+  {
+   "id": "ff40b8b70d774a32b89e2dcbd45ba22c",
+   "parent_id": null,
+   "prefab_ref": null,
+   "name": "球9",
+   "type": "sphere",
+   "params": {
+    "radius": 0.8,
+    "stacks": 36,
+    "slices": 54
+   },
+   "position": [
+    -8.0,
+    0.8,
+    -3.0
+   ],
+   "rotation": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "scale": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "color": "#e08a4a",
+   "material_id": null,
+   "normal_mode": "vertex",
+   "saturation": 1.0,
+   "visible": true,
+   "scripts": [],
+   "collider": {
+    "shape": "sphere",
+    "enabled": true
+   },
+   "rigidbody": null,
+   "audio_source": null,
+   "animator": null
+  },
+  {
+   "id": "4029e24d2aed4a1989bfd0b7ee103f2f",
+   "parent_id": null,
+   "prefab_ref": null,
+   "name": "球10",
+   "type": "sphere",
+   "params": {
+    "radius": 0.8,
+    "stacks": 36,
+    "slices": 54
+   },
+   "position": [
+    -6.0,
+    0.8,
+    -3.0
+   ],
+   "rotation": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "scale": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "color": "#e08a4a",
+   "material_id": null,
+   "normal_mode": "vertex",
+   "saturation": 1.0,
+   "visible": true,
+   "scripts": [
+    {
+     "id": "rotate",
+     "vars": {
+      "sx": 90.0,
+      "sy": 40.0,
+      "sz": 0.0
+     }
+    }
+   ],
+   "collider": {
+    "shape": "sphere",
+    "enabled": true
+   },
+   "rigidbody": null,
+   "audio_source": null,
+   "animator": null
+  },
+  {
+   "id": "9c1cbbf21ffd47d6926e64f4a4bd9707",
+   "parent_id": null,
+   "prefab_ref": null,
+   "name": "球11",
+   "type": "sphere",
+   "params": {
+    "radius": 0.8,
+    "stacks": 36,
+    "slices": 54
+   },
+   "position": [
+    -4.0,
+    0.8,
+    -3.0
+   ],
+   "rotation": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "scale": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "color": "#e08a4a",
+   "material_id": null,
+   "normal_mode": "vertex",
+   "saturation": 1.0,
+   "visible": true,
+   "scripts": [],
+   "collider": {
+    "shape": "sphere",
+    "enabled": true
+   },
+   "rigidbody": null,
+   "audio_source": null,
+   "animator": null
+  },
+  {
+   "id": "a365b4696e3c4fc9bf8bb103c47f675d",
+   "parent_id": null,
+   "prefab_ref": null,
+   "name": "球12",
+   "type": "sphere",
+   "params": {
+    "radius": 0.8,
+    "stacks": 36,
+    "slices": 54
+   },
+   "position": [
+    -2.0,
+    0.8,
+    -3.0
+   ],
+   "rotation": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "scale": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "color": "#e08a4a",
+   "material_id": null,
+   "normal_mode": "vertex",
+   "saturation": 1.0,
+   "visible": true,
+   "scripts": [],
+   "collider": {
+    "shape": "sphere",
+    "enabled": true
+   },
+   "rigidbody": null,
+   "audio_source": null,
+   "animator": null
+  },
+  {
+   "id": "549802637a2c4ab78df36d27e02864d0",
+   "parent_id": null,
+   "prefab_ref": null,
+   "name": "球13",
+   "type": "sphere",
+   "params": {
+    "radius": 0.8,
+    "stacks": 36,
+    "slices": 54
+   },
+   "position": [
+    0.0,
+    0.8,
+    -3.0
+   ],
+   "rotation": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "scale": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "color": "#e08a4a",
+   "material_id": null,
+   "normal_mode": "vertex",
+   "saturation": 1.0,
+   "visible": true,
+   "scripts": [],
+   "collider": {
+    "shape": "sphere",
+    "enabled": true
+   },
+   "rigidbody": null,
+   "audio_source": null,
+   "animator": null
+  },
+  {
+   "id": "1078c661f697437cade82a74e026f795",
+   "parent_id": null,
+   "prefab_ref": null,
+   "name": "球14",
+   "type": "sphere",
+   "params": {
+    "radius": 0.8,
+    "stacks": 36,
+    "slices": 54
+   },
+   "position": [
+    2.0,
+    0.8,
+    -3.0
+   ],
+   "rotation": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "scale": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "color": "#e08a4a",
+   "material_id": null,
+   "normal_mode": "vertex",
+   "saturation": 1.0,
+   "visible": true,
+   "scripts": [],
+   "collider": {
+    "shape": "sphere",
+    "enabled": true
+   },
+   "rigidbody": null,
+   "audio_source": null,
+   "animator": null
+  },
+  {
+   "id": "620c2ddbc4ae456bbc55a57236cf6086",
+   "parent_id": null,
+   "prefab_ref": null,
+   "name": "球15",
+   "type": "sphere",
+   "params": {
+    "radius": 0.8,
+    "stacks": 36,
+    "slices": 54
+   },
+   "position": [
+    4.0,
+    0.8,
+    -3.0
+   ],
+   "rotation": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "scale": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "color": "#e08a4a",
+   "material_id": null,
+   "normal_mode": "vertex",
+   "saturation": 1.0,
+   "visible": true,
+   "scripts": [
+    {
+     "id": "rotate",
+     "vars": {
+      "sx": 90.0,
+      "sy": 40.0,
+      "sz": 0.0
+     }
+    }
+   ],
+   "collider": {
+    "shape": "sphere",
+    "enabled": true
+   },
+   "rigidbody": null,
+   "audio_source": null,
+   "animator": null
+  },
+  {
+   "id": "01e4838ba2054d5b8568813c48a9d1ab",
+   "parent_id": null,
+   "prefab_ref": null,
+   "name": "球16",
+   "type": "sphere",
+   "params": {
+    "radius": 0.8,
+    "stacks": 36,
+    "slices": 54
+   },
+   "position": [
+    6.0,
+    0.8,
+    -3.0
+   ],
+   "rotation": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "scale": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "color": "#e08a4a",
+   "material_id": null,
+   "normal_mode": "vertex",
+   "saturation": 1.0,
+   "visible": true,
+   "scripts": [],
+   "collider": {
+    "shape": "sphere",
+    "enabled": true
+   },
+   "rigidbody": null,
+   "audio_source": null,
+   "animator": null
+  },
+  {
+   "id": "0baabd8c84934f728f0054244bf77c7f",
+   "parent_id": null,
+   "prefab_ref": null,
+   "name": "球17",
+   "type": "sphere",
+   "params": {
+    "radius": 0.8,
+    "stacks": 36,
+    "slices": 54
+   },
+   "position": [
+    8.0,
+    0.8,
+    -3.0
+   ],
+   "rotation": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "scale": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "color": "#e08a4a",
+   "material_id": null,
+   "normal_mode": "vertex",
+   "saturation": 1.0,
+   "visible": true,
+   "scripts": [],
+   "collider": {
+    "shape": "sphere",
+    "enabled": true
+   },
+   "rigidbody": null,
+   "audio_source": null,
+   "animator": null
+  },
+  {
+   "id": "17b116286e8c48838e65b72b0c8a467f",
+   "parent_id": null,
+   "prefab_ref": null,
+   "name": "球18",
+   "type": "sphere",
+   "params": {
+    "radius": 0.8,
+    "stacks": 36,
+    "slices": 54
+   },
+   "position": [
+    -8.0,
+    0.8,
+    -1.0
+   ],
+   "rotation": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "scale": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "color": "#e0c04a",
+   "material_id": null,
+   "normal_mode": "vertex",
+   "saturation": 1.0,
+   "visible": true,
+   "scripts": [],
+   "collider": {
+    "shape": "sphere",
+    "enabled": true
+   },
+   "rigidbody": null,
+   "audio_source": null,
+   "animator": null
+  },
+  {
+   "id": "f4fd02171f2a4ed29cc9ab8ca1e77636",
+   "parent_id": null,
+   "prefab_ref": null,
+   "name": "球19",
+   "type": "sphere",
+   "params": {
+    "radius": 0.8,
+    "stacks": 36,
+    "slices": 54
+   },
+   "position": [
+    -6.0,
+    0.8,
+    -1.0
+   ],
+   "rotation": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "scale": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "color": "#e0c04a",
+   "material_id": null,
+   "normal_mode": "vertex",
+   "saturation": 1.0,
+   "visible": true,
+   "scripts": [],
+   "collider": {
+    "shape": "sphere",
+    "enabled": true
+   },
+   "rigidbody": null,
+   "audio_source": null,
+   "animator": null
+  },
+  {
+   "id": "784c87e7c3b54d4d90c3fd2373ac6eef",
+   "parent_id": null,
+   "prefab_ref": null,
+   "name": "球20",
+   "type": "sphere",
+   "params": {
+    "radius": 0.8,
+    "stacks": 36,
+    "slices": 54
+   },
+   "position": [
+    -4.0,
+    0.8,
+    -1.0
+   ],
+   "rotation": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "scale": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "color": "#e0c04a",
+   "material_id": null,
+   "normal_mode": "vertex",
+   "saturation": 1.0,
+   "visible": true,
+   "scripts": [
+    {
+     "id": "rotate",
+     "vars": {
+      "sx": 90.0,
+      "sy": 40.0,
+      "sz": 0.0
+     }
+    }
+   ],
+   "collider": {
+    "shape": "sphere",
+    "enabled": true
+   },
+   "rigidbody": null,
+   "audio_source": null,
+   "animator": null
+  },
+  {
+   "id": "64616deb19b0401db0d5010e7b8f9b74",
+   "parent_id": null,
+   "prefab_ref": null,
+   "name": "球21",
+   "type": "sphere",
+   "params": {
+    "radius": 0.8,
+    "stacks": 36,
+    "slices": 54
+   },
+   "position": [
+    -2.0,
+    0.8,
+    -1.0
+   ],
+   "rotation": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "scale": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "color": "#e0c04a",
+   "material_id": null,
+   "normal_mode": "vertex",
+   "saturation": 1.0,
+   "visible": true,
+   "scripts": [],
+   "collider": {
+    "shape": "sphere",
+    "enabled": true
+   },
+   "rigidbody": null,
+   "audio_source": null,
+   "animator": null
+  },
+  {
+   "id": "c0451b3332a34b5c87b58e814af3255d",
+   "parent_id": null,
+   "prefab_ref": null,
+   "name": "球22",
+   "type": "sphere",
+   "params": {
+    "radius": 0.8,
+    "stacks": 36,
+    "slices": 54
+   },
+   "position": [
+    0.0,
+    0.8,
+    -1.0
+   ],
+   "rotation": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "scale": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "color": "#e0c04a",
+   "material_id": null,
+   "normal_mode": "vertex",
+   "saturation": 1.0,
+   "visible": true,
+   "scripts": [],
+   "collider": {
+    "shape": "sphere",
+    "enabled": true
+   },
+   "rigidbody": null,
+   "audio_source": null,
+   "animator": null
+  },
+  {
+   "id": "c95d7756957e4d9783340486ba9e3c79",
+   "parent_id": null,
+   "prefab_ref": null,
+   "name": "球23",
+   "type": "sphere",
+   "params": {
+    "radius": 0.8,
+    "stacks": 36,
+    "slices": 54
+   },
+   "position": [
+    2.0,
+    0.8,
+    -1.0
+   ],
+   "rotation": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "scale": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "color": "#e0c04a",
+   "material_id": null,
+   "normal_mode": "vertex",
+   "saturation": 1.0,
+   "visible": true,
+   "scripts": [],
+   "collider": {
+    "shape": "sphere",
+    "enabled": true
+   },
+   "rigidbody": null,
+   "audio_source": null,
+   "animator": null
+  },
+  {
+   "id": "57771d8d9d784b418f5696e625d3f2ad",
+   "parent_id": null,
+   "prefab_ref": null,
+   "name": "球24",
+   "type": "sphere",
+   "params": {
+    "radius": 0.8,
+    "stacks": 36,
+    "slices": 54
+   },
+   "position": [
+    4.0,
+    0.8,
+    -1.0
+   ],
+   "rotation": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "scale": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "color": "#e0c04a",
+   "material_id": null,
+   "normal_mode": "vertex",
+   "saturation": 1.0,
+   "visible": true,
+   "scripts": [],
+   "collider": {
+    "shape": "sphere",
+    "enabled": true
+   },
+   "rigidbody": null,
+   "audio_source": null,
+   "animator": null
+  },
+  {
+   "id": "4e34303846b243819e2bd0c1844b115a",
+   "parent_id": null,
+   "prefab_ref": null,
+   "name": "球25",
+   "type": "sphere",
+   "params": {
+    "radius": 0.8,
+    "stacks": 36,
+    "slices": 54
+   },
+   "position": [
+    6.0,
+    0.8,
+    -1.0
+   ],
+   "rotation": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "scale": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "color": "#e0c04a",
+   "material_id": null,
+   "normal_mode": "vertex",
+   "saturation": 1.0,
+   "visible": true,
+   "scripts": [
+    {
+     "id": "rotate",
+     "vars": {
+      "sx": 90.0,
+      "sy": 40.0,
+      "sz": 0.0
+     }
+    }
+   ],
+   "collider": {
+    "shape": "sphere",
+    "enabled": true
+   },
+   "rigidbody": null,
+   "audio_source": null,
+   "animator": null
+  },
+  {
+   "id": "ac0b8fbaf1674c22b5561de6b7694899",
+   "parent_id": null,
+   "prefab_ref": null,
+   "name": "球26",
+   "type": "sphere",
+   "params": {
+    "radius": 0.8,
+    "stacks": 36,
+    "slices": 54
+   },
+   "position": [
+    8.0,
+    0.8,
+    -1.0
+   ],
+   "rotation": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "scale": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "color": "#e0c04a",
+   "material_id": null,
+   "normal_mode": "vertex",
+   "saturation": 1.0,
+   "visible": true,
+   "scripts": [],
+   "collider": {
+    "shape": "sphere",
+    "enabled": true
+   },
+   "rigidbody": null,
+   "audio_source": null,
+   "animator": null
+  },
+  {
+   "id": "411ef3e67c9248e0b5a70616382a735d",
+   "parent_id": null,
+   "prefab_ref": null,
+   "name": "球27",
+   "type": "sphere",
+   "params": {
+    "radius": 0.8,
+    "stacks": 36,
+    "slices": 54
+   },
+   "position": [
+    -8.0,
+    0.8,
+    1.0
+   ],
+   "rotation": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "scale": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "color": "#5ab85a",
+   "material_id": null,
+   "normal_mode": "vertex",
+   "saturation": 1.0,
+   "visible": true,
+   "scripts": [],
+   "collider": {
+    "shape": "sphere",
+    "enabled": true
+   },
+   "rigidbody": null,
+   "audio_source": null,
+   "animator": null
+  },
+  {
+   "id": "6b13b6a990fe4cf5a765b7add31c7bb9",
+   "parent_id": null,
+   "prefab_ref": null,
+   "name": "球28",
+   "type": "sphere",
+   "params": {
+    "radius": 0.8,
+    "stacks": 36,
+    "slices": 54
+   },
+   "position": [
+    -6.0,
+    0.8,
+    1.0
+   ],
+   "rotation": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "scale": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "color": "#5ab85a",
+   "material_id": null,
+   "normal_mode": "vertex",
+   "saturation": 1.0,
+   "visible": true,
+   "scripts": [],
+   "collider": {
+    "shape": "sphere",
+    "enabled": true
+   },
+   "rigidbody": null,
+   "audio_source": null,
+   "animator": null
+  },
+  {
+   "id": "76b3b99ac5684faabd21d935e3f32817",
+   "parent_id": null,
+   "prefab_ref": null,
+   "name": "球29",
+   "type": "sphere",
+   "params": {
+    "radius": 0.8,
+    "stacks": 36,
+    "slices": 54
+   },
+   "position": [
+    -4.0,
+    0.8,
+    1.0
+   ],
+   "rotation": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "scale": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "color": "#5ab85a",
+   "material_id": null,
+   "normal_mode": "vertex",
+   "saturation": 1.0,
+   "visible": true,
+   "scripts": [],
+   "collider": {
+    "shape": "sphere",
+    "enabled": true
+   },
+   "rigidbody": null,
+   "audio_source": null,
+   "animator": null
+  },
+  {
+   "id": "85e6e7ec3bf741ba97f36124b17301d3",
+   "parent_id": null,
+   "prefab_ref": null,
+   "name": "球30",
+   "type": "sphere",
+   "params": {
+    "radius": 0.8,
+    "stacks": 36,
+    "slices": 54
+   },
+   "position": [
+    -2.0,
+    0.8,
+    1.0
+   ],
+   "rotation": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "scale": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "color": "#5ab85a",
+   "material_id": null,
+   "normal_mode": "vertex",
+   "saturation": 1.0,
+   "visible": true,
+   "scripts": [
+    {
+     "id": "rotate",
+     "vars": {
+      "sx": 90.0,
+      "sy": 40.0,
+      "sz": 0.0
+     }
+    }
+   ],
+   "collider": {
+    "shape": "sphere",
+    "enabled": true
+   },
+   "rigidbody": null,
+   "audio_source": null,
+   "animator": null
+  },
+  {
+   "id": "f75c1060b8f54f519379cb384e2a38b8",
+   "parent_id": null,
+   "prefab_ref": null,
+   "name": "球31",
+   "type": "sphere",
+   "params": {
+    "radius": 0.8,
+    "stacks": 36,
+    "slices": 54
+   },
+   "position": [
+    0.0,
+    0.8,
+    1.0
+   ],
+   "rotation": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "scale": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "color": "#5ab85a",
+   "material_id": null,
+   "normal_mode": "vertex",
+   "saturation": 1.0,
+   "visible": true,
+   "scripts": [],
+   "collider": {
+    "shape": "sphere",
+    "enabled": true
+   },
+   "rigidbody": null,
+   "audio_source": null,
+   "animator": null
+  },
+  {
+   "id": "0057cb2d0f5143f0a0fa3d0a9eeab326",
+   "parent_id": null,
+   "prefab_ref": null,
+   "name": "球32",
+   "type": "sphere",
+   "params": {
+    "radius": 0.8,
+    "stacks": 36,
+    "slices": 54
+   },
+   "position": [
+    2.0,
+    0.8,
+    1.0
+   ],
+   "rotation": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "scale": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "color": "#5ab85a",
+   "material_id": null,
+   "normal_mode": "vertex",
+   "saturation": 1.0,
+   "visible": true,
+   "scripts": [],
+   "collider": {
+    "shape": "sphere",
+    "enabled": true
+   },
+   "rigidbody": null,
+   "audio_source": null,
+   "animator": null
+  },
+  {
+   "id": "06da544619e848c3ba0eb11877e5343d",
+   "parent_id": null,
+   "prefab_ref": null,
+   "name": "球33",
+   "type": "sphere",
+   "params": {
+    "radius": 0.8,
+    "stacks": 36,
+    "slices": 54
+   },
+   "position": [
+    4.0,
+    0.8,
+    1.0
+   ],
+   "rotation": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "scale": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "color": "#5ab85a",
+   "material_id": null,
+   "normal_mode": "vertex",
+   "saturation": 1.0,
+   "visible": true,
+   "scripts": [],
+   "collider": {
+    "shape": "sphere",
+    "enabled": true
+   },
+   "rigidbody": null,
+   "audio_source": null,
+   "animator": null
+  },
+  {
+   "id": "ba099d6713c946f29e254a0350c5084c",
+   "parent_id": null,
+   "prefab_ref": null,
+   "name": "球34",
+   "type": "sphere",
+   "params": {
+    "radius": 0.8,
+    "stacks": 36,
+    "slices": 54
+   },
+   "position": [
+    6.0,
+    0.8,
+    1.0
+   ],
+   "rotation": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "scale": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "color": "#5ab85a",
+   "material_id": null,
+   "normal_mode": "vertex",
+   "saturation": 1.0,
+   "visible": true,
+   "scripts": [],
+   "collider": {
+    "shape": "sphere",
+    "enabled": true
+   },
+   "rigidbody": null,
+   "audio_source": null,
+   "animator": null
+  },
+  {
+   "id": "ef367b1c38f34e6d8383b7e79000ade3",
+   "parent_id": null,
+   "prefab_ref": null,
+   "name": "球35",
+   "type": "sphere",
+   "params": {
+    "radius": 0.8,
+    "stacks": 36,
+    "slices": 54
+   },
+   "position": [
+    8.0,
+    0.8,
+    1.0
+   ],
+   "rotation": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "scale": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "color": "#5ab85a",
+   "material_id": null,
+   "normal_mode": "vertex",
+   "saturation": 1.0,
+   "visible": true,
+   "scripts": [
+    {
+     "id": "rotate",
+     "vars": {
+      "sx": 90.0,
+      "sy": 40.0,
+      "sz": 0.0
+     }
+    }
+   ],
+   "collider": {
+    "shape": "sphere",
+    "enabled": true
+   },
+   "rigidbody": null,
+   "audio_source": null,
+   "animator": null
+  },
+  {
+   "id": "22c1a64cd6964d4cab018f1f64691aea",
+   "parent_id": null,
+   "prefab_ref": null,
+   "name": "球36",
+   "type": "sphere",
+   "params": {
+    "radius": 0.8,
+    "stacks": 36,
+    "slices": 54
+   },
+   "position": [
+    -8.0,
+    0.8,
+    3.0
+   ],
+   "rotation": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "scale": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "color": "#5a9ae0",
+   "material_id": null,
+   "normal_mode": "vertex",
+   "saturation": 1.0,
+   "visible": true,
+   "scripts": [],
+   "collider": {
+    "shape": "sphere",
+    "enabled": true
+   },
+   "rigidbody": null,
+   "audio_source": null,
+   "animator": null
+  },
+  {
+   "id": "9391c0c1e34a4e61a37c165e704ea8f4",
+   "parent_id": null,
+   "prefab_ref": null,
+   "name": "球37",
+   "type": "sphere",
+   "params": {
+    "radius": 0.8,
+    "stacks": 36,
+    "slices": 54
+   },
+   "position": [
+    -6.0,
+    0.8,
+    3.0
+   ],
+   "rotation": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "scale": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "color": "#5a9ae0",
+   "material_id": null,
+   "normal_mode": "vertex",
+   "saturation": 1.0,
+   "visible": true,
+   "scripts": [],
+   "collider": {
+    "shape": "sphere",
+    "enabled": true
+   },
+   "rigidbody": null,
+   "audio_source": null,
+   "animator": null
+  },
+  {
+   "id": "5222620cad0d427d8cbf35e5be49a890",
+   "parent_id": null,
+   "prefab_ref": null,
+   "name": "球38",
+   "type": "sphere",
+   "params": {
+    "radius": 0.8,
+    "stacks": 36,
+    "slices": 54
+   },
+   "position": [
+    -4.0,
+    0.8,
+    3.0
+   ],
+   "rotation": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "scale": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "color": "#5a9ae0",
+   "material_id": null,
+   "normal_mode": "vertex",
+   "saturation": 1.0,
+   "visible": true,
+   "scripts": [],
+   "collider": {
+    "shape": "sphere",
+    "enabled": true
+   },
+   "rigidbody": null,
+   "audio_source": null,
+   "animator": null
+  },
+  {
+   "id": "4539b0ad8a26485d8101787e16ea7d64",
+   "parent_id": null,
+   "prefab_ref": null,
+   "name": "球39",
+   "type": "sphere",
+   "params": {
+    "radius": 0.8,
+    "stacks": 36,
+    "slices": 54
+   },
+   "position": [
+    -2.0,
+    0.8,
+    3.0
+   ],
+   "rotation": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "scale": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "color": "#5a9ae0",
+   "material_id": null,
+   "normal_mode": "vertex",
+   "saturation": 1.0,
+   "visible": true,
+   "scripts": [],
+   "collider": {
+    "shape": "sphere",
+    "enabled": true
+   },
+   "rigidbody": null,
+   "audio_source": null,
+   "animator": null
+  },
+  {
+   "id": "3dc4a816069a4aa7a4f30ae68af691a7",
+   "parent_id": null,
+   "prefab_ref": null,
+   "name": "球40",
+   "type": "sphere",
+   "params": {
+    "radius": 0.8,
+    "stacks": 36,
+    "slices": 54
+   },
+   "position": [
+    0.0,
+    0.8,
+    3.0
+   ],
+   "rotation": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "scale": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "color": "#5a9ae0",
+   "material_id": null,
+   "normal_mode": "vertex",
+   "saturation": 1.0,
+   "visible": true,
+   "scripts": [
+    {
+     "id": "rotate",
+     "vars": {
+      "sx": 90.0,
+      "sy": 40.0,
+      "sz": 0.0
+     }
+    }
+   ],
+   "collider": {
+    "shape": "sphere",
+    "enabled": true
+   },
+   "rigidbody": null,
+   "audio_source": null,
+   "animator": null
+  },
+  {
+   "id": "deecec927c89490dacec75754b76e7df",
+   "parent_id": null,
+   "prefab_ref": null,
+   "name": "球41",
+   "type": "sphere",
+   "params": {
+    "radius": 0.8,
+    "stacks": 36,
+    "slices": 54
+   },
+   "position": [
+    2.0,
+    0.8,
+    3.0
+   ],
+   "rotation": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "scale": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "color": "#5a9ae0",
+   "material_id": null,
+   "normal_mode": "vertex",
+   "saturation": 1.0,
+   "visible": true,
+   "scripts": [],
+   "collider": {
+    "shape": "sphere",
+    "enabled": true
+   },
+   "rigidbody": null,
+   "audio_source": null,
+   "animator": null
+  },
+  {
+   "id": "96cde32088f14de9ab4125039839a304",
+   "parent_id": null,
+   "prefab_ref": null,
+   "name": "球42",
+   "type": "sphere",
+   "params": {
+    "radius": 0.8,
+    "stacks": 36,
+    "slices": 54
+   },
+   "position": [
+    4.0,
+    0.8,
+    3.0
+   ],
+   "rotation": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "scale": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "color": "#5a9ae0",
+   "material_id": null,
+   "normal_mode": "vertex",
+   "saturation": 1.0,
+   "visible": true,
+   "scripts": [],
+   "collider": {
+    "shape": "sphere",
+    "enabled": true
+   },
+   "rigidbody": null,
+   "audio_source": null,
+   "animator": null
+  },
+  {
+   "id": "825a6c8c41ab4f8db30caf8581ddfffb",
+   "parent_id": null,
+   "prefab_ref": null,
+   "name": "球43",
+   "type": "sphere",
+   "params": {
+    "radius": 0.8,
+    "stacks": 36,
+    "slices": 54
+   },
+   "position": [
+    6.0,
+    0.8,
+    3.0
+   ],
+   "rotation": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "scale": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "color": "#5a9ae0",
+   "material_id": null,
+   "normal_mode": "vertex",
+   "saturation": 1.0,
+   "visible": true,
+   "scripts": [],
+   "collider": {
+    "shape": "sphere",
+    "enabled": true
+   },
+   "rigidbody": null,
+   "audio_source": null,
+   "animator": null
+  },
+  {
+   "id": "e73411fcaf684b15b5f1858b6fc351e1",
+   "parent_id": null,
+   "prefab_ref": null,
+   "name": "球44",
+   "type": "sphere",
+   "params": {
+    "radius": 0.8,
+    "stacks": 36,
+    "slices": 54
+   },
+   "position": [
+    8.0,
+    0.8,
+    3.0
+   ],
+   "rotation": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "scale": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "color": "#5a9ae0",
+   "material_id": null,
+   "normal_mode": "vertex",
+   "saturation": 1.0,
+   "visible": true,
+   "scripts": [],
+   "collider": {
+    "shape": "sphere",
+    "enabled": true
+   },
+   "rigidbody": null,
+   "audio_source": null,
+   "animator": null
+  },
+  {
+   "id": "cbdc65c744f44a2ab9885a1b35e7f8b3",
+   "parent_id": null,
+   "prefab_ref": null,
+   "name": "球45",
+   "type": "sphere",
+   "params": {
+    "radius": 0.8,
+    "stacks": 36,
+    "slices": 54
+   },
+   "position": [
+    -8.0,
+    0.8,
+    5.0
+   ],
+   "rotation": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "scale": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "color": "#e05a5a",
+   "material_id": null,
+   "normal_mode": "vertex",
+   "saturation": 1.0,
+   "visible": true,
+   "scripts": [
+    {
+     "id": "rotate",
+     "vars": {
+      "sx": 90.0,
+      "sy": 40.0,
+      "sz": 0.0
+     }
+    }
+   ],
+   "collider": {
+    "shape": "sphere",
+    "enabled": true
+   },
+   "rigidbody": null,
+   "audio_source": null,
+   "animator": null
+  },
+  {
+   "id": "43687ca53e87486c9503dd004603f645",
+   "parent_id": null,
+   "prefab_ref": null,
+   "name": "球46",
+   "type": "sphere",
+   "params": {
+    "radius": 0.8,
+    "stacks": 36,
+    "slices": 54
+   },
+   "position": [
+    -6.0,
+    0.8,
+    5.0
+   ],
+   "rotation": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "scale": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "color": "#e05a5a",
+   "material_id": null,
+   "normal_mode": "vertex",
+   "saturation": 1.0,
+   "visible": true,
+   "scripts": [],
+   "collider": {
+    "shape": "sphere",
+    "enabled": true
+   },
+   "rigidbody": null,
+   "audio_source": null,
+   "animator": null
+  },
+  {
+   "id": "c0319ccac08441cc9f18d28265106f82",
+   "parent_id": null,
+   "prefab_ref": null,
+   "name": "球47",
+   "type": "sphere",
+   "params": {
+    "radius": 0.8,
+    "stacks": 36,
+    "slices": 54
+   },
+   "position": [
+    -4.0,
+    0.8,
+    5.0
+   ],
+   "rotation": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "scale": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "color": "#e05a5a",
+   "material_id": null,
+   "normal_mode": "vertex",
+   "saturation": 1.0,
+   "visible": true,
+   "scripts": [],
+   "collider": {
+    "shape": "sphere",
+    "enabled": true
+   },
+   "rigidbody": null,
+   "audio_source": null,
+   "animator": null
+  },
+  {
+   "id": "2dbe1b8f064842e880e6eb6a2fc6932f",
+   "parent_id": null,
+   "prefab_ref": null,
+   "name": "球48",
+   "type": "sphere",
+   "params": {
+    "radius": 0.8,
+    "stacks": 36,
+    "slices": 54
+   },
+   "position": [
+    -2.0,
+    0.8,
+    5.0
+   ],
+   "rotation": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "scale": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "color": "#e05a5a",
+   "material_id": null,
+   "normal_mode": "vertex",
+   "saturation": 1.0,
+   "visible": true,
+   "scripts": [],
+   "collider": {
+    "shape": "sphere",
+    "enabled": true
+   },
+   "rigidbody": null,
+   "audio_source": null,
+   "animator": null
+  },
+  {
+   "id": "00fc0fd15c0449318c885f722b830fbb",
+   "parent_id": null,
+   "prefab_ref": null,
+   "name": "球49",
+   "type": "sphere",
+   "params": {
+    "radius": 0.8,
+    "stacks": 36,
+    "slices": 54
+   },
+   "position": [
+    0.0,
+    0.8,
+    5.0
+   ],
+   "rotation": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "scale": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "color": "#e05a5a",
+   "material_id": null,
+   "normal_mode": "vertex",
+   "saturation": 1.0,
+   "visible": true,
+   "scripts": [],
+   "collider": {
+    "shape": "sphere",
+    "enabled": true
+   },
+   "rigidbody": null,
+   "audio_source": null,
+   "animator": null
+  },
+  {
+   "id": "9bdee435a6c14202a3323b5f78837ee6",
+   "parent_id": null,
+   "prefab_ref": null,
+   "name": "地面",
+   "type": "plane",
+   "params": {
+    "width": 33.0,
+    "depth": 33.0
+   },
+   "position": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "rotation": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "scale": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "color": "#6a6a72",
+   "material_id": null,
+   "normal_mode": "flat",
+   "saturation": 1.0,
+   "visible": true,
+   "scripts": [],
+   "collider": {
+    "shape": "box",
+    "enabled": true
+   },
+   "rigidbody": null,
+   "audio_source": null,
+   "animator": null
+  }
+ ]
+}

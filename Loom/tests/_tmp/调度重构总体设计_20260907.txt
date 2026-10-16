@@ -1,0 +1,210 @@
+====================================================================
+Loom 底层调度重构总体设计 — 主线程只留 Python 胶水, 工作分散到所有核心
+====================================================================
+日期: 2026-09-07 | 性质: 架构设计文档 (只读分析产物, 未改任何引擎源码)
+依据: 代码架构.txt 十七节 / 库性能优化堵点清单 R1-R10 / 实现报告_逻辑帧渲染帧分离
+  _2026-09-05 / TPS_FPS分核取证报告_20260907 / diag2_perf_exe_tps20.json (编译版
+  账目) / 批4A-4E 候选清单 / C内核+组装段+collide+shadow族四份 09-07 报告
+机器: Xeon E5-2696 v3 18核同质 (无 P/E) | CPython 3.12 标准 GIL (不可移除)
+目标: 播放态 (混合500, TPS20) 编译版 76FPS / GPU 54% → GPU 喂到编辑态水平
+  (90%+), 主线程占比 65% → ≤25%, 其余核从 <3% 打酱油 → 承担 nogil 重段。
+
+--------------------------------------------------------------------
+〇、结论一页
+--------------------------------------------------------------------
+1. 不做"逻辑帧整体搬线程" (GIL 墙, 09-05 已否决, 取证再次确认); 做
+   【重段外包 + 主线程瘦身】: 主线程保留 Qt 节拍/输入/GL 提交/每段胶水,
+   把 _logic_frame 与渲染帧里"释放 GIL 的重段" (C 内核 DLL / numba nogil /
+   Jolt step / 大 numpy) 搬到常驻工作线程, 与主线程 GL 提交真并行。
+2. 两个新常驻件 + 一个需拍板件, 全部单写者纪律, 引用交换式交接 (零锁):
+   NgilPool (期1) — 6-8 常驻 nogil 工人 (扩展 parallel.FramePool): C 内核
+     并行宿主 + numpy 重段分块 (aabbs/interp/buckets/世界矩阵局部段);
+   PrepWorker (期2) — 逻辑帧 prep 段整段搬常驻线程 (world_matrices/aabbs/
+     VP/pairs), S1 完成事件触发, 内部复用 NgilPool 分块;
+   期3 (需拍板) — 稳态一帧前瞻 + TPS 总管线程实验 (GIL 争抢探针先行),
+     前两期时钟始终留在主线程逐位保语义。
+   ★外包收益判据 (本设计推演核心): 段搬 worker 而不分块 → 墙钟不变
+     (只是换核, 主线程照样等); 只有 (a) 段可分块池并行, 或 (b) 段近乎纯
+     nogil (C 内核内部自并行), 才真缩墙钟。故期1 先行、期2 随后。
+3. 收益上限 (编译版 TPS20 口径推算, 公式 FPS=(1000−TPS×L)/R):
+   现状 L=27.2/R≈6 → 76FPS/GPU54%; 期1 后 L≈23/R≈4.5-5 → 95-115FPS/
+   GPU63-72%; 期2 后 L≈13-16 → 120-140FPS/GPU80-88%; 期3 后 (S1 等待
+   藏进渲染窗口) L临界≈9 → 140-160FPS/GPU90-97% (顶=编辑态 159FPS/97%,
+   受 R 地板与 Qt/驱动常数封顶)。主线程计算 730ms/s → 期2 后 ~120ms/s。
+4. 第一期内容 = 期1 NgilPool 池并行: 批4A 闸门修正衔接 (aabbs C 内核
+   5.2→1.6ms) + interp/buckets numpy 分块 + render_first 实验旗标 (默认
+   关)。全部段有既有对拍网, 风险最低、收益直接、独立可回退。
+5. 最大风险 = GIL 争抢反噬 (worker 的 Python 胶水与主线程互抢): 用
+   "段级 GIL 预算 + sys.setswitchinterval 调优 + 超时永久降级" 三重缓解,
+   且每期独立逃生门 (LOOM_NO_SCHED 族), 逐位对拍不过即回退。
+
+--------------------------------------------------------------------
+一、现状定案 (代码事实 + 取证对齐)
+--------------------------------------------------------------------
+1.1 现行帧结构 (工作区 Loom\, 2026-09-07 实测口径)
+  Qt 主线程每渲染帧: _on_tick (ui\loom_gui.py:861 节拍+输入+相机)
+    → paintGL (loom_gui.py:166) → advance_logic (engine.py:4806)
+      → clk.advance (core_clock.py:102, 主线程 accumulator)
+        → _logic_frame (engine.py:4676): 脚本 → 连发物理子步×N (不等待)
+          → 音频/动画 → S1 wait_pending → _logic_prep → 事件派发 → interp 翻页
+    → render (editor.py:1763): world_matrices(fw缓存) → interp 插值矩阵
+      → shadow 派发/挂VP → buckets 实例组装 → 阴影贴图 → GL 提交。
+  线程现状: loom-physics (physics_pipe.py v2 常驻) / loom-scripts
+    (parallel.py ScriptRunner 同步模型) / FramePool 8 worker / 碰撞池 4 worker
+    / ckernels C 内核每帧 CreateThread×9 (无池) / EAI HTTP 线程 / Qt 内部。
+
+1.2 编译版账目 (TPS20, diag2_perf_exe_tps20.json + 取证报告)
+  播放态 76FPS / TPS 20.2 (取证口径; diag2 同口径 54.1, 场景相同设置不同)。
+  主线程 tid 级 GetThreadTimes 65% 一骑绝尘, 其余 60 线程各 <3%;
+  每核 busy 核0=67% 其余 <23%; 全机 2.3 核当量 / 18 核; GPU 54%。
+  主线程墙钟账 (ms/墙钟秒, 45s 窗):
+    logic_step 548 (内含 pipe_wait 272 等待 + aabbs 361 含 C内核104串行)
+    + buckets 85 + interp 75 + world_matrices 85(逻辑+渲染两侧合计)
+    + shadow_prep 7 + dispatch 7 ≈ 730ms/s 计算 ≈ 65-73% 单核 ✓取证吻合
+  每逻辑帧账 (ms_per_logic, 报告口径, 各段跨逻辑/渲染帧摊分):
+    aabbs 17.9 (C内核5.2串行 + 组装/解包/行级缓存混计) / pipe_wait 13.5 /
+    world_matrices 4.2 / buckets 4.2 / interp 3.7 / collide_pairs 1.4 /
+    shadow_bounds 0.85 / dispatch 0.34。
+  ★账目口径注: ms_per_logic 各子段之和 (46.6) > logic_step (27.2), 因
+    buckets/interp/world_matrices 渲染侧段按墙钟秒摊到逻辑帧口径; 设计按
+    "ms/墙钟秒" (无歧义) 定收益, 按 ms_per_logic 定段归属。
+
+1.3 prep 顺序关键事实 (设计依赖, 已从源码确认)
+  _logic_frame 内 pipe.wait_pending() (S1, engine.py:4702) 返回【之后】
+  才调 _logic_prep (engine.py:4707) — prep 读到物理回读后最新位形; 且物理
+  写 position 必换 Point3D 对象 → _fw_cache/_soa keys 必失效 → prep 的
+  world_matrices 播放态每逻辑帧真重算 (账目 4.2ms/逻辑帧吻合)。
+  ⇒ prep 与物理的 happens-before 已由 pipe._done Event 保证; prep 与渲染
+  的交接靠 _prep_*/_logic_gen (渲染帧只读), 天然"先产后消" — 线程化时把
+  这对关系显式化即可, 语义不新增。
+
+1.4 分核可行性定案 (取证报告结论, 本设计全盘对齐)
+  FPS 不可搬 (Qt 架构锁死 GUI 线程); TPS 全量搬不可行 (脚本/桥胶水/快照
+  全持 GIL); 重段外包可行 — 可移出主线程的 nogil 重段 ≈ 8-10ms/逻辑帧
+  (C内核 5.2 + collide C 0.15 + Jolt step 0.3×3 + numpy 段) + 渲染侧
+  numpy 段 ~3ms/渲染帧; pipe_wait 预取可行 (frame_buffer.py 记账器模式)。
+
+(第二节起由主线程收编完成 — 设计代理七次断线, 骨架已保住, 以下按其既定
+方向+批4A 新情报落盘, 2026-09-07)
+
+--------------------------------------------------------------------
+二、线程模型 — 三常驻线程 + 单写者 + 引用交换 (零锁)
+--------------------------------------------------------------------
+2.0 分期修正 (深入推演后, 与〇结论对齐):
+  期1 = NgilPool nogil 池并行 — 直接缩短墙钟 (重段移出=主线程同时做渲染);
+  期2 = PrepWorker prep 线程化 — 单独做不缩墙钟 (主线程 Event 等待≠省),
+        必须与期1 池配合才转化为真收益 (等待期主线程跑渲染提交);
+  期3 = RenderPrep 渲染侧 numpy 预计算 (双缓冲);
+  期4 (可选) = 时钟搬 worker (TPS 总管), 前三期时钟留主线程逐位保语义。
+
+2.1 总图 (播放态一逻辑帧):
+  主线程: _on_tick → advance_logic(胶水) ──发帧信号──▶ [NgilPool]
+    │                                        workers 并行: C内核批量 /
+    │                                        collide C / Jolt step 分片 /
+    │                                        world_matrices 分块 numpy
+    │◀────完成 Event (引用交换: 结果数组指针原子换入)────┘
+    ├─ _logic_prep (期1 留主线程; 期2 移 PrepWorker)
+    ├─ interp 翻页 (主线程, 单写者)
+    └─ render: interp 插值 → buckets → GL 提交 (Qt 锁死本线程)
+
+2.2 三常驻线程职责 (全部单写者纪律):
+  NgilPool (期1): 2-4 常驻 worker, 只接"预打包 numpy 参数"的 nogil 任务;
+    ckernels DLL 调用 (ctypes 释放 GIL) / Jolt step / numpy 大运算。
+    ★批4A 情报: 播放态 C 内核 50 次/帧全 n≤6 碎任务 — 池侧按"帧批"
+    打包成一次 DLL 调用 (或 n≤6 组批进内核新增 batch 入口), 摊薄 ctypes
+    提交开销; 闸门 n×V≥300k 收益归无池大组, 池路径另测。
+  PrepWorker (期2): _logic_prep 整段 (world_matrices/aabbs/VP/pairs);
+    S1 wait_pending Event 触发; 输入=物理回读后位形 (1.3 已确认
+    happens-before 由 pipe._done 保证); 输出=新 _prep_* 数组引用交换。
+  RenderPrep (期3): 渲染侧 interp 矩阵/buckets 实例 numpy 预计算,
+    双缓冲 (写后台份, paintGL 读前台份), 落点帧回退路径保持主线程。
+
+2.3 交接协议 (零锁):
+  - 引用交换: worker 写自己的 out 数组 → 完成时主线程原子换引用
+    (Python 赋值天然原子, GIL 保护) — 无 mutex, 无竞争窗口;
+  - 信号: threading.Event (S1 done / 池批 done); 主线程 Event.wait()
+    释放 GIL — 等待期渲染代码可跑;
+  - 所有权: 每帧每数组恒一个写者 (逻辑数组=池/prep, 显示数组=主线程);
+    worker 不碰 GameObject/Qt/脚本对象 (纯 numpy/dll 参数);
+  - 快照输入: worker 输入用 _transform_snapshot 硬化快照 (既存, 三件
+    id 键+对象钉住), 防主线程同帧改写 → 撕裂。
+
+--------------------------------------------------------------------
+三、GIL 逐段归属表 (逐段定性 + ms 收益, 编译版 TPS20 账目口径)
+--------------------------------------------------------------------
+段                      | GIL    | 可外包 | 收益 (ms/逻辑帧) | 期
+------------------------|--------|--------|------------------|---
+脚本执行 (scripts.py)   | 持有   | 否     | 0 (语义红线)     | -
+物理桥 Python 胶水      | 持有   | 否     | 0                | -
+Jolt step (C++)        | 释放   | 是     | ~0.9 (0.3×3)     | 1
+C 内核 aabbs (ctypes)   | 释放   | 是     | 碎任务批量化 ~1-2| 1
+collide_pairs C (ctypes)| 释放   | 是     | ~0.15            | 1
+world_matrices (numpy)  | 释放   | 是     | ~2-3 (分块)      | 1
+interp 快照 grab        | 持有   | 否     | 0 (单写者主线程) | -
+pipe_wait (S1 等待)     | 等待   | 转化   | 13.5 → 渲染并行窗| 2
+buckets 实例组装        | 持有   | 部分   | ~1-2 (numpy 预计算)| 3
+interp 插值矩阵         | 释放   | 部分   | ~1-2             | 3
+shadow_prep numpy 段    | 释放   | 是     | ~0.5             | 3
+可移出主线程合计        |        |        | ~8-10 + 等待转化 13.5| -
+
+--------------------------------------------------------------------
+四、分期实施计划 (每期独立可验收可回退)
+--------------------------------------------------------------------
+期1 NgilPool (先做, 直接受益):
+  改动: 新 scheduler.py (常驻池+任务包协议+引用交换) + engine._logic_frame
+  拆段挂钩 (Jolt step/C 内核批/world_matrices 分块提交池) + ckernels 可选
+  batch 入口 (碎任务 n≤6 组批)。
+  验收: 双对拍逐位 (全段) + compiled_verify FPS + 每核 busy (对照取证
+  基线: 核0 67% → 预期 ≤45%, worker 核抬升) + 回归 EXIT=0。
+  逃生门: LOOM_NO_SCHED=1 (整池旁路, 逐位旧行为)。
+期2 PrepWorker + pipe_wait 转化:
+  改动: prep 段搬常驻线程 (S1 Event 触发) + 主线程 S1 等待期跑渲染预提交
+  (等待转化 — 13.5ms/逻辑帧 等待窗变并行窗) + frame_buffer 记账器复用。
+  验收: 同上 + TPS 时间轴逐位 (advance 语义零变化) + 帧长 p99。
+  逃生门: LOOM_NO_PREPWORKER=1。
+期3 RenderPrep 双缓冲:
+  改动: interp 矩阵/buckets numpy 预计算搬双缓冲线程 + paintGL 只读换手。
+  验收: 画面逐位 (NCC 1.0) + FPS + 主线程占比。
+  逃生门: LOOM_NO_RENDERPREP=1。
+期4 (可选, 另行拍板): 时钟搬 worker。
+
+--------------------------------------------------------------------
+五、风险清单与缓解
+--------------------------------------------------------------------
+R1 GIL 争抢反噬 (最大风险): worker 的 Python 胶水与主线程互抢 →
+  缓解: ①任务包在主线程打好 (worker 侧纯执行零胶水) ②sys.setswitchinterval
+  调优 (5e-4→2e-3 实测定) ③段级 GIL 预算: 每逻辑帧外包任务的 Python
+  侧准备 ≤2ms, 超预算回退串行;
+R2 快照撕裂: worker 读到半写状态 → 硬化快照 (既存) + 单写者交接 (2.3);
+R3 死锁 (Event 与 Qt 交互): worker 永不持 Qt/GL; 主线程 wait 带超时
+  (≤2ms) + 超时永久降级串行 (自愈, 不重试);
+R4 Nuitka 编译影响: 池/线程代码纯标准库; ckernels batch 入口 C 侧,
+  编译无感; 重编验证 compiled_verify 必测;
+R5 调试复杂度: 每期独立逃生门 + LOOM_SCHED_DEBUG=1 段级日志 + 对拍网
+  逐位锚点先行 (先建对拍再动代码, 沿用战役铁律);
+R6 语义漂移: R1-R10 红线全保留 — 时钟/时间轴/interp 语义前三期不动,
+  睡眠唤醒语义不动, advance 判定不动。
+
+--------------------------------------------------------------------
+六、拟改文件清单 + 函数级挂点
+--------------------------------------------------------------------
+新增 scheduler.py: NgilPool (submit_batch/wait_exchange/shutdown) +
+SchedMetrics (engine_metrics 扩展通道)。
+engine.py: _logic_frame (4676) 拆段 — Jolt step 提交点 / C 内核批提交点 /
+world_matrices 分块提交点; render (5082+) 渲染侧等待转化挂点 (期2);
+engine_metrics (agent_commands.py:701) 扩 sched 字段。
+physics_bridge.py: step 调用点参数打包 (期1)。
+physics_pipe.py: wait_pending Event 复用 (期2 PrepWorker 触发源)。
+ui/loom_gui.py: 无改动 (期1-3 主线程循环结构不变, 池等待在 advance 内)。
+ckernels\loom_kernels.c: 可选 batch 入口 (碎任务组批, 期1 配套)。
+设置.json: LOOM_SCHED 开关族进默认 (全关=逐位旧行为)。
+
+--------------------------------------------------------------------
+七、收益上限重申 (批4A 情报修正后)
+--------------------------------------------------------------------
+主线程计算 730ms/s → 预期 ~250-300ms/s (重段外包 + 等待转化);
+FPS 76 → 100-140 区间 (受 GL 提交与窗口合成顶); GPU 54% → 85-97%
+(上限=编辑态 159FPS/97%); 18 核利用率 2.3 核当量 → 5-8 核当量。
+碎任务批量化 (批4A 情报) 是期1 实际收益的关键变量 — 开工前先做
+"50 次/帧 n≤6 调用批进单次 DLL 调用"微基准 (预期 ctypes 提交开销
+占比 30-50%, 批后内核总耗时 ~1-2ms)。

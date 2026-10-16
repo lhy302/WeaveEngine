@@ -1,0 +1,343 @@
+====================================================================
+Loom 模块化与插件化分析 (2026-08-20 编写, 2026-08-28 更新)
+====================================================================
+用途: 分析 Loom 现有功能全景、已有模块化程度、可拆出的用户自定义
+扩展点, 对照 Unity 插件系统设计, 给出"类 Unity + 开源 + 高度模块化
+插件化自行 DIY"的插件系统路线方案。
+资料来源: 《开发进度与Unity对照.txt》《使用操作指南.txt》《现代游戏
+引擎设计.txt》《代码架构.txt》 + Unity 官方手册 (docs.unity.cn:
+cus-pkg-lp / cus-add-code) + 社区调研 (DSH 无网络环境知识总结)。
+
+====================================================================
+★ 重要更新 (2026-08-28): 插件系统已于 2026-08-27 按"L1 分级重设计"实装,
+  本文档第五/六/八节的方案与路线是 08-20 设计稿, 实装形态已被修订取代,
+  一切以《Loom插件系统分级方案.txt》为准。实装要点:
+  - 目录: plugins\editor|player (普通插件, editor 层受限环境) +
+    core_plugins\<类别> (核心插件, 清单必填 layer/capability/desc);
+  - 信任闸: SHA256 → 插件信任.json, 未信任/被改 → 不加载 (重启生效 + UI 确认);
+  - 受限环境: 普通插件 editor 层 = 受限 builtins + 白名单 import +
+    api.read_asset 限插件目录; 核心插件全权;
+  - 跨层按钮: api.register_editor_button → 编辑器「插件」菜单 + EAI plugin_button;
+  - 游戏侧: build_game --protection secure|open + --no-encrypt-content;
+    .lpc 插件包 + .lsc 内 plugins_sha256 互验;
+    game_player / Loom.py 双启接入 install_game_plugins;
+  - 测试: test_plugin_loader 39 项 + test_gamepack 8 项;
+    示例插件 (blink_demo/color_cycle/orbit_bob) 已于 2026-08-21 删除。
+====================================================================
+
+====================================================================
+一、Loom 当前功能全景 (模块 → 职责 → 关键文件)
+====================================================================
+  [场景组织]   场景树(Transform 父子, 防环) + 组件化 GameObject +
+               单场景 JSON v10 + 版本迁移            engine.py / sceneio.py
+  [渲染]       moderngl 真 GPU, Blinn-Phong + 半球环境光 + 菲涅尔 +
+               gamma + 阴影(平行光双模式/点光 6面) + 无限网格
+                                                    engine.py / ui/grid.py
+               ★ shader 源码硬编码在 engine.py (_VERT_SRC/_FRAG_SRC)
+  [光照]       平行光/点光源实体, ≤8 个, 光束截面可调      engine.py
+  [材质]       颜色+饱和度 资产化, GUID 共享引用        assets/materials
+  [资源]       资源浏览器(列/预览/拖放/存资产) + Prefab  编辑器资源面板
+  [行为]       Python 脚本 @register 注册表 + 11 内置脚本 +
+               坏脚本容错 + 多脚本挂载               scripts.py
+  [试玩]       编辑/播放模式, 快照-还原, 全拦截         editor.py
+  [物理]       AABB/球碰撞 + 刚体 + 碰撞事件回调 + 子步  engine.py
+  [输入]       动作层 get_action + 键位重映射         输入配置.json
+  [动画/音频]  AnimationClip/Animator + AudioSource    内置组件
+  [导入]       obj 解析 (仅此一种格式)                  load_obj
+  [场景切换]   load_scene 运行时换场景
+  [运行时UI]   HUD 文字/按钮/进度条                    RuntimeUI
+  [编辑器]     控制器命令层 + 撤销100步 + 层级/检查器/资源
+               面板 + 右键菜单 + gizmo + 滚动条 + 底部命令行坞
+               (F12, 与远程 Agent 同命令表)            editor.py / ui/
+  [编辑器UI]   默认 Qt 原生视图 (PySide6, ui/loom_gui.py);
+               自研即时 GUI (gui.py / LoomGUI.py) 已弃用仅留参考
+  [多核]       FramePool 预计算池 + 核心调度            parallel.py
+  [项目管理]   LoomHub: 项目 + 解释器多版本扫描/导入/.zip
+               安装/远程下载接口(预留)                 LoomHub/
+  [发布]       Nuitka exe + 纯玩家 exe + 场景加密 + 游戏脚本目录
+               (08-27 起: build_game --protection secure|open +
+                .lpc 插件包 + .lsc plugins_sha256 互验)
+
+====================================================================
+二、已经模块化 / 可插拔的部分 (基础已经打牢)
+====================================================================
+  1. UI 层 (2026-08-13): controller 命令层 + IEditorView/IHubView 契约
+     + GUI/ 投放式插件 + guiloader.py (头部标识文本扫描 / 加载失败回退
+     官方 / 设置.json 记忆) —— 这就是"一个完整插件系统"的原型,
+     只是目前只服务"视图"这一个品类。
+  2. 脚本系统 (M27): @register 装饰器注册表 + scripts/ 动态目录加载
+     + 游戏 exe 旁 scripts/ 自动注册 —— 行为扩展已开。
+  3. 资产系统 (M23/M24): GUID 引用 + assets/ 目录 + 资源面板 ——
+     数据即内容已落地。
+  4. 引擎/编辑器分层 (M17): engine 不 import editor; runtime.py /
+     game_player.py 纯运行时 —— 打包可剥编辑器。
+  5. 输入动作层 (M30b): 键位在 输入配置.json, 改键不动脚本。
+  6. LoomHub 与解释器分离 + 多版本共存 (C:\Program Files\Loom\<版本>)。
+  7. 场景数据驱动: JSON v10 + 逐版本迁移 + 加密场景。
+
+结论: "稳定内核 + 开放定制" 的哲学已经在 UI/脚本/资产三处落地,
+下一步是把这三处统一升级成"一个插件系统"。
+
+====================================================================
+三、Unity 插件系统是怎么设计的 (本地文档 + 官网 + 调研三源合一)
+====================================================================
+本地文档 (Unity*.txt): 覆盖 Unity 核心系统(组件/变换/渲染/物理/UI/
+动画/输入/打包…), 但【没有插件/扩展体系专章】——只有 Package
+Manager 装 Input System 的用法级提及。因此插件部分以下面两个来源为主。
+
+官方手册要点 (docs.unity.cn, 2026-08-20 实测抓取):
+  1. UPM 包 = 功能内容 (自定义编辑器窗口/运行时工具/开发工具) 的分发
+     单元, 不是纯美术资产; 提供 模块化 + 版本化 + 跨项目复用。
+  2. Editor/ 与 Runtime/ 子目录是核心约定: Editor 代码(自定义调试器/
+     profiler/关卡工具)不进玩家构建; Runtime 代码(对话系统/程序化
+     生成/输入重映射)进构建。
+  3. 清单 package.json: name(反向域名唯一 id)/version(SemVer)/
+     displayName/description/unity(最低引擎版本)/dependencies(依赖
+     版本范围)。
+  4. 四种包来源: 嵌入式(项目 Packages/ 内, 源码级)/ 本地(项目外路径)/
+     注册表(官方或 scoped registry)/ Git URL; 依赖图递归解析 + 锁文件。
+  5. 包生命周期: Preview → Released → Verified; 附 CHANGELOG/LICENSE/
+     Tests/ / Samples~/ 规范。
+
+扩展体系形态 (调研综合):
+  - 组件扩展: MonoBehaviour + 魔法方法消息派发 (Update/OnTriggerEnter…)
+  - 资产扩展: ScriptableObject 纯数据资产
+  - 编辑器扩展: [MenuItem] 菜单 / CustomEditor+PropertyDrawer 自定义
+    Inspector / EditorWindow 自定义窗口 / OnSceneGUI+Gizmos 场景视图 /
+    ScriptedImporter+AssetPostprocessor 资产导入管线 / SettingsProvider
+    设置面板
+  - 程序集隔离: asmdef 定义依赖边界和 Editor-only
+  - 分发: Asset Store 市场
+  - 底层定制: SRP 可编程渲染管线 (稳定内核 + 上层脚本化定制)
+
+对 Loom 的启示 (Unity 的经验 = 显式扩展点 + 包作为分发单元):
+  ① 扩展点要显式 (注册表/装饰器), 别靠魔法方法;
+  ② 包 = 目录 + 清单 (id/版本/依赖/最低引擎版本/入口);
+  ③ Editor 代码与 Runtime 代码分离的意识 (Loom 已天然有);
+  ④ 资产导入要可重跑、带版本号 (importer version → 重新导入);
+  ⑤ 插件失败要隔离, 不能拖垮编辑器;
+  ⑥ Python 生态已有的 entry_points/importlib 别重复造轮子, 但 Loom
+     是零依赖自研风格, 用自研注册表 + 装饰器更契合。
+
+====================================================================
+四、可以模块化分离出来、让用户自定义的候选扩展点
+====================================================================
+按"用户最想 DIY 什么"排序, 每条: 现状 → 拆法 → 对应 Unity 概念:
+
+  1.【行为/脚本包】现状: 脚本只能加在 scripts.py 或游戏 scripts/ 目录。
+     拆法: 插件包可注册脚本类 (register_script), 检查器自动可挂。
+     → Unity MonoBehaviour 组件扩展。★★★ 最高频 DIY 需求。
+
+  2.【自定义面板】现状: 层级/检查器/资源三面板固定。
+     拆法: register_panel(id, build_fn) 注册新面板, 布局可插。
+     → Unity EditorWindow 自定义窗口。★★★
+
+  3.【菜单/命令】现状: 工具栏按钮固定, 无菜单系统。
+     拆法: register_menu(路径, 回调) 菜单注册表, 工具栏/右键菜单
+     都能挂。→ Unity [MenuItem]。★★★ 所有工具的第一入口。
+
+  4.【资产导入器】现状: 只有 obj 一种格式。
+     拆法: register_importer(扩展名, 解析器) —— 用户能导入自己的
+     格式 (如 .vox/.gltf/自研格式)。→ Unity ScriptedImporter。★★
+
+  5.【渲染/材质扩展】现状: shader 硬编码在 engine.py, 材质只有
+     颜色+饱和度。拆法: 材质 = shader+参数 资产, register_shader
+     注册新 shader (自定义效果/透明度/贴图)。→ Unity Shader/材质
+     资产。★★ 深度 DIY 的核心, 改动最大。
+
+  6.【后处理链】现状: 无后处理。拆法: register_postprocess 链式
+     注册 (泛光/描边/雾/天空盒)。→ Unity 后处理/URP 扩展。★
+
+  7.【组件检查器】现状: 检查器字段固定 (引擎写死)。
+     拆法: register_inspector(类型, 控件构建器) 自定义编辑界面。
+     → Unity CustomEditor/PropertyDrawer。★★
+
+  8.【工具/生成器】现状: 重复操作靠手点。拆法: register_tool
+     (一键生成/批量改名/参数化造景)。→ Unity Editor 工具类。★★
+
+  9.【LoomHub 安装源】现状: 远程下载接口已预留 (RemoteDownloader.
+     download), 未开放。拆法: 插件包分发源 = 解释器分发同机制。
+     → Unity 注册表/Asset Store。★
+
+  10.【资产后处理】现状: 导入 obj 后无管线钩子。拆法:
+      register_postprocess 导入后钩子 (自动设材质/生成碰撞体)。
+      → Unity AssetPostprocessor。★
+
+====================================================================
+五、Loom 插件系统设计方案 (类 Unity + 开源 + 高度模块化 DIY)
+          —— 08-20 设计稿, 实装形态已按分级重设计修订 (见顶部★更新段)
+====================================================================
+设计原则 (对齐三源):
+  - 显式注册优于魔法命名 (Unity 魔法方法难调试 → 用装饰器注册表);
+  - 包即目录 + 清单 (学 UPM 轻量清单, 不学 .unitypackage 解压覆盖);
+  - 插件失败隔离 + 回退官方 (沿用 guiloader 已验证的机制);
+  - 零新依赖 (延续自研风格, 不引 importlib.metadata 等)。
+
+1. 插件形态: .loompkg = 目录 (zip 用于分享安装), 结构:
+   (实装改为 .lpc 插件包, 见顶部★更新段)
+       plugin.json     {id, name, version, min_engine, entry, deps}
+       entry.py        提供 register(api) 钩子 (插件唯一入口)
+       <其它文件>      脚本/面板/资源/代码按需
+   id 建议反向域名风格 (如 com.example.my_tool), 防重名。
+
+2. 安装位 (两级, 对齐 Unity 全局包 vs 项目包):
+       全局: Loom\plugins\   (所有项目可用)
+       项目: 场景旁 plugins\ (随项目分发)
+       编译版: exe 旁 plugins\
+   用户 DIY = 把插件目录放进 plugins\ 即生效 (和现有 GUI/ 投放一致)。
+  实装分角色 plugins\editor|player + core_plugins\<类别> (见顶部★更新段)。
+
+3. 扩展点注册表 (api 暴露给 register()):
+       register_script(类)        行为脚本
+       register_menu(路径, fn)    菜单/工具栏命令
+       register_panel(id, fn)     自定义面板
+       register_importer(ext, fn) 资产导入器
+       register_shader(id, src)   渲染 shader
+       register_postprocess(fn)   后处理链
+       register_inspector(类型, fn) 检查器自定义
+       register_tool(fn)          一键工具
+   加载时插件拿到 api, 显式注册; 引擎扫描 plugins\ 逐目录加载。
+
+4. 契约与安全 (全部复用 guiloader 已验证模式):
+       - 文本扫描头部标识 (不 import 坏文件前先验明正身);
+       - 加载失败 → 打印错误 + 该插件禁用, 编辑器不崩;
+       - 运行期异常边界: 插件回调异常只禁该插件;
+       - 版本校验: min_engine 不满足 → 提示禁用。
+
+5. 管理 = 目录即管理 (2026-08-20 用户拍板: LoomHub 不做插件面板):
+       放进 plugins\ = 装上; 删掉 = 卸载回官方; 坏插件自动回退。
+       不建 LoomHub 插件管理面板, 远程下载等增强留待以后。
+
+6. 分发与开源:
+       - 分享 = 打包 zip (或直接给目录);
+       - 开源社区 = GitHub 仓库/话题 (如 dsh-plugin 那样的话题聚合);
+       - 示例插件随引擎发布 (官方示例 = 最好的文档)。
+
+7. 与现有机制的关系 (平滑升级, 不推翻):
+       - GUI/ 视图插件 → 升级为 register_panel 的一个内建应用;
+       - scripts.py @register → 变成 api.register_script 的内建插件;
+       - 资产/输入/场景 全部不动, 插件系统是"加一层"不是"重构"。
+
+====================================================================
+六、落地路线 (依赖排序, 每步都进测试台账)
+          —— L1 已于 2026-08-27 按分级重设计实装 (见顶部★更新段),
+             本节 L2-L6 状态以《Loom插件系统分级方案.txt》为准。
+====================================================================
+  L1 插件加载器内核: plugin.json 解析 + plugins\ 扫描 + api 注册表
+     + 失败隔离。产出 demo 插件 (一个菜单项) 验证全链路。
+     → 直接复用 guiloader 骨架, 改动面最小, 收益立竿见影。
+     (已落地; 演示插件已删 2026-08-21, 测试 39+8 项全绿)
+  L2 菜单/命令扩展点: register_menu → 编辑器菜单栏 + 右键菜单。
+     (DIY 第一入口, 之后的插件都需要它)
+  L3 行为脚本包: register_script → 检查器可挂插件脚本。
+     (承接现有 @register, 几乎零成本)
+  L4 导入器扩展点: register_importer → 自定义格式导入。
+  L5 检查器自定义 + 自定义面板: register_inspector / register_panel。
+  L6 渲染 shader 扩展: 材质 = shader+参数 资产 (改动 engine 渲染层,
+     最大的一步, 排在最后)。
+  L7 (取消, 用户拍板 2026-08-20): LoomHub 不做插件管理面板,
+     只保留 GUI 自定制 (已实现); 插件管理 = 目录投放即装删。
+  每个 L 对应: 实现 + 测试台账新增可自动化项 + 使用指南/代码架构同步。
+
+====================================================================
+七、DSH 源码级分析补充 (2026-08-20, 委派 DSH 通读 Loom\ 源码产出)
+====================================================================
+与第四节互补: 第四节是"用户想 DIY 什么"视角, 本节是"代码耦合在哪"
+视角。DSH 实测数据: engine.py 3631 行 / ui\qt_view.py 1772 /
+ui\LoomGUI.py 1759 / editor.py 1759 / sceneio.py 504 —— 扩展机会
+集中在 engine.py 与 editor.py 两处。
+
+已确认的三处真插件系统 (与第二节一致):
+  GUI 加载器 (guiloader: 后缀+头标识文本扫描 → importlib 动态加载 →
+  失败写回官方) / 脚本注册表 (@register + scripts\ 目录动态加载 +
+  声明式参数规格自动生成检查器) / 资产文件+Prefab (GUID 引用 + v1→v10
+  迁移 + 内置/磁盘资产并列)。
+
+DSH 提出的 8 个代码级扩展点候选:
+  1. 组件系统可插拔: GameObject 构造硬编码依次建组件, 新组件要改
+     __init__ + sceneio + undo 三处 → 统一 components 列表 + 组件自带
+     序列化 schema (一处声明, 场景存取/撤销/检查器三端自动支持)。
+  2. 渲染管线 Pass 化: render() 巨型方法 (阴影→VP→绘制→HUD 全内嵌)
+     → RenderPass 接口 + 有序 pass 注册表 (后处理/bloom/新光照类型
+     从此可插)。
+  3. 网格生成器注册表: 只有 cube/sphere 硬编码 → MESH_GENERATORS
+     注册表 (圆柱/圆环/文本可插)。
+  4. 物理后端可替换: 手写 AABB/球碰撞内嵌引擎 → IPhysicsWorld 接口
+     (step/move_body/query), 内置 SimplePhysics 为默认实现。
+  5. 脚本生命周期扩展: 目前只有 on_start/update, on_collision_* 是
+     特判 → 完整生命周期回调统一派发 + 脚本 API 门面对象 (为未来
+     沙箱/隔离预留)。
+  6. 资产导入器协议: 仅 obj 特例 + 三类资产写死 → AssetImporter
+     协议 (extensions/import/preview), _scan_assets 按注册遍历。
+  7. 输入后端抽象: pygame 事件强绑定 (Qt 靠 _QT_TO_PG 映射回来)
+     → IInputBackend 归一化事件流, 手柄/触屏注册新 source 即可。
+  8. 撤销命令注册表: 10+ 个 *Command 类样板重复 → 声明式
+     UndoablePath / 统一 PropertyCommand, 与组件序列化共用 schema。
+
+主线洞察 (DSH 原话要点): 8 个候选共享同一设计主线 ——
+  "注册表 + 契约接口 + 声明式 schema (参数/序列化/撤销共用一套)",
+与工程内已成功的 @register 脚本机制同构, 迁移成本低。
+—— 与第五节方案完全吻合, 可视为对 L1-L7 路线的代码级验证。
+
+====================================================================
+八、方向决策 (2026-08-20 用户拍板, 后续开发以此为准)
+          —— 2026-08-27 部分修订: 第 3 条"不做复杂沙箱"已升级为
+             "信任闸 (SHA256) + 分级受限环境"安全模型 (见顶部★更新段)。
+====================================================================
+  1. LoomHub: 不做插件化。游戏开发者不需要 DIY 插件去编辑 LoomHub,
+     只保留 GUI 自定制 (已实现, guiloader 机制不变)。LoomHub 的
+     "DIY" = 开源源码级二次开发 (目录/模块已清晰, 见代码架构)。
+  2. Loom 本体: 走"一切皆插件"路线 (同 DSH/Cordis 哲学) ——
+     本体封装核心部件 (官方实现全内置), 但每个部件都留外部挂载/
+     替换插槽; 用户 DIY = 放插件替换/扩展官方组件。
+  3. 容错目标: 只做好"坏插件回退"即可, 不做复杂沙箱 ——
+     删掉/损坏的插件自动回退官方组件 (完全复用 GUI 机制:
+     扫描验明正身 → 加载失败禁用 → 回退官方, 见 guiloader.py)。
+     ※ 2026-08-27 修订: 升级为"信任闸 (SHA256) + 受限环境"分级安全,
+        普通插件 editor 层受限, 核心插件全权 + UI 信任确认。
+  4. 方案调整: 第五节 5 (管理) 与第六节 L7 已按此修订 ——
+     无 LoomHub 插件面板, 管理 = plugins\ 目录投放 (放进即装,
+     删掉即卸回官方)。
+  5. 插件范围聚焦 Loom 本体 10 类扩展点 (第四节), 优先级按第六节
+     L1-L6: 内核 → 菜单 → 脚本 → 导入 → 检查器/面板 → shader。
+
+====================================================================
+九、引擎 ↔ LoomHub 元数据合同 (2026-08-22, 平行线契约)
+====================================================================
+背景: LoomHub 与引擎本体是两套平行线 —— LoomHub 可以长期不更新,
+引擎频繁发版 (版本号随意变大)。旧 LoomHub 导入新版本引擎**不受
+影响**的边界就在这一份元数据上: LoomHub 只读 `解释器.json` 并
+调起主程序, 与引擎内部逻辑零耦合, 但**字段名与格式不许变**。
+
+合同内容 (改动前两边都必须知晓):
+  1. 字段名清单 (固定): name / version / python_version /
+     main / main_exe / description。旧 hub 用 meta.get() 只读已知
+     键: 额外新增字段会被安全忽略; **改字段名 = 旧 hub 识别失败**。
+  2. version 格式 (2026-08-22 起支持内测版, 合同正则 _VERSION_RE):
+     `x.y.z` 正式版 / `x.y.z.betaN` 内测版 (beta+内部编号, N 可为多位数,
+     如 1.0.0.beta1) —— 数值大小无上限 (1.0.0 ~ 9999.9999.9999 均可),
+     白名单只查格式不查大小; 排序 _version_key: beta 尾段参与且
+     **beta < 正式版** (1.0.0.beta1 < 1.0.0.beta2 < 1.0.0)。
+     语义: 内测版 = 放出去给人测 BUG 的引擎, 发版自检/安装 zip
+     (hub_install 版本输入) 走同一合同。
+  3. main / main_exe 主程序名白名单 (可执行文件约束):
+     `^[A-Za-z0-9_.-]+\.(py|exe)$`, 须至少填一个, 且实际文件存在。
+     exe 文件名建议保持 Loom.exe / LoomHub.exe 稳定不变。
+  4. 兼容性方向: 旧 hub + 新引擎 = 支持 (字段/格式不变即可);
+     新 hub + 旧引擎 = 支持 (旧元数据本就合规)。真正会断的是
+     "引擎改格式/字段名" —— 由此合同与发版自检约束。
+
+发版自检 (打 zip/发版前强制, 不合规拒绝打包):
+  hub_config.validate_meta(meta) —— 返回 None=合法 / 原因字符串,
+  检查: dict 类型、x.y.z 版本格式、主程序名白名单、main/main_exe
+  至少一项、指向文件存在 (导入时与发版时共用; 导入报错即展示
+  原因)。discover_interpreter 已复用本函数, 导入/扫描两路同判。
+
+====================================================================
+(完) 一句话: Loom 已具备"稳定内核+开放定制"的骨架 (UI/脚本/资产
+三处已开), 统一插件系统已按 L1 分级重设计实装 (2026-08-27:
+plugins\editor|player + core_plugins + 信任闸, 见顶部★更新段);
+本档 .loompkg 设计稿中菜单/面板/导入器/shader 等扩展点的实装形态
+以《Loom插件系统分级方案.txt》为准; 核心心法 = 一切皆插件 +
+信任闸 + 分层受限环境; 与 LoomHub 的接缝只有解释器元数据合同 (见第九节)。
+====================================================================
