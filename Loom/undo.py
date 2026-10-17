@@ -34,6 +34,10 @@ def snapshot(m):
         'saturation': m.saturation,
         'visible': m.visible,
         'name': m.name,
+        # Layer/Tag (2026-10-18): 项目级身份元信息 (契约 §4.3 要求进撤销栈);
+        # 旧快照无此二键 -> apply_snapshot 跳过 (向后兼容).
+        'layer': m.layer,
+        'tag': m.tag,
         # M23: 材质引用 (换材质时恢复原材质). 恒存在, 但颜色改动的命令前后同引用.
         'material': m.renderer.material,
         # M25 组件化: 快照全部脚本组件 (可多个). 元组 (id, vars 副本) 列表.
@@ -70,6 +74,10 @@ def apply_snapshot(m, snap):
     m.saturation = snap['saturation']
     m.visible = snap['visible']
     m.name = snap['name']
+    if 'layer' in snap:                    # Layer/Tag (2026-10-18; 旧快照跳过)
+        m.layer = snap['layer']
+    if 'tag' in snap:
+        m.tag = snap['tag']
     if 'scripts' in snap:                  # M25: 还原全部脚本组件 (清空重建)
         m.clear_scripts()
         for sid, vars_ in snap['scripts']:
