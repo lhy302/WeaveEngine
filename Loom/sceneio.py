@@ -90,6 +90,9 @@ def _emit_object(m):
         "parent_id": m.parent.guid if m.parent is not None else None,
         "prefab_ref": m.prefab_ref,
         "name": m.name,
+        # Layer/Tag (2026-10-18): 项目级身份元信息; 旧文件无此二键 -> 加载取默认
+        "layer": m.layer,
+        "tag": m.tag,
         "type": m.primitive or 'cube',
         "params": dict(m.params) if m.params else {'size': 1.0},
         "position": [m.position.x, m.position.y, m.position.z],
@@ -179,6 +182,32 @@ def _apply_object(engine, obj):
     if oid:
         m.guid = oid
     m.prefab_ref = obj.get('prefab_ref')
+    # Layer/Tag (2026-10-18, 契约 §3.3 容错):
+    #   layer 越界 -> 钳制 0 + 警告;  tag 未注册 -> 自动注册 + 警告;
+    #   tag 非法字符 -> 回退 'Untagged' + 警告. 任何情况都不阻断场景加载.
+    try:
+        lv = int(obj.get('layer', 0))
+    except (TypeError, ValueError):
+        lv = 0
+    if lv < 0 or lv > 31:
+        print("[sceneio] 警告: 物体 %r 的 layer=%r 越界, 已钳制为 0"
+              % (m.name, obj.get('layer')))
+        lv = 0
+    m.layer = lv
+    tg = obj.get('tag', 'Untagged')
+    if not isinstance(tg, str) or not tg.strip():
+        tg = 'Untagged'
+    tg = tg.strip()
+    import layer_tag
+    if not layer_tag.tag_exists(tg):
+        try:
+            layer_tag.register_tag(tg)
+            print("[sceneio] 警告: 标签 %r 未注册, 已自动注册" % tg)
+        except ValueError as e:
+            print("[sceneio] 警告: 标签 %r 非法 (%s), 回退 'Untagged'"
+                  % (tg, e))
+            tg = 'Untagged'
+    m.tag = tg
     # 脚本 (M25): 恢复全部脚本组件 (可多个). 兼容 v3 的单 "script" 字段.
     scs = obj.get('scripts')
     if scs is None:
