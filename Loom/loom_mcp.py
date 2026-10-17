@@ -87,7 +87,10 @@ TOOLS_DEF = [
     {'name': 'diag_get_console_logs', 'description': '【问题排查】拉取引擎内部环形控制台日志流与错误排查记录', 'inputSchema': {'type': 'object', 'properties': {'after_seq': {'type': 'integer', 'description': '从该日志序号之后拉取增量 (0 为拉取最新)'}}}},
     {'name': 'diag_inspect_gameobject', 'description': '【问题排查】深度透视检查指定 GameObject 的所有组件、世界矩阵、碰撞盒与运行态变量', 'inputSchema': {'type': 'object', 'properties': {'name_or_id': {'type': 'string', 'description': '物体名称或 ID'}}, 'required': ['name_or_id']}},
     {'name': 'diag_check_dll_integrity', 'description': '【问题排查】全量自检 5 大官方 C ABI 动态库 (ckernels, pipeline, script, physics, module_ref) 的 SHA256 钉扎完整性与导出接口', 'inputSchema': {'type': 'object', 'properties': {}}},
-    {'name': 'diag_check_crash_dumps', 'description': '【问题排查】扫描崩溃日志目录下的 Windows MiniDump (.dmp) 崩溃转储文件与异常堆栈', 'inputSchema': {'type': 'object', 'properties': {}}}
+    {'name': 'diag_check_crash_dumps', 'description': '【问题排查】扫描崩溃日志目录下的 Windows MiniDump (.dmp) 崩溃转储文件与异常堆栈', 'inputSchema': {'type': 'object', 'properties': {}}},
+    {'name': 'loom_set_layer', 'description': '设置 GameObject 的 Layer (0~31; 对齐 Unity GameObject.layer)', 'inputSchema': {'type': 'object', 'properties': {'name': {'type': 'string', 'description': '物体名称 (缺省=当前选中)'}, 'layer': {'type': 'integer', 'description': '层编号 0~31'}}, 'required': ['layer']}},
+    {'name': 'loom_set_tag', 'description': '设置 GameObject 的 Tag (对齐 Unity GameObject.tag; 未注册自动注册)', 'inputSchema': {'type': 'object', 'properties': {'name': {'type': 'string', 'description': '物体名称 (缺省=当前选中)'}, 'tag': {'type': 'string', 'description': '标签名 (字母/数字/下划线/中文)'}}, 'required': ['tag']}},
+    {'name': 'loom_get_layer_tag', 'description': '查询 GameObject 的 Layer/Tag (对齐 Unity layer + tag)', 'inputSchema': {'type': 'object', 'properties': {'name': {'type': 'string', 'description': '物体名称 (缺省=当前选中)'}}}},
 ]
 
 RESOURCES_DEF = [
@@ -333,6 +336,25 @@ class LoomMCPServer:
             with open(full_path, 'w', encoding='utf-8') as f:
                 f.write(code_str)
             return self._mk('脚本写入成功: %s (%d bytes)' % (full_path, len(code_str)))
+
+        # ---- Layer / Tag (2026-10-18) ----
+        if name == 'loom_set_layer':
+            payload = {'layer': args.get('layer')}
+            if args.get('name'):
+                payload['name'] = args['name']
+            return self._wrap(c.call('set_layer', payload))
+
+        if name == 'loom_set_tag':
+            payload = {'tag': args.get('tag')}
+            if args.get('name'):
+                payload['name'] = args['name']
+            return self._wrap(c.call('set_tag', payload))
+
+        if name == 'loom_get_layer_tag':
+            payload = {}
+            if args.get('name'):
+                payload['name'] = args['name']
+            return self._wrap(c.call('get_layer_tag', payload))
 
         # ---- 测试视口 ----
         if name == 'unity_playmode_toggle':
