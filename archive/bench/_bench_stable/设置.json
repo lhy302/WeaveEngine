@@ -1,0 +1,10 @@
+{
+  "gui": "LoomGUI",
+  "save_dir": "",
+  "parallel_enable": true,
+  "script_cores": 4,
+  "show_grid": true,
+  "fps_limit": "unlimited",
+  "cam_speed": 1.0,
+  "render_api": "vulkan"
+}

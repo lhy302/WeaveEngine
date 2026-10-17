@@ -1,0 +1,62 @@
+========================================================================
+任务 D1 报告: engine._ancestry_ranges 接线 fastpath.ancestry_dfs (组3层2)
+日期: 2026-08-30  |  Python: py -3.12 -X utf8  |  numba: 0.67.0 (编译路径)
+========================================================================
+
+一、engine.py 修改内容 (仅两处)
+------------------------------------------------------------------------
+1. 顶部 import 区 (engine.py 第 32 行, 紧随既有 depths 导入先例):
+   新增: from fastpath import ancestry_dfs as _fp_ancestry   # 组3层2: ...
+
+2. _ancestry_ranges 函数体 (engine.py 第 2632-2658 行, 改后行号):
+   - 保留: gen 归一 / key 构建 / 命中返回缓存逻辑 (改后 2645-2649)
+   - 保留: parent_idx 构建 (id2i dict + np.full, 改后 2650-2655)
+   - 替换: 旧 2654-2686 的 children 列表构建 + 栈式 DFS + 兜底循环
+     整体换成一行 (改后 2656):
+       tin, tout = _fp_ancestry(parent_idx)
+   - 保持: _ANCESTRY_CACHE 写回 (改后 2657) 与 return (2658) 不动
+   - docstring 末尾追加 (改后 2644):
+       组3层2: DFS 计算委托 fastpath.ancestry_dfs (numba 编译/纯 Python
+       降级同源, 对拍网 numba_par_check.py 覆盖)。
+   - 未动: fastpath.py / vk_renderer.py / 其他任何文件 / 缓存键语义 /
+     调用点 (3212 行 gen 传参不动)。
+   - 文件总行数 4050 -> 4020 (净 -30)。
+
+二、wire_check 6 场景结果 (tests/_tmp/ancestry_wire_check.py, 退出码 0)
+------------------------------------------------------------------------
+   命令: py -3.12 -X utf8 tests/_tmp/ancestry_wire_check.py
+   参考: ref_ranges() = 旧内联实现 (parent_idx + children 列表 + 栈式
+         tin/tout + 兜底) 直译; 逐位比对 np.array_equal。
+   场景1 ①线性链10层:        n=10  PASS
+   场景2 ②宽扇出1父32子:      n=33  PASS
+   场景3 ③三棵独立森林:       n=9   PASS
+   场景4 ④单根单叶:          n=2   PASS
+   场景5 ⑤环状父链(防御隔离):  n=5   PASS
+   场景6 ⑥孤儿混合:          n=8   PASS
+   总结果: ALL 6 PASS
+   (运行时确认 fastpath numba 已装, ancestry_dfs 为 CPUDispatcher 编译路径)
+
+三、既有回归结果 (逐个跑)
+------------------------------------------------------------------------
+1. tests/test_collision.py        ALL PASS   (17 项)          [exit 0]
+2. tests/test_collision_edges.py  ALL PASS   (19 项)          [exit 0]
+3. tests/test_scripts_collision.py ALL PASS  (10 项)          [exit 0]
+4. tests/test_parallel.py         74/75 PASS, 1 FAIL          [exit 1]
+     FAIL 项: "interval=0 仍做启动选核" (期望 current_bit==5, 实得 None)
+     - 定位: parallel.py MainThreadCoreScheduler 真实 Win32 绑核路径
+       (OpenThread/SetThreadAffinityMask), 测试 359-361 行 _s6。
+     - 与本次改动无关的证据: tests/_tmp/_probe_s6.py 独立探针
+       (完全不导入 engine.py) 复现同一结果:
+         real-pin   current_bit = None   (与测试中 FAIL 完全一致)
+         disable_pin current_bit = 5     (纯逻辑路径正常)
+       => 该 FAIL 为运行沙箱环境下线程亲和 API 受限所致, 属改动前
+         已存在的环境性失败, 非本次接线引入。
+5. tests/test_engine_safety.py    ALL PASS   (5 项)           [exit 0]
+
+四、异常记录
+------------------------------------------------------------------------
+- 除上述 test_parallel.py 中 1 项环境性 FAIL (探针证明与改动无关) 外,
+  其余全部 PASS, 无其他异常。
+- 本次新增文件: tests/_tmp/ancestry_wire_check.py (验证脚本)、
+  tests/_tmp/_probe_s6.py (FAIL 归因探针)、本报告。
+========================================================================

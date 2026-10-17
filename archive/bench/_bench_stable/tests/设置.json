@@ -1,0 +1,12 @@
+{
+  "gui": "LoomGUI",
+  "open_py": false,
+  "save_dir": "",
+  "parallel_enable": true,
+  "script_cores": 2,
+  "show_grid": true,
+  "fps_limit": "120",
+  "cam_speed": 1.0,
+  "gravity": -9.8,
+  "render_api": "vulkan"
+}

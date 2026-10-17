@@ -1,0 +1,16 @@
+{
+  "cases": [
+    {"name": "create_A", "op": "unity_gameobject_create",
+     "args": {"primitive": "cube", "name": "A", "position": [0, 1, 0]}},
+    {"name": "pos_positive", "op": "unity_transform_set",
+     "args": {"name_or_id": "A", "position": [3, 2, 1]}},
+    {"name": "pos_negative", "op": "unity_transform_set",
+     "args": {"name_or_id": "A", "position": [-4, -1, -2]}},
+    {"name": "pos_zero", "op": "unity_transform_set",
+     "args": {"name_or_id": "A", "position": [0, 0, 0]}},
+    {"name": "pos_far", "op": "unity_transform_set",
+     "args": {"name_or_id": "A", "position": [100, 50, 100]}},
+    {"name": "scale_2x", "op": "unity_transform_set",
+     "args": {"name_or_id": "A", "scale": [2, 2, 2]}}
+  ]
+}

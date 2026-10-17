@@ -1,0 +1,38 @@
+﻿soa_verify_report.txt — 组3层1 SoA 独立验证报告 (2026-08-31)
+生成命令: py -3.12 -X utf8 soa_val_check.py / soa_bench.py
+
+########## 1) soa_val_check.py ##########
+pygame 2.6.1 (SDL 2.28.4, Python 3.12.10)
+Hello from the pygame community. https://www.pygame.org/contribute.html
+soa_val_check: 新路径 (_transform_snapshot + fastpath.depths) vs 旧算法直译 (属性链 + 深度while), np.array_equal 逐位
+①线性链10层: n=10  depth一致=True  世界矩阵逐位一致=True  PASS
+②宽扇出1父32子: n=33  depth一致=True  世界矩阵逐位一致=True  PASS
+③三棵独立森林: n=9  depth一致=True  世界矩阵逐位一致=True  PASS
+④单根单叶: n=2  depth一致=True  世界矩阵逐位一致=True  PASS
+⑤浮点欧拉角: n=3  depth一致=True  世界矩阵逐位一致=True  PASS
+⑥重复父共享: n=6  depth一致=True  世界矩阵逐位一致=True  PASS
+总结果: ALL PASS
+
+########## 2) soa_bench.py ##########
+pygame 2.6.1 (SDL 2.28.4, Python 3.12.10)
+Hello from the pygame community. https://www.pygame.org/contribute.html
+==============================================================================
+soa_bench: 采集段对比 (旧属性链 vs 新快照), n=200/场景, 50 遍取中位, 每遍前 _bump_struct() 强制快照失效
+numba: 可用 v0.67.0
+numba depths 预热(200节点199层链, 含首次JIT编译): 287.3 ms (不进计时)
+==============================================================================
+场景                   旧us       新us      倍率   逐位对拍
+------------------------------------------------------------------------------
+①线性链10层            773.2     469.3   1.65x   OK
+②宽扇出1父32子          641.3     491.9   1.30x   OK
+③三棵独立森林            561.6     511.8   1.10x   OK
+④单根单叶              521.9     461.4   1.13x   OK
+⑤浮点欧拉角             535.4     475.5   1.13x   OK
+⑥重复父共享             573.9     470.7   1.22x   OK
+------------------------------------------------------------------------------
+平均倍率 (6场景算术平均): 1.25x
+总耗时比 (Σ旧/Σ新中位):   1.25x
+参考: 快照缓存命中路径 (场景①, 不失效): 241.1 us (vs 失效重建, 体现结构/属性未变帧的额外收益)
+==============================================================================
+
+########## END ##########

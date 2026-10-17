@@ -1,0 +1,543 @@
+{
+  "version": 10,
+  "camera": {
+    "target": [
+      0,
+      5,
+      0
+    ],
+    "distance": 14,
+    "yaw": 0.8,
+    "pitch": -0.35
+  },
+  "materials": [
+    {
+      "id": "01b3c614d35f4c939edbbcd7c62eeaa0",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0
+    },
+    {
+      "id": "f2c8287488684366bc2625e13350d087",
+      "name": "材质",
+      "color": "#8FA3B8",
+      "saturation": 1.0
+    },
+    {
+      "id": "e4aff787c2a044fd95820d83ceb80f6c",
+      "name": "材质",
+      "color": "#8FA3B8",
+      "saturation": 1.0
+    },
+    {
+      "id": "43d686b837644c188bbaeafa0b339434",
+      "name": "材质",
+      "color": "#8FA3B8",
+      "saturation": 1.0
+    },
+    {
+      "id": "d007e3f204af4f1989c683627a2fb8ca",
+      "name": "材质",
+      "color": "#7A5C3E",
+      "saturation": 1.0
+    },
+    {
+      "id": "0ddab092308d407c9b695f7b1f21bad4",
+      "name": "材质",
+      "color": "#7A5C3E",
+      "saturation": 1.0
+    },
+    {
+      "id": "ee380d54948547878fda42d83201552a",
+      "name": "材质",
+      "color": "#55AAFF",
+      "saturation": 1.0
+    },
+    {
+      "id": "02fb8f80b2b1449099d3269e906d4ae4",
+      "name": "材质",
+      "color": "#FFD700",
+      "saturation": 1.0
+    },
+    {
+      "id": "9a82cfe038424ccb9fac2d7eea5f3763",
+      "name": "材质",
+      "color": "#FFD700",
+      "saturation": 1.0
+    },
+    {
+      "id": "2e7473bb445746f08d44ee9fa83288b3",
+      "name": "材质",
+      "color": "#FFD700",
+      "saturation": 1.0
+    }
+  ],
+  "lights": [
+    {
+      "id": "59853f8ca1264194b7e28b58326b4701",
+      "name": "平行光",
+      "kind": "directional",
+      "position": [
+        0,
+        10,
+        0
+      ],
+      "direction": [
+        0.0,
+        -1.0,
+        6.123233995736766e-17
+      ],
+      "azimuth": 0.0,
+      "elevation": -90.0,
+      "roll": 0.0,
+      "color": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "intensity": 1.0,
+      "mode": "full",
+      "shape": "circle",
+      "size": 5.0,
+      "shadow": true
+    }
+  ],
+  "cameras": [
+    {
+      "id": "6706eabc66b142ca982c4b2d2e278cbc",
+      "name": "随身相机",
+      "position": [
+        0.0,
+        1.6,
+        0.0
+      ],
+      "yaw": 0.0,
+      "pitch": 0.0,
+      "roll": 0.0,
+      "fov": 45.0,
+      "fov_locked": true,
+      "pitch_lock": false,
+      "pitch_min": -85.0,
+      "pitch_max": 85.0,
+      "parent_id": "31c8bf2974a84715a0d7781a3c6928e6"
+    }
+  ],
+  "active_camera": null,
+  "objects": [
+    {
+      "id": "1b8d89554e03413eb0824e2462e7c7d3",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "地面",
+      "type": "plane",
+      "params": {
+        "width": 30,
+        "depth": 30
+      },
+      "position": [
+        0,
+        -2,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "color": null,
+      "material_id": "01b3c614d35f4c939edbbcd7c62eeaa0",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "40b834b3cdea46c4a55a4828b834d857",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "平台1",
+      "type": "cube",
+      "params": {
+        "size": 4
+      },
+      "position": [
+        5,
+        -1,
+        -5
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "color": "#8FA3B8",
+      "material_id": "f2c8287488684366bc2625e13350d087",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "84f2c6aecc264e5ba928f6f0d605becb",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "平台2",
+      "type": "cube",
+      "params": {
+        "size": 4
+      },
+      "position": [
+        10,
+        1,
+        -8
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "color": "#8FA3B8",
+      "material_id": "e4aff787c2a044fd95820d83ceb80f6c",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "a06d97574f25440181f231c096a43c12",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "平台3",
+      "type": "cube",
+      "params": {
+        "size": 4
+      },
+      "position": [
+        14,
+        3,
+        -3
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "color": "#8FA3B8",
+      "material_id": "43d686b837644c188bbaeafa0b339434",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "47df3bf5028249f98169cd870b2a6b2f",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙1",
+      "type": "cube",
+      "params": {
+        "size": 2.0
+      },
+      "position": [
+        -6,
+        -1,
+        -12
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        0.4,
+        1.0,
+        1.0
+      ],
+      "color": "#7A5C3E",
+      "material_id": "d007e3f204af4f1989c683627a2fb8ca",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "5d76c628c0c74d89801b52a1d26b01d8",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙2",
+      "type": "cube",
+      "params": {
+        "size": 2.0
+      },
+      "position": [
+        2,
+        -1,
+        -18
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        0.4,
+        1.0,
+        1.0
+      ],
+      "color": "#7A5C3E",
+      "material_id": "0ddab092308d407c9b695f7b1f21bad4",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "31c8bf2974a84715a0d7781a3c6928e6",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "玩家",
+      "type": "cube",
+      "params": {
+        "size": 0.8
+      },
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "color": "#55AAFF",
+      "material_id": "ee380d54948547878fda42d83201552a",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [
+        {
+          "id": "first_person",
+          "vars": {
+            "speed": 6.0,
+            "eye": 1.6,
+            "jump_v": 7.0
+          }
+        }
+      ],
+      "collider": {
+        "shape": "box",
+        "enabled": true
+      },
+      "rigidbody": {
+        "mass": 1.0,
+        "use_gravity": true,
+        "is_kinematic": false
+      },
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "786ae67dad834ef4ab92fad41b27060d",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "彩球0",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        3,
+        -1.0,
+        -4
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "color": "#FFD700",
+      "material_id": "02fb8f80b2b1449099d3269e906d4ae4",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [
+        {
+          "id": "count_touch",
+          "vars": {}
+        }
+      ],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "d214815129284ae5b6f6a002ca32c7cd",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "彩球1",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        -4,
+        -1.0,
+        -7
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "color": "#FFD700",
+      "material_id": "9a82cfe038424ccb9fac2d7eea5f3763",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [
+        {
+          "id": "count_touch",
+          "vars": {}
+        }
+      ],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "b12323db0d1e48ac8c05e7d84bfd5fa8",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "彩球2",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        8,
+        -1.0,
+        -12
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "color": "#FFD700",
+      "material_id": "2e7473bb445746f08d44ee9fa83288b3",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [
+        {
+          "id": "count_touch",
+          "vars": {}
+        }
+      ],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    }
+  ]
+}

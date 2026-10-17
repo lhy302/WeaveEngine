@@ -1,0 +1,21 @@
+========== 场景基准 stress_500mixed.json (300 帧, 墙钟 17.98s) ==========
+FPS: 16.7  (平均帧时间 59.947 ms)
+帧稳定性: p50=59.956 p99=65.484 max=66.800 ms
+逐阶段累计耗时 (LOOM_PROFILE, ms/帧):
+  physics                  22.10
+  phys_bridge_ensure        7.09
+  phys_bridge_pre          14.35
+  phys_bridge_step          0.43
+  phys_bridge_post          0.21
+  world_matrices            2.14
+  aabbs                    12.56
+  shadow_prep              32.97
+  shadow_bounds             4.95
+  shadow_cornerfill         2.73
+  shadow_matmul             1.89
+  collide_pairs            16.52
+  shadow_jobs              19.75
+  dispatch                  0.53
+  buckets                   1.52
+  已插桩阶段合计           139.74 (帧时间 59.947, 其余=GL/脚本/事件)
+完成。

@@ -1,0 +1,239 @@
+{
+  "version": 10,
+  "camera": {
+    "target": [
+      0,
+      0,
+      0
+    ],
+    "distance": 10.0,
+    "yaw": 0.6,
+    "pitch": -0.35
+  },
+  "gravity": -9.8,
+  "materials": [
+    {
+      "id": "1aa885f9d2524e1fb0f3f8606bc62454",
+      "name": "材质",
+      "color": "#55FF55",
+      "saturation": 1.5
+    },
+    {
+      "id": "e69a1ac8b2de46cf895bf86ea99a3b7d",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0
+    },
+    {
+      "id": "0d130fe6b50c407b9d46fe2b7ae35288",
+      "name": "材质",
+      "color": "#FF5555",
+      "saturation": 1.0
+    },
+    {
+      "id": "ea8ef8e7c84f45819c0caff3f7a97604",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0
+    },
+    {
+      "id": "9e70598c447246c4828dbbd0222b4970",
+      "name": "材质",
+      "color": "#55FF55",
+      "saturation": 1.5
+    },
+    {
+      "id": "fe7fbdabaf4e4117b06df7fdd8500b77",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0
+    },
+    {
+      "id": "cdb92f737e8842be9d9bc77e93e2eddc",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0
+    },
+    {
+      "id": "5f91b0f309f3491c92c0b60279ad31d2",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0
+    },
+    {
+      "id": "2c8df9f1884c4091bec44f53bc6f4532",
+      "name": "材质",
+      "color": "#55FF55",
+      "saturation": 1.0
+    }
+  ],
+  "lights": [],
+  "cameras": [],
+  "active_camera": null,
+  "objects": [
+    {
+      "id": "c18e4f5bbc48499bab338030a854ac97",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "模型1",
+      "type": "obj",
+      "params": {
+        "obj": "D:\\my-project\\Loom(py源代码-工作区)\\Loom\\tests\\_tmp\\eai_tri.obj"
+      },
+      "position": [
+        0,
+        0.0,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "color": null,
+      "material_id": "fe7fbdabaf4e4117b06df7fdd8500b77",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "2cd688286d2b4f04ada162fc3e71083d",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "模型1",
+      "type": "obj",
+      "params": {
+        "obj": "D:\\my-project\\Loom(py源代码-工作区)\\Loom\\tests\\_tmp\\eai_tri.obj"
+      },
+      "position": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "color": null,
+      "material_id": "fe7fbdabaf4e4117b06df7fdd8500b77",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "4acae850bbe04ec7b8354c7744c9fa73",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "立方体3",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        456.0,
+        0.0,
+        -8.348877145181177e-14
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "color": null,
+      "material_id": "5f91b0f309f3491c92c0b60279ad31d2",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "ce20bdefbe3c453d9d847a25014e8fd9",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "立方体4",
+      "type": "cube",
+      "params": {
+        "size": 1.5
+      },
+      "position": [
+        0,
+        1.0,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "color": "#55FF55",
+      "material_id": "2c8df9f1884c4091bec44f53bc6f4532",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    }
+  ]
+}

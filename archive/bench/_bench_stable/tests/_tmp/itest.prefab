@@ -1,0 +1,94 @@
+{
+  "version": 1,
+  "prefab": {
+    "guid": "e03db5cff26e48b2aa0affca86074bfc",
+    "name": "平面"
+  },
+  "objects": [
+    {
+      "id": "e03db5cff26e48b2aa0affca86074bfc",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "平面",
+      "type": "plane",
+      "params": {
+        "width": 8.0,
+        "depth": 8.0
+      },
+      "position": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "color": null,
+      "material_id": "60504347df894249a83570781b907b68",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "e031b3bac17b4ee293147a0230c0b81f",
+      "parent_id": "e03db5cff26e48b2aa0affca86074bfc",
+      "prefab_ref": null,
+      "name": "球体5",
+      "type": "sphere",
+      "params": {
+        "radius": 1.0,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "rotation": [
+        0.0,
+        -0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "color": null,
+      "material_id": "438dbaf6764a4700a6b737460a70ecb1",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    }
+  ]
+}

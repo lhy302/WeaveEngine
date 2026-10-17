@@ -1,0 +1,77 @@
+# -*- coding: utf-8 -*-
+"""组6验收报告 + 500球扩展压测 — 2026-08-31
+====================================================================
+
+一、组6 = numba spin-wait 治理 (用户拍板方案B 治本)
+--------------------------------------------------------------------
+根因 (numba_spin_probe.py 取证):
+  组3 层3 aabbs_minmax 是唯一 parallel=True 函数; 每次 prange 唤醒 numba
+  线程池 (NUMBA_NUM_THREADS 默认=18, OMP_WAIT_POLICY 未设), worker 调用
+  后 busy-wait 不睡眠。帧间隔 ~6.5ms 期间 18 线程全程 100% 空烧。
+  实验 B (模拟帧节奏 60 调用): 墙钟 424ms, 真实工作 3.2ms, CPU 消耗
+  8969ms ≈ 21 核全程满转 —— 99.96% CPU 是无效负载。
+  正对应用户判读: "18 核满载/负载翻 18 倍, 只换 +20 帧"。
+
+修复 (方案B 结构治本; 方案A 环境变量被否 —— 仍有空转且依赖环境):
+  1. fastpath.py: aabbs_minmax 改串行 njit (nogil 保留, 去 prange ——
+     帧路径不触碰 numba 线程池); prange 版独立为 aabbs_minmax_par
+     (逃生门, 同算法逐位同源)。
+  2. engine.py: _AABB_PAR_MIN_MODELS=512 闸门 —— _aabbs_batched 单组
+     模型数 >= 512 才切 prange (工作量摊得开 spin 税); 闸门随代码走,
+     打包 exe 同行为, 不设环境变量。
+  3. 堆叠缓冲 thread-local 复用: vhN/m3N/mn/mx 按 (组序号,n,V) 键缓存
+     (threading.local 免锁), 消每帧 4 次 np.empty 大分配 (51球V=2035
+     ≈3.3MB/帧)。
+  4. 插桩: _model_aabbs_par 计 'aabbs' 阶段 (LOOM_PROFILE 独立观测)。
+
+验收数据 (全部亲测, 改前/改后同机同场景 300 帧):
+  ------------------------------------------------------------------
+  指标               改前           改后           判定
+  FPS                153.5          167.1          +8.9%
+  帧时间             6.513ms        5.983ms        -0.53ms
+  18 worker 线程     85-93% 满烧    最高 13.9%     ★验收核心=归零
+  MainThread         82.4%          72.3%          -10pt
+  shadow_prep        3.07ms         2.67ms         -13%
+  aabbs (新插桩)     (含在shadow)   1.25ms         独立观测
+  GPU                20.1%          18.1%          等 CPU 时间缩短
+  ------------------------------------------------------------------
+  对拍: spin_gate_check 5 项全 PASS (串行 vs prange 逐位一致 / 串行
+  200 连调 worker CPU=0.0ms / 闸门 n=51<512 走串行 / 堆叠缓冲对象身份
+  不变真复用 / 逃生门 n=561 切 par 不崩) + aabb_par_check ALL PASS
+  (串行/入口/兜底逐位) + A/B 截图 NCC 1.000 (4x4 区域逐块全同) +
+  全量回归 EXIT=0 (改前改后各跑一遍)。
+
+产物: fastpath.py (aabbs_minmax 串行 + aabbs_minmax_par) /
+  engine.py (_AABB_PAR_MIN_MODELS=512 + thread-local 堆叠缓冲 + 插桩) /
+  tests/_tmp: numba_spin_probe.py (取证) + spin_gate_check.py (对拍网) +
+  ab_spin_before/after.png。台账 V05【0,1】。
+
+二、500 球压测 (用户指令: "压测场景扩展到 500 球, 现代游戏场景负载量级")
+--------------------------------------------------------------------
+场景: stress_500spheres.json (stress_scene.py 500 生成, 50 球同设计等比
+  扩展): 500 高面数球 (36x54=2035 顶点/球, 总量 101.75 万顶点) 29x18
+  网格 + 100 个 rotate 脚本球 + 地面 105x105 + 阴影平行光(full) + 点光;
+  Jolt 501 静态体 (球全部带 sphere 碰撞器, 无刚体 = STATIC)。
+  stress_scene.py 已改参数化 [球数]; stress_probe.py 支持第 2 参数选场景。
+
+结果 (组6 改后串行路径, 300 帧):
+  FPS 16.4 (帧时间 61.14ms) / GPU 26.4% (峰值 41%)
+  physics        22.84 ms/帧  ← 最大头 (Jolt 501 体 + 12.5万对 triu 候选)
+  shadow_prep    33.52 ms/帧  ← 其中 aabbs 11.02ms + 光源 VP/角点变换 ~22ms
+  world_matrices  2.34 ms/帧
+  插桩合计       69.71 ms/帧 (其余 ~8ms = GL 提交/桶准备/脚本/事件)
+  线程: MainThread 46.7% + 8 池 worker 各 7-12% (帧池并行正常, 无空烧);
+        numba 线程池未唤醒 (500 < 512 闸门, 串行路径) ★组6 语义保持。
+
+判读 (给下一轮的输入, 未动手):
+  1. physics 22.8ms = 最大单堵点: Jolt 步进本身 + ensure_models 签名
+     循环 + 碰撞对 triu (500 体 → 124,750 对) 向量化后仍重。
+  2. shadow_prep 内除 aabbs 外 ~22ms: _scene_light_bounds_par 8 角点
+     (n*8=4000,4) matmul 应该不慢, 嫌疑 = _dir_light_vp 组装/光源 VP
+     循环/池 worker 同步开销 —— 需细拆。
+  3. GL 段 (桶准备+提交) ~8ms: 101 万顶点 500 实例高面数球, A2 实例化
+     已批, 剩余 = 固有 GPU 负载。
+  4. 帧池 worker 有活干 (7-12%) 而非空烧 = 组6 后并行语义健康。
+====================================================================
+(报告完)
+====================================================================

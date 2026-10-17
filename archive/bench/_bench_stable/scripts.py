@@ -1,0 +1,427 @@
+# -*- coding: utf-8 -*-
+"""
+scripts.py — 物体脚本系统 (M27: 从"摆静态场景"跨到"做能动的游戏")
+
+设计 (设计总纲: 引擎必须是"做东西"的工具):
+  - 每个内置/自定义脚本是一个 Script 子类, 用 @register 注册进 SCRIPTS.
+  - 物体 (GameObject, M25 组件化) 挂 ScriptComponent 列表 (可多个), 每个组件
+    存 script_id + script_vars (参数覆盖), 不含运行实例.
+  - 播放期引擎对挂了脚本的物体实例化 Script, 绑定 obj/engine:
+      进入播放调一次 on_start(), 每帧调 update(dt).
+  - 脚本可做的事:
+      · 改自身变换: obj.position / obj.rotation / obj.scale
+      · 改相机: engine.camera_target / camera_yaw / camera_distance 等 (轨道相机)
+      · 读输入: engine.is_key('w'/'space'/'Left'...) —— 见 engine._KEYMAP
+      · 读引擎: engine.models / engine.world_position(obj) / engine.lights
+      · 碰撞 (M28): engine.move_with_collision(obj, dx,dy,dz) 带碰撞移动
+        (被挡返回 True), engine.get_collisions(obj) 查询碰撞物体列表.
+        所有物体默认有碰撞体 (球=球体, 其他=盒子), 纯装饰可把检查器里
+        碰撞体禁用/设 none.
+  - 参数规格: params = ((key, label, default, vmin, vmax, fmt), ...),
+    检查器据此画拖拽滑块, 值存进 script_vars 并随场景序列化.
+
+内置脚本即"实用工具"的最小行为库: 自转/公转/浮动 (演示用) +
+WASD移动/相机跟随 (组合起来 = 一个能跑的最小第三人称演示)。
+"""
+import math
+import os
+import re
+import sys
+import types
+
+from engine import Point3D
+
+# 脚本注册表: script_id -> Script 子类 (dict 保持注册顺序)
+SCRIPTS = {}
+
+
+def register(cls):
+    """类装饰器: 把脚本登记进 SCRIPTS (键 = cls.script_id)"""
+    SCRIPTS[cls.script_id] = cls
+    return cls
+
+
+_SCRIPT_FNAME_RE = re.compile(r'^[A-Za-z0-9_]+\.py$')  # 2026-08-20 安全加固: 文件名白名单
+
+
+def load_script_dir(directory):
+    """M38: 加载"游戏脚本目录"里的 .py 脚本 (Unity 项目脚本机制).
+    目录里每个 .py 文件动态 import 执行 —— 类里的 @register 会注册进 SCRIPTS,
+    之后检查器可挂载、运行时实例化. 引擎启动时扫描 exe/引擎旁的 scripts/ 目录.
+    文件名白名单 [A-Za-z0-9_]+\.py (2026-08-20 安全加固, 防隐蔽文件名),
+    跳过 _ 开头(内部文件). 坏脚本打印不崩. 返回成功加载数."""
+    import importlib.util
+    if not directory or not os.path.isdir(directory):
+        return 0
+    count = 0
+    for fname in sorted(os.listdir(directory)):
+        if not _SCRIPT_FNAME_RE.match(fname):
+            continue
+        path = os.path.join(directory, fname)
+        try:
+            spec = importlib.util.spec_from_file_location(fname[:-3], path)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            count += 1
+        except Exception as e:
+            print("[脚本] 加载游戏脚本 %s 失败: %r" % (fname, e))
+    return count
+
+
+def register_sources(sources):
+    """2026-08-22 发布链路: 从内存源码加载游戏脚本 (游戏包.lsc 内, 不落盘明文).
+    sources = [(name, source)] 或 [{'name':.., 'source':..}] (游戏包格式) ——
+    与 load_script_dir 同一注册机制: exec 源码成独立模块, 模块级 @register
+    自动进 SCRIPTS (检查器可挂 / 运行时实例化). 坏脚本打印不崩. 返回成功加载数."""
+    count = 0
+    for i, item in enumerate(sources):
+        if isinstance(item, dict):
+            name, source = item['name'], item['source']
+        else:
+            name, source = item
+        mod_name = 'game_script_%d_%s' % (i, re.sub(r'[^A-Za-z0-9_]', '_',
+                                                    str(name)).strip('_') or 'x')
+        try:
+            mod = types.ModuleType(mod_name)
+            mod.__file__ = '<game_pack:%s>' % name
+            exec(compile(source, '<game_pack:%s>' % name, 'exec'), mod.__dict__)
+            sys.modules[mod_name] = mod
+            count += 1
+        except Exception as e:
+            print('[脚本] 游戏包脚本 %s 加载失败: %r' % (name, e))
+    return count
+
+
+def get_script(script_id):
+    """按 id 取脚本类 (未注册返回 None)"""
+    return SCRIPTS.get(script_id)
+
+
+def script_options():
+    """脚本下拉选项: [(None, '无'), (id, 名称), ...] (注册顺序)"""
+    return [(None, '无')] + [(sid, SCRIPTS[sid].name) for sid in SCRIPTS]
+
+
+class Script:
+    """脚本基类. 子类覆盖 script_id/name/params, 实现 on_start/update."""
+    script_id = None   # 唯一标识 (小写蛇形, 序列化用)
+    name = '脚本'
+    params = ()        # ((key, label, default, vmin, vmax, fmt), ...)
+
+    def __init__(self):
+        self.obj = None       # 宿主物体 (GameObject)
+        self.engine = None    # 引擎 (GLEngine/EditorApp/PlayerApp)
+        self.vals = {}        # 参数 key -> 当前值
+        for key, _label, default, *_ in self.params:
+            self.vals[key] = default
+
+    def on_start(self):
+        """进入播放时调用一次 (obj/engine 已绑定, 可读宿主初值/记录基态)"""
+        pass
+
+    def update(self, dt):
+        """每帧播放期调用. dt 为秒."""
+        pass
+
+
+# ================ 内置脚本 ================
+
+@register
+class RotateScript(Script):
+    """自转: 绕自身轴旋转 (角度/秒)"""
+    script_id = 'rotate'
+    name = '自转'
+    params = (('sx', 'X速度°', 0.0, -720, 720, '%.1f'),
+              ('sy', 'Y速度°', 90.0, -720, 720, '%.1f'),
+              ('sz', 'Z速度°', 0.0, -720, 720, '%.1f'))
+
+    def update(self, dt):
+        o = self.obj
+        o.rotation = Point3D(o.rotation.x + math.radians(self.vals['sx']) * dt,
+                             o.rotation.y + math.radians(self.vals['sy']) * dt,
+                             o.rotation.z + math.radians(self.vals['sz']) * dt)
+
+
+@register
+class OrbitScript(Script):
+    """公转: 绕世界中心点旋转 (默认原点), 保持进入播放时的半径与高度差"""
+    script_id = 'orbit'
+    name = '公转'
+    params = (('cx', '中心X', 0.0, -50, 50, '%.1f'),
+              ('cy', '中心Y', 0.0, -50, 50, '%.1f'),
+              ('cz', '中心Z', 0.0, -50, 50, '%.1f'),
+              ('speed', '转速°', 45.0, -360, 360, '%.1f'))
+
+    def on_start(self):
+        c = (self.vals['cx'], self.vals['cy'], self.vals['cz'])
+        p = self.engine.world_position(self.obj)
+        self._dy = p.y - c[1]                       # 保持高度差
+        self._ang = math.atan2(p.z - c[2], p.x - c[0])
+        self._rad = math.hypot(p.x - c[0], p.z - c[2])
+
+    def update(self, dt):
+        self._ang += math.radians(self.vals['speed']) * dt
+        c = (self.vals['cx'], self.vals['cy'], self.vals['cz'])
+        self.obj.position = Point3D(c[0] + self._rad * math.cos(self._ang),
+                                    c[1] + self._dy,
+                                    c[2] + self._rad * math.sin(self._ang))
+
+
+@register
+class BobScript(Script):
+    """浮动: 沿 Y 上下正弦浮动 (以进入播放时的高度为基)"""
+    script_id = 'bob'
+    name = '浮动'
+    params = (('amp', '幅度', 0.5, 0.0, 5.0, '%.2f'),
+              ('freq', '频率', 1.0, 0.0, 10.0, '%.2f'))
+
+    def on_start(self):
+        self._base_y = self.obj.position.y
+        self._t = 0.0
+
+    def update(self, dt):
+        self._t += dt
+        o = self.obj
+        o.position = Point3D(o.position.x,
+                             self._base_y + self.vals['amp'] * math.sin(
+                                 self.vals['freq'] * self._t * 2 * math.pi),
+                             o.position.z)
+
+
+@register
+class WASDMoveScript(Script):
+    """WASD 移动 (世界轴): W=+z 前, S=-z 后, A=-x 左, D=+x 右.
+    M30b: 改用输入动作层 get_action('向前/向后/向左/向右') —— 键位重映射(输入配置.json)
+    后脚本自动跟随, 不用改脚本. 走 move_with_collision (M28) 撞到碰撞体被挡下."""
+    script_id = 'wasd_move'
+    name = 'WASD移动'
+    params = (('speed', '速度', 3.0, 0.0, 30.0, '%.1f'),)
+
+    def update(self, dt):
+        a = self.engine.get_action
+        dx = (1 if a('向右') else 0) - (1 if a('向左') else 0)
+        dz = (1 if a('向前') else 0) - (1 if a('向后') else 0)
+        if dx or dz:
+            s = self.vals['speed'] * dt
+            self.engine.move_with_collision(self.obj, dx * s, 0.0, dz * s)
+
+
+@register
+class CameraFollowScript(Script):
+    """相机跟随: 轨道相机目标锁定本物体世界位置 (+偏移). 与 WASD移动组合 =
+    一个最小第三人称演示 (相机自动跟着玩家走)."""
+    script_id = 'camera_follow'
+    name = '相机跟随'
+    params = (('oy', '高度偏移', 2.0, -10, 10, '%.1f'),
+              ('oz', '距离偏移', 0.0, -10, 10, '%.1f'))
+
+    def update(self, dt):
+        p = self.engine.world_position(self.obj)
+        self.engine.camera_target = (p.x, p.y + self.vals['oy'],
+                                     p.z + self.vals['oz'])
+
+
+# ================ 物理脚本 (M28: 简单碰撞) ================
+# 依赖引擎碰撞: engine.move_with_collision(obj, dx,dy,dz) 带碰撞移动,
+# engine.get_collisions(obj) 查询碰撞 —— 详见 scripts.py 顶部 docstring.
+
+@register
+class FallScript(Script):
+    """重力落地: 自由落体, 碰到下面的碰撞体就停住 (最基本物理演示).
+    把球/立方体放到平面上方, 挂上它, 按播放就能看到落体+落地.
+    碰撞体: 所有物体默认都有 (球=球体, 其他=盒子); 纯装饰可关掉."""
+    script_id = 'fall'
+    name = '重力落地'
+    params = (('g', '重力', -9.8, -30.0, -1.0, '%.1f'),)
+
+    def on_start(self):
+        self._vy = 0.0
+
+    def update(self, dt):
+        self._vy += self.vals['g'] * dt
+        hit = self.engine.move_with_collision(self.obj, 0.0, self._vy * dt, 0.0)
+        if hit:
+            self._vy = 0.0
+
+
+@register
+class BounceScript(Script):
+    """弹跳: 重力下落, 碰到下面碰撞体反弹 (衰减). 演示"碰撞响应"最直观的一档."""
+    script_id = 'bounce'
+    name = '弹跳'
+    params = (('g', '重力', -9.8, -30.0, -1.0, '%.1f'),
+              ('rest', '弹力', 0.7, 0.0, 1.0, '%.2f'))
+
+    def on_start(self):
+        self._vy = 0.0
+
+    def update(self, dt):
+        self._vy += self.vals['g'] * dt
+        hit = self.engine.move_with_collision(self.obj, 0.0, self._vy * dt, 0.0)
+        if hit and self._vy < 0:
+            self._vy = -self._vy * self.vals['rest']
+
+
+# ==================== 玩家控制器 (M32, 承接 Unity 玩家控制 + 输入动作层) ====================
+@register
+class FirstPersonScript(Script):
+    """第一人称玩家控制器: WASD 沿视角前方移动 (带碰撞) + 鼠标转动视角 + 跳跃.
+    挂到角色物体 (建议加刚体受重力); 播放期脚本接管相机 = 角色眼高视角."""
+    script_id = 'first_person'
+    name = '第一人称'
+    params = (('speed', '速度', 5.0, 0.0, 30.0, '%.1f'),
+              ('eye', '眼高', 1.6, 0.0, 5.0, '%.1f'),
+              ('sens', '鼠标灵敏度', 0.002, 0.0, 0.01, '%.3f'),
+              ('jump_v', '跳跃速度', 6.0, 0.0, 20.0, '%.1f'))
+
+    def on_start(self):
+        self.yaw = self.engine.camera_yaw
+        self.pitch = self.engine.camera_pitch
+        self._tab_was = False
+        sml = getattr(self.engine, 'set_mouse_locked', None)   # M39: 播放锁定鼠标
+        if sml is not None:
+            sml(True)
+
+    def update(self, dt):
+        e = self.engine
+        # M39: Tab 切换鼠标锁定 (按下帧检测); 释放状态鼠标滑动不转视角
+        tab = e.is_key('Tab')
+        if tab and not self._tab_was:
+            e.toggle_mouse_locked()
+        self._tab_was = tab
+        if getattr(e, 'mouse_locked', True):   # 仅锁定状态用鼠标转视角
+            mx, my = getattr(e, 'mouse_rel', (0, 0))
+            self.yaw += mx * self.vals['sens']
+            # M41: 激活相机开俯仰角限制则夹到 [pitch_min,pitch_max], 否则默认 ±1.5rad
+            lim = e.player_pitch_limits()
+            self.pitch = (max(lim[0], min(lim[1], self.pitch - my * self.vals['sens']))
+                          if lim else max(-1.5, min(1.5,
+                                                    self.pitch - my * self.vals['sens'])))
+        # WASD 沿视角前方水平移动 (带碰撞, 撞墙被挡)
+        fwd = (math.sin(self.yaw), 0.0, math.cos(self.yaw))
+        right = (math.cos(self.yaw), 0.0, -math.sin(self.yaw))
+        a = e.get_action
+        dx = (1 if a('向右') else 0) - (1 if a('向左') else 0)
+        dz = (1 if a('向前') else 0) - (1 if a('向后') else 0)
+        if dx or dz:
+            s = self.vals['speed'] * dt
+            e.move_with_collision(self.obj,
+                                  right[0] * dx * s + fwd[0] * dz * s, 0.0,
+                                  right[2] * dx * s + fwd[2] * dz * s)
+        # 跳跃 (需刚体; 仅当已落地/速度接近 0)
+        rb = getattr(self.obj, 'rigidbody', None)
+        if a('跳跃') and rb is not None and abs(rb.velocity.y) < 0.01:
+            rb.velocity = Point3D(rb.velocity.x, self.vals['jump_v'],
+                                  rb.velocity.z)
+        # 接管相机: 位置 = 角色 + 眼高, 朝向 = 脚本 yaw/pitch (关闭轨道相机)
+        p = self.obj.position
+        e.camera = Point3D(p.x, p.y + self.vals['eye'], p.z)
+        e.camera_yaw = self.yaw
+        e.camera_pitch = self.pitch
+        e.orbit_mode = False
+
+
+@register
+class ThirdPersonScript(Script):
+    """第三人称玩家控制器: 角色移动 (相机前方) + 鼠标转向 + 相机跟在角色后方上方.
+    挂到角色物体 (建议加刚体); 相机距离/高度可调."""
+    script_id = 'third_person'
+    name = '第三人称'
+    params = (('speed', '速度', 5.0, 0.0, 30.0, '%.1f'),
+              ('dist', '相机距离', 6.0, 1.0, 30.0, '%.1f'),
+              ('height', '相机高度', 3.0, 0.0, 10.0, '%.1f'),
+              ('sens', '鼠标灵敏度', 0.002, 0.0, 0.01, '%.3f'))
+
+    def on_start(self):
+        self.yaw = self.engine.camera_yaw
+        self.pitch = self.engine.camera_pitch
+        self._tab_was = False
+        sml = getattr(self.engine, 'set_mouse_locked', None)   # M39: 播放锁定鼠标
+        if sml is not None:
+            sml(True)
+
+    def update(self, dt):
+        e = self.engine
+        # M39: Tab 切换鼠标锁定; 释放状态鼠标滑动不转视角
+        tab = e.is_key('Tab')
+        if tab and not self._tab_was:
+            e.toggle_mouse_locked()
+        self._tab_was = tab
+        if getattr(e, 'mouse_locked', True):
+            mx, my = getattr(e, 'mouse_rel', (0, 0))
+            self.yaw += mx * self.vals['sens']
+            # M41: 激活相机开俯仰角限制则夹到 [pitch_min,pitch_max], 否则默认 ±1.4rad
+            lim = e.player_pitch_limits()
+            self.pitch = (max(lim[0], min(lim[1], self.pitch - my * self.vals['sens']))
+                          if lim else max(-1.4, min(1.4,
+                                                    self.pitch - my * self.vals['sens'])))
+        fwd = (math.sin(self.yaw), 0.0, math.cos(self.yaw))
+        right = (math.cos(self.yaw), 0.0, -math.sin(self.yaw))
+        a = e.get_action
+        dx = (1 if a('向右') else 0) - (1 if a('向左') else 0)
+        dz = (1 if a('向前') else 0) - (1 if a('向后') else 0)
+        if dx or dz:
+            s = self.vals['speed'] * dt
+            e.move_with_collision(self.obj,
+                                  right[0] * dx * s + fwd[0] * dz * s, 0.0,
+                                  right[2] * dx * s + fwd[2] * dz * s)
+        # 角色朝向 yaw (播放期脚本控制)
+        self.obj.rotation = Point3D(0, self.yaw, 0)
+        # 相机在角色后方上方 (跟随)
+        d = self.vals['dist']
+        p = self.obj.position
+        e.camera = Point3D(p.x - fwd[0] * d, p.y + self.vals['height'],
+                           p.z - fwd[2] * d)
+        e.camera_yaw = self.yaw
+        e.camera_pitch = self.pitch
+        e.orbit_mode = False
+
+
+@register
+class JumpScript(Script):
+    """跳跃 (M32): 挂到带刚体的角色, 按'跳跃'动作给向上速度 (落地后才能再跳).
+    可与 wasd_move/first_person 等组合."""
+    script_id = 'jump'
+    name = '跳跃'
+    params = (('v', '跳跃速度', 6.0, 0.0, 20.0, '%.1f'),)
+
+    def update(self, dt):
+        rb = getattr(self.obj, 'rigidbody', None)
+        if rb is None:
+            return
+        if self.engine.get_action('跳跃') and abs(rb.velocity.y) < 0.01:
+            rb.velocity = Point3D(rb.velocity.x, self.vals['v'], rb.velocity.z)
+
+
+@register
+class CountTouchScript(Script):
+    """触碰计数彩球 (2026-08-22 教学演示, M33 运行时 UI 配套):
+    挂在彩球上, 玩家(名字='玩家')碰到 -> 彩球消失, 右上角 HUD 计数 +1.
+    展示三件事: ①脚本里做碰撞判定 (engine.get_collisions);
+    ②运行时 UI (engine.ui.text 每帧声明, 引擎画在游戏 HUD 层);
+    ③脚本 self.engine / self.obj / self.vals 用法 (教学参考脚本).
+    生产建议: 碰撞判定用正式碰撞事件/按 guid 区分对象, 名字字符串仅供教学."""
+    script_id = 'count_touch'
+    name = '触碰计数彩球'
+    params = ()
+
+    def on_start(self):
+        self.hits = getattr(self.engine, '_count_hits', 0)
+        self._hit_printed = False   # 已碰到标志
+
+    def update(self, dt):
+        e = self.engine
+        if self._hit_printed:
+            return
+        for other in e.get_collisions(self.obj):
+            if other.name == '玩家':
+                self._hit_printed = True
+                self.hits += 1
+                e._count_hits = self.hits
+                e.remove_model(self.obj)
+                break
+        # 每帧声明 HUD (M33 语义: 声明即绘制); 用"剩余第一个球"当 HUD 载体
+        # —— 它被吃掉后下一个球自动顶上 (简单转移, 教学用).
+        if e.models and e.models.index(self.obj) == 0:
+            total = sum(1 for m in e.models if m.name.startswith('彩球'))
+            e.ui.text("碰到的彩球: %d  (剩余 %d)" % (self.hits, total), 20, 20, 22)

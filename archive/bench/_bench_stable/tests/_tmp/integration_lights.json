@@ -1,0 +1,222 @@
+{
+  "version": 10,
+  "camera": {
+    "target": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "distance": 10.0,
+    "yaw": 0.6,
+    "pitch": -0.35
+  },
+  "gravity": -9.8,
+  "materials": [
+    {
+      "id": "07f30446fc8842d9912b140d371bc190",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0
+    },
+    {
+      "id": "18982c48ffd14e1495561d50976fa546",
+      "name": "材质",
+      "color": "#FF5555",
+      "saturation": 1.0
+    },
+    {
+      "id": "a31148cd1ba94959ad4d1b97e62969a2",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0
+    }
+  ],
+  "lights": [
+    {
+      "id": "13795280a6c44468b98f4f3dc556045a",
+      "name": "平行光",
+      "kind": "directional",
+      "position": [
+        0,
+        5,
+        0
+      ],
+      "direction": [
+        -0.5773502691896258,
+        -0.5773502691896257,
+        0.5773502691896256
+      ],
+      "azimuth": 315.0,
+      "elevation": -35.264389682754654,
+      "roll": 0.0,
+      "color": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "intensity": 1.0,
+      "mode": "full",
+      "shape": "circle",
+      "size": 5.0,
+      "shadow": false
+    },
+    {
+      "id": "b4c8e3843a7b4865a5db9ba943b7e2cc",
+      "name": "点光源",
+      "kind": "point",
+      "position": [
+        3.0,
+        2.0,
+        1.0
+      ],
+      "direction": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "azimuth": 0.0,
+      "elevation": 0.0,
+      "roll": 0.0,
+      "color": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "intensity": 1.0,
+      "mode": "full",
+      "shape": "circle",
+      "size": 5.0,
+      "shadow": true
+    }
+  ],
+  "cameras": [],
+  "active_camera": null,
+  "objects": [
+    {
+      "id": "69e5506104144c488c9d84670f4a927d",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "平面",
+      "type": "plane",
+      "params": {
+        "width": 8.0,
+        "depth": 8.0
+      },
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "color": null,
+      "material_id": "07f30446fc8842d9912b140d371bc190",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "dbc7b6857ba3414b85fa3f0866f85de7",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "立方体",
+      "type": "cube",
+      "params": {
+        "size": 1.5
+      },
+      "position": [
+        1.2,
+        0.75,
+        0.3
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "color": "#FF5555",
+      "material_id": "18982c48ffd14e1495561d50976fa546",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "1e548421ba554f8a85122dba81ee30ad",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "球体",
+      "type": "sphere",
+      "params": {
+        "radius": 1.0,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        -1.5,
+        1.0,
+        0.5
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "color": null,
+      "material_id": "a31148cd1ba94959ad4d1b97e62969a2",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    }
+  ]
+}
