@@ -570,6 +570,43 @@ class GLEngine(ShadowMixin, FrameComponentMixin, PhysicsMixin, InputMixin, HudMi
                 print("[sched] NgilPool 建失败, 回退串行:", e)
 
 
+    # ================ Layer / Tag 接口 (2026-10-18, 契约 §4) ================
+    # 纯数据操作层: 校验与存储全部代理 layer_tag 模块; 撤销快照由调用方
+    # (GUI commit_model / EAI _commit) 负责 —— 基座层不依赖编辑器概念.
+    def tag_exists(self, tag):
+        """标签是否已注册 (不区分大小写)."""
+        import layer_tag
+        return layer_tag.tag_exists(tag)
+
+    def layer_name(self, layer_id):
+        """层编号 -> 层名 (未命名/越界返回空串)."""
+        import layer_tag
+        return layer_tag.layer_name(layer_id)
+
+    def layer_id(self, name):
+        """层名 -> 层编号 (找不到返回 -1)."""
+        import layer_tag
+        return layer_tag.layer_id(name)
+
+    def register_tag(self, tag):
+        """注册新标签 (幂等); 已存在返回 False, 非法抛 ValueError."""
+        import layer_tag
+        return layer_tag.register_tag(tag)
+
+    def find_by_tag(self, tag):
+        """查找所有指定标签的物体 (不区分大小写)."""
+        low = str(tag).lower()
+        return [m for m in self.models
+                if getattr(m, 'tag', '').lower() == low]
+
+    def set_object_layer(self, obj, layer_id):
+        """设置物体层; 越界抛 ValueError (校验在 GameObject.layer setter)."""
+        obj.layer = layer_id
+
+    def set_object_tag(self, obj, tag):
+        """设置物体标签; 未注册抛 TagNotRegisteredError (校验在 GameObject.tag setter)."""
+        obj.tag = tag
+
     def _build_hud_quad(self):
         """单位 quad (2 三角形), HUD 文字纹理 + M33 运行时 UI 纯色矩形用"""
         quad = np.array([0, 0, 0, 0,  1, 0, 1, 0,  1, 1, 1, 1,
