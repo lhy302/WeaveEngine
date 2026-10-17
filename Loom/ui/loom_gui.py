@@ -1957,6 +1957,56 @@ class LoomGUI(QMainWindow):
         name_edit.editingFinished.connect(
             lambda: e.rename(m, name_edit.text(), m.name) if name_edit.text() != m.name else None)
         lay.addRow("名称", name_edit)
+        # ---- Layer / Tag (2026-10-18, 契约 §7) ----
+        import layer_tag
+        lay_combo = QComboBox()
+        for i in range(32):
+            nm = e.layer_name(i)
+            lay_combo.addItem("%d: %s" % (i, nm if nm else "(未命名)"), i)
+        lay_combo.setCurrentIndex(m.layer)
+        lay_combo.currentIndexChanged.connect(
+            lambda i: e.commit_model(m, "设置 Layer",
+                                     lambda: e.set_object_layer(m, i))
+            if i != m.layer else None)
+        lay.addRow("Layer", lay_combo)
+
+        tag_combo = QComboBox()
+        tag_combo.setEditable(True)
+        for t in layer_tag.get_tags():
+            tag_combo.addItem(t)
+        cur_tag = m.tag
+        idx = tag_combo.findText(cur_tag)
+        if idx >= 0:
+            tag_combo.setCurrentIndex(idx)
+        else:
+            tag_combo.setEditText(cur_tag)
+
+        def _apply_tag():
+            val = tag_combo.currentText().strip()
+            if val == m.tag:
+                return
+            ok, reason = layer_tag.validate_tag(val)
+            if not ok:
+                e._notify("Tag 非法: %s" % reason, (220, 80, 80))
+                tag_combo.setEditText(m.tag)
+                return
+            if not e.tag_exists(val):
+                try:
+                    e.register_tag(val)
+                except ValueError as ex:
+                    e._notify("Tag 注册失败: %s" % ex, (220, 80, 80))
+                    tag_combo.setEditText(m.tag)
+                    return
+                # 注册成功后刷新下拉项 (新 tag 出现在列表里)
+                if tag_combo.findText(val) < 0:
+                    tag_combo.addItem(val)
+                    tag_combo.setCurrentIndex(tag_combo.count() - 1)
+            e.commit_model(m, "设置 Tag", lambda: e.set_object_tag(m, val))
+
+        tag_combo.activated.connect(lambda _i: _apply_tag())
+        if tag_combo.lineEdit() is not None:
+            tag_combo.lineEdit().editingFinished.connect(_apply_tag)
+        lay.addRow("Tag", tag_combo)
         parent_name = m.parent.name if m.parent is not None else "(根)"
         info = "父级: %s" % parent_name
         if m.prefab_ref:
