@@ -20,6 +20,10 @@ __pycache__/
 *.dmp
 *.log
 
+# ---- 项目级配置（运行时生成，每台机器独立）----
+layer_tag.json
+**/layer_tag.json
+
 # ---- 运行时状态文件（含 token/pid，禁提交）----
 .agent_port.json
 **/.agent_port.json
