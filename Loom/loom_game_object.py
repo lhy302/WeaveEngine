@@ -34,6 +34,11 @@ class GameObject:
         # 稳定身份 (M16): 场景/Prefab 引用用
         self.guid = None
         self.prefab_ref = None
+        # Layer/Tag (2026-10-18, 契约 LayerTag系统契约_20261018.md):
+        # 项目级身份元信息, 与 name 同构。layer 为 0~31 整数(32 层位掩码),
+        # tag 为字符串且必须已注册。setter 做校验, 故 _layer/_tag 为真实存储。
+        self._layer = 0
+        self._tag = 'Untagged'
         # —— 组件 (M25) ——
         self.components = []
         self.transform = TransformComponent(position, rotation, scale)
@@ -66,6 +71,34 @@ class GameObject:
         # 边界: params dict 原地 mutate (不经 setter) 不会失效缓存 —— 全库
         # 无此用法 (mesh.py 创建期/sceneio 读取期均走赋值), 注释备案.
         self._bucket_key = None
+
+    # ================ Layer / Tag (2026-10-18) ================
+    @property
+    def layer(self):
+        return self._layer
+    @layer.setter
+    def layer(self, v):
+        try:
+            i = int(v)
+        except (TypeError, ValueError):
+            raise ValueError('layer 必须是 0~31 的整数, 收到 %r' % (v,))
+        if i < 0 or i > 31:
+            raise ValueError('layer 必须是 0~31 的整数, 收到 %r' % (v,))
+        self._layer = i
+    @property
+    def tag(self):
+        return self._tag
+    @tag.setter
+    def tag(self, v):
+        import layer_tag          # 惰性 import: 构造热路径零开销
+        ok, reason = layer_tag.validate_tag(v)
+        if not ok:
+            raise ValueError(reason)
+        v = v.strip()
+        if not layer_tag.tag_exists(v):
+            raise layer_tag.TagNotRegisteredError(
+                '标签未注册: %s (先用 engine.register_tag 注册)' % v)
+        self._tag = v
 
     # ================ 变换便捷 (委托 TransformComponent) ================
     @property

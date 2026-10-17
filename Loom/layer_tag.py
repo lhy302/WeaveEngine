@@ -115,6 +115,81 @@ def save(layers, tags, base=None):
     return path
 
 
+class TagNotRegisteredError(ValueError):
+    """标签未注册时赋值抛此异常 (契约 §3.2 严格语义)。"""
+
+
+# ---- 进程级注册表 (惰性初始化; 单进程单引擎, 多引擎共享同一份) ----
+_STATE = None
+
+
+def _state():
+    """惰性加载进程级注册表 {'layers': dict[int,str], 'tags': list[str]}."""
+    global _STATE
+    if _STATE is None:
+        layers, tags = load()
+        _STATE = {'layers': layers, 'tags': tags}
+    return _STATE
+
+
+def reload(base=None):
+    """强制重新从磁盘加载 (测试/外部改动后使用)."""
+    global _STATE
+    _STATE = None
+    return _state()
+
+
+def get_layers():
+    """返回层名表副本 {int: str} (0~31 全量)."""
+    return dict(_state()['layers'])
+
+
+def get_tags():
+    """返回已注册标签列表副本."""
+    return list(_state()['tags'])
+
+
+def tag_exists(tag):
+    """标签是否已注册 (不区分大小写)."""
+    low = str(tag).lower()
+    return any(t.lower() == low for t in _state()['tags'])
+
+
+def register_tag(tag, base=None):
+    """注册新标签; 已存在返回 False (幂等). 非法标签抛 ValueError."""
+    ok, reason = validate_tag(tag)
+    if not ok:
+        raise ValueError(reason)
+    tag = tag.strip()
+    st = _state()
+    if any(t.lower() == tag.lower() for t in st['tags']):
+        return False
+    if len(st['tags']) >= MAX_TAGS:
+        raise ValueError('标签数量已达上限 %d' % MAX_TAGS)
+    st['tags'].append(tag)
+    try:
+        save(st['layers'], st['tags'], base)
+    except Exception:
+        pass          # 落盘失败不阻断内存注册 (下次启动重试)
+    return True
+
+
+def layer_name(idx):
+    """层编号 -> 层名 (未命名/越界返回空串)."""
+    try:
+        return _state()['layers'].get(int(idx), '')
+    except (TypeError, ValueError):
+        return ''
+
+
+def layer_id(name):
+    """层名 -> 层编号 (找不到返回 -1)."""
+    for i, n in _state()['layers'].items():
+        if n and n == name:
+            return i
+    return -1
+
+
 def load(base=None):
     """读 layer_tag.json -> (layers: dict[int,str], tags: list[str]).
     文件缺失/损坏时回退默认并尝试落盘; 任何异常都不阻止启动."""
