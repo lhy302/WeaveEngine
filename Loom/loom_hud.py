@@ -174,6 +174,43 @@ class HudMixin:
                                              2.0 * h / self.height)
             self._quad_vao.render(moderngl.TRIANGLES)
 
+    # ---- scissor 裁剪栈 (2026-10-18: UI ScrollView 用) ----
+    def push_scissor(self, rect):
+        """推入一个屏幕矩形裁剪区 (x, y, w, h, 左上原点). 嵌套时求交. 需与 pop_scissor 配对."""
+        if not hasattr(self, '_ui_scissor_stack'):
+            self._ui_scissor_stack = []
+            self._ui_scissor_cur = None
+        self._ui_scissor_stack.append(self._ui_scissor_cur)
+        x, y, w, h = rect
+        if self._ui_scissor_cur is not None:
+            # 与现有裁剪区求交
+            ox, oy, ow, oh = self._ui_scissor_cur
+            nx = max(x, ox)
+            ny = max(y, oy)
+            nw = max(0, min(x + w, ox + ow) - nx)
+            nh = max(0, min(y + h, oy + oh) - ny)
+            self._ui_scissor_cur = (nx, ny, nw, nh)
+        else:
+            self._ui_scissor_cur = (max(0, x), max(0, y), max(0, w), max(0, h))
+        self._apply_ui_scissor()
+
+    def pop_scissor(self):
+        """弹出上一个裁剪区 (与 push_scissor 配对)."""
+        if not hasattr(self, '_ui_scissor_stack') or not self._ui_scissor_stack:
+            return
+        self._ui_scissor_cur = self._ui_scissor_stack.pop()
+        self._apply_ui_scissor()
+
+    def _apply_ui_scissor(self):
+        """把当前裁剪区写到 GL. None -> 关闭裁剪."""
+        sc = self._ui_scissor_cur
+        if sc is None:
+            self.ctx.scissor = None
+            return
+        x, y, w, h = sc
+        # GL 原点在左下: y_gl = height - (y+h)
+        self.ctx.scissor = (int(x), int(self.height - (y + h)), int(w), int(h))
+
     def draw_screen_rect(self, rect, color):
         """M33: 屏幕像素填充矩形 (运行时 UI 用). rect=(x,y,w,h) 左上角.
         color=(r,g,b) 或 (r,g,b,a) 0..255; 2026-10-18 起支持 alpha (Panel 半透明)."""
