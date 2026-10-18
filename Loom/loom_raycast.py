@@ -123,9 +123,26 @@ class RaycastMixin:
         except Exception:
             return None
 
+    # ---------- 内部: LayerMask 过滤 ----------
+    @staticmethod
+    def _layer_match(model, layer_mask):
+        """模型 layer 是否在 layer_mask 内（位掩码，bit i 表示 layer i）."""
+        if layer_mask is None or layer_mask < 0:
+            return True   # None 或负数 = 不限制
+        try:
+            lay = int(getattr(model, 'layer', 0))
+        except (TypeError, ValueError):
+            lay = 0
+        if lay < 0 or lay > 31:
+            return False
+        return bool((1 << lay) & layer_mask)
+
     # ---------- 内部: 几何 raycast ----------
-    def _raycast_geom_all(self, origin, direction, max_dist):
-        """几何 AABB raycast 返回 [(model, distance, hit_point), ...] 距离升序."""
+    def _raycast_geom_all(self, origin, direction, max_dist, layer_mask=None):
+        """几何 AABB raycast 返回 [(model, distance, hit_point), ...] 距离升序.
+
+        layer_mask: 位掩码过滤（None = 不限制）
+        """
         o = (float(origin[0]), float(origin[1]), float(origin[2]))
         d = (float(direction[0]), float(direction[1]), float(direction[2]))
         # 归一化方向（保证 distance 是世界单位）
@@ -159,6 +176,8 @@ class RaycastMixin:
         for i, m in enumerate(models):
             if not m.visible:
                 continue
+            if not self._layer_match(m, layer_mask):
+                continue
             ab = aabbs[i]
             if ab is None:
                 continue
@@ -173,7 +192,7 @@ class RaycastMixin:
 
     # ---------- 公开 API ----------
     def raycast(self, origin, direction, max_dist=1000.0,
-                ignore_model=None, backend='auto'):
+                ignore_model=None, backend='auto', layer_mask=None):
         """射线检测: 返回最近命中的物体.
 
         参数:
@@ -182,6 +201,7 @@ class RaycastMixin:
           max_dist: 最大检测距离
           ignore_model: 忽略的模型对象（射线从它内部射出时用）
           backend: 'auto'|'physics'|'geometry'（默认 auto）
+          layer_mask: 位掩码过滤（bit i 表示 layer i；None/负数 = 不限；0 = 全不匹配）
 
         返回: (model, distance, hit_point_tuple) 或 None
         """
@@ -197,27 +217,37 @@ class RaycastMixin:
                         if e.get('model') is ignore_model:
                             ignore_handle = int(e.get('handle', 0))
                             break
-            r = self._raycast_phys(origin, direction, max_dist, ignore_handle)
-            if r is None:
-                return None
-            handle, dist, hp = r
             hm = self._raycast_handle_map()
-            model = hm.get(handle)
-            if model is None:
-                return None
-            return (model, dist, hp)
+            # 物理 raycast 无 layer_mask 参数: 循环直到命中匹配层或超限
+            ignore = ignore_handle
+            for _ in range(100):
+                r = self._raycast_phys(origin, direction, max_dist, ignore)
+                if r is None:
+                    return None
+                handle, dist, hp = r
+                model = hm.get(handle)
+                if model is None:
+                    return None
+                if self._layer_match(model, layer_mask):
+                    return (model, dist, hp)
+                ignore = handle   # 不匹配: 继续忽略该 handle 找下一个
+
+            return None
 
         # 几何路径
-        all_hits = self._raycast_geom_all(origin, direction, max_dist)
+        all_hits = self._raycast_geom_all(origin, direction, max_dist,
+                                           layer_mask=layer_mask)
         for m, dist, hp in all_hits:
             if m is ignore_model:
                 continue
             return (m, dist, hp)
         return None
 
-    def raycast_all(self, origin, direction, max_dist=1000.0, backend='auto'):
+    def raycast_all(self, origin, direction, max_dist=1000.0, backend='auto',
+                    layer_mask=None):
         """射线检测: 返回所有命中（按距离升序）.
 
+        layer_mask: 位掩码过滤（None/负数 = 不限）
         返回: [(model, distance, hit_point_tuple), ...]（可能空列表）
         """
         use_phys = (backend == 'physics'
@@ -238,18 +268,20 @@ class RaycastMixin:
                     break
                 seen.add(handle)
                 model = hm.get(handle)
-                if model is not None:
+                if model is not None and self._layer_match(model, layer_mask):
                     results.append((model, dist, hp))
                 ignore = handle
             results.sort(key=lambda x: x[1])
             return results
 
-        return self._raycast_geom_all(origin, direction, max_dist)
+        return self._raycast_geom_all(origin, direction, max_dist,
+                                       layer_mask=layer_mask)
 
     def raycast_screen(self, px, py, max_dist=1000.0,
-                       ignore_model=None, backend='auto'):
+                       ignore_model=None, backend='auto', layer_mask=None):
         """从屏幕像素 (px, py) 反投影发射线，返回最近命中.
 
+        layer_mask: 位掩码过滤（None/负数 = 不限）
         返回: (model, distance, hit_point_tuple) 或 None
         """
         ray = self._ray_from_screen(px, py)
@@ -257,7 +289,8 @@ class RaycastMixin:
             return None
         origin, direction = ray
         return self.raycast(origin, direction, max_dist,
-                            ignore_model=ignore_model, backend=backend)
+                            ignore_model=ignore_model, backend=backend,
+                            layer_mask=layer_mask)
 
     # ---------- 内部: 屏幕坐标反投影 ----------
     def _ray_from_screen(self, px, py):

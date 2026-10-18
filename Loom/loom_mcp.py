@@ -146,6 +146,7 @@ TOOLS_DEF = [
          'dx': {'type': 'number'}, 'dy': {'type': 'number'}, 'dz': {'type': 'number'},
          'max_dist': {'type': 'number', 'description': '最大距离，缺省 1000'},
          'backend': {'type': 'string', 'description': 'auto|physics|geometry，缺省 auto'},
+         'layer_mask': {'type': 'integer', 'description': '位掩码过滤（bit i 表示 layer i；缺省=不限；0=全不匹配）'},
      }, 'required': ['ox', 'oy', 'oz', 'dx', 'dy', 'dz']}},
     {'name': 'loom_raycast_all', 'description': '射线检测（全部命中）：返回 hits 列表按距离升序',
      'inputSchema': {'type': 'object', 'properties': {
@@ -153,6 +154,7 @@ TOOLS_DEF = [
          'dx': {'type': 'number'}, 'dy': {'type': 'number'}, 'dz': {'type': 'number'},
          'max_dist': {'type': 'number'},
          'backend': {'type': 'string'},
+         'layer_mask': {'type': 'integer', 'description': '位掩码过滤（bit i 表示 layer i）'},
      }, 'required': ['ox', 'oy', 'oz', 'dx', 'dy', 'dz']}},
     {'name': 'loom_raycast_screen', 'description': '屏幕坐标反投影射线（等价鼠标点选）',
      'inputSchema': {'type': 'object', 'properties': {
@@ -160,6 +162,7 @@ TOOLS_DEF = [
          'py': {'type': 'number', 'description': '屏幕 y 像素'},
          'max_dist': {'type': 'number'},
          'backend': {'type': 'string'},
+         'layer_mask': {'type': 'integer', 'description': '位掩码过滤（bit i 表示 layer i）'},
      }, 'required': ['px', 'py']}},
 ]
 

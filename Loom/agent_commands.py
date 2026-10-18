@@ -2160,11 +2160,18 @@ def cmd_raycast(win, args):
         return {'error': '需要 ox/oy/oz/dx/dy/dz 六个数值参数'}
     max_dist = float(as_float(args.get('max_dist', 1000.0), 1000.0))
     backend = str(args.get('backend', 'auto'))
+    layer_mask = args.get('layer_mask')
+    if layer_mask is not None:
+        try:
+            layer_mask = int(layer_mask)
+        except (TypeError, ValueError):
+            return {'error': 'layer_mask 必须是整数位掩码'}
     ignore = None
     if args.get('ignore'):
         ignore = _find_model_by_name(ed, args['ignore'])
     r = ed.raycast((ox, oy, oz), (dx, dy, dz),
-                   max_dist=max_dist, ignore_model=ignore, backend=backend)
+                   max_dist=max_dist, ignore_model=ignore, backend=backend,
+                   layer_mask=layer_mask)
     if r is None:
         return {'hit': None}
     model, dist, pt = r
@@ -2183,8 +2190,15 @@ def cmd_raycast_all(win, args):
         return {'error': '需要 ox/oy/oz/dx/dy/dz 六个数值参数'}
     max_dist = float(as_float(args.get('max_dist', 1000.0), 1000.0))
     backend = str(args.get('backend', 'auto'))
+    layer_mask = args.get('layer_mask')
+    if layer_mask is not None:
+        try:
+            layer_mask = int(layer_mask)
+        except (TypeError, ValueError):
+            return {'error': 'layer_mask 必须是整数位掩码'}
     rs = ed.raycast_all((ox, oy, oz), (dx, dy, dz),
-                        max_dist=max_dist, backend=backend)
+                        max_dist=max_dist, backend=backend,
+                        layer_mask=layer_mask)
     return {'hits': [{'name': m.name,
                       'distance': round(float(d), 4),
                       'point': [round(p, 4) for p in pt]}
@@ -2200,7 +2214,14 @@ def cmd_raycast_screen(win, args):
     px = float(as_float(args['px'])); py = float(as_float(args['py']))
     max_dist = float(as_float(args.get('max_dist', 1000.0), 1000.0))
     backend = str(args.get('backend', 'auto'))
-    r = ed.raycast_screen(px, py, max_dist=max_dist, backend=backend)
+    layer_mask = args.get('layer_mask')
+    if layer_mask is not None:
+        try:
+            layer_mask = int(layer_mask)
+        except (TypeError, ValueError):
+            return {'error': 'layer_mask 必须是整数位掩码'}
+    r = ed.raycast_screen(px, py, max_dist=max_dist, backend=backend,
+                          layer_mask=layer_mask)
     if r is None:
         return {'hit': None}
     model, dist, pt = r
