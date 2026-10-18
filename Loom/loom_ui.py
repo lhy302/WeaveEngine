@@ -276,6 +276,8 @@ class UIManager:
         self._hovered = None        # 当前鼠标悬停的元素
         self._pressed_elem = None   # 当前被按下的元素
         self._dragging_elem = None  # 当前拖动中的元素 (滑条)
+        # 2026-10-18 阶段3: 焦点管理 (契约 §6.4, 同一时刻最多一个)
+        self._focused = None        # 当前持有键盘焦点的元素 (InputField 等)
 
     def add_canvas(self, canvas):
         if canvas not in self.canvases:
@@ -316,6 +318,57 @@ class UIManager:
             if hit is not None:
                 return c, hit
         return None, None
+
+
+    # ---- 焦点管理 (阶段3, 契约 §6.4) ----
+    def focus_element(self, elem):
+        """设置焦点元素. 原焦点元素先失焦. elem 为 None 时等效 blur_focused()."""
+        if self._focused is elem:
+            return
+        if self._focused is not None:
+            try:
+                self._focused.on_blur()
+            except Exception:
+                pass
+        self._focused = elem
+        if elem is not None:
+            try:
+                elem.on_focus()
+            except Exception:
+                pass
+
+    def blur_focused(self):
+        """清空焦点."""
+        self.focus_element(None)
+
+    def focused(self):
+        """返回当前焦点元素 (无则 None)."""
+        return self._focused
+
+    def dispatch_key(self, pg_key, mods=0):
+        """键盘事件 -> 焦点元素. 返回 True = 消费.
+        pg_key 是 pygame 键码 (与 loom_input._KEYMAP 一致).
+        键名转译: pg_key -> 'Backspace'/'Delete'/'Left'/'Right'/'Home'/'End'/'Return'/'Escape'.
+        普通字符不经此处 (走 dispatch_text, 由 IME/GLFW char_callback 提供).
+        """
+        if self._focused is None:
+            return False
+        name = _KEY_CODE_TO_NAME.get(pg_key)
+        if name is None:
+            return False
+        try:
+            return bool(self._focused.on_key_down(name))
+        except Exception:
+            return False
+
+    def dispatch_text(self, text):
+        """文本输入 (IME 提交的最终文本或 ASCII) -> 焦点元素. 返回 True = 消费."""
+        if self._focused is None or not text:
+            return False
+        try:
+            return bool(self._focused.on_text_input(text))
+        except Exception:
+            return False
 
 
     # ---- 鼠标事件分发 (阶段2) ----
@@ -380,6 +433,14 @@ class UIManager:
                             return True
                     except Exception:
                         pass
+
+        # 2.6) 焦点切换 (阶段3, 契约 §6.4): 点击 InputField 获焦, 点击别处失焦
+        if left_down:
+            if hovered is not None and hovered.ctype == 'input_field':
+                self.focus_element(hovered)
+            elif self._focused is not None:
+                # 点击任何非 InputField 元素 / 空白 -> 原焦点失焦
+                self.blur_focused()
 
         # 3) 按下
         if left_down and hovered is not None:
@@ -542,6 +603,39 @@ class UIManager:
         self.add_canvas(c)
         return c
 
+
+
+# ======================== 键码 -> 键名映射 (阶段3) ========================
+# InputField 用字符串名识别按键 (loom_ui.py 不 import pygame)
+_KEY_CODE_TO_NAME = None    # 惰性初始化 (避免 loom_ui 硬依赖 pygame)
+
+
+def _init_key_name_map():
+    """惰性构建 pygame 键码 -> 键名字符串映射 (模块首次调用时)."""
+    global _KEY_CODE_TO_NAME
+    if _KEY_CODE_TO_NAME is not None:
+        return _KEY_CODE_TO_NAME
+    try:
+        import pygame
+        _KEY_CODE_TO_NAME = {
+            pygame.K_BACKSPACE: 'Backspace',
+            pygame.K_DELETE: 'Delete',
+            pygame.K_LEFT: 'Left',
+            pygame.K_RIGHT: 'Right',
+            pygame.K_HOME: 'Home',
+            pygame.K_END: 'End',
+            pygame.K_RETURN: 'Return',
+            pygame.K_KP_ENTER: 'Return',
+            pygame.K_ESCAPE: 'Escape',
+            pygame.K_TAB: 'Tab',
+        }
+    except Exception:
+        _KEY_CODE_TO_NAME = {}
+    return _KEY_CODE_TO_NAME
+
+
+# 惰性初始化 (模块导入时先建，避免每次 dispatch_key 都判空)
+_init_key_name_map()
 
 
 # =================== 阶段1 元素: Panel / Text (2026-10-18) ===================
@@ -1027,6 +1121,174 @@ class ScrollView(UIElement):
             block_y = int(y + (h - block_h) * ratio)
             engine.draw_screen_rect((bar_x, block_y, self.bar_width, block_h),
                                     self.bar_color)
+
+
+
+
+
+
+class InputField(UIElement):
+    """单行文本输入框 (契约 §3.3). 键盘焦点 + IME 支持（B1：不显示拼音中间态）.
+
+    焦点由 UIManager 统一管理：点击本元素 -> UIManager.focused = self；
+    点击其他元素 -> UIManager.focused = None。
+    """
+
+    ctype = 'input_field'
+
+    def __init__(self, name='input', rect=(0, 0, 200, 32),
+                 text='', placeholder='',
+                 max_length=200,
+                 bg_color=(50, 55, 70, 255),
+                 focus_bg_color=(60, 70, 90, 255),
+                 text_color=(255, 255, 255),
+                 placeholder_color=(140, 140, 150),
+                 cursor_color=(220, 220, 230),
+                 font_size=16,
+                 on_submit=None, on_change=None, **kw):
+        super().__init__(name=name, rect=rect, **kw)
+        self.text = str(text)
+        self.placeholder = str(placeholder)
+        self.max_length = max(0, int(max_length))
+        self.bg_color = tuple(bg_color)
+        self.focus_bg_color = tuple(focus_bg_color)
+        self.text_color = tuple(text_color)
+        self.placeholder_color = tuple(placeholder_color)
+        self.cursor_color = tuple(cursor_color)
+        self.font_size = int(font_size)
+        self.on_submit = on_submit
+        self.on_change = on_change
+        # 2026-10-18 阶段3: 光标位置 (字符索引, 0..len(text))
+        # _focused 由 UIManager 设置 (不在此初始化, 避免与焦点系统竞态)
+        self._cursor = len(self.text)
+        self._focused = False
+
+    # ---- 焦点回调 (UIManager 调) ----
+    def on_focus(self):
+        self._focused = True
+        self._cursor = min(self._cursor, len(self.text))
+
+    def on_blur(self):
+        self._focused = False
+
+    # ---- 文本编辑 ----
+    def _set_text(self, new_text, notify=True):
+        old = self.text
+        if self.max_length > 0:
+            new_text = new_text[:self.max_length]
+        self.text = new_text
+        self._cursor = max(0, min(self._cursor, len(self.text)))
+        if notify and new_text != old and self.on_change is not None:
+            try:
+                self.on_change(new_text)
+            except Exception:
+                pass
+
+    def _insert(self, s):
+        """在光标处插入字符串 (支持多字符)"""
+        if not s:
+            return
+        cur = self._cursor
+        new = self.text[:cur] + s + self.text[cur:]
+        self._set_text(new)
+        self._cursor = min(cur + len(s), len(self.text))
+
+    def _backspace(self):
+        if self._cursor > 0:
+            cur = self._cursor
+            new = self.text[:cur - 1] + self.text[cur:]
+            self._set_text(new)
+            self._cursor = cur - 1
+
+    def _delete(self):
+        if self._cursor < len(self.text):
+            cur = self._cursor
+            new = self.text[:cur] + self.text[cur + 1:]
+            self._set_text(new)
+            # 光标不动
+
+    def _submit(self):
+        if self.on_submit is not None:
+            try:
+                self.on_submit(self.text)
+            except Exception:
+                pass
+
+    # ---- 键盘事件 (UIManager 分发, 只在 focused=True 时) ----
+    def on_key_down(self, key_name):
+        """接收按键名 ('Backspace'/'Delete'/'Left'/'Right'/'Home'/'End'/'Return').
+
+        返回 True = 消费按键; False = 未处理（UIManager 转给其他逻辑）。
+        普通字符走 on_text_input, 不走这里。
+        """
+        if key_name == 'Backspace':
+            self._backspace()
+            return True
+        if key_name == 'Delete':
+            self._delete()
+            return True
+        if key_name == 'Left':
+            if self._cursor > 0:
+                self._cursor -= 1
+            return True
+        if key_name == 'Right':
+            if self._cursor < len(self.text):
+                self._cursor += 1
+            return True
+        if key_name == 'Home':
+            self._cursor = 0
+            return True
+        if key_name == 'End':
+            self._cursor = len(self.text)
+            return True
+        if key_name == 'Return':
+            self._submit()
+            return True
+        if key_name == 'Escape':
+            # ESC 在输入框内不消费，让上层处理（UIManager 会转给引擎）
+            return False
+        return False
+
+    def on_text_input(self, text):
+        """IME 提交的文本 (含中文/emoji/普通字母). 由 UIManager 分发."""
+        if not text:
+            return False
+        self._insert(text)
+        return True
+
+    # ---- 鼠标交互 ----
+    def on_mouse_down(self, pos):
+        """返回 True = 请求焦点 (UIManager 处理后设置焦点 + 清空 pressed)."""
+        if not self.enabled:
+            return False
+        # 简化: 点击任意位置把光标放到末尾（不做字符位置点击定位）
+        self._cursor = len(self.text)
+        return True
+
+    def on_mouse_up(self, pos):
+        return True    # 消费点击 (防止穿透到 3D)
+
+    # ---- 绘制 ----
+    def draw(self, engine, screen_rect):
+        x, y, w, h = screen_rect
+        bg = self.focus_bg_color if self._focused else self.bg_color
+        engine.draw_screen_rect(screen_rect, bg)
+        # 文字 (空时显示 placeholder)
+        pad = 6
+        ty = int(y + (h - self.font_size * 1.2) / 2)
+        if self.text:
+            engine.draw_text_quad(self.text, x + pad, ty,
+                                  self.text_color, self.font_size)
+        elif self.placeholder:
+            engine.draw_text_quad(self.placeholder, x + pad, ty,
+                                  self.placeholder_color, self.font_size)
+        # 光标 (只在有焦点时画，绘制在 _cursor 字符位置的 x)
+        if self._focused:
+            # 光标前的文本宽度
+            prefix = self.text[:self._cursor]
+            prefix_w = engine._measure_text(prefix, self.font_size)[0] if prefix else 0
+            cx = x + pad + prefix_w
+            engine.draw_screen_rect((cx, y + 4, 2, h - 8), self.cursor_color)
 
 
 

@@ -279,8 +279,16 @@ class GlfwWindowMixin:
             self._pending_wheel = 0
 
         # char_callback 收到提交文本 -> on_text_input 钩子（兼容 pygame TEXTINPUT 语义）
+        # 2026-10-18 阶段3: UI 输入框焦点优先接收（IME 中文从这里进 InputField）
         if self._pending_chars:
+            ui = getattr(self, 'ui', None)
             for text in self._pending_chars:
+                if ui is not None:
+                    try:
+                        if ui.dispatch_text(text):
+                            continue
+                    except Exception:
+                        pass
                 try:
                     from types import SimpleNamespace
                     self.on_text_input(
@@ -416,6 +424,16 @@ def _on_key_cb(win, key, scancode, action, mods):
             except Exception:
                 pass
             return
+
+    # 2026-10-18 阶段3: UI 输入框优先接收键盘事件（焦点元素消费则跳过后续）
+    if action == glfw.PRESS:
+        ui = getattr(e, 'ui', None)
+        if ui is not None:
+            try:
+                if ui.dispatch_key(pg_key, getattr(e, '_mods', 0)):
+                    return
+            except Exception:
+                pass
 
     # on_key_event 钩子（编辑器输入框等可吞掉）
     try:
