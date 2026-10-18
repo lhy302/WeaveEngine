@@ -61,6 +61,7 @@ from loom_glfw_window import GlfwWindowMixin   # 2026-10-18: GLFW 窗口 (pygame
 from loom_transform import TransformMixin   # 变换层次子系统 (世界矩阵/父链/包围盒)
 from loom_profiler import ProfilerMixin   # 性能插桩子系统 (LOOM_PROFILE 阶段耗时)
 from loom_logic_thread import LogicThreadMixin   # 逻辑帧线程子系统 (异步逻辑线程启停/主循环)
+from loom_raycast import RaycastMixin   # 2026-10-18: 射线检测 (物理 Culverin + 几何 AABB 兜底)
 
 # ---- 组件化 M25（已抽出到 loom_components.py，原 79-448 行） ----
 from loom_components import (  # noqa: E402,F401
@@ -160,7 +161,7 @@ def gc_play_exit():
 
 class GLEngine(ShadowMixin, FrameComponentMixin, PhysicsMixin, InputMixin, HudMixin, CameraMixin,
                RenderMixin, ModelGpuMixin, LightingMixin, GlfwWindowMixin, TransformMixin,
-               ProfilerMixin, LogicThreadMixin):
+               ProfilerMixin, LogicThreadMixin, RaycastMixin):
     # 组2 (2026-08-30) _ancestry_ranges 结果缓存 (tin/tout, 类级):
     # key=(id(models 列表对象), _ANCESTRY_GEN 版本号); 五个结构变更点
     # (add_model/remove_model/clear_scene/set_parent/remove_camera) 写 _ANCESTRY_GEN
