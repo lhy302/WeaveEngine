@@ -124,6 +124,11 @@ def _emit_object(m):
             "clip": m.audio_source.clip,
             "loop": m.audio_source.loop,
             "volume": m.audio_source.volume,
+            # 2026-10-18 3D 音频 (契约 §6.1)
+            "category": m.audio_source.category,
+            "min_distance": m.audio_source.min_distance,
+            "max_distance": m.audio_source.max_distance,
+            "rolloff": m.audio_source.rolloff,
         },
         "animator": None if m.animator is None else {          # M35: 动画
             "current": m.animator.current,
@@ -229,9 +234,44 @@ def _apply_object(engine, obj):
     # 音频源 (M34): 文件有 audio_source 字段则加 (旧文件无=无音频)
     au = obj.get('audio_source')
     if isinstance(au, dict):
+        # 2026-10-18 3D 音频 (契约 §6.2): 逐项校验 + 显式警告 (组件 setter 是静默回退,
+        # 场景加载需要让用户知道文件里写坏了什么).
+        cat = au.get('category', 'sfx')
+        if not isinstance(cat, str) or cat.strip().lower() not in ('music', 'sfx', 'voice'):
+            print("[sceneio] 警告: 物体 %r 的音频 category=%r 非法, 回退 'sfx'"
+                  % (m.name, cat))
+            cat = 'sfx'
+        else:
+            cat = cat.strip().lower()
+        try:
+            mn = float(au.get('min_distance', 1.0))
+        except (TypeError, ValueError):
+            mn = 1.0
+        if mn <= 0:
+            print("[sceneio] 警告: 物体 %r 的音频 min_distance=%r 非法, 回退 1.0"
+                  % (m.name, au.get('min_distance')))
+            mn = 1.0
+        try:
+            mx = float(au.get('max_distance', 500.0))
+        except (TypeError, ValueError):
+            mx = 500.0
+        if mx <= mn:
+            print("[sceneio] 警告: 物体 %r 的音频 max_distance=%r 不大于 min_distance=%r, "
+                  "回退默认 (1.0/500.0)" % (m.name, au.get('max_distance'), mn))
+            mn, mx = 1.0, 500.0
+        try:
+            ro = float(au.get('rolloff', 1.0))
+        except (TypeError, ValueError):
+            ro = 1.0
+        if ro <= 0:
+            print("[sceneio] 警告: 物体 %r 的音频 rolloff=%r 非法, 回退 1.0"
+                  % (m.name, au.get('rolloff')))
+            ro = 1.0
         m.add_audio_source(clip=au.get('clip'),
                            loop=au.get('loop', False),
-                           volume=au.get('volume', 1.0))
+                           volume=au.get('volume', 1.0),
+                           category=cat, min_distance=mn,
+                           max_distance=mx, rolloff=ro)
     # 动画 (M35): 文件有 animator 字段则加 (重建 AnimationClip)
     an = obj.get('animator')
     if isinstance(an, dict) and isinstance(an.get('clips'), dict):
