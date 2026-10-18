@@ -1491,6 +1491,13 @@ class EditorApp(GLEngine):
         self.commit_model(m, "碰撞体开关",
                           lambda: setattr(m.collider, 'enabled', not m.collider.enabled))
 
+    def toggle_trigger(self, m):
+        """2026-10-18 阶段1档序17 Trigger: 切换 collider.is_trigger。
+        is_trigger=True 时物理层建 sensor 体（可重叠穿过），事件走 on_trigger_*。"""
+        self.commit_model(m, "触发器开关",
+                          lambda: setattr(m.collider, 'is_trigger',
+                                          not m.collider.is_trigger))
+
     def add_rigidbody(self, m):
         self.commit_model(m, "加刚体", m.add_rigidbody)
 

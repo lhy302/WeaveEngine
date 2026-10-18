@@ -127,7 +127,7 @@ class ColliderComponent(Component):
     ctype = 'collider'
 
     def __init__(self, shape='box', enabled=True, friction=0.5, restitution=0.0,
-                 rolling_friction=0.1):
+                 rolling_friction=0.1, is_trigger=False):
         super().__init__()
         self.shape = shape
         self.enabled = bool(enabled)
@@ -141,6 +141,11 @@ class ColliderComponent(Component):
         # culverin 0.14.0 无原生滚动阻尼 -> 桥内按 f = max(0, 1 - μ·rolling·K·dt)
         # 指数衰减 ω/水平线速度 (仅动态体清醒时)。与摩擦/弹性同控制组。
         self.rolling_friction = float(rolling_friction)
+        # 2026-10-18 阶段1档序17 Trigger (路线见 docs/design/功能补全5档施工路线图 §2.7):
+        # is_trigger=True 时: 物理层传 is_sensor (Culverin 不产生接触力, 可重叠穿过);
+        # 事件层派发 on_trigger_* 而非 on_collision_*（详见 loom_physics 事件分流）.
+        # 语义对齐 Unity Collider.isTrigger: 任一方为 trigger 即走触发事件路径.
+        self.is_trigger = bool(is_trigger)
 
 
 class RigidbodyComponent(Component):

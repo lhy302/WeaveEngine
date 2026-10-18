@@ -44,9 +44,11 @@ def snapshot(m):
         'scripts': [(sc.script_id, dict(sc.script_vars)) for sc in m.scripts],
         # M28: 碰撞体 (shape, enabled, friction, restitution) — B1 加接触材质;
         # B1-P1 (2026-08-30) 追加第 5 槽 rolling_friction (旧 2/4 元快照兼容)
+        # 2026-10-18 Trigger: 第 6 槽 is_trigger (旧 5 元快照兼容, 缺省视为 False)
         'collider': (m.collider.shape, m.collider.enabled,
                      m.collider.friction, m.collider.restitution,
-                     m.collider.rolling_friction),
+                     m.collider.rolling_friction,
+                     bool(getattr(m.collider, 'is_trigger', False))),
         # M31: 刚体 (None 或 (mass, use_gravity, is_kinematic, friction,
         # restitution, rolling_friction)); 运行时速度不序列化. B1 加接触材质+
         # 滚动摩擦 (与 apply_snapshot 成对, 旧 3/5 元快照兼容)
@@ -95,6 +97,8 @@ def apply_snapshot(m, snap):
             m.collider.friction, m.collider.restitution = col[2], col[3]
         if len(col) >= 5:                  # B1-P1: 滚动摩擦 (旧 4 元快照兼容)
             m.collider.rolling_friction = col[4]
+        if len(col) >= 6:                  # 2026-10-18 Trigger: is_trigger (旧 5 元兼容)
+            m.collider.is_trigger = bool(col[5])
     if 'rigidbody' in snap:                # M31: 还原刚体 (None=无刚体)
         if snap['rigidbody'] is None:
             m.remove_rigidbody()

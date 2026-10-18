@@ -110,7 +110,9 @@ def _emit_object(m):
         "collider": {"shape": m.collider.shape, "enabled": m.collider.enabled,
                      "friction": m.collider.friction,
                      "restitution": m.collider.restitution,
-                     "rolling_friction": m.collider.rolling_friction},
+                     "rolling_friction": m.collider.rolling_friction,
+                     # 2026-10-18 Trigger: is_trigger (旧文件无此键 -> 缺省 False)
+                     "is_trigger": bool(getattr(m.collider, 'is_trigger', False))},
         # M31 + B1: 刚体 (包含接触材质: 动态体用; 缺省=默认, 兼容旧文件)
         "rigidbody": None if m.rigidbody is None else {
             "mass": m.rigidbody.mass,
@@ -290,6 +292,8 @@ def _apply_object(engine, obj):
         m.collider.friction = float(col.get('friction', 0.5))
         m.collider.restitution = float(col.get('restitution', 0.0))
         m.collider.rolling_friction = float(col.get('rolling_friction', 0.1))
+        # 2026-10-18 Trigger: 旧文件无此键 -> 缺省 False（兼容不变）
+        m.collider.is_trigger = bool(col.get('is_trigger', False))
     return m, oid
 
 

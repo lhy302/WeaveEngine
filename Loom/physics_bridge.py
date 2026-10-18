@@ -749,10 +749,15 @@ class PhysicsWorldBridge:
             roll = float(getattr(rb, 'rolling_friction', 0.1))
         bid = self._next_id
         self._next_id += 1
+        # 2026-10-18 阶段1档序17 Trigger: is_trigger=True 时建 sensor 体
+        # （Culverin is_sensor: 不产生接触力, 可重叠穿过; 事件派发由几何判定走
+        # loom_physics._collision_events_inline 分流, 不依赖 Culverin 接触事件）
+        is_sensor = bool(getattr(col, 'is_trigger', False))
         h = w.create_body(pos=(float(c[0]), float(c[1]), float(c[2])),
                           rot=(0.0, 0.0, 0.0, 1.0), size=size, shape=shp,
                           motion=motion, mass=mass, category=cat, mask=mask,
-                          user_data=bid, friction=fric, restitution=rest)
+                          user_data=bid, friction=fric, restitution=rest,
+                          is_sensor=is_sensor)
         if motion == cv.MOTION_DYNAMIC:
             # 关键: 模型当前速度在创建时就要进 Jolt —— 若建模前脚本已设
             # velocity (脚本先写速再被 ensure_models 建体), 只靠 pre_step 的

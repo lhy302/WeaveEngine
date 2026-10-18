@@ -210,6 +210,25 @@ class Script:
         注意: 未定义本方法的脚本走零开销快路径 (不进入 stay 派发)."""
         pass
 
+    # ---- 2026-10-18 阶段1档序17 Trigger (路线见 §2.7) ----
+    # 语义对齐 Unity OnTriggerEnter/Exit/Stay:
+    #   1) 双方 collider.is_trigger 任一为 True 时派发本组事件 (而非 on_collision_*)
+    #   2) 物理层 is_sensor 保证不产生接触力 (可重叠穿过)
+    #   3) 双方都有脚本时, 双方各自收到对方的 on_trigger_* (与 on_collision_* 同语义)
+    #   4) 未定义本方法的脚本走零开销快路径 (与 stay 机制同)
+    def on_trigger_enter(self, other):
+        """进入触发区 (other=对方物体). 对应 Unity OnTriggerEnter."""
+        pass
+
+    def on_trigger_exit(self, other):
+        """离开触发区. 对应 Unity OnTriggerExit."""
+        pass
+
+    def on_trigger_stay(self, other):
+        """持续处于触发区每逻辑帧. 对应 Unity OnTriggerStay.
+        未定义本方法的脚本走零开销快路径."""
+        pass
+
 
     # ---- 2026-10-18 协程（决策 A1 generator 风格 + B1 Script 作用域）----
     def start_coroutine(self, gen):

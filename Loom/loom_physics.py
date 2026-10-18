@@ -58,6 +58,47 @@ def _any_script_overrides_stay(scripts):
     return False
 
 
+# ---- 2026-10-18 阶段1档序17 Trigger（路线见 docs/design/功能补全5档施工路线图 §2.7）----
+
+def _script_overrides_trigger_stay(inst):
+    """脚本实例是否重写了 on_trigger_stay（非 Script 基类空方法）。
+    未定义 → 走原热路径早退（保持'无事件零开销'契约，与 on_collision_stay 同）。"""
+    if inst is None:
+        return False
+    try:
+        from scripts import Script as _BaseScript
+    except ImportError:
+        return False
+    fn = getattr(type(inst), 'on_trigger_stay', None)
+    return fn is not None and fn is not getattr(_BaseScript, 'on_trigger_stay', None)
+
+
+def _any_script_needs_stay(scripts):
+    """物体上任一脚本实例覆盖了 on_collision_stay 或 on_trigger_stay（任一即需 stay 派发）。
+    Trigger 语义：任一方 is_trigger 时走 trigger 路径（enter/exit/stay），
+                 双方都不是 trigger 时走 collision 路径（start/end/stay）。
+    因此只要任一脚本覆盖了 stay 类方法，就说明该物体可能在 stay 派发中收到事件。"""
+    for sc in scripts:
+        inst = getattr(sc, '_script', None)
+        if inst is None or getattr(sc, '_script_broken', False):
+            continue
+        if _script_overrides_stay(inst):
+            return True
+        if _script_overrides_trigger_stay(inst):
+            return True
+    return False
+
+
+def _is_trigger_pair(m_a, m_b):
+    """两物体任一 collider 的 is_trigger=True 则判定为 Trigger 对（触发事件路径）。
+    Unity 语义：任一方是 trigger 就走 OnTrigger* 而非 OnCollision*。"""
+    ca = getattr(m_a, 'collider', None)
+    cb = getattr(m_b, 'collider', None)
+    ta = bool(getattr(ca, 'is_trigger', False)) if ca is not None else False
+    tb = bool(getattr(cb, 'is_trigger', False)) if cb is not None else False
+    return ta or tb
+
+
 class PhysicsMixin:
 
     # 组2/组3: _ancestry_ranges 结果缓存 (tin/tout, 类级; 从 engine.GLEngine 迁入)
@@ -674,19 +715,34 @@ class PhysicsMixin:
             prev = getattr(m, '_colliding', set())
             # C1 (2026-10-16): 有脚本覆盖 on_collision_stay 时, 即使集合不变也要派发;
             # 否则保持原"无事件零开销"早退契约.
-            has_stay = _any_script_overrides_stay(m.scripts)
+            # 2026-10-18 阶段1档序17 Trigger: 扩展为 needs_stay —— 覆盖
+            # on_collision_stay 或 on_trigger_stay 任一即需进入 stay 派发。
+            has_stay = _any_script_needs_stay(m.scripts)
             if current == prev and not has_stay:
                 continue
             # 组2 (2026-08-30): id->对象 一次建 (旧: 每事件 next() O(n) 扫;
             # 仅在确有增减事件时才建, 无事件帧零开销)
             id2m = {id(o): o for o in models}
+            # Trigger 分流: 逐个碰撞对判定, 派发对应钩子组
             for cid in current - prev:
-                self._call_collision_cb(m, 'on_collision_start', id2m.get(cid))
+                other = id2m.get(cid)
+                if other is not None and _is_trigger_pair(m, other):
+                    self._call_collision_cb(m, 'on_trigger_enter', other)
+                else:
+                    self._call_collision_cb(m, 'on_collision_start', other)
             for cid in prev - current:
-                self._call_collision_cb(m, 'on_collision_end', id2m.get(cid))
+                other = id2m.get(cid)
+                if other is not None and _is_trigger_pair(m, other):
+                    self._call_collision_cb(m, 'on_trigger_exit', other)
+                else:
+                    self._call_collision_cb(m, 'on_collision_end', other)
             if has_stay:
                 for cid in current & prev:
-                    self._call_collision_cb(m, 'on_collision_stay', id2m.get(cid))
+                    other = id2m.get(cid)
+                    if other is not None and _is_trigger_pair(m, other):
+                        self._call_collision_cb(m, 'on_trigger_stay', other)
+                    else:
+                        self._call_collision_cb(m, 'on_collision_stay', other)
             m._colliding = current
 
     def _collision_events_parallel(self):
@@ -710,16 +766,30 @@ class PhysicsMixin:
             current = {id(self.models[j]) for j in neigh.get(i, ())}
             prev = getattr(m, '_colliding', set())
             # C1 (2026-10-16): 有脚本覆盖 on_collision_stay 时, 即使集合不变也要派发.
-            has_stay = _any_script_overrides_stay(m.scripts)
+            # 2026-10-18 Trigger: 扩展为 needs_stay（collision_stay / trigger_stay 任一）.
+            has_stay = _any_script_needs_stay(m.scripts)
             if current == prev and not has_stay:
                 continue
+            # 2026-10-18 Trigger 分流（与 inline 版逐位一致）
             for cid in current - prev:
-                self._call_collision_cb(m, 'on_collision_start', id2m.get(cid))
+                other = id2m.get(cid)
+                if other is not None and _is_trigger_pair(m, other):
+                    self._call_collision_cb(m, 'on_trigger_enter', other)
+                else:
+                    self._call_collision_cb(m, 'on_collision_start', other)
             for cid in prev - current:
-                self._call_collision_cb(m, 'on_collision_end', id2m.get(cid))
+                other = id2m.get(cid)
+                if other is not None and _is_trigger_pair(m, other):
+                    self._call_collision_cb(m, 'on_trigger_exit', other)
+                else:
+                    self._call_collision_cb(m, 'on_collision_end', other)
             if has_stay:
                 for cid in current & prev:
-                    self._call_collision_cb(m, 'on_collision_stay', id2m.get(cid))
+                    other = id2m.get(cid)
+                    if other is not None and _is_trigger_pair(m, other):
+                        self._call_collision_cb(m, 'on_trigger_stay', other)
+                    else:
+                        self._call_collision_cb(m, 'on_collision_stay', other)
             m._colliding = current
 
     def _collision_pairs_parallel(self, aabbs=None):

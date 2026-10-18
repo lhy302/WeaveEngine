@@ -2311,6 +2311,14 @@ class LoomGUI(QMainWindow):
                            lambda v: setattr(m.collider, 'restitution', v), step=0.05)
                 self._spin(lay, "滚动摩擦", m.collider.rolling_friction, 0, 3, 'col.roll',
                            lambda v: setattr(m.collider, 'rolling_friction', v), step=0.05)
+            # 2026-10-18 阶段1档序17 Trigger: is_trigger 开关（路线见路线图 §2.7）
+            # 语义: is_trigger=True 时物理层建 sensor 体（可重叠穿过, 不产生接触力）,
+            # 事件走 on_trigger_enter/exit/stay（双方任一方 trigger 即走 trigger 路径）.
+            # 按钮措辞: 状态+动作显式（"触发器: 开/关"），避免同 toggle_collider 旧措辞陷阱.
+            self._btn_row(lay, [
+                ("触发器: 开 (点按关闭)" if getattr(m.collider, 'is_trigger', False)
+                 else "触发器: 关 (点按开启)",
+                 lambda: e.toggle_trigger(m))])
         # 刚体
         if m.rigidbody is not None:
             txt = "刚体: 受重力" if m.rigidbody.use_gravity else "刚体: 不受重力"
