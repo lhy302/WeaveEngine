@@ -256,6 +256,9 @@ def _bench_scene(scene_path, n_frames=300):
     except OSError as e:
         print("[bench] 结果写盘失败 (%r), 仅有 stdout" % e)
     eng._stop_parallel()
+    # 2026-10-18 A2: 保留 pygame.quit() —— 它清理 font/mixer 子系统
+    # （_load_font 与 AudioSystem 内部按需 pygame.font/mixer.init，
+    #  quit 负责反初始化。与"删 pygame 窗口"不冲突：窗口层已走 GLFW）
     pygame.quit()
     return fps
 
