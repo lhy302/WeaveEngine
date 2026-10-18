@@ -78,8 +78,9 @@ from loom_material import Material   # noqa: E402,F401
 from loom_game_object import GameObject   # noqa: E402,F401
 
 # ---- 光源/相机/运行时 UI（已抽出到 loom_scene_entities.py，原 94-319 行） ----
+from loom_ui import UIManager, Canvas  # 2026-10-18: 新 Canvas UI 系统
 from loom_scene_entities import (  # noqa: E402,F401
-    wrap_deg, direction_to_angles, LightState, CameraState, RuntimeUI,
+    wrap_deg, direction_to_angles, LightState, CameraState,
 )
 # ---- 按键绑定配置（已抽出到 loom_input.py，原 98-118 行） ----
 from loom_input import KEY_BINDINGS   # noqa: E402,F401
@@ -353,7 +354,12 @@ class GLEngine(ShadowMixin, FrameComponentMixin, PhysicsMixin, InputMixin, HudMi
         self._last_frame_stamp = time.perf_counter()
         self.last_frame_time = time.perf_counter()
         self._running = False
-        self.ui = RuntimeUI(self)        # M33: 运行时 UI (脚本声明 HUD/按钮/进度条)
+        # 2026-10-18: RuntimeUI (M33 立即模式) 淘汰, 改为 Canvas UI (保留模式).
+        # 脚本直接操作 ui.default_canvas().root 下的 UIElement 树.
+        self.ui = UIManager()
+        _c0 = Canvas(canvas_type='screen', width=self.width, height=self.height,
+                     z_order=0)
+        self.ui.add_canvas(_c0)
         self.audio = AudioSystem()       # M34: 音频 (pygame.mixer 封装, Sound 缓存)
         # M38: 游戏脚本目录 (exe/引擎旁的 scripts/) 启动时加载注册
         # (Unity 项目脚本机制: 游戏专属脚本放这, 检查器可挂, 打包时随游戏分发)

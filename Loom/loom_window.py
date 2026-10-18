@@ -26,6 +26,13 @@ class WindowMixin:
         self.width = max(320, int(w))
         self.height = max(240, int(h))
         self.ctx.viewport = (0, 0, self.width, self.height)
+        # 2026-10-18: Canvas UI 跟随窗口尺寸 (screen Canvas 重算根矩形)
+        ui = getattr(self, 'ui', None)
+        if ui is not None:
+            try:
+                ui.resize(self.width, self.height)
+            except Exception:
+                pass
 
     def _desktop_resolution(self):
         """当前桌面分辨率 (主显示器全屏覆盖用).

@@ -58,7 +58,7 @@ class MinimalEditorView(IEditorView):
         g.end_frame()
         g.render()
         if getattr(ctl, 'ui', None) is not None:
-            ctl.ui.draw()   # 播放期游戏 HUD 仍画在最上层
+            ctl.ui.draw_all(ctl)   # 2026-10-18: Canvas UI 游戏 HUD 仍画在最上层
 
     def _draw_grid(self, ctl):
         """无限网格 (2026-08-14): 跟随相机, 远处淡出, 可 show_grid 开关."""

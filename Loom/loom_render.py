@@ -553,7 +553,7 @@ class RenderMixin:
         _t = self._prof_t0()
         self._draw_hud()
         if getattr(self, 'ui', None) is not None:
-            self.ui.draw()          # M33: 运行时 UI (脚本声明的 HUD/按钮/进度条)
+            self.ui.draw_all(self)  # 2026-10-18: Canvas UI (保留模式, 元素树渲染)
         self._prof_add('mt_hud', _t)
         _t = self._prof_t0()
         self._update_fps()

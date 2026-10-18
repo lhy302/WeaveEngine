@@ -1,15 +1,17 @@
 # -*- coding: utf-8 -*-
-"""loom_scene_entities.py — 场景实体状态类与运行时 UI。
+"""loom_scene_entities.py — 场景实体状态类。
 
-原属 engine.py（"光源状态" + CameraState + RuntimeUI 段）。
+原属 engine.py（"光源状态" + CameraState 段）。
 内容：
   wrap_deg / direction_to_angles（角度工具）
   LightState（光源实体）
   CameraState（摄像机实体）
-  RuntimeUI（M33 运行时 HUD UI；通过 self.engine 反向调用引擎绘制接口）
 依赖：math / uuid / loom_types.Point3D。
-engine.py 通过 `from loom_scene_entities import *` 重导出。
+engine.py 通过 from loom_scene_entities import ... 重导出。
+
+2026-10-18: RuntimeUI 已删除 (C3 决策: 脚本直接用 loom_ui.Canvas API).
 """
+
 
 import math
 import uuid
@@ -189,60 +191,4 @@ class CameraState:
                        up_ref[2] * c + cz * sn)
 
 
-class RuntimeUI:
-    """M33 运行时 UI (Unity uGUI 简化): 脚本每帧用 engine.ui 声明文字/按钮/进度条,
-    引擎 render 末尾画在屏幕 HUD 层 (屏幕像素坐标, 左上角 y 向下).
-    与编辑器自绘 GUI 分离 —— 这是"游戏里的 UI"(分数/生命/菜单), 非编辑器面板."""
-    def __init__(self, engine):
-        self.engine = engine
-        self.cmds = []
-
-    def clear(self):
-        self.cmds = []
-
-    def text(self, text, x, y, size=18, color=(255, 255, 255)):
-        """HUD 文字 (左上角坐标)."""
-        self.cmds.append(('text', str(text), int(x), int(y), size, tuple(color)))
-
-    def button(self, uid, rect, text, size=15):
-        """HUD 按钮: 返回 True = 本帧被点击 (鼠标在矩形内且本帧按下左键)."""
-        e = self.engine
-        clicked = False
-        if 1 in getattr(e, 'pressed', ()):
-            mx, my = e.mouse_pos
-            if (rect[0] <= mx < rect[0] + rect[2] and
-                    rect[1] <= my < rect[1] + rect[3]):
-                clicked = True
-        self.cmds.append(('button', uid, tuple(rect), str(text), size))
-        return clicked
-
-    def bar(self, rect, frac, color=(80, 220, 120)):
-        """HUD 进度条 (0..1 填充)."""
-        self.cmds.append(('bar', tuple(rect), max(0.0, min(1.0, float(frac))),
-                          tuple(color)))
-
-    def draw(self):
-        """绘制全部 UI 命令到屏幕 (正交 HUD); render 末尾调用."""
-        e = self.engine
-        for c in self.cmds:
-            if c[0] == 'text':
-                _, t, x, y, size, col = c
-                e.draw_text_quad(t, x, y, col, size)
-            elif c[0] == 'button':
-                _, _uid, r, t, size = c
-                e.draw_screen_rect(r, (52, 60, 76))                     # 背景
-                e.draw_screen_rect((r[0], r[1], r[2], 2), (210, 220, 235))   # 边框
-                e.draw_screen_rect((r[0], r[1] + r[3] - 2, r[2], 2), (210, 220, 235))
-                e.draw_screen_rect((r[0], r[1], 2, r[3]), (210, 220, 235))
-                e.draw_screen_rect((r[0] + r[2] - 2, r[1], 2, r[3]), (210, 220, 235))
-                tw = e._measure_text(t, size)[0]                        # 居中文字
-                e.draw_text_quad(t, r[0] + max((r[2] - tw) // 2, 0),
-                                 r[1] + max((r[3] - size) // 2, 0),
-                                 (255, 255, 255), size)
-            elif c[0] == 'bar':
-                _, r, frac, col = c
-                e.draw_screen_rect(r, (40, 44, 54))                     # 背景
-                fw = int(r[2] * frac)
-                if fw > 0:
-                    e.draw_screen_rect((r[0], r[1], fw, r[3]), col)     # 填充
-        self.cmds = []
+# 2026-10-18: RuntimeUI 已删除 (C3 决策: 脚本直接用 loom_ui.Canvas API).

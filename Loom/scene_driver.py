@@ -19,6 +19,7 @@ from matlib import mat4_view_yaw_pitch, mat4_perspective
 from mesh import spec_to_mesh
 from engine import GameObject, Point3D, LightState, DEFAULT_ACTIONS
 from scripts import get_script
+from loom_ui import UIManager, Canvas  # 2026-10-18: Canvas UI (替换 _DriverUI 空壳)
 
 # B1: 物理桥 (零 GL; 缺失/导入失败 -> physb=None -> 无物理步进)
 try:
@@ -126,7 +127,13 @@ class SceneDriver:
         self.camera_yaw = 0.0
         self.camera_pitch = 0.0
         self.orbit_mode = True                   # 脚本设置 False 表示脚本接管相机
-        self.ui = _DriverUI()                    # 运行时 UI 空壳 (e.ui.text 安全 no-op)
+        # 2026-10-18: 替换 _DriverUI 空壳为真 UIManager —— 数据层无 GPU 依赖,
+        # 脚本 (count_touch 等) 用 e.ui.default_canvas() 建的元素树在 driver 层也能工作;
+        # draw_all 只在渲染层调用, driver.draw() 是占位, 不会触发绘制.
+        self.ui = UIManager()
+        self.ui.add_canvas(Canvas(canvas_type='screen',
+                                  width=getattr(self, 'width', 1280),
+                                  height=getattr(self, 'height', 800)))
         # 方案二 (2026-09-05): 外推渲染模式设置键 (与 engine 同语义)
         try:
             import guiloader as _gl
@@ -409,21 +416,4 @@ class SceneDriver:
             self.models.remove(m)
 
 
-class _DriverUI:
-    """运行时 UI 空壳 (count_touch 等脚本调用 e.ui.text; 驱动层不支持运行时 UI,
-    安全 no-op 保证脚本不 broken)."""
-
-    def __init__(self):
-        self._items = []
-
-    def text(self, message, x=0, y=0, size=22, color=None):
-        self._items.append(('text', str(message), x, y, size, color))
-
-    def button(self, label, x, y, size=22, callback=None):
-        self._items.append(('button', str(label), x, y, size, callback))
-
-    def progress(self, value, x, y, w=100, h=12, label=None):
-        self._items.append(('progress', float(value), x, y, w, h, label))
-
-    def draw(self):          # 渲染层自行消费 self._items; 此处只占位
-        pass
+# 2026-10-18: _DriverUI 空壳已删除, 改用 loom_ui.UIManager (真数据模型, 无 GPU 依赖).

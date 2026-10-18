@@ -272,6 +272,33 @@ class UIManager:
                 return c, hit
         return None, None
 
+    def draw_all(self, engine):
+        """渲染所有 screen Canvas 的元素树 (渲染层末尾调用). 父先于子."""
+        for c in self.canvases:
+            if c.canvas_type != 'screen':
+                continue
+            self._draw_elem(c.root, engine,
+                            (0.0, 0.0, float(c.width), float(c.height)))
+
+    @staticmethod
+    def _draw_elem(elem, engine, parent_rect):
+        if not elem.visible:
+            return
+        sr = elem.screen_rect(parent_rect)
+        elem.draw(engine, sr)
+        for child in list(elem.children):
+            UIManager._draw_elem(child, engine, sr)
+
+    def default_canvas(self):
+        """返回第一个 screen Canvas (无则创建 1920x1080). 脚本便捷入口."""
+        for c in self.canvases:
+            if c.canvas_type == 'screen':
+                return c
+        c = Canvas(canvas_type='screen', width=1920, height=1080)
+        self.add_canvas(c)
+        return c
+
+
 
 # =================== 阶段1 元素: Panel / Text (2026-10-18) ===================
 

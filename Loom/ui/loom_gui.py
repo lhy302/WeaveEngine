@@ -623,7 +623,7 @@ class LoomGUI(QMainWindow):
             self._draw_light_icons(ctl)
             self._draw_camera_icons(ctl)
             if getattr(ctl, 'ui', None) is not None:
-                ctl.ui.draw()          # M33 运行时 UI (游戏 HUD) 最上层
+                ctl.ui.draw_all(ctl)   # 2026-10-18: Canvas UI (游戏 HUD) 最上层
             return
         if getattr(ctl, 'show_grid', True):
             out = ctl.grid_geometry()

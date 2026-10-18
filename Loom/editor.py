@@ -124,7 +124,7 @@ class EditorApp(GLEngine):
         # (ui/loom_gui.py, Qt 原生, 由入口 run_loom_gui 创建后注入); 换 UI 只需
         # 传另一个实现 —— 引擎/逻辑零改动. 未注入时的兜底 = MinimalEditorView
         # (零 Qt/pygame 依赖, 2026-08-28 起; 旧默认 pygame 即时 GUI 已删除).
-        # 注意: self.ui 是引擎运行时 HUD (M33 RuntimeUI), 编辑器视图用 self.view 区分.
+        # 注意: self.ui 是引擎 Canvas UI (loom_ui.UIManager), 编辑器视图用 self.view 区分.
         if view is None:
             from ui.minimal_editor_view import MinimalEditorView
             view = MinimalEditorView()

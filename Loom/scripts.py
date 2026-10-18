@@ -490,6 +490,18 @@ class CountTouchScript(Script):
     def on_start(self):
         self.hits = getattr(self.engine, '_count_hits', 0)
         self._hit_printed = False   # 已碰到标志
+        # 2026-10-18: RuntimeUI 淘汰, 改用 Canvas UI 保留模式 —— on_start 建一次元素,
+        # update 只改 text 属性 (不再每帧声明命令).
+        import loom_ui
+        e = self.engine
+        canvas = e.ui.default_canvas()
+        self._hud_text = loom_ui.Text(
+            name='_count_touch_hud',
+            rect=(20, 20, 500, 30),
+            text='碰到的彩球: %d' % self.hits,
+            font_size=22,
+            color=(255, 255, 255))
+        canvas.root.add_child(self._hud_text)
 
     def update(self, dt):
         e = self.engine
@@ -504,8 +516,8 @@ class CountTouchScript(Script):
                 # 修复 (2026-10-14 小游戏实测): 物体已移除, 必须立即 return ——
                 # 否则下方 e.models.index(self.obj) 对已移除物体抛 ValueError。
                 return
-        # 每帧声明 HUD (M33 语义: 声明即绘制); 用"剩余第一个球"当 HUD 载体
-        # —— 它被吃掉后下一个球自动顶上 (简单转移, 教学用).
+        # 用"剩余第一个球"当 HUD 载体 (简单转移, 教学用)
         if e.models and e.models.index(self.obj) == 0:
             total = sum(1 for m in e.models if m.name.startswith('彩球'))
-            e.ui.text("碰到的彩球: %d  (剩余 %d)" % (self.hits, total), 20, 20, 22)
+            if self._hud_text is not None:
+                self._hud_text.text = "碰到的彩球: %d  (剩余 %d)" % (self.hits, total)
