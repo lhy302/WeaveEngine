@@ -62,7 +62,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
-    QSplitter, QLabel, QLineEdit, QDoubleSpinBox, QComboBox, QCheckBox,
+    QSplitter, QLabel, QLineEdit, QDoubleSpinBox, QSpinBox, QComboBox, QCheckBox,
     QPushButton, QToolBar, QScrollArea, QTreeWidget, QTreeWidgetItem,
     QListWidget, QListWidgetItem, QMenu, QDialog, QDialogButtonBox,
     QInputDialog, QMessageBox, QAbstractItemView, QToolButton, QFrame,
@@ -542,6 +542,10 @@ class LoomGUI(QMainWindow):
         self._build_central()          # 层级/资源 | 视口 | 检查器
         self._build_statusbar()
         self._build_console()          # 底部命令行坞 (EAI 命令表, 默认隐藏)
+        # 2026-10-18 阶段5: 底部 UI 树 dock（CanvasUI 可视化编辑器）
+        self._ui_selected_name = None      # 当前选中的 UI 元素名
+        self._ui_selected_canvas = None    # 所在 Canvas 序号
+        self._build_ui_tree_dock()
 
         # 渲染驱动 (帧率档位由 设置.json 的 fps_limit 决定, 见 _apply_fps_limit)
         # + 面板轮询刷新 (300ms).
@@ -949,6 +953,130 @@ class LoomGUI(QMainWindow):
             e._prof_add('mt_qt_tick', _t_tick)
 
     # ---------------- 构建: 工具栏 ----------------
+
+    # ---------------- UI 树 dock (2026-10-18 阶段5) ----------------
+    def _build_ui_tree_dock(self):
+        """底部 UI 树 dock（与命令行坞并列，默认显示）."""
+        from ui import qt_uitree
+        self.uitree = qt_uitree.UITreeDock(self)
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.uitree)
+        # 与 console 并排（tabify 或 split），保持两个都在底部
+        try:
+            self.tabifyDockWidget(self.console, self.uitree)
+        except Exception:
+            pass
+        self.uitree.show()
+
+    def _invoke_ui_cmd(self, cmd_name, **args):
+        """所有 UI 树操作走这里（决策 B4 命令壳）。
+
+        1) 调 EAI 命令（进撤销栈）
+        2) 写命令日志（教学：小白看到等价 EAI 命令）
+        3) 刷 UI 树
+        4) 刷检查器（C3 联动）
+        """
+        import agent_commands as ac
+        fn = ac._COMMANDS.get(cmd_name)
+        if fn is None:
+            self.editor._notify("UI 命令不存在: %s" % cmd_name, (235, 90, 90))
+            return {'error': '命令不存在: %s' % cmd_name}
+        try:
+            r = fn(self, args)
+        except Exception as e:
+            self.editor._notify("UI 操作异常: %r" % e, (235, 90, 90))
+            return {'error': repr(e)}
+        if isinstance(r, dict) and 'error' in r:
+            self.editor._notify("UI 操作失败: %s" % r['error'], (235, 90, 90))
+            return r
+        # 命令日志（教学：等价命令）
+        self.uitree.log_cmd(cmd_name, args)
+        # 刷 UI 树
+        self.uitree.refresh()
+        # 刷检查器（C3 联动）
+        self._insp_last_digest = None
+        self._rebuild_inspector()
+        return r
+
+    def _ui_tree_set_selection(self, elem_name, canvas_idx):
+        """UI 树选中变化 -> 检查器切到该元素属性（C3）."""
+        if elem_name == self._ui_selected_name and canvas_idx == self._ui_selected_canvas:
+            return
+        self._ui_selected_name = elem_name
+        self._ui_selected_canvas = canvas_idx
+        self._insp_last_digest = None
+        self._rebuild_inspector()
+
+    def _ui_tree_add_dialog(self, canvas=0, parent=None):
+        """UI 树「+ 元素」对话框."""
+        import agent_commands as ac
+        dlg = QDialog(self)
+        dlg.setWindowTitle("添加 UI 元素")
+        form = QFormLayout(dlg)
+        type_combo = QComboBox()
+        type_combo.addItems(list(ac._UI_TYPE_NAMES))
+        form.addRow("类型:", type_combo)
+        name_edit = QLineEdit('')
+        name_edit.setPlaceholderText("(自动生成)")
+        form.addRow("名字:", name_edit)
+        x_spin = QSpinBox(); x_spin.setRange(-10000, 10000); x_spin.setValue(0)
+        y_spin = QSpinBox(); y_spin.setRange(-10000, 10000); y_spin.setValue(0)
+        w_spin = QSpinBox(); w_spin.setRange(1, 10000); w_spin.setValue(120)
+        h_spin = QSpinBox(); h_spin.setRange(1, 10000); h_spin.setValue(32)
+        row_rect = QWidget()
+        hr = QHBoxLayout(row_rect); hr.setContentsMargins(0,0,0,0)
+        for lab, sp in (('x', x_spin), ('y', y_spin), ('w', w_spin), ('h', h_spin)):
+            hr.addWidget(QLabel(lab)); hr.addWidget(sp)
+        form.addRow("位置/尺寸:", row_rect)
+        parent_label = QLabel(parent or "(Canvas root)")
+        form.addRow("父元素:", parent_label)
+        canvas_label = QLabel(str(canvas))
+        form.addRow("Canvas:", canvas_label)
+        btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok
+                                | QDialogButtonBox.StandardButton.Cancel)
+        btns.accepted.connect(dlg.accept)
+        btns.rejected.connect(dlg.reject)
+        form.addRow(btns)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        args = {
+            'type': type_combo.currentText(),
+            'canvas': canvas,
+            'rect': (x_spin.value(), y_spin.value(),
+                     w_spin.value(), h_spin.value()),
+        }
+        if name_edit.text().strip():
+            args['name'] = name_edit.text().strip()
+        if parent:
+            args['parent'] = parent
+        self._invoke_ui_cmd('ui_add', **args)
+
+    def _ui_tree_add_canvas_dialog(self):
+        """UI 树「+ Canvas」对话框."""
+        dlg = QDialog(self)
+        dlg.setWindowTitle("添加 Canvas")
+        form = QFormLayout(dlg)
+        type_combo = QComboBox()
+        type_combo.addItems(['screen', 'world'])
+        form.addRow("类型:", type_combo)
+        w_spin = QSpinBox(); w_spin.setRange(1, 10000); w_spin.setValue(1280)
+        h_spin = QSpinBox(); h_spin.setRange(1, 10000); h_spin.setValue(720)
+        form.addRow("宽度:", w_spin)
+        form.addRow("高度:", h_spin)
+        z_spin = QSpinBox(); z_spin.setRange(-1000, 1000); z_spin.setValue(0)
+        form.addRow("z_order:", z_spin)
+        btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok
+                                | QDialogButtonBox.StandardButton.Cancel)
+        btns.accepted.connect(dlg.accept)
+        btns.rejected.connect(dlg.reject)
+        form.addRow(btns)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        self._invoke_ui_cmd('ui_canvas_add',
+                            type=type_combo.currentText(),
+                            width=w_spin.value(),
+                            height=h_spin.value(),
+                            z_order=z_spin.value())
+
     def _build_toolbar(self):
         tb = QToolBar("工具栏")
         tb.setMovable(False)
@@ -1813,10 +1941,18 @@ class LoomGUI(QMainWindow):
 
     # ---------------- 检查器 ----------------
     def _insp_target(self):
-        """当前检查器目标 (含类型). ('obj'|'light'|'camera', 对象)."""
+        """当前检查器目标 (含类型). ('obj'|'light'|'camera'|'ui', 对象)."""
         e = self.editor
         if e is None or e.is_playing:
             return None
+        # 2026-10-18 阶段5: UI 树选中的元素优先（C3 联动）
+        if self._ui_selected_name is not None and self._ui_selected_canvas is not None:
+            ui = getattr(e, 'ui', None)
+            if ui is not None and self._ui_selected_canvas < len(ui.canvases):
+                c = ui.canvases[self._ui_selected_canvas]
+                elem = c.root.find(self._ui_selected_name)
+                if elem is not None:
+                    return ('ui', elem)
         m = e._selected()
         if m is not None:
             return ('obj', m)
@@ -1838,6 +1974,9 @@ class LoomGUI(QMainWindow):
         if t is None:
             return None
         kind, obj = t
+        # 2026-10-18 阶段5: UI 元素用 (canvas_idx, name) 标识（元素会重建, id 不稳）
+        if kind == 'ui':
+            return ('ui', self._ui_selected_canvas, self._ui_selected_name)
         return (kind, id(obj))
 
     def _rebuild_inspector(self):
@@ -1871,6 +2010,9 @@ class LoomGUI(QMainWindow):
                 self._build_obj_inspector(lay, obj)
             elif kind == 'light':
                 self._build_light_inspector(lay, obj)
+            elif kind == 'ui':
+                # 2026-10-18 阶段5: UI 元素检查器
+                self._build_ui_inspector(lay, obj)
             else:
                 self._build_camera_inspector(lay, obj)
         finally:
@@ -1950,6 +2092,99 @@ class LoomGUI(QMainWindow):
             b.clicked.connect(lambda _=False, f=fn: f())
             h.addWidget(b)
         lay.addRow(row)
+
+
+    def _build_ui_inspector(self, lay, elem):
+        """UI 元素检查器 (C3). 每次编辑 = 一个 ui_set 命令 = 一个撤销步骤."""
+        typ = elem.ctype
+        lay.addRow(QLabel("<b>%s</b>  [%s]" % (elem.name, typ)))
+
+        # 通用字段
+        lay.addRow(QLabel("位置/尺寸 (rect)"))
+        for i, axis in enumerate(('X', 'Y', 'W', 'H')):
+            self._ui_attr_spin(lay, axis, elem.rect[i], -10000, 10000,
+                               ('rect', i), step=1, dec=0)
+        lay.addRow(QLabel("锚点 (anchor)"))
+        for i, axis in enumerate(('AX', 'AY')):
+            self._ui_attr_spin(lay, axis, elem.anchor[i], 0, 1,
+                               ('anchor', i), step=0.05, dec=2)
+        lay.addRow(QLabel("轴心 (pivot)"))
+        for i, axis in enumerate(('PX', 'PY')):
+            self._ui_attr_spin(lay, axis, elem.pivot[i], 0, 1,
+                               ('pivot', i), step=0.05, dec=2)
+        self._ui_attr_check(lay, "可见", elem.visible, 'visible')
+        self._ui_attr_check(lay, "启用", elem.enabled, 'enabled')
+        self._ui_attr_spin(lay, "z_order", elem.z_order, -1000, 1000,
+                           ('z_order',), step=1, dec=0)
+
+        # type-specific（常用字段）
+        if typ == 'button':
+            self._ui_attr_line(lay, "文字", elem.text, 'text')
+        elif typ == 'text':
+            self._ui_attr_line(lay, "内容", elem.text, 'text')
+        elif typ == 'input_field':
+            self._ui_attr_line(lay, "文字", elem.text, 'text')
+            self._ui_attr_line(lay, "占位", elem.placeholder, 'placeholder')
+        elif typ == 'toggle':
+            self._ui_attr_check(lay, "勾选", elem.is_on, 'is_on')
+            self._ui_attr_line(lay, "标签", elem.label, 'label')
+        elif typ == 'slider':
+            self._ui_attr_spin(lay, "值", elem.value,
+                               elem.min_value, elem.max_value,
+                               ('value',), step=0.01, dec=3)
+        elif typ == 'progress_bar':
+            self._ui_attr_spin(lay, "进度", elem.value, 0, 1,
+                               ('value',), step=0.01, dec=3)
+
+        lay.addRow(QLabel(
+            "(更多字段请用控制台命令: ui_set name=%s ...)" % elem.name))
+
+    def _ui_attr_spin(self, lay, label, value, lo, hi, path,
+                      step=1.0, dec=3):
+        sb = QDoubleSpinBox()
+        sb.setRange(lo, hi)
+        sb.setDecimals(dec)
+        sb.setSingleStep(step)
+        sb.setValue(float(value))
+        sb.editingFinished.connect(
+            lambda: self._ui_apply_attr(path, sb.value()))
+        lay.addRow(label, sb)
+
+    def _ui_attr_check(self, lay, label, value, attr):
+        cb = QCheckBox()
+        cb.setChecked(bool(value))
+        cb.stateChanged.connect(
+            lambda _s: self._ui_apply_attr((attr,), bool(cb.isChecked())))
+        lay.addRow(label, cb)
+
+    def _ui_attr_line(self, lay, label, value, attr):
+        le = QLineEdit(str(value))
+        le.editingFinished.connect(
+            lambda: self._ui_apply_attr((attr,), le.text()))
+        lay.addRow(label, le)
+
+    def _ui_apply_attr(self, path, value):
+        """path 元组：('attr',) 或 ('rect', 0)。构造 ui_set payload。"""
+        if self._building:
+            return
+        name = self._ui_selected_name
+        canvas = self._ui_selected_canvas
+        if name is None or canvas is None:
+            return
+        e = self.editor
+        if not e.ui.canvases or canvas >= len(e.ui.canvases):
+            return
+        elem = e.ui.canvases[canvas].root.find(name)
+        if elem is None:
+            return
+        payload = {'name': name, 'canvas': canvas}
+        if len(path) == 1:
+            payload[path[0]] = value
+        else:
+            cur = list(getattr(elem, path[0]))
+            cur[path[1]] = value
+            payload[path[0]] = tuple(cur)
+        self._invoke_ui_cmd('ui_set', **payload)
 
     def _build_obj_inspector(self, lay, m):
         e = self.editor
