@@ -91,6 +91,8 @@ TOOLS_DEF = [
     {'name': 'loom_set_layer', 'description': '设置 GameObject 的 Layer (0~31; 对齐 Unity GameObject.layer)', 'inputSchema': {'type': 'object', 'properties': {'name': {'type': 'string', 'description': '物体名称 (缺省=当前选中)'}, 'layer': {'type': 'integer', 'description': '层编号 0~31'}}, 'required': ['layer']}},
     {'name': 'loom_set_tag', 'description': '设置 GameObject 的 Tag (对齐 Unity GameObject.tag; 未注册自动注册)', 'inputSchema': {'type': 'object', 'properties': {'name': {'type': 'string', 'description': '物体名称 (缺省=当前选中)'}, 'tag': {'type': 'string', 'description': '标签名 (字母/数字/下划线/中文)'}}, 'required': ['tag']}},
     {'name': 'loom_get_layer_tag', 'description': '查询 GameObject 的 Layer/Tag (对齐 Unity layer + tag)', 'inputSchema': {'type': 'object', 'properties': {'name': {'type': 'string', 'description': '物体名称 (缺省=当前选中)'}}}},
+    {'name': 'loom_audio_3d_set', 'description': '设置音频 3D 参数 (对齐 Unity AudioSource 的 spatialBlend/minDistance/maxDistance/rolloffMode)', 'inputSchema': {'type': 'object', 'properties': {'name': {'type': 'string', 'description': '物体名称 (缺省=当前选中)'}, 'category': {'type': 'string', 'enum': ['music', 'sfx', 'voice'], 'description': '音频类别: music=强制2D(背景音乐), sfx/voice=走3D'}, 'min_distance': {'type': 'number', 'description': '最小距离 (内不再衰减)'}, 'max_distance': {'type': 'number', 'description': '最大距离 (外完全听不见)'}, 'rolloff': {'type': 'number', 'description': '衰减曲线强度'}}}},
+    {'name': 'loom_audio_3d_get', 'description': '查询音频 3D 参数', 'inputSchema': {'type': 'object', 'properties': {'name': {'type': 'string', 'description': '物体名称 (缺省=当前选中)'}}}},
 ]
 
 RESOURCES_DEF = [
@@ -336,6 +338,22 @@ class LoomMCPServer:
             with open(full_path, 'w', encoding='utf-8') as f:
                 f.write(code_str)
             return self._mk('脚本写入成功: %s (%d bytes)' % (full_path, len(code_str)))
+
+        # ---- 3D 音频 (2026-10-18) ----
+        if name == 'loom_audio_3d_set':
+            payload = {}
+            if args.get('name'):
+                payload['name'] = args['name']
+            for k in ('category', 'min_distance', 'max_distance', 'rolloff'):
+                if k in args:
+                    payload[k] = args[k]
+            return self._wrap(c.call('set_audio_3d', payload))
+
+        if name == 'loom_audio_3d_get':
+            payload = {}
+            if args.get('name'):
+                payload['name'] = args['name']
+            return self._wrap(c.call('get_audio_3d', payload))
 
         # ---- Layer / Tag (2026-10-18) ----
         if name == 'loom_set_layer':
