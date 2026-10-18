@@ -1638,6 +1638,26 @@ _UI_TYPE_NAMES = ('panel', 'text', 'image', 'button', 'slider', 'toggle',
                   'grid_layout')
 
 
+def _push_ui_undo(win, cmd, auto_do=True):
+    """UI 编辑撤销入口（2026-10-18 阶段5）.
+
+    auto_do=True : 通过 undo.push 执行 cmd.do() 并压栈（默认，用于 ui_add/ui_remove）
+    auto_do=False: 通过 undo.push_no_do 只压栈（用于 ui_set，字段已改完只需记录快照差异）
+    桩环境无 undo 时静默跳过（冒烟测试用）。
+    """
+    ed = getattr(win, 'editor', None)
+    undo_mgr = getattr(ed, 'undo', None) if ed is not None else None
+    if undo_mgr is None:
+        return
+    try:
+        if auto_do:
+            undo_mgr.push(cmd)
+        else:
+            undo_mgr.push_no_do(cmd)
+    except Exception:
+        pass
+
+
 def _ui_canvas(win, args):
     """按 args['canvas'] 取 Canvas（缺省=第 0 个）. 找不到返回 None."""
     ui = getattr(win.editor, 'ui', None)
@@ -1702,7 +1722,10 @@ def cmd_ui_canvas_add(win, args):
     h = int(as_float(args.get('height', 600), 600))
     z = int(as_float(args.get('z_order', 0), 0))
     c = Canvas(canvas_type=typ, width=w, height=h, z_order=z)
-    ui.add_canvas(c)
+    idx = len(ui.canvases)
+    import undo as _undo_mod
+    cmd = _undo_mod.UIAddCanvasCommand('添加 Canvas', win.editor, c, idx)
+    _push_ui_undo(win, cmd)
     return {'canvas_type': typ, 'width': w, 'height': h, 'z_order': z,
             'total': len(ui.canvases)}
 
@@ -1826,7 +1849,11 @@ def cmd_ui_add(win, args):
     else:
         return {'error': '内部错误: type %r 未实现' % typ}
 
-    parent.add_child(elem)
+    idx = len(parent.children)
+    # 2026-10-18 阶段5: 撤销（决策选项2，UI 编辑全进撤销栈）
+    import undo as _undo_mod
+    _push_ui_undo(win, _undo_mod.UIAddCommand('添加 UI 元素', win.editor,
+                                              parent, elem, idx))
     return {'name': name, 'type': typ, 'parent': parent.name,
             'canvas': c.canvas_type, 'total': len(parent.children)}
 
@@ -1845,6 +1872,10 @@ def cmd_ui_set(win, args):
         return {'error': '找不到 UI 元素: %r' % name}
     if elem is c.root:
         return {'error': '不能修改 Canvas root（用 ui_add / ui_set 改具体元素）'}
+
+    # 2026-10-18 阶段5: 改前快照（撤销用）
+    import undo as _undo_mod
+    before = _undo_mod.ui_elem_snapshot(elem)
 
     done = {}
     if 'rect' in args:
@@ -1954,6 +1985,13 @@ def cmd_ui_set(win, args):
 
     if not done:
         return {'error': '没有可改的字段（检查参数名）', 'type': typ}
+    # 2026-10-18 阶段5: 撤销（仅当字段真的有变化时压栈）
+    import undo as _undo_mod
+    after = _undo_mod.ui_elem_snapshot(elem)
+    if after != before:
+        _push_ui_undo(win, _undo_mod.UIStateCommand('修改 UI 属性',
+                                                    win.editor, elem,
+                                                    before, after), auto_do=False)
     return {'name': name, 'type': typ, 'changed': done}
 
 
@@ -1973,7 +2011,10 @@ def cmd_ui_remove(win, args):
     parent = elem.parent
     if parent is None:
         return {'error': '元素没有父节点，无法删除'}
-    parent.remove_child(elem)
+    # 2026-10-18 阶段5: 撤销
+    import undo as _undo_mod
+    cmd = _undo_mod.UIRemoveCommand('删除 UI 元素', win.editor, elem)
+    _push_ui_undo(win, cmd)
     return {'removed': name, 'parent': parent.name,
             'remaining': len(parent.children)}
 
@@ -1997,6 +2038,105 @@ def cmd_ui_list(win, args):
             'root': _ui_to_dict(c.root),
         })
     return {'canvases': out, 'total': len(ui.canvases)}
+
+
+@command('ui_reparent', '移动 UI 元素到另一个父元素: {name, new_parent, canvas?, index?} '
+                            '(new_parent 缺省 = Canvas root; 检查循环依赖)')
+def cmd_ui_reparent(win, args):
+    name = args.get('name')
+    if not name:
+        return {'error': '必须传 name=（先 ui_list 查看所有元素）'}
+    c = _ui_canvas(win, args)
+    if c is None:
+        return {'error': '找不到 Canvas（传 canvas= 序号）'}
+    elem = c.root.find(name)
+    if elem is None:
+        return {'error': '找不到 UI 元素: %r' % name}
+    if elem is c.root:
+        return {'error': '不能移动 Canvas root'}
+
+    new_parent_name = args.get('new_parent')
+    if new_parent_name:
+        new_parent = c.root.find(new_parent_name)
+        if new_parent is None:
+            return {'error': '找不到新父元素: %r' % new_parent_name}
+    else:
+        new_parent = c.root
+
+    if new_parent is elem:
+        return {'error': '不能把元素挂到自己下面'}
+    # 循环依赖检查: new_parent 不能是 elem 的子孙
+    p = new_parent
+    while p is not None:
+        if p is elem:
+            return {'error': '不能把元素挂到自己的子孙下面（会造成循环）'}
+        p = p.parent
+
+    old_parent = elem.parent
+    if old_parent is None:
+        return {'error': '元素没有父节点，无法移动'}
+    if old_parent is new_parent:
+        return {'error': '新旧父元素相同（如需调整同级顺序用 ui_move_child）'}
+    try:
+        old_idx = old_parent.children.index(elem)
+    except ValueError:
+        old_idx = -1
+
+    new_idx = None
+    if 'index' in args:
+        ni = int(as_float(args['index'], -1))
+        if ni >= 0:
+            new_idx = ni
+
+    import undo as _undo_mod
+    cmd = _undo_mod.UIReparentCommand('移动 UI 父节点', win.editor,
+                                      elem, old_parent, old_idx,
+                                      new_parent, new_idx)
+    _push_ui_undo(win, cmd)
+    return {'name': name, 'old_parent': old_parent.name,
+            'new_parent': new_parent.name,
+            'old_index': old_idx,
+            'new_index': elem.parent.children.index(elem)
+            if elem.parent is new_parent else -1}
+
+
+@command('ui_move_child', '同一父元素内调整顺序: {name, to_index, canvas?}')
+def cmd_ui_move_child(win, args):
+    name = args.get('name')
+    if not name:
+        return {'error': '必须传 name=（先 ui_list 查看所有元素）'}
+    c = _ui_canvas(win, args)
+    if c is None:
+        return {'error': '找不到 Canvas（传 canvas= 序号）'}
+    elem = c.root.find(name)
+    if elem is None:
+        return {'error': '找不到 UI 元素: %r' % name}
+    if elem is c.root:
+        return {'error': '不能移动 Canvas root'}
+    parent = elem.parent
+    if parent is None:
+        return {'error': '元素没有父节点，无法移动'}
+    if 'to_index' not in args:
+        return {'error': '必须传 to_index=（同级列表中的目标位置，0 起）'}
+    try:
+        cur_idx = parent.children.index(elem)
+    except ValueError:
+        return {'error': '元素不在父节点列表中'}
+    to_idx = int(as_float(args['to_index'], -1))
+    if to_idx < 0 or to_idx >= len(parent.children):
+        return {'error': 'to_index 范围超限（0~%d），收到 %d'
+                         % (len(parent.children) - 1, to_idx)}
+    if to_idx == cur_idx:
+        return {'name': name, 'moved': False, 'index': cur_idx,
+                'message': '位置相同，未移动'}
+
+    import undo as _undo_mod
+    cmd = _undo_mod.UIMoveChildCommand('调整 UI 顺序', win.editor,
+                                       elem, cur_idx, to_idx)
+    _push_ui_undo(win, cmd)
+    return {'name': name, 'moved': True,
+            'old_index': cur_idx, 'new_index': to_idx,
+            'siblings': [ch.name for ch in parent.children]}
 
 
 @command('settings_get', '读编辑器设置: {key?} (fps_limit/cam_speed/多核 等)')

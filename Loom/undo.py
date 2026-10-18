@@ -962,6 +962,15 @@ class UndoManager:
         self.redo_stack.clear()
         return cmd
 
+    def push_no_do(self, cmd):
+        """只压栈不执行 cmd.do() —— 用于"命令函数已执行完修改"的场景
+        (如 ui_set 已改完字段, 只需记录快照差异). 2026-10-18 阶段5."""
+        self.undo_stack.append(cmd)
+        if len(self.undo_stack) > self.limit:
+            self.undo_stack.pop(0)
+        self.redo_stack.clear()
+        return cmd
+
     def undo(self):
         if not self.undo_stack:
             return None
