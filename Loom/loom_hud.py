@@ -153,17 +153,40 @@ class HudMixin:
             self.hud_prog['u_size'].value = (sx, sy)
             self._quad_vao.render(moderngl.TRIANGLES)
 
-    def draw_screen_rect(self, rect, color):
-        """M33: 屏幕像素填充矩形 (运行时 UI 用). rect=(x,y,w,h) 左上角, color=(r,g,b) 0..255."""
+    def draw_texture_quad(self, tex, rect, tint=(255, 255, 255, 255)):
+        """屏幕像素坐标绘制任意纹理 quad (2026-10-18: Image 元素用).
+        tint=(r,g,b,a) 0..255, 乘到纹理上 (片元着色器 frag = texture * u_color)."""
+        if tex is None:
+            return
         x, y, w, h = rect
         if w <= 0 or h <= 0:
             return
+        fb = self._screen_fb()
+        with self.ctx.scope(framebuffer=fb, enable_only=moderngl.BLEND):
+            tex.use(0)
+            self.hud_prog['u_tex'].value = 0
+            self.hud_prog['u_color'].value = (
+                tint[0] / 255.0, tint[1] / 255.0, tint[2] / 255.0,
+                (tint[3] / 255.0) if len(tint) > 3 else 1.0)
+            self.hud_prog['u_origin'].value = (2.0 * x / self.width - 1.0,
+                                               1.0 - 2.0 * (y + h) / self.height)
+            self.hud_prog['u_size'].value = (2.0 * w / self.width,
+                                             2.0 * h / self.height)
+            self._quad_vao.render(moderngl.TRIANGLES)
+
+    def draw_screen_rect(self, rect, color):
+        """M33: 屏幕像素填充矩形 (运行时 UI 用). rect=(x,y,w,h) 左上角.
+        color=(r,g,b) 或 (r,g,b,a) 0..255; 2026-10-18 起支持 alpha (Panel 半透明)."""
+        x, y, w, h = rect
+        if w <= 0 or h <= 0:
+            return
+        a = (color[3] / 255.0) if len(color) > 3 else 1.0
         fb = self._screen_fb()   # 2026-08-18: 外部模式用缓存 widget FBO
         with self.ctx.scope(framebuffer=fb, enable_only=moderngl.BLEND):
             self._hud_white_tex.use(0)
             self.hud_prog['u_tex'].value = 0
             self.hud_prog['u_color'].value = (
-                color[0] / 255.0, color[1] / 255.0, color[2] / 255.0, 1.0)
+                color[0] / 255.0, color[1] / 255.0, color[2] / 255.0, a)
             self.hud_prog['u_origin'].value = (2.0 * x / self.width - 1.0,
                                                1.0 - 2.0 * (y + h) / self.height)
             self.hud_prog['u_size'].value = (2.0 * w / self.width,

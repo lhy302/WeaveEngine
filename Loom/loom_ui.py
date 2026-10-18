@@ -271,3 +271,139 @@ class UIManager:
             if hit is not None:
                 return c, hit
         return None, None
+
+
+# =================== 阶段1 元素: Panel / Text (2026-10-18) ===================
+
+class Panel(UIElement):
+    """纯色矩形 (契约 §3.3). bg_color=(r,g,b) 或 (r,g,b,a) 0~255."""
+
+    ctype = 'panel'
+
+    def __init__(self, name='panel', rect=(0, 0, 100, 30),
+                 bg_color=(0, 0, 0, 128), **kw):
+        super().__init__(name=name, rect=rect, **kw)
+        self.bg_color = tuple(bg_color)
+
+    def draw(self, engine, screen_rect):
+        engine.draw_screen_rect(screen_rect, self.bg_color)
+
+
+class Text(UIElement):
+    """文字元素 (契约 §3.3). 支持自动换行 (wrap_width > 0) 与 UTF-8 全字符集
+    (走 engine.draw_text_quad -> loom_font.FontChain 多字体回退)."""
+
+    ctype = 'text'
+
+    def __init__(self, name='text', rect=(0, 0, 200, 30), text='',
+                 font_size=16, color=(255, 255, 255),
+                 align='left', wrap_width=0, **kw):
+        super().__init__(name=name, rect=rect, **kw)
+        self.text = str(text)
+        self.font_size = int(font_size)
+        self.color = tuple(color)
+        self.align = align if align in ('left', 'center', 'right') else 'left'
+        self.wrap_width = max(0, int(wrap_width))
+
+    def _wrap_lines(self, engine):
+        """自动换行: 按测量宽度累计切行 (中英混排/emoji 安全)."""
+        if not self.text:
+            return []
+        if self.wrap_width <= 0:
+            return self.text.split('\n')
+        lines = []
+        cur = []
+        cur_w = 0
+        for ch in self.text:
+            if ch == '\n':
+                lines.append(''.join(cur))
+                cur, cur_w = [], 0
+                continue
+            w = engine._measure_text(ch, self.font_size)[0]
+            if cur_w + w > self.wrap_width and cur:
+                lines.append(''.join(cur))
+                cur, cur_w = [ch], w
+            else:
+                cur.append(ch)
+                cur_w += w
+        if cur:
+            lines.append(''.join(cur))
+        return lines
+
+    def draw(self, engine, screen_rect):
+        if not self.text:
+            return
+        x, y, w, h = screen_rect
+        lines = self._wrap_lines(engine)
+        line_h = engine._measure_text('Mg', self.font_size)[1] or self.font_size
+        for i, line in enumerate(lines):
+            if not line:
+                continue
+            lw = engine._measure_text(line, self.font_size)[0]
+            if self.align == 'center':
+                tx = x + (w - lw) / 2
+            elif self.align == 'right':
+                tx = x + w - lw
+            else:
+                tx = x
+            engine.draw_text_quad(line, int(tx), int(y + i * line_h),
+                                  self.color, self.font_size)
+
+
+class Image(UIElement):
+    """图片元素 (契约 §3.3). fit: stretch 拉伸 / contain 等比装入 / cover 等比填满."""
+
+    ctype = 'image'
+
+    def __init__(self, name='image', rect=(0, 0, 100, 100),
+                 texture_path='', tint=(255, 255, 255, 255),
+                 fit='stretch', **kw):
+        super().__init__(name=name, rect=rect, **kw)
+        self.texture_path = str(texture_path or '')
+        self.tint = tuple(tint) + ((255,) if len(tint) == 3 else ())
+        self.fit = fit if fit in ('stretch', 'contain', 'cover') else 'stretch'
+        self._tex = None
+        self._tex_size = (0, 0)
+        self._tex_loaded = False
+
+    def _load(self, engine):
+        """惰性加载图片 -> moderngl 纹理. 失败时 _tex 保持 None (画占位灰底)."""
+        if self._tex_loaded:
+            return
+        self._tex_loaded = True
+        if not self.texture_path:
+            return
+        try:
+            import pygame
+            # 不用 convert_alpha(): 它要求 display 已初始化, 无头环境会抛异常;
+            # PNG 载入后本身带 SRCALPHA, _surf_to_tex 走 array_alpha 可正常处理
+            # (与 draw_text_quad 里 font.render(True, color) 的表面同款).
+            surf = pygame.image.load(self.texture_path)
+            self._tex = engine._surf_to_tex(surf)
+            self._tex_size = surf.get_size()
+        except Exception:
+            self._tex = None
+
+    def _fit_rect(self, rect):
+        """按 fit 策略计算实际绘制矩形 (相对于 screen_rect)."""
+        x, y, w, h = rect
+        tw, th = self._tex_size
+        if tw <= 0 or th <= 0:
+            return rect
+        if self.fit == 'stretch':
+            return (x, y, w, h)
+        if self.fit == 'contain':
+            s = min(w / tw, h / th)
+        else:               # cover
+            s = max(w / tw, h / th)
+        dw, dh = tw * s, th * s
+        return (x + (w - dw) / 2, y + (h - dh) / 2, dw, dh)
+
+    def draw(self, engine, screen_rect):
+        self._load(engine)
+        if self._tex is None:
+            engine.draw_screen_rect(screen_rect, (80, 80, 80, 255))
+            return
+        engine.draw_texture_quad(self._tex, self._fit_rect(screen_rect), self.tint)
+
+
