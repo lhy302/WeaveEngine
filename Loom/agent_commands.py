@@ -1631,6 +1631,374 @@ def cmd_list_layers(win, args):
     return {'layers': {str(i): ed.layer_name(i) for i in range(32)}}
 
 
+# ================= 2026-10-18 阶段5: UI 编辑命令 =================
+
+_UI_TYPE_NAMES = ('panel', 'text', 'image', 'button', 'slider', 'toggle',
+                  'progress_bar', 'scroll_view', 'input_field', 'dropdown',
+                  'grid_layout')
+
+
+def _ui_canvas(win, args):
+    """按 args['canvas'] 取 Canvas（缺省=第 0 个）. 找不到返回 None."""
+    ui = getattr(win.editor, 'ui', None)
+    if ui is None or not ui.canvases:
+        return None
+    idx = int(as_float(args.get('canvas', 0), 0))
+    if idx < 0 or idx >= len(ui.canvases):
+        return None
+    return ui.canvases[idx]
+
+
+def _ui_parent(win, args):
+    """找父元素: args['parent'] 指定 name, 缺省 = canvas root. 返回 (canvas, parent)."""
+    c = _ui_canvas(win, args)
+    if c is None:
+        return None, None
+    pname = args.get('parent')
+    if not pname:
+        return c, c.root
+    hit = c.root.find(pname)
+    if hit is None:
+        return c, None
+    return c, hit
+
+
+def _ui_auto_name(parent, typ):
+    """自动生成唯一 name（{typ}_{n}，从 0 开始找未占用的）."""
+    n = 0
+    while True:
+        name = '%s_%d' % (typ, n)
+        if parent.find(name) is None:
+            return name
+        n += 1
+
+
+def _ui_to_dict(elem):
+    """UIElement -> dict（用于 ui_list）."""
+    return {
+        'type': elem.ctype,
+        'name': elem.name,
+        'rect': list(elem.rect),
+        'anchor': list(elem.anchor),
+        'pivot': list(elem.pivot),
+        'visible': bool(elem.visible),
+        'enabled': bool(elem.enabled),
+        'z_order': int(elem.z_order),
+        'children': [_ui_to_dict(ch) for ch in elem.children],
+    }
+
+
+@command('ui_canvas_add', '添加 UI Canvas: {type?, width?, height?, z_order?} '
+                          '(type=screen|world, 默认 screen)')
+def cmd_ui_canvas_add(win, args):
+    from loom_ui import Canvas
+    ui = getattr(win.editor, 'ui', None)
+    if ui is None:
+        return {'error': '引擎没有 ui 字段'}
+    typ = str(args.get('type', 'screen'))
+    if typ not in ('screen', 'world'):
+        return {'error': 'type 必须是 screen 或 world, 收到 %r' % typ}
+    w = int(as_float(args.get('width', 800), 800))
+    h = int(as_float(args.get('height', 600), 600))
+    z = int(as_float(args.get('z_order', 0), 0))
+    c = Canvas(canvas_type=typ, width=w, height=h, z_order=z)
+    ui.add_canvas(c)
+    return {'canvas_type': typ, 'width': w, 'height': h, 'z_order': z,
+            'total': len(ui.canvases)}
+
+
+@command('ui_add', '添加 UI 元素: {type, name?, parent?, canvas?, ...字段} '
+                   '(type: panel|text|image|button|slider|toggle|progress_bar|'
+                   'scroll_view|input_field|dropdown|grid_layout)')
+def cmd_ui_add(win, args):
+    typ = str(args.get('type', ''))
+    if typ not in _UI_TYPE_NAMES:
+        return {'error': 'type 必须是以下之一: %s, 收到 %r'
+                         % (', '.join(_UI_TYPE_NAMES), typ)}
+    c, parent = _ui_parent(win, args)
+    if c is None:
+        return {'error': '找不到 Canvas（传 canvas= 序号, 先 ui_list 查看）'}
+    if parent is None:
+        return {'error': '找不到父元素: %r' % args.get('parent')}
+    name = args.get('name') or _ui_auto_name(parent, typ)
+    import loom_ui
+
+    kw = {'name': name}
+    if 'rect' in args:
+        kw['rect'] = tuple(args['rect'])
+    if 'anchor' in args:
+        kw['anchor'] = tuple(args['anchor'])
+    if 'pivot' in args:
+        kw['pivot'] = tuple(args['pivot'])
+    if 'visible' in args:
+        kw['visible'] = bool(args['visible'])
+    if 'enabled' in args:
+        kw['enabled'] = bool(args['enabled'])
+    if 'z_order' in args:
+        kw['z_order'] = int(as_float(args['z_order'], 0))
+
+    def take(key, conv=lambda v: v):
+        if key in args:
+            kw[key] = conv(args[key])
+
+    if typ == 'panel':
+        take('bg_color', tuple)
+        elem = loom_ui.Panel(**kw)
+    elif typ == 'text':
+        take('text', str)
+        take('font_size', lambda v: int(as_float(v, 16)))
+        take('color', tuple)
+        take('align', str)
+        take('wrap_width', lambda v: int(as_float(v, 0)))
+        elem = loom_ui.Text(**kw)
+    elif typ == 'image':
+        take('texture_path', str)
+        take('tint', tuple)
+        take('fit', str)
+        elem = loom_ui.Image(**kw)
+    elif typ == 'button':
+        take('text', str)
+        take('font_size', lambda v: int(as_float(v, 16)))
+        take('text_color', tuple)
+        take('normal_color', tuple)
+        take('hover_color', tuple)
+        take('pressed_color', tuple)
+        elem = loom_ui.Button(**kw)
+    elif typ == 'slider':
+        take('min_value', float)
+        take('max_value', float)
+        take('value', float)
+        take('direction', str)
+        take('track_color', tuple)
+        take('fill_color', tuple)
+        take('handle_color', tuple)
+        elem = loom_ui.Slider(**kw)
+    elif typ == 'toggle':
+        take('is_on', bool)
+        take('label', str)
+        take('label_size', lambda v: int(as_float(v, 16)))
+        take('box_color', tuple)
+        take('check_color', tuple)
+        take('label_color', tuple)
+        elem = loom_ui.Toggle(**kw)
+    elif typ == 'progress_bar':
+        take('value', float)
+        take('bg_color', tuple)
+        take('fill_color', tuple)
+        elem = loom_ui.ProgressBar(**kw)
+    elif typ == 'scroll_view':
+        take('content_size', tuple)
+        take('scroll_pos', tuple)
+        take('bg_color', tuple)
+        take('bar_color', tuple)
+        take('bar_width', lambda v: int(as_float(v, 8)))
+        take('show_bar', bool)
+        take('scroll_step', lambda v: int(as_float(v, 30)))
+        elem = loom_ui.ScrollView(**kw)
+    elif typ == 'input_field':
+        take('text', str)
+        take('placeholder', str)
+        take('max_length', lambda v: int(as_float(v, 200)))
+        take('bg_color', tuple)
+        take('focus_bg_color', tuple)
+        take('text_color', tuple)
+        take('placeholder_color', tuple)
+        take('cursor_color', tuple)
+        take('font_size', lambda v: int(as_float(v, 16)))
+        elem = loom_ui.InputField(**kw)
+    elif typ == 'dropdown':
+        take('options', list)
+        take('selected_index', lambda v: int(as_float(v, 0)))
+        take('bg_color', tuple)
+        take('hover_color', tuple)
+        take('list_bg', tuple)
+        take('list_hover', tuple)
+        take('text_color', tuple)
+        take('font_size', lambda v: int(as_float(v, 14)))
+        take('item_height', lambda v: int(as_float(v, 28)))
+        elem = loom_ui.Dropdown(**kw)
+    elif typ == 'grid_layout':
+        take('cell_size', tuple)
+        take('spacing', tuple)
+        take('columns', lambda v: int(as_float(v, 4)))
+        take('bg_color', tuple)
+        elem = loom_ui.GridLayout(**kw)
+    else:
+        return {'error': '内部错误: type %r 未实现' % typ}
+
+    parent.add_child(elem)
+    return {'name': name, 'type': typ, 'parent': parent.name,
+            'canvas': c.canvas_type, 'total': len(parent.children)}
+
+
+@command('ui_set', '修改 UI 元素字段: {name, canvas?, ...字段} '
+                   '(支持 rect/anchor/pivot/visible/enabled/z_order + type-specific)')
+def cmd_ui_set(win, args):
+    name = args.get('name')
+    if not name:
+        return {'error': '必须传 name=（先 ui_list 查看所有元素）'}
+    c = _ui_canvas(win, args)
+    if c is None:
+        return {'error': '找不到 Canvas（传 canvas= 序号）'}
+    elem = c.root.find(name)
+    if elem is None:
+        return {'error': '找不到 UI 元素: %r' % name}
+    if elem is c.root:
+        return {'error': '不能修改 Canvas root（用 ui_add / ui_set 改具体元素）'}
+
+    done = {}
+    if 'rect' in args:
+        elem.rect = tuple(args['rect'])
+        done['rect'] = list(elem.rect)
+    if 'anchor' in args:
+        elem.anchor = tuple(args['anchor'])
+        done['anchor'] = list(elem.anchor)
+    if 'pivot' in args:
+        elem.pivot = tuple(args['pivot'])
+        done['pivot'] = list(elem.pivot)
+    if 'visible' in args:
+        elem.visible = bool(args['visible'])
+        done['visible'] = elem.visible
+    if 'enabled' in args:
+        elem.enabled = bool(args['enabled'])
+        done['enabled'] = elem.enabled
+    if 'z_order' in args:
+        elem.z_order = int(as_float(args['z_order'], 0))
+        done['z_order'] = elem.z_order
+
+    def take(key, conv=lambda v: v):
+        if key in args and hasattr(elem, key):
+            try:
+                setattr(elem, key, conv(args[key]))
+                done[key] = getattr(elem, key)
+            except Exception as e:
+                done[key] = 'error: %r' % e
+
+    typ = elem.ctype
+    if typ == 'panel':
+        take('bg_color', tuple)
+    elif typ == 'text':
+        take('text', str)
+        take('font_size', lambda v: int(as_float(v, 16)))
+        take('color', tuple)
+        take('align', str)
+        take('wrap_width', lambda v: int(as_float(v, 0)))
+    elif typ == 'image':
+        take('texture_path', str)
+        take('tint', tuple)
+        take('fit', str)
+    elif typ == 'button':
+        take('text', str)
+        take('font_size', lambda v: int(as_float(v, 16)))
+        take('text_color', tuple)
+        take('normal_color', tuple)
+        take('hover_color', tuple)
+        take('pressed_color', tuple)
+    elif typ == 'slider':
+        take('min_value', float)
+        take('max_value', float)
+        take('value', float)
+        take('direction', str)
+        take('track_color', tuple)
+        take('fill_color', tuple)
+        take('handle_color', tuple)
+    elif typ == 'toggle':
+        take('is_on', bool)
+        take('label', str)
+        take('label_size', lambda v: int(as_float(v, 16)))
+        take('box_color', tuple)
+        take('check_color', tuple)
+        take('label_color', tuple)
+    elif typ == 'progress_bar':
+        take('value', float)
+        take('bg_color', tuple)
+        take('fill_color', tuple)
+    elif typ == 'scroll_view':
+        take('content_size', tuple)
+        take('scroll_pos', tuple)
+        take('bg_color', tuple)
+        take('bar_color', tuple)
+        take('bar_width', lambda v: int(as_float(v, 8)))
+        take('show_bar', bool)
+        take('scroll_step', lambda v: int(as_float(v, 30)))
+    elif typ == 'input_field':
+        take('text', str)
+        take('placeholder', str)
+        take('max_length', lambda v: int(as_float(v, 200)))
+        take('bg_color', tuple)
+        take('focus_bg_color', tuple)
+        take('text_color', tuple)
+        take('placeholder_color', tuple)
+        take('cursor_color', tuple)
+        take('font_size', lambda v: int(as_float(v, 16)))
+    elif typ == 'dropdown':
+        take('options', list)
+        take('selected_index', lambda v: int(as_float(v, 0)))
+        take('bg_color', tuple)
+        take('hover_color', tuple)
+        take('list_bg', tuple)
+        take('list_hover', tuple)
+        take('text_color', tuple)
+        take('font_size', lambda v: int(as_float(v, 14)))
+        take('item_height', lambda v: int(as_float(v, 28)))
+    elif typ == 'grid_layout':
+        take('cell_size', tuple)
+        take('spacing', tuple)
+        take('columns', lambda v: int(as_float(v, 4)))
+        take('bg_color', tuple)
+        if hasattr(elem, '_reflow'):
+            try:
+                elem._reflow()
+            except Exception:
+                pass
+
+    if not done:
+        return {'error': '没有可改的字段（检查参数名）', 'type': typ}
+    return {'name': name, 'type': typ, 'changed': done}
+
+
+@command('ui_remove', '删除 UI 元素: {name, canvas?}')
+def cmd_ui_remove(win, args):
+    name = args.get('name')
+    if not name:
+        return {'error': '必须传 name=（先 ui_list 查看所有元素）'}
+    c = _ui_canvas(win, args)
+    if c is None:
+        return {'error': '找不到 Canvas（传 canvas= 序号）'}
+    if name == c.root.name:
+        return {'error': '不能删除 Canvas root（用其他方式清空）'}
+    elem = c.root.find(name)
+    if elem is None:
+        return {'error': '找不到 UI 元素: %r' % name}
+    parent = elem.parent
+    if parent is None:
+        return {'error': '元素没有父节点，无法删除'}
+    parent.remove_child(elem)
+    return {'removed': name, 'parent': parent.name,
+            'remaining': len(parent.children)}
+
+
+@command('ui_list', '列出 UI 树: {canvas?} (缺省=全部 Canvas)')
+def cmd_ui_list(win, args):
+    ui = getattr(win.editor, 'ui', None)
+    if ui is None:
+        return {'error': '引擎没有 ui 字段'}
+    only_canvas = args.get('canvas')
+    out = []
+    for i, c in enumerate(ui.canvases):
+        if only_canvas is not None and int(as_float(only_canvas, -1)) != i:
+            continue
+        out.append({
+            'index': i,
+            'canvas_type': c.canvas_type,
+            'width': c.width,
+            'height': c.height,
+            'z_order': c.z_order,
+            'root': _ui_to_dict(c.root),
+        })
+    return {'canvases': out, 'total': len(ui.canvases)}
+
+
 @command('settings_get', '读编辑器设置: {key?} (fps_limit/cam_speed/多核 等)')
 def cmd_settings_get(win, args):
     import guiloader
