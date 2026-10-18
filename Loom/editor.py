@@ -1756,6 +1756,14 @@ class EditorApp(GLEngine):
                             inst.on_disable()   # C1: 停止播放 = 脚本实例禁用
                         except Exception as e:
                             print("[脚本] %s.on_disable 出错: %r" % (m.name, e))
+                        # 2026-10-18 协程：on_disable 后显式清理（generator 里的
+                        # try/finally 在此触发，避免停止播放时泄漏资源）
+                        if hasattr(inst, 'stop_all_coroutines'):
+                            try:
+                                inst.stop_all_coroutines()
+                            except Exception as e:
+                                print("[脚本] %s.stop_all_coroutines 出错: %r"
+                                      % (m.name, e))
                     sc._script = None
                     sc._script_broken = False
                 rb = getattr(m, 'rigidbody', None)

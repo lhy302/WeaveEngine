@@ -179,6 +179,9 @@ class Script:
         self.obj = None       # 宿主物体 (GameObject)
         self.engine = None    # 引擎 (GLEngine/EditorApp/PlayerApp)
         self.vals = {}        # 参数 key -> 当前值
+        # 2026-10-18 协程（决策 A1+B1）：Python generator 作为协程
+        # 生命周期与 Script 实例绑定：sc._script=None 时整批 drop，无需手动清理
+        self._coroutines = []  # [(gen, {'wait_t': 0.0, 'wait_until': None, 'wait_while': None})]
         for key, _label, default, *_ in self.params:
             self.vals[key] = default
 
@@ -206,6 +209,140 @@ class Script:
         """持续接触每逻辑帧调用 (other=对方物体). C1: 对齐 Unity OnCollisionStay.
         注意: 未定义本方法的脚本走零开销快路径 (不进入 stay 派发)."""
         pass
+
+
+    # ---- 2026-10-18 协程（决策 A1 generator 风格 + B1 Script 作用域）----
+    def start_coroutine(self, gen):
+        """启动一个协程（generator）。用法：
+
+            def my_coro(self):
+                yield self.wait(2.0)                              # 等 2 秒
+                self.obj.position = Point3D(0, 5, 0)
+                yield self.wait_until(lambda: self.obj.position.y < 1)  # 等到落下
+                print("落地了")
+
+            def on_start(self):
+                self.start_coroutine(self.my_coro())
+
+        协程与脚本生命周期绑定：脚本实例销毁（sc._script=None）时自动清理。
+        返回 generator 本身（可用于 stop_coroutine 停止）。
+        """
+        if not hasattr(gen, 'send'):
+            raise TypeError(
+                "start_coroutine 需要 generator 对象，收到 %r" % type(gen))
+        self._coroutines.append(
+            (gen, {'wait_t': 0.0, 'wait_until': None, 'wait_while': None}))
+        return gen
+
+    def stop_coroutine(self, gen):
+        """停止指定协程（按 generator 引用）。返回 True 表示找到并停止。"""
+        for entry in list(self._coroutines):
+            if entry[0] is gen:
+                self._coroutines.remove(entry)
+                try:
+                    gen.close()
+                except Exception:
+                    pass
+                return True
+        return False
+
+    def stop_all_coroutines(self):
+        """停止本脚本上的所有协程。"""
+        for entry in list(self._coroutines):
+            try:
+                entry[0].close()
+            except Exception:
+                pass
+        self._coroutines.clear()
+
+    def coroutine_count(self):
+        """当前活跃协程数（诊断用）。"""
+        return len(self._coroutines)
+
+    def wait(self, seconds):
+        """协程暂停 N 秒。用法: yield self.wait(2.0)  ← yield 不是 yield from"""
+        return float(seconds)
+
+    def wait_until(self, pred):
+        """协程等到 pred() 为真。用法: yield self.wait_until(lambda: ...)"""
+        return ('until', pred)
+
+    def wait_while(self, pred):
+        """协程等到 pred() 为假。用法: yield self.wait_while(lambda: ...)"""
+        return ('while', pred)
+
+    def wait_frame(self):
+        """协程等 1 帧。用法: yield self.wait_frame()"""
+        return None
+
+    def _drive_coroutines(self, dt):
+        """内部方法：由引擎 update_scripts 每帧推进本脚本的所有协程。"""
+        if not self._coroutines:
+            return
+        for entry in list(self._coroutines):
+            gen, state = entry
+            try:
+                should_resume = False
+                if state['wait_t'] > 0:
+                    state['wait_t'] -= dt
+                    if state['wait_t'] <= 0:
+                        state['wait_t'] = 0.0
+                        should_resume = True
+                elif state['wait_until'] is not None:
+                    try:
+                        if state['wait_until']():
+                            state['wait_until'] = None
+                            should_resume = True
+                    except Exception as e:
+                        print("[脚本] wait_until 谓词异常 (%s): %r"
+                              % (self.script_id or '?', e))
+                        self._coroutines.remove(entry)
+                        continue
+                elif state['wait_while'] is not None:
+                    try:
+                        if not state['wait_while']():
+                            state['wait_while'] = None
+                            should_resume = True
+                    except Exception as e:
+                        print("[脚本] wait_while 谓词异常 (%s): %r"
+                              % (self.script_id or '?', e))
+                        self._coroutines.remove(entry)
+                        continue
+                else:
+                    should_resume = True
+
+                if not should_resume:
+                    continue
+
+                yielded = gen.send(None)
+                if yielded is None:
+                    pass   # 等 1 帧
+                elif isinstance(yielded, (int, float)):
+                    state['wait_t'] = float(yielded)
+                elif callable(yielded):
+                    state['wait_until'] = yielded
+                elif isinstance(yielded, tuple) and len(yielded) == 2:
+                    kind, arg = yielded
+                    if kind == 'until' and callable(arg):
+                        state['wait_until'] = arg
+                    elif kind == 'while' and callable(arg):
+                        state['wait_while'] = arg
+                    else:
+                        print("[脚本] 未知协程指令 (%s): %r"
+                              % (self.script_id or '?', yielded))
+                else:
+                    print("[脚本] 未知协程产出类型 (%s): %r"
+                          % (self.script_id or '?', type(yielded)))
+            except StopIteration:
+                self._coroutines.remove(entry)
+            except Exception as e:
+                print("[脚本] 协程异常 (%s): %r"
+                      % (self.script_id or '?', e))
+                try:
+                    gen.close()
+                except Exception:
+                    pass
+                self._coroutines.remove(entry)
 
     def update(self, dt):
         """每帧播放期调用. dt 为秒."""

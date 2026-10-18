@@ -803,8 +803,13 @@ class GLEngine(ShadowMixin, FrameComponentMixin, PhysicsMixin, InputMixin, HudMi
         for m, sc, s in generic_items:
             try:
                 s.update(delta_time)
+                # 2026-10-18 协程：脚本 update 后推进协程（B1：作用域绑定 Script 实例）
+                if hasattr(s, '_drive_coroutines'):
+                    s._drive_coroutines(delta_time)
             except Exception as e:
                 print("[脚本] %s(%s) 出错: %r" % (m.name, sc.script_id, e))
+                if hasattr(s, 'stop_all_coroutines'):
+                    s.stop_all_coroutines()
                 sc._script = None
                 sc._script_broken = True
 

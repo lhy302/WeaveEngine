@@ -272,6 +272,13 @@ class ModelGpuMixin:
                         inst.on_destroy()
                     except Exception as e:
                         print("[脚本] %s.on_destroy 出错: %r" % (model.name, e))
+                    # 2026-10-18 协程：物体销毁时显式清理（generator 的 finally 触发）
+                    if hasattr(inst, 'stop_all_coroutines'):
+                        try:
+                            inst.stop_all_coroutines()
+                        except Exception as e:
+                            print("[脚本] %s.stop_all_coroutines 出错: %r"
+                                  % (model.name, e))
             # A2 (2026-08-29): 几何/实例缓冲归 mesh 桶共享 (桶内其他物体还在用),
             # 单物体删除只解除引用; 共享资源由 _release_bucket_resources 统一释放
             # (清场景时). undo.attach_model 依据 vbo is None 重挂会重新解析桶.

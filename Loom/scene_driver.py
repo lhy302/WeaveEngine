@@ -312,8 +312,13 @@ class SceneDriver:
                         continue
                 try:
                     s.update(dt)
+                    # 2026-10-18 协程：Vk 路径同步推进
+                    if hasattr(s, '_drive_coroutines'):
+                        s._drive_coroutines(dt)
                 except Exception as e:
                     print("[脚本] %s(%s) 出错: %r" % (m.name, sc.script_id, e))
+                    if hasattr(s, 'stop_all_coroutines'):
+                        s.stop_all_coroutines()
                     sc._script = None
                     sc._script_broken = True
 
