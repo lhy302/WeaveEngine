@@ -728,6 +728,11 @@ class GLEngine(ShadowMixin, FrameComponentMixin, PhysicsMixin, InputMixin, HudMi
         for m in models:
             if not m.scripts:
                 continue
+            # 2026-10-18 A7 修复: 同物体的第 2+ 个 rotate 脚本降级到 generic_items
+            # （走 Python update 路径）, 避免 C 批处理"后写覆盖先写"导致参数不叠加
+            # （test_scripts_collision.py 的 A7 双 rotate 用例期望 90°+180°=270°）。
+            # 常见场景（每物体 1 个 rotate）零变化, 全走 C 批处理。
+            _rotate_seen_for_m = False
             for sc in m.scripts:              # 组2: 引用迭代 (旧 list() 每物体每帧复制;
                                               # 契约: update 不增删本物体脚本组件)
                 if not sc.script_id:
@@ -759,8 +764,11 @@ class GLEngine(ShadowMixin, FrameComponentMixin, PhysicsMixin, InputMixin, HudMi
 
                 # M4 C 批处理分流: rotate 走 C 原生批处理, 其余走通用 update
                 # ★B3 退役: 删 use_c 判断 + move/linear_move 分流 (死代码)
-                if sc.script_id == 'rotate':
+                # 2026-10-18 A7 修复: 同物体第 2+ 个 rotate 降级走 generic
+                # （C 批处理一次性基于同一初值算, 后写会覆盖先写 → 参数不叠加）
+                if sc.script_id == 'rotate' and not _rotate_seen_for_m:
                     rot_items.append((m, sc, s))
+                    _rotate_seen_for_m = True
                 else:
                     generic_items.append((m, sc, s))
 
