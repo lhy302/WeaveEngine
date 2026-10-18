@@ -67,11 +67,18 @@ _comdlg32.GetOpenFileNameW.argtypes = [ctypes.POINTER(OPENFILENAMEW)]
 
 
 def _parent_hwnd():
-    """返回 pygame 窗口句柄 (对话框模态置顶用), 失败返回 0 (则对话框独立)."""
+    """返回玩家运行时 GLFW 窗口句柄 (对话框模态置顶用), 失败返回 0 (则对话框独立).
+    2026-10-18 A2: 原 pygame.display.get_wm_info 改 GLFW。
+    - 玩家运行时（GLFW 窗口）: 从当前上下文窗口拿 HWND
+    - 编辑器模式（Qt）: 无 GLFW 窗口，返回 0（对话框独立，Qt 有自己的模态）"""
     try:
-        import pygame
-        if pygame.display.get_init():
-            return pygame.display.get_wm_info().get('window', 0) or 0
+        import glfw
+        win = glfw.get_current_context()   # 返回当前线程已 make_current 的窗口
+        if win:
+            from loom_glfw_window import _make_hwnd
+            hwnd = _make_hwnd(win)
+            if hwnd:
+                return hwnd
     except Exception:
         pass
     return 0

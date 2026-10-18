@@ -73,15 +73,31 @@ class InputMixin:
     mixin 只通过 self 按需访问 (语义与拆分前逐位一致)."""
 
     def _key_pressed(self):
-        """按键快照 (每帧): pygame 返回 get_pressed 数组; 嵌入式模式 (Qt 宿主)
-        由宿主维护的 512 长数组 (view.key_pressed_array) 提供. 供 _update_camera 等."""
+        """按键快照 (每帧): 供 _update_camera 等按键查询.
+        - 嵌入式模式 (Qt 宿主): 由宿主维护的 key_pressed_array 提供
+        - 玩家运行时 (GLFW 窗口): 从 GLFW 键状态构建 dict (按 pygame K_* 索引)
+        返回类型是 defaultdict(int)，可按 pygame 键码索引 (0/1)."""
         if getattr(self, '_external_ctx', False):
             view = getattr(self, 'view', None)
             if view is not None and hasattr(view, 'key_pressed_array'):
                 return view.key_pressed_array()
             from collections import defaultdict
             return defaultdict(int)   # 特殊键码 (K_LEFT 等) 超 512, 用 dict 防越界
-        return pygame.key.get_pressed()
+        # 2026-10-18 A2: GLFW 键状态 -> pygame K_* 索引 dict
+        from collections import defaultdict
+        result = defaultdict(int)
+        win = getattr(self, '_glfw_win', None)
+        if win is None:
+            return result
+        try:
+            import glfw
+            from loom_glfw_window import _GLFW_TO_PG
+            for gl_key, pg_key in _GLFW_TO_PG.items():
+                if glfw.get_key(win, gl_key) == glfw.PRESS:
+                    result[pg_key] = 1
+        except Exception:
+            pass
+        return result
 
     def is_key(self, name):
         """脚本/游戏输入查询: name 为 _KEYMAP 字符键 ('w'/'space'/'Left'...).
@@ -117,9 +133,15 @@ class InputMixin:
             if view is not None and hasattr(view, 'set_mouse_locked'):
                 view.set_mouse_locked(locked)
             return
+        # 2026-10-18 A2: GLFW 光标模式（原 pygame.event.set_grab + mouse.set_visible）
+        # CURSOR_DISABLED = 锁定 + 隐藏（玩家控制器转视角用）
+        # CURSOR_NORMAL   = 正常显示（解锁）
         try:
-            pygame.event.set_grab(locked)
-            pygame.mouse.set_visible(not locked)
+            import glfw
+            win = getattr(self, '_glfw_win', None)
+            if win is not None:
+                mode = glfw.CURSOR_DISABLED if locked else glfw.CURSOR_NORMAL
+                glfw.set_input_mode(win, glfw.CURSOR, mode)
         except Exception:
             pass
 

@@ -253,7 +253,17 @@ class HudMixin:
         yaw_deg = 360 - math.degrees(self.camera_yaw) % 360
         pitch_deg = math.degrees(self.camera_pitch)
         total_faces = sum(len(x.mesh.faces) for x in self.models)
-        if not self._external_ctx and pygame.key.get_focused():
+        # 2026-10-18 A2: GLFW 焦点判断（原 pygame.key.get_focused）
+        _focused = False
+        if not self._external_ctx:
+            try:
+                import glfw
+                win = getattr(self, '_glfw_win', None)
+                if win is not None:
+                    _focused = bool(glfw.get_window_attrib(win, glfw.FOCUSED))
+            except Exception:
+                pass
+        if _focused:
             if m is not None:
                 model_line = (f"模型 {self.current_model_index + 1}/{len(self.models)}: "
                               f"位置=({m.position.x:.2f}, {m.position.y:.2f}, "
