@@ -62,6 +62,7 @@ from loom_transform import TransformMixin   # 变换层次子系统 (世界矩�
 from loom_profiler import ProfilerMixin   # 性能插桩子系统 (LOOM_PROFILE 阶段耗时)
 from loom_logic_thread import LogicThreadMixin   # 逻辑帧线程子系统 (异步逻辑线程启停/主循环)
 from loom_raycast import RaycastMixin   # 2026-10-18: 射线检测 (物理 Culverin + 几何 AABB 兜底)
+from loom_events import EventBus   # 2026-10-18: 全局事件总线 (跨脚本/跨系统解耦通信)
 
 # ---- 组件化 M25（已抽出到 loom_components.py，原 79-448 行） ----
 from loom_components import (  # noqa: E402,F401
@@ -217,6 +218,10 @@ class GLEngine(ShadowMixin, FrameComponentMixin, PhysicsMixin, InputMixin, HudMi
         # (现契约测试零受影响; 详见 update_physics 2674 附近分支说明).
         self._phys_bridge = None
         self._phys_bridge_auto = True
+        # 2026-10-18 事件系统: 全局事件总线（跨脚本/跨系统解耦通信）
+        # 用法: engine.events.emit('player_died', {'cause': 'fall'})
+        #       handle = engine.events.on('player_died', callback)
+        self.events = EventBus()
 
         self.camera_yaw = 0      # 水平旋转角度 (弧度)
         self.camera_pitch = 0    # 垂直旋转角度 (弧度)

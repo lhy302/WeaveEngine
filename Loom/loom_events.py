@@ -82,31 +82,33 @@ class EventBus:
           - off('name', callback) : 取消该事件的指定 callback
         """
         if isinstance(handle_or_name, EventHandler):
-            handle_or_name.alive = False
+            h = handle_or_name
             if self._dispatching:
-                self._pending_remove.append(handle_or_name)
+                # 派发期间: 延迟到本轮结束移除（Unity C# 快照语义:
+                # 当前轮仍会调用, 下一轮起不再调用）
+                self._pending_remove.append(h)
             else:
-                self._remove_one(handle_or_name)
+                h.alive = False
+                self._remove_one(h)
             return
 
         name = str(handle_or_name)
         lst = self._handlers.get(name, [])
         if callback is None:
             # 取消全部
-            for h in lst:
-                h.alive = False
             if self._dispatching:
                 self._pending_remove.extend(lst)
             else:
+                for h in lst:
+                    h.alive = False
                 self._handlers.pop(name, None)
         else:
             matches = [h for h in lst if h.callback == callback]
-            for h in matches:
-                h.alive = False
             if self._dispatching:
                 self._pending_remove.extend(matches)
             else:
                 for h in matches:
+                    h.alive = False
                     self._remove_one(h)
 
     def _remove_one(self, h):
@@ -144,6 +146,13 @@ class EventBus:
                     print('[事件] %s 回调异常: %r' % (name, e),
                           file=sys.stderr)
                     # 异常隔离：继续派发
+                # once 自动移除（异常也移除，Unity 语义）
+                if h.once:
+                    if self._dispatching:
+                        self._pending_remove.append(h)
+                    else:
+                        h.alive = False
+                        self._remove_one(h)
         finally:
             self._dispatching -= 1
             self._apply_pending()
@@ -157,6 +166,7 @@ class EventBus:
         adds, removes = self._pending_add, self._pending_remove
         self._pending_add, self._pending_remove = [], []
         for h in removes:
+            h.alive = False
             self._remove_one(h)
         for h in adds:
             if h.alive:

@@ -41,6 +41,14 @@ class UIElement:
         self._hover = False
         self._pressed = False       # 本元素当前被按下 (按钮/滑条/勾选)
         self._dragging = False      # 本元素正在被拖动 (滑条)
+        # 2026-10-18 事件系统: 通用 pointer 回调字段 (与 on_mouse_* 覆写机制并列)
+        # 用法: elem.on_pointer_enter = lambda: print('hover 开始')
+        # 这些是字段（None 或 callable），子类无需 super() 即可用
+        self.on_pointer_enter = None    # ()              鼠标进入
+        self.on_pointer_exit = None     # ()              鼠标离开
+        self.on_pointer_down = None     # (pos)           左键按下
+        self.on_pointer_up = None       # (pos)           左键松开
+        self.on_pointer_drag = None     # (pos, delta)    拖动中（仅 dragging 元素）
 
     # ---- 字段校验 (钳制到合法范围) ----
     @property
@@ -231,6 +239,19 @@ class UIElement:
         """按住时鼠标移动 (仅 _dragging=True 的滑条等). 返回 True = 已消费."""
         return False
 
+    # ---- 2026-10-18 事件系统: 通用 pointer 字段回调派发 ----
+    def _emit_pointer(self, kind, *args):
+        """派发字段回调（若设置了的话）。kind ∈ enter/exit/down/up/drag.
+        异常隔离: 回调抛异常打印后继续（不影响 UIManager 主循环）。"""
+        cb = getattr(self, 'on_pointer_' + kind, None)
+        if cb is None:
+            return
+        try:
+            cb(*args)
+        except Exception as e:
+            print('[UI] %s.on_pointer_%s 回调异常: %r'
+                  % (getattr(self, 'name', '?'), kind, e))
+
     # ---- 渲染接口 ----
     def draw(self, engine, screen_rect):
         """绘制自身 (子类覆写). engine 提供 draw_screen_rect / draw_text_quad 等."""
@@ -274,8 +295,12 @@ class UIManager:
         self.canvases = []
         # 2026-10-18 阶段2: 交互状态 (每帧由 dispatch_mouse 更新)
         self._hovered = None        # 当前鼠标悬停的元素
-        self._pressed_elem = None   # 当前被按下的元素
+        self._pressed_elem = None   # 当前被按下且消费了事件的元素
         self._dragging_elem = None  # 当前拖动中的元素 (滑条)
+        # 2026-10-18 事件系统: 记录"最后按下的元素"用于 pointer up 派发
+        # 与 _pressed_elem 的区别: _pressed_elem 只有 on_mouse_down 返回 True 才设,
+        # _last_pointer_down 无论是否消费都记录（用于通用 pointer 回调）
+        self._last_pointer_down = None
         # 2026-10-18 阶段3: 焦点管理 (契约 §6.4, 同一时刻最多一个)
         self._focused = None        # 当前持有键盘焦点的元素 (InputField 等)
 
@@ -412,11 +437,13 @@ class UIManager:
                     self._hovered.on_mouse_leave()
                 except Exception:
                     pass
+                self._hovered._emit_pointer('exit')
             if hovered is not None:
                 try:
                     hovered.on_mouse_enter()
                 except Exception:
                     pass
+                hovered._emit_pointer('enter')
             self._hovered = hovered
 
         consumed = False
@@ -444,6 +471,8 @@ class UIManager:
 
         # 3) 按下
         if left_down and hovered is not None:
+            hovered._emit_pointer('down', pos)
+            self._last_pointer_down = hovered
             try:
                 if hovered.on_mouse_down(pos):
                     self._pressed_elem = hovered
@@ -459,6 +488,8 @@ class UIManager:
                 if hasattr(self._dragging_elem, 'drag_to'):
                     self._dragging_elem.drag_to(pos, sr)
                     consumed = True
+                # 通用 pointer drag 回调（pos 已在 screen 坐标）
+                self._dragging_elem._emit_pointer('drag', pos)
             except Exception:
                 pass
         # 若当前 hover 的是 Slider 且已按下, 开始拖动
@@ -470,6 +501,11 @@ class UIManager:
 
         # 5) 松开
         if left_up:
+            # 通用 pointer up: 派发给"最后按下的元素"（不依赖 _pressed_elem，
+            # 因为基类 on_mouse_down 返回 False 时 _pressed_elem 未被设置）
+            if self._last_pointer_down is not None:
+                self._last_pointer_down._emit_pointer('up', pos)
+                self._last_pointer_down = None
             if self._pressed_elem is not None:
                 try:
                     if self._pressed_elem.on_mouse_up(pos):
@@ -477,8 +513,7 @@ class UIManager:
                 except Exception:
                     pass
                 self._pressed_elem._pressed = False
-                if self._dragging_elem is not None:
-                    self._dragging_elem._dragging = False
+                self._dragging_elem._dragging = False                     if self._dragging_elem is not None else None
                 self._pressed_elem = None
                 self._dragging_elem = None
 
@@ -544,11 +579,13 @@ class UIManager:
                     self._hovered.on_mouse_leave()
                 except Exception:
                     pass
+                self._hovered._emit_pointer('exit')
             if hovered is not None:
                 try:
                     hovered.on_mouse_enter()
                 except Exception:
                     pass
+                hovered._emit_pointer('enter')
             self._hovered = hovered
 
     def draw_all(self, engine):
