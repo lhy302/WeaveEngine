@@ -139,6 +139,28 @@ TOOLS_DEF = [
          'to_index': {'type': 'integer', 'description': '目标位置（同级列表中的索引，0 起）'},
          'canvas': {'type': 'integer', 'description': 'Canvas 序号（缺省=0）'},
      }, 'required': ['name', 'to_index']}},
+    # 2026-10-18 Raycast（物理 Culverin + 几何 AABB 兜底）
+    {'name': 'loom_raycast', 'description': '射线检测（最近命中）：从 (ox,oy,oz) 沿 (dx,dy,dz) 射向，返回 hit 或 null',
+     'inputSchema': {'type': 'object', 'properties': {
+         'ox': {'type': 'number'}, 'oy': {'type': 'number'}, 'oz': {'type': 'number'},
+         'dx': {'type': 'number'}, 'dy': {'type': 'number'}, 'dz': {'type': 'number'},
+         'max_dist': {'type': 'number', 'description': '最大距离，缺省 1000'},
+         'backend': {'type': 'string', 'description': 'auto|physics|geometry，缺省 auto'},
+     }, 'required': ['ox', 'oy', 'oz', 'dx', 'dy', 'dz']}},
+    {'name': 'loom_raycast_all', 'description': '射线检测（全部命中）：返回 hits 列表按距离升序',
+     'inputSchema': {'type': 'object', 'properties': {
+         'ox': {'type': 'number'}, 'oy': {'type': 'number'}, 'oz': {'type': 'number'},
+         'dx': {'type': 'number'}, 'dy': {'type': 'number'}, 'dz': {'type': 'number'},
+         'max_dist': {'type': 'number'},
+         'backend': {'type': 'string'},
+     }, 'required': ['ox', 'oy', 'oz', 'dx', 'dy', 'dz']}},
+    {'name': 'loom_raycast_screen', 'description': '屏幕坐标反投影射线（等价鼠标点选）',
+     'inputSchema': {'type': 'object', 'properties': {
+         'px': {'type': 'number', 'description': '屏幕 x 像素'},
+         'py': {'type': 'number', 'description': '屏幕 y 像素'},
+         'max_dist': {'type': 'number'},
+         'backend': {'type': 'string'},
+     }, 'required': ['px', 'py']}},
 ]
 
 RESOURCES_DEF = [
@@ -445,6 +467,14 @@ class LoomMCPServer:
 
         if name == 'loom_ui_move_child':
             return self._wrap(c.call('ui_move_child', dict(args)))
+
+        # ---- Raycast (2026-10-18) ----
+        if name == 'loom_raycast':
+            return self._wrap(c.call('raycast', dict(args)))
+        if name == 'loom_raycast_all':
+            return self._wrap(c.call('raycast_all', dict(args)))
+        if name == 'loom_raycast_screen':
+            return self._wrap(c.call('raycast_screen', dict(args)))
 
         # ---- 测试视口 ----
         if name == 'unity_playmode_toggle':
