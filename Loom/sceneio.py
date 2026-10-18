@@ -540,6 +540,14 @@ def _emit_ui_element(elem):
         base['value'] = float(elem.value)
         base['bg_color'] = list(elem.bg_color)
         base['fill_color'] = list(elem.fill_color)
+    elif elem.ctype == 'scroll_view':
+        base['content_size'] = list(elem.content_size)
+        base['scroll_pos'] = list(elem.scroll_pos)
+        base['bg_color'] = list(elem.bg_color)
+        base['bar_color'] = list(elem.bar_color)
+        base['bar_width'] = int(elem.bar_width)
+        base['show_bar'] = bool(elem.show_bar)
+        base['scroll_step'] = int(elem.scroll_step)
     base['children'] = [_emit_ui_element(c) for c in elem.children]
     return base
 
@@ -620,6 +628,16 @@ def _apply_ui_element(d):
                                    bg_color=tuple(d.get('bg_color') or (40, 44, 54, 255)),
                                    fill_color=tuple(d.get('fill_color') or (80, 220, 120, 255)),
                                    **kw)
+    elif typ == 'scroll_view':
+        elem = loom_ui.ScrollView(content_size=tuple(d.get('content_size') or (300, 800)),
+                                  bg_color=tuple(d.get('bg_color') or (30, 34, 44, 255)),
+                                  bar_color=tuple(d.get('bar_color') or (120, 130, 150, 255)),
+                                  bar_width=int(d.get('bar_width', 8)),
+                                  show_bar=bool(d.get('show_bar', True)),
+                                  scroll_step=int(d.get('scroll_step', 30)),
+                                  **kw)
+        if d.get('scroll_pos'):
+            elem.scroll_pos = tuple(d['scroll_pos'])
     else:
         print("[sceneio] 警告: 未知 UI 元素类型 %r, 跳过" % typ)
         return None
