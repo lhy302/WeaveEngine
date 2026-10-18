@@ -93,6 +93,39 @@ TOOLS_DEF = [
     {'name': 'loom_get_layer_tag', 'description': '查询 GameObject 的 Layer/Tag (对齐 Unity layer + tag)', 'inputSchema': {'type': 'object', 'properties': {'name': {'type': 'string', 'description': '物体名称 (缺省=当前选中)'}}}},
     {'name': 'loom_audio_3d_set', 'description': '设置音频 3D 参数 (对齐 Unity AudioSource 的 spatialBlend/minDistance/maxDistance/rolloffMode)', 'inputSchema': {'type': 'object', 'properties': {'name': {'type': 'string', 'description': '物体名称 (缺省=当前选中)'}, 'category': {'type': 'string', 'enum': ['music', 'sfx', 'voice'], 'description': '音频类别: music=强制2D(背景音乐), sfx/voice=走3D'}, 'min_distance': {'type': 'number', 'description': '最小距离 (内不再衰减)'}, 'max_distance': {'type': 'number', 'description': '最大距离 (外完全听不见)'}, 'rolloff': {'type': 'number', 'description': '衰减曲线强度'}}}},
     {'name': 'loom_audio_3d_get', 'description': '查询音频 3D 参数', 'inputSchema': {'type': 'object', 'properties': {'name': {'type': 'string', 'description': '物体名称 (缺省=当前选中)'}}}},
+    # 2026-10-18 阶段5: UI 编辑工具（与 EAI ui_* 命令对接）
+    {'name': 'loom_ui_list', 'description': '列出所有 UI Canvas 与元素树（CanvasUI 契约 §8）',
+     'inputSchema': {'type': 'object', 'properties': {
+         'canvas': {'type': 'integer', 'description': '指定 Canvas 序号（缺省=全部）'}}}},
+    {'name': 'loom_ui_add', 'description': '添加 UI 元素：11 种类型 (panel/text/image/button/slider/toggle/progress_bar/scroll_view/input_field/dropdown/grid_layout)',
+     'inputSchema': {'type': 'object', 'properties': {
+         'type': {'type': 'string', 'description': '元素类型'},
+         'name': {'type': 'string', 'description': '元素名（缺省自动生成 {type}_{n}）'},
+         'parent': {'type': 'string', 'description': '父元素名（缺省=Canvas root）'},
+         'canvas': {'type': 'integer', 'description': 'Canvas 序号（缺省=0）'},
+         'rect': {'type': 'array', 'description': '[x,y,w,h] 像素'},
+         'anchor': {'type': 'array', 'description': '[ax,ay] 锚点 0~1'},
+         'pivot': {'type': 'array', 'description': '[px,py] 轴心 0~1'},
+         'visible': {'type': 'boolean'},
+         'enabled': {'type': 'boolean'},
+         'z_order': {'type': 'integer'},
+     }, 'required': ['type']}},
+    {'name': 'loom_ui_set', 'description': '修改 UI 元素字段（含 type-specific 字段）',
+     'inputSchema': {'type': 'object', 'properties': {
+         'name': {'type': 'string', 'description': '元素名'},
+         'canvas': {'type': 'integer', 'description': 'Canvas 序号（缺省=0）'},
+     }, 'required': ['name']}},
+    {'name': 'loom_ui_remove', 'description': '删除 UI 元素',
+     'inputSchema': {'type': 'object', 'properties': {
+         'name': {'type': 'string', 'description': '元素名'},
+         'canvas': {'type': 'integer', 'description': 'Canvas 序号（缺省=0）'},
+     }, 'required': ['name']}},
+    {'name': 'loom_ui_canvas_add', 'description': '添加 UI Canvas',
+     'inputSchema': {'type': 'object', 'properties': {
+         'type': {'type': 'string', 'description': 'screen 或 world（缺省 screen）'},
+         'width': {'type': 'integer'}, 'height': {'type': 'integer'},
+         'z_order': {'type': 'integer'},
+     }}},
 ]
 
 RESOURCES_DEF = [
@@ -373,6 +406,26 @@ class LoomMCPServer:
             if args.get('name'):
                 payload['name'] = args['name']
             return self._wrap(c.call('get_layer_tag', payload))
+
+        # ---- UI 编辑 (2026-10-18 阶段5) ----
+        if name == 'loom_ui_list':
+            payload = {}
+            if 'canvas' in args:
+                payload['canvas'] = args['canvas']
+            return self._wrap(c.call('ui_list', payload))
+
+        if name == 'loom_ui_add':
+            # 直接透传 args（含 type / name / parent / canvas / rect 等）
+            return self._wrap(c.call('ui_add', dict(args)))
+
+        if name == 'loom_ui_set':
+            return self._wrap(c.call('ui_set', dict(args)))
+
+        if name == 'loom_ui_remove':
+            return self._wrap(c.call('ui_remove', dict(args)))
+
+        if name == 'loom_ui_canvas_add':
+            return self._wrap(c.call('ui_canvas_add', dict(args)))
 
         # ---- 测试视口 ----
         if name == 'unity_playmode_toggle':
