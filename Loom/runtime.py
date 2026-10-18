@@ -10,7 +10,7 @@ Loom.py / build_entry.py 的 --run <scene.json> 都从这里启动。
 """
 import json
 
-import pygame                     # 仅 set_caption (引擎已初始化 pygame)
+# 2026-10-18 A2: import pygame 已删（GLFW 窗口剥离；set_caption 改用 glfw）
 from engine import GLEngine, gc_play_enter, gc_play_exit, engine_gc_frozen
 import sceneio
 
@@ -24,7 +24,14 @@ class PlayerApp(GLEngine):
         for m in list(self.models):
             self.remove_model(m)                 # 清默认场景
         if title:
-            pygame.display.set_caption(title)    # 玩家窗口标题 = 游戏名
+            # 2026-10-18 A2: GLFW 窗口标题（原 pygame.display.set_caption）
+            try:
+                import glfw
+                win = getattr(self, '_glfw_win', None)
+                if win is not None:
+                    glfw.set_window_title(win, title)
+            except Exception:
+                pass
         cam_out = {}
         # M38: load_scene_data (明文 JSON 与 LOOMSC 混淆场景自动解密);
         # 2026-08-22: scene_data 为游戏包解包产物时直接使用 (场景不出明文).

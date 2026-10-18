@@ -21,7 +21,8 @@ from engine import (GLEngine, Point3D, LightState, CameraState, wrap_deg,
 from matlib import (mat4_perspective, mat4_rotation, mat4_scale,
                     mat4_translation, mat4_view_yaw_pitch, decompose_euler)
 from mesh import create_cube, create_plane, create_sphere, spec_to_mesh
-from gui import GUI
+# 2026-10-18 选项1: from gui import GUI 已删（EditorApp 零依赖 MinimalEditorView 兜底路径
+# 已随 pygame 窗口剥离一起删除；gui.py 本身保留供 tests 使用）。
 # 2026-08-28: 默认视图不再引用 ui.loom_gui (Qt 视图需 QApplication, 由入口
 # run_loom_gui 创建后显式注入); EditorApp 默认为零依赖 MinimalEditorView 兜底
 from undo import (UndoManager, StateCommand, AddObjectCommand,
@@ -1808,11 +1809,10 @@ class EditorApp(GLEngine):
             self.msg = ""
         # M32: 鼠标相对移动 (玩家控制器转向; 渲染帧实时采集 — Unity 同款:
         # 输入即时, 逻辑帧消费)
-        try:
-            if not self._external_ctx and pygame.display.get_init():
-                self.mouse_rel = pygame.mouse.get_rel()
-        except Exception:
-            self.mouse_rel = (0, 0)
+        # 2026-10-18 A2: EditorApp 只在 _external_ctx=True 下运行 (Qt 宿主),
+        # mouse_rel 由宿主 GLViewport 喂；此处不再需要 pygame.mouse.get_rel()。
+        # 保留 mouse_rel 上次值（不重置），防宿主喂流中断时突跳。
+        pass
         # 嵌入式模式 (Qt 宿主): 刷新脚本键快照 (pygame 路径在 _handle_events
         # 每帧刷; 外部模式事件由宿主喂, script_keys 此前恒空 = 玩家脚本
         # is_key/get_action 永远 False). 每渲染帧刷新, 与 pygame 同语义.
@@ -1920,7 +1920,8 @@ class EditorApp(GLEngine):
         if not getattr(self, '_preframing', False):
             self._framebuf_prefetch(getattr(self, '_frame_start', time.perf_counter()))
         if not self._external_ctx:      # 外部模式: 宿主 (QOpenGLWidget) 自动交换缓冲
-            pygame.display.flip()
+            # 2026-10-18 A2: GLFW swap（原 pygame.display.flip）
+            self._glfw_swap_buffers()
         self._prof_add('mt_render_tail', _t)
         self._prof_add('mt_render_total', _t_render)
 
@@ -1953,46 +1954,10 @@ class EditorApp(GLEngine):
         with self.ctx.scope(framebuffer=self._screen_fb(), enable_only=0):
             self.draw_lines(lines, [col] * len(lines))
 
-    # ================ 主循环 (覆写) ================
-    def run(self):
-        """嵌入式模式 (Qt 宿主) 由宿主驱动渲染, 不进入本循环."""
-        if self._external_ctx:
-            print("[editor] 嵌入式模式: 主循环由宿主 (Qt 视图) 驱动, 忽略 run()")
-            return
-        self._running = True
-        clock = pygame.time.Clock()
-        # 2026-08-19: 帧率上限从 设置.json 读 (原硬编码 120). tick(0)=无上限,
-        # 'auto' = 按设备检测 (guiloader.device_fps_limit).
-        try:
-            import guiloader
-            _fl = guiloader.load_settings('loom').get('fps_limit', '120')
-            if _fl == 'auto':
-                _fl = guiloader.device_fps_limit()
-            _tick = 0 if _fl == 'unlimited' else int(_fl)
-        except Exception:
-            _tick = 120
-        self.last_frame_time = time.time()
-        while self._running:
-            now = time.time()
-            delta_time = min(now - self.last_frame_time, 0.1)
-            self.last_frame_time = now
-            self._handle_events()
-            self._update_camera(delta_time)
-            self.render(delta_time)
-            clock.tick(_tick)   # 0 = 无上限; 档位见上方 guiloader 读取
-        self._stop_parallel()          # 多核优化: 停脚本线程/碰撞池
-        # 异步GUI: 释放视图持有的离屏 GUI FBO/纹理 (幂等; minimal 视图无 shutdown 也安全)
-        if getattr(self, 'view', None) is not None and hasattr(self.view, 'shutdown'):
-            try:
-                self.view.shutdown()
-            except Exception:
-                pass
-        # B2 (2026-08-30): 音频后端 shutdown (miniaudio 设备线程; 幂等, atexit 兜底)
-        try:
-            self.audio.shutdown()
-        except Exception:
-            pass
-        pygame.quit()
+    # ================ 主循环 ================
+    # 2026-10-18 选项1: EditorApp 不再覆写 run()。原 pygame 编辑器路径（--ui default/minimal）
+    # 已随 pygame 窗口剥离删除，Qt 编辑器由宿主 paintGL 驱动，从不进入基类 loom_render.run()。
+    # 若未来有人直接调 EditorApp().run()，走基类：因 _external_ctx=True 立即 return（行为一致）。
 
     def on_key_event(self, ev):
         """吞掉 GUI 输入框按键 + 旧引擎快捷键 (编辑器模式). 返回 True = 已消费."""

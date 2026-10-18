@@ -48,6 +48,8 @@ def _parse_args(argv):
             open_scene = argv[i + 1]
             i += 1
         elif a == '--ui' and i + 1 < len(argv):
+            # 2026-10-18 选项1: --ui 参数已无实际效果（旧 pygame 视图 --ui default/minimal
+            # 已删，编辑器只剩 Qt）。保留参数解析是为了老启动脚本不报错。
             ui = argv[i + 1]
             i += 1
         elif a == '--editor':
@@ -56,18 +58,8 @@ def _parse_args(argv):
     return benchmark, n_tri, n_iter, run_scene, open_scene, editor, ui
 
 
-def _make_editor_view(ui_name, base=None):
-    """按 --ui 选择编辑器视图实现 (IEditorView). 返回 None = 用默认 LoomGUI.
-    2026-08-14: 'default' 时读设置选 GUI (自定义 GUI 来自 GUI/ 文件夹, 重启后生效;
-    加载失败自动回退官方返回 None). 播放器 (PlayerApp) 运行时 UI 不分离, 不受影响.
-    2026-08-28: 默认官方 GUI = LoomGUI (ui/loom_gui.py, Qt 原生视图)."""
-    if ui_name == 'minimal':
-        from ui.minimal_editor_view import MinimalEditorView
-        return MinimalEditorView()
-    if ui_name in ('default', None, ''):
-        from guiloader import resolve_gui
-        return resolve_gui('loom', base=base)
-    return None
+# 2026-10-18 选项1: _make_editor_view 已删除（--ui default/minimal 旧 pygame 视图
+# 路径随 pygame 窗口剥离一并移除，只剩 Qt 编辑器）。
 
 
 def _benchmark_math(n_tri=5000, n_iter=100):
@@ -240,20 +232,15 @@ if __name__ == "__main__":
                     sys.exit(1)
                 from runtime import PlayerApp
                 engine = PlayerApp(_scene, 1280, 800)
-            elif ui == 'qt':
+            else:
                 # Qt 编辑器 (2026-08-17): 原生 Qt 控件全重写 —— pygame(SDL) 窗口
                 # 会进程级污染中文输入法(IME)候选框, 编辑器弃用 pygame 做窗口;
                 # QOpenGLWidget 承载 moderngl 视口 + Qt 原生面板 (见记忆
                 # sdl-window-contaminates-ime). 控制器命令层/GL 渲染管线复用.
+                # 2026-10-18 选项1: --ui default/minimal 旧 pygame 视图路径彻底删除.
                 from ui.loom_gui import run_loom_gui
                 run_loom_gui(scene_path=open_scene)
                 sys.exit(0)
-            else:
-                # --ui default / minimal: 走 guiloader (自定义 GUI 投放机制) 或
-                # 遗留 pygame 视图 (仅参考, 有 IME 污染)
-                from editor import EditorApp
-                engine = EditorApp(1280, 800, scene_path=open_scene,
-                                   view=_make_editor_view(ui))
     except Exception as e:
         print(f"[错误] 无法启动渲染引擎: {e}")
         sys.exit(1)

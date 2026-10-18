@@ -57,7 +57,7 @@ from loom_camera import CameraMixin   # 相机控制子系统 (轨道相机/键�
 from loom_render import RenderMixin   # 渲染管线子系统 (主 pass 帧准备/绘制/帧循环)
 from loom_model_gpu import ModelGpuMixin   # 模型/材质 GPU 资源子系统 (几何构建/桶/场景加载)
 from loom_lighting import LightingMixin   # 光源/光照上传/阴影 VP 子系统
-from loom_window import WindowMixin   # 窗口/事件子系统 (尺寸/全屏/事件循环/输入钩子)
+from loom_glfw_window import GlfwWindowMixin   # 2026-10-18: GLFW 窗口 (pygame 已剥离)
 from loom_transform import TransformMixin   # 变换层次子系统 (世界矩阵/父链/包围盒)
 from loom_profiler import ProfilerMixin   # 性能插桩子系统 (LOOM_PROFILE 阶段耗时)
 from loom_logic_thread import LogicThreadMixin   # 逻辑帧线程子系统 (异步逻辑线程启停/主循环)
@@ -159,7 +159,7 @@ def gc_play_exit():
 
 
 class GLEngine(ShadowMixin, FrameComponentMixin, PhysicsMixin, InputMixin, HudMixin, CameraMixin,
-               RenderMixin, ModelGpuMixin, LightingMixin, WindowMixin, TransformMixin,
+               RenderMixin, ModelGpuMixin, LightingMixin, GlfwWindowMixin, TransformMixin,
                ProfilerMixin, LogicThreadMixin):
     # 组2 (2026-08-30) _ancestry_ranges 结果缓存 (tin/tout, 类级):
     # key=(id(models 列表对象), _ANCESTRY_GEN 版本号); 五个结构变更点
@@ -242,29 +242,14 @@ class GLEngine(ShadowMixin, FrameComponentMixin, PhysicsMixin, InputMixin, HudMi
         self._external_ctx = ctx is not None
         self._desktop_override = None   # 测试钩子: 固定桌面分辨率
         if ctx is None:
-            pygame.init()
-            pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MAJOR_VERSION, 3)
-            pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MINOR_VERSION, 3)
-            pygame.display.gl_set_attribute(pygame.GL_CONTEXT_PROFILE_MASK,
-                                            pygame.GL_CONTEXT_PROFILE_CORE)
-            self.window = pygame.display.set_mode((width, height),
-                                                  pygame.OPENGL | pygame.DOUBLEBUF
-                                                  | pygame.RESIZABLE)
-            pygame.display.set_caption("Loom - OpenGL (moderngl) GPU 渲染")
-            # 窗口创建前的桌面分辨率 (Info() 在窗口存在后只返回当前窗口尺寸, 不可信;
-            # F11 假全屏要铺满屏幕, 用真桌面尺寸; 运行中桌面分辨率变化极少, 此快照够用)
-            _di = pygame.display.Info()
-            self._desktop_size = (_di.current_w, _di.current_h)
-            # 从控制台(.bat)启动时窗口可能抢不到键盘焦点 -> 强制置前
-            # (Windows 限制: SetForegroundWindow 只在进程允许时生效, 创建窗口后立即调用一般可行)
-            try:
-                import ctypes
-                hwnd = pygame.display.get_wm_info()['window']
-                ctypes.windll.user32.SetForegroundWindow(hwnd)
-            except Exception:
-                pass
-            # 关闭文本输入合成, 避免中文输入法(IME)吞掉字母/方向键的 KEYDOWN
-            pygame.key.stop_text_input()
+            # 2026-10-18 决策 A2：GLFW 窗口取代 pygame 窗口。原因：pygame(SDL) 窗口
+            # 会进程级污染系统输入法候选框（实测见
+            # docs/audit/pygame窗口IME污染实测报告_20261018.md：
+            # 候选框不弹 + 关窗后其他程序输入法失灵）。GLFW 不污染（实测确认），
+            # 且 Vulkan 后端 (vk_player.py) 已经是 GLFW，两条后端统一窗口技术栈。
+            self._init_glfw_window(width, height,
+                                   title="Loom - OpenGL (GLFW) GPU 渲染")
+            # GLFW make_context_current 已建好 GL 上下文，moderngl 直接复用
             self.ctx = moderngl.create_context()
         else:
             self.window = None                 # 外部模式: 无 pygame 窗口 (Qt 宿主管窗口)

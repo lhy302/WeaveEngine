@@ -200,9 +200,8 @@ def _bench_scene(scene_path, n_frames=300):
     靠文件收结果; 路径相对 exe/脚本工作目录)."""
     import time
     os.environ.setdefault('LOOM_PROFILE', '1')   # 逐阶段计时 (render 内插桩)
-    import pygame
-    pygame.init()
-    pygame.display.gl_set_attribute(pygame.GL_SWAP_CONTROL, 0)  # 关 vsync = 真 FPS
+    # 2026-10-18 A2: 删 pygame.init + gl_set_attribute（PlayerApp 已走 GLFW，
+    # vsync 由 _init_glfw_window 的 swap_interval(0) 关闭）
     import runtime
     eng = runtime.PlayerApp(scene_path, 1024, 768)
     eng.set_mouse_locked(False)                  # 探针不锁鼠标 (与 stress_probe 同)

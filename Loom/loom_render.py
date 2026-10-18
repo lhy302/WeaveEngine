@@ -28,7 +28,7 @@ import os
 import time
 
 import numpy as np
-import pygame
+# 2026-10-18 A2: import pygame 已删（GLFW 窗口剥离；本文件不再引用 pygame 常量）
 import moderngl
 
 from matlib import mat4_perspective, mat4_view_yaw_pitch
@@ -433,12 +433,9 @@ class RenderMixin:
         分离批3: 宿主若已调 advance_logic (编辑器 paintGL), 本帧不重复推进."""
         # 脚本 (M27): PlayerApp (--run 运行时) 每次渲染都跑脚本 —— 打包的游戏才会动.
         # 编辑器 (EditorApp) 覆写本方法, 只在播放模式调 update_scripts.
-        # M32: 鼠标相对移动 (玩家控制器转向用; 有窗口才读, 别消费 GUI 的绝对位置)
-        try:
-            if not self._external_ctx and pygame.display.get_init():
-                self.mouse_rel = pygame.mouse.get_rel()   # 外部模式由宿主喂 mouse_rel
-        except Exception:
-            self.mouse_rel = (0, 0)
+        # M32: 鼠标相对移动 (玩家控制器转向用).
+        # 2026-10-18 A2: GLFW 下 mouse_rel 由 _handle_events 的 _update_mouse_rel
+        # 维护（光标禁用模式用 cursor_pos 差值），外部模式（Qt 编辑器）由宿主喂。
         # TPS 缓冲: 帧首打点 (渲染帧尾预取预算=帧已消耗墙钟的基准)
         self._frame_start = time.perf_counter()
         # ★M3 插桩: 帧计数 + render() 总耗时 (paintgl_total 的对照项)
@@ -562,7 +559,7 @@ class RenderMixin:
         if not getattr(self, '_preframing', False):
             self._framebuf_prefetch(getattr(self, '_frame_start', time.perf_counter()))
         if not self._external_ctx:      # 外部模式: 宿主 (QOpenGLWidget) 自动交换缓冲
-            pygame.display.flip()
+            self._glfw_swap_buffers()   # 2026-10-18 A2: GLFW swap（原 pygame.display.flip）
         self._prof_add('mt_render_tail', _t)
         self._prof_add('mt_render_total', _t_render)
 
@@ -574,9 +571,12 @@ class RenderMixin:
             print("[engine] 嵌入式模式: 主循环由宿主驱动, 忽略 run()")
             return
         self._running = True
-        clock = pygame.time.Clock()
+        # 2026-10-18 A2: GLFW 下不用 pygame.time.Clock，改 perf_counter 手动限帧 120FPS。
+        # 语义与 clock.tick(120) 等价：算帧耗时 -> 不足 1/120 秒则 sleep 补足。
+        _frame_dur = 1.0 / 120.0
         self.last_frame_time = time.perf_counter()
         while self._running:
+            _frame_start = time.perf_counter()
             self._handle_events()
             now = time.perf_counter()   # 高精度单调钟 (与 Qt 宿主/相机 dt 同源)
             delta_time = min(now - self.last_frame_time, 0.1)  # 防窗口拖动时 dt 过大
@@ -584,7 +584,10 @@ class RenderMixin:
             self.move_camera(delta_time)
             self.rotate_camera(delta_time)
             self.render(delta_time)
-            clock.tick(120)   # 限帧 120 (受 vsync 影响, 通常 60)
+            # 限帧 120：算剩余时间 sleep（对齐 pygame.Clock.tick(120) 语义）
+            _elapsed = time.perf_counter() - _frame_start
+            if _elapsed < _frame_dur:
+                time.sleep(_frame_dur - _elapsed)
         self._stop_parallel()          # 多核优化: 停脚本线程/碰撞池
         # B2 (2026-08-30): 音频后端 shutdown —— miniaudio 设备线程不关会挂死进程
         # (pygame.mixer 无此问题, 但 shutdown 幂等对两种情况都安全)
@@ -592,5 +595,6 @@ class RenderMixin:
             self.audio.shutdown()
         except Exception:
             pass
-        pygame.quit()
+        # 2026-10-18 A2: GLFW terminate（原 pygame.quit）
+        self._glfw_shutdown()
 
