@@ -487,6 +487,118 @@ def _apply_materials(engine, mat_dicts):
 
 # ---------------- 场景 ----------------
 
+def _emit_ui_element(elem):
+    """UIElement -> dict (递归). 阶段1 支持 panel/text/image."""
+    base = {
+        'type': elem.ctype,
+        'name': elem.name,
+        'rect': list(elem.rect),
+        'anchor': list(elem.anchor),
+        'pivot': list(elem.pivot),
+        'visible': bool(elem.visible),
+        'enabled': bool(elem.enabled),
+        'z_order': int(elem.z_order),
+    }
+    if elem.ctype == 'panel':
+        base['bg_color'] = list(elem.bg_color)
+    elif elem.ctype == 'text':
+        base['text'] = elem.text
+        base['font_size'] = int(elem.font_size)
+        base['color'] = list(elem.color)
+        base['align'] = elem.align
+        base['wrap_width'] = int(elem.wrap_width)
+    elif elem.ctype == 'image':
+        base['texture_path'] = elem.texture_path
+        base['tint'] = list(elem.tint)
+        base['fit'] = elem.fit
+    base['children'] = [_emit_ui_element(c) for c in elem.children]
+    return base
+
+
+def _emit_ui(ui_manager):
+    """UIManager -> dict (契约 §8). 空/None -> 空 canvases."""
+    if ui_manager is None:
+        return {'canvases': []}
+    canvases = []
+    for c in ui_manager.canvases:
+        canvases.append({
+            'canvas_type': c.canvas_type,
+            'z_order': int(c.z_order),
+            'width': int(c.width),
+            'height': int(c.height),
+            'elements': [_emit_ui_element(c.root)],
+        })
+    return {'canvases': canvases}
+
+
+def _apply_ui_element(d):
+    """dict -> UIElement (按 type 分发). 未知类型返回 None + 警告."""
+    if not isinstance(d, dict):
+        return None
+    import loom_ui
+    typ = d.get('type', '')
+    kw = {
+        'name': d.get('name', 'element'),
+        'rect': tuple(d.get('rect') or (0, 0, 100, 30)),
+        'anchor': tuple(d.get('anchor') or (0, 0)),
+        'pivot': tuple(d.get('pivot') or (0, 0)),
+        'visible': bool(d.get('visible', True)),
+        'enabled': bool(d.get('enabled', True)),
+        'z_order': int(d.get('z_order', 0)),
+    }
+    if typ == 'element':
+        # Canvas.root 等纯容器 (无专属字段)
+        elem = loom_ui.UIElement(**kw)
+    elif typ == 'panel':
+        elem = loom_ui.Panel(bg_color=tuple(d.get('bg_color') or (0, 0, 0, 128)), **kw)
+    elif typ == 'text':
+        elem = loom_ui.Text(text=str(d.get('text', '')),
+                            font_size=int(d.get('font_size', 16)),
+                            color=tuple(d.get('color') or (255, 255, 255)),
+                            align=d.get('align', 'left'),
+                            wrap_width=int(d.get('wrap_width', 0)), **kw)
+    elif typ == 'image':
+        elem = loom_ui.Image(texture_path=str(d.get('texture_path', '')),
+                             tint=tuple(d.get('tint') or (255, 255, 255, 255)),
+                             fit=d.get('fit', 'stretch'), **kw)
+    else:
+        print("[sceneio] 警告: 未知 UI 元素类型 %r, 跳过" % typ)
+        return None
+    for cd in (d.get('children') or []):
+        ch = _apply_ui_element(cd)
+        if ch is not None:
+            elem.add_child(ch)
+    return elem
+
+
+def _apply_ui(engine, ui_data):
+    """dict -> engine.ui (清空重建). 缺/空 -> 保留一个空默认 Canvas."""
+    if not hasattr(engine, 'ui') or engine.ui is None:
+        return
+    import loom_ui
+    engine.ui.clear()
+    canvases = (ui_data or {}).get('canvases') or []
+    if not canvases:
+        # 无 ui 段: 留一个默认 screen Canvas (与引擎 __init__ 一致)
+        engine.ui.add_canvas(loom_ui.Canvas(
+            canvas_type='screen',
+            width=getattr(engine, 'width', 1280),
+            height=getattr(engine, 'height', 800)))
+        return
+    for cd in canvases:
+        canvas = loom_ui.Canvas(
+            canvas_type=cd.get('canvas_type', 'screen'),
+            width=int(cd.get('width', 1280)),
+            height=int(cd.get('height', 800)),
+            z_order=int(cd.get('z_order', 0)))
+        for ed in (cd.get('elements') or []):
+            root_el = _apply_ui_element(ed)
+            if root_el is not None:
+                # 第一层元素替换 root (而非作为 root 的子元素)
+                canvas.root = root_el
+        engine.ui.add_canvas(canvas)
+
+
 def scene_to_dict(engine, camera=None):
     """引擎场景 -> v7 dict. camera: {'target','distance','yaw','pitch'} 或 None"""
     objs = []
@@ -509,6 +621,7 @@ def scene_to_dict(engine, camera=None):
             "lights": [_emit_light(l) for l in engine.lights],
             "cameras": [_emit_camera(c) for c in engine.cameras],
             "active_camera": engine.active_camera,
+            "ui": _emit_ui(getattr(engine, 'ui', None)),   # 2026-10-18: Canvas UI
             "objects": objs}
 
 
@@ -518,6 +631,7 @@ def scene_from_dict(engine, data, camera_out=None):
     data = migrate(data)
     # 2026-08-30: 场景级重力加速度 (缺失=保留引擎当前值)
     engine.gravity = float(data.get('gravity', getattr(engine, 'gravity', -9.8)))
+    _apply_ui(engine, data.get('ui'))                # 2026-10-18: Canvas UI (清空重建)
     _apply_lights(engine, data.get('lights', []))   # M21: 场景光源 (清空重建)
     cam_links = _apply_cameras(engine, data.get('cameras', []))  # 场景摄像机 (清空重建)
     engine.active_camera = data.get('active_camera')  # 玩家视角摄像机
