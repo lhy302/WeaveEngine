@@ -534,6 +534,33 @@ class EditorApp(GLEngine):
                                   else camera_snapshot(t) if isinstance(t, CameraState)
                                   else undo_snapshot(t))
 
+    def _dispatch_ui_mouse(self):
+        """2026-10-18 阶段2 (决策3=B): UI 鼠标事件分发 + ui_consumed 标记.
+
+        UI 命中并消费的点击, 在 3D 拾取 (_update_gizmo) 与相机控制 (_update_camera)
+        中通过 self.ui_consumed 检查而跳过. 每帧开头调一次.
+        """
+        ui = getattr(self, 'ui', None)
+        if ui is None:
+            self.ui_consumed = False
+            return
+        # pressed/released 是「本帧新按下/松开」, 每帧事件处理后被清空
+        consumed = False
+        try:
+            consumed = ui.dispatch_mouse(
+                getattr(self, 'mouse_pos', (0, 0)),
+                set(getattr(self, 'pressed', ())),
+                set(getattr(self, 'released', ())))
+        except Exception:
+            consumed = False
+        # hover-only 更新 (按钮悬停效果, 无点击时)
+        if not consumed:
+            try:
+                ui.update_hover_only(getattr(self, 'mouse_pos', (0, 0)))
+            except Exception:
+                pass
+        self.ui_consumed = consumed
+
     def _update_gizmo(self):
         """视口交互: gizmo 拖拽 > 点选. GUI 未抢点击时处理."""
         # 拖拽中: 每帧重算 (左键松开即结束 -> 压撤销栈)
@@ -566,6 +593,8 @@ class EditorApp(GLEngine):
             return
         # 无拖拽: 只在左键按下帧处理 (Alt 按下时归相机轨道, 不点选)
         if 1 not in self.pressed or self.view.input_state()['click_captured']:
+            return
+        if getattr(self, 'ui_consumed', False):    # 2026-10-18: UI 命中则跳过 3D 拾取
             return
         if self._mods & pygame.KMOD_ALT:
             return
@@ -2021,14 +2050,25 @@ class EditorApp(GLEngine):
                 vp[1] <= pos[1] < vp[1] + vp[3])
 
     def _update_camera(self, delta_time=None):
+        # 2026-10-18: UI 鼠标事件分发 (在相机/3D 消费之前). 两条路径 (pygame 主循环
+        # 与 Qt loom_gui) 都走本方法, 所以这里是唯一的插入点.
         """轨道相机交互: 右键=转动视角(Unity 场景视图风格), Alt+左/中键=轨道,
         中键+Shift/Alt=平移 target, 滚轮=缩放.
         WASD/QE/方向键在输入框失焦时移动 target. 全部限视口内.
         M41: "用此相机预览"时禁用轨道操作 (视口固定在该摄像机视角).
         2026-08-19: 移动/转向全部按 delta_time 缩放 (帧率恒定) —— 原每帧固定
-        步长导致 30帧(2.4单位/秒) 与无上限 245帧(19.6单位/秒) 移速差 8 倍."""
+        步长导致 30帧(2.4单位/秒) 与无上限 245帧(19.6单位/秒) 移速差 8 倍.
+        2026-10-18: UI 鼠标分发置于本方法开头 (两条路径共用入口)."""
+        # 2026-10-18: UI 鼠标事件分发 (在相机/3D 消费之前). 两条路径 (pygame 主循环
+        # 与 Qt loom_gui) 都走本方法, 所以这里是唯一的插入点.
+        self._dispatch_ui_mouse()
         if self.preview_camera is not None:
             return
+        # UI 命中并消费鼠标 -> 跳过全部鼠标相机控制 (决策3=B, 键盘 WASD 不受影响)
+        # 2026-10-18 D1: UI 命中时只锁鼠标 (滚轮/拖拽), 键盘 WASD 不受影响.
+        _ui_lock = bool(getattr(self, 'ui_consumed', False))
+        if _ui_lock:
+            self._cam_prev_mouse = self.mouse_pos    # 保持 prev 同步, 防消费结束后突跳
         if delta_time is None:
             # ★2026-09-07 相机卡顿修复①: dt 时钟 time.time()->perf_counter。
             # time.time() 走系统定时器 (本机 1ms 粒度; 无 timeBeginPeriod 的机器
@@ -2061,18 +2101,19 @@ class EditorApp(GLEngine):
         # 滚轮缩放 (视口内): 往上推 = 放大/拉近, 往下滑 = 拉远 (2026-08-12 用户确认标准方向)
         # 2026-09-06 相机统一: 播放/编辑同一轨道几何 — 滚轮一律推拉
         # camera_distance (旧"播放态推拉相机本体"自由相机分支删除)。
-        if self.mouse_wheel and self._in_viewport(self.mouse_pos):
+        if (not _ui_lock and self.mouse_wheel
+                and self._in_viewport(self.mouse_pos)):
             self.camera_distance = max(0.5, min(200.0,
                 self.camera_distance * math.exp(-self.mouse_wheel * 0.1)))
 
         # 2026-08-12: 右键转视角 = 视口内按下即激活, 拖动过程(即使拖出视口)持续, 松开停
         # (Unity 风格: 大范围拖动更合理; 检查器/面板上右键仍走拖条数值输入)
-        if right and self._in_viewport(self.mouse_pos):
+        if not _ui_lock and right and self._in_viewport(self.mouse_pos):
             self._right_drag_view = True
-        if not right:
+        if not right or _ui_lock:
             self._right_drag_view = False
 
-        in_vp = self._in_viewport(self.mouse_pos)
+        in_vp = self._in_viewport(self.mouse_pos) and not _ui_lock
         if in_vp:
             # 平移 target: 中键 + (Shift/Alt)
             if mid and (shift or alt):
