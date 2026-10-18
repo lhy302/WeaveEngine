@@ -55,8 +55,11 @@ def snapshot(m):
          m.rigidbody.friction, m.rigidbody.restitution,
          m.rigidbody.rolling_friction),
         # M34: 音频源 (None 或 (clip, loop, volume)); 运行时 playing/_key 不序列化
+        # 2026-10-18 3D 音频: 追加 category/min/max/rolloff (旧 3 元快照 apply 时兼容)
         'audio_source': None if m.audio_source is None else
-        (m.audio_source.clip, m.audio_source.loop, m.audio_source.volume),
+        (m.audio_source.clip, m.audio_source.loop, m.audio_source.volume,
+         m.audio_source.category, m.audio_source.min_distance,
+         m.audio_source.max_distance, m.audio_source.rolloff),
         # M35: 动画 (None 或 (clips, current, loop)); 运行时 time/playing 不还原
         'animator': None if m.animator is None else
         (m.animator.clips, m.animator.current, m.animator.loop),
@@ -118,8 +121,15 @@ def apply_snapshot(m, snap):
         elif m.audio_source is None:
             m.add_audio_source(*snap['audio_source'])
         else:
-            m.audio_source.clip, m.audio_source.loop, m.audio_source.volume = \
-                snap['audio_source']
+            au = snap['audio_source']
+            m.audio_source.clip = au[0]
+            m.audio_source.loop = au[1]
+            m.audio_source.volume = au[2]
+            if len(au) >= 7:               # 2026-10-18: 3D 字段 (旧 3 元快照兼容)
+                m.audio_source.category = au[3]
+                m.audio_source.min_distance = au[4]
+                m.audio_source.max_distance = au[5]
+                m.audio_source.rolloff = au[6]
         # 2026-08-30: 运行态清零 (playing/_key 不入快照; 还原=停播)
         if m.audio_source is not None:
             m.audio_source.playing = False

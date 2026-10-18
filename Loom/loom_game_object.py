@@ -281,9 +281,16 @@ class GameObject:
                 self.components.remove(rb)
         return rb
 
-    def add_audio_source(self, clip=None, loop=False, volume=1.0):
-        """M34: 给物体加音频源组件 (返回 AudioSourceComponent). 播放状态由 playing 控制."""
-        a = AudioSourceComponent(clip=clip, loop=loop, volume=volume)
+    def add_audio_source(self, clip=None, loop=False, volume=1.0,
+                         category='sfx', min_distance=1.0,
+                         max_distance=500.0, rolloff=1.0):
+        """M34: 给物体加音频源组件 (返回 AudioSourceComponent). 播放状态由 playing 控制.
+        2026-10-18 3D 音频: category/min_distance/max_distance/rolloff 见组件契约."""
+        a = AudioSourceComponent(clip=clip, loop=loop, volume=volume,
+                                 category=category,
+                                 min_distance=min_distance,
+                                 max_distance=max_distance,
+                                 rolloff=rolloff)
         a.owner = self
         self.audio_source = a
         self.components.append(a)

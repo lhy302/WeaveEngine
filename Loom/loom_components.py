@@ -179,13 +179,81 @@ class AudioSourceComponent(Component):
     _key     运行时: 已播放的 (clip, playing) 标志 (不序列化, 播放状态变化才重播)"""
     ctype = 'audio'
 
-    def __init__(self, clip=None, loop=False, volume=1.0):
+    # 2026-10-18 3D 音频 (契约 3D音频系统契约_20261018.md):
+    #   category 决定空间化行为 —— music 强制 2D (背景音乐不该有距离感),
+    #   sfx/voice 走 3D (音源位置 + 距离衰减). 不存在独立 spatial 开关.
+    _CATEGORIES = ('music', 'sfx', 'voice')
+
+    def __init__(self, clip=None, loop=False, volume=1.0,
+                 category='sfx', min_distance=1.0, max_distance=500.0,
+                 rolloff=1.0):
         super().__init__()
         self.clip = clip
         self.loop = bool(loop)
         self.volume = float(volume)
+        # 3D 字段 (setter 做静默回退; EAI 层单独校验并返回 error)
+        self.category = category
+        self.min_distance = min_distance
+        self.max_distance = max_distance
+        self.rolloff = rolloff
         self.playing = False
         self._key = None
+
+    # ---- 3D 音频字段 (2026-10-18) ----
+    @property
+    def category(self):
+        return self._category
+
+    @category.setter
+    def category(self, v):
+        """非法值静默回退 'sfx' (契约 §10: 组件层回退, 场景加载/EAI 层另行警告/报错)."""
+        s = str(v).strip().lower() if v is not None else 'sfx'
+        self._category = s if s in self._CATEGORIES else 'sfx'
+
+    @property
+    def min_distance(self):
+        return self._min_distance
+
+    @min_distance.setter
+    def min_distance(self, v):
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            f = 1.0
+        self._min_distance = f if f > 0 else 1.0
+
+    @property
+    def max_distance(self):
+        return self._max_distance
+
+    @max_distance.setter
+    def max_distance(self, v):
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            f = 500.0
+        if f <= 0:
+            f = 500.0
+        lo = getattr(self, '_min_distance', 1.0)
+        if f <= lo:                       # 必须严格大于 min_distance
+            f = lo * 2.0
+        self._max_distance = f
+
+    @property
+    def rolloff(self):
+        return self._rolloff
+
+    @rolloff.setter
+    def rolloff(self, v):
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            f = 1.0
+        self._rolloff = f if f > 0 else 1.0
+
+    def is_spatial(self):
+        """是否走 3D 空间化 (契约 §2.2 唯一判定入口)."""
+        return self._category in ('sfx', 'voice')
 
 
 class AnimationClip:
