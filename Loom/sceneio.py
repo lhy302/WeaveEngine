@@ -511,6 +511,35 @@ def _emit_ui_element(elem):
         base['texture_path'] = elem.texture_path
         base['tint'] = list(elem.tint)
         base['fit'] = elem.fit
+    elif elem.ctype == 'button':
+        base['text'] = elem.text
+        base['font_size'] = int(elem.font_size)
+        base['text_color'] = list(elem.text_color)
+        base['normal_color'] = list(elem.normal_color)
+        base['hover_color'] = list(elem.hover_color)
+        base['pressed_color'] = list(elem.pressed_color)
+        # on_click 不序列化 (运行时由脚本挂载, 契约 §8)
+    elif elem.ctype == 'slider':
+        base['min_value'] = float(elem.min_value)
+        base['max_value'] = float(elem.max_value)
+        base['value'] = float(elem.value)
+        base['direction'] = elem.direction
+        base['track_color'] = list(elem.track_color)
+        base['fill_color'] = list(elem.fill_color)
+        base['handle_color'] = list(elem.handle_color)
+        # on_change 不序列化
+    elif elem.ctype == 'toggle':
+        base['is_on'] = bool(elem.is_on)
+        base['label'] = elem.label
+        base['label_size'] = int(elem.label_size)
+        base['box_color'] = list(elem.box_color)
+        base['check_color'] = list(elem.check_color)
+        base['label_color'] = list(elem.label_color)
+        # on_change 不序列化
+    elif elem.ctype == 'progress_bar':
+        base['value'] = float(elem.value)
+        base['bg_color'] = list(elem.bg_color)
+        base['fill_color'] = list(elem.fill_color)
     base['children'] = [_emit_ui_element(c) for c in elem.children]
     return base
 
@@ -561,6 +590,36 @@ def _apply_ui_element(d):
         elem = loom_ui.Image(texture_path=str(d.get('texture_path', '')),
                              tint=tuple(d.get('tint') or (255, 255, 255, 255)),
                              fit=d.get('fit', 'stretch'), **kw)
+    elif typ == 'button':
+        elem = loom_ui.Button(text=str(d.get('text', '')),
+                              font_size=int(d.get('font_size', 16)),
+                              text_color=tuple(d.get('text_color') or (255, 255, 255)),
+                              normal_color=tuple(d.get('normal_color') or (70, 80, 100, 255)),
+                              hover_color=tuple(d.get('hover_color') or (90, 100, 125, 255)),
+                              pressed_color=tuple(d.get('pressed_color') or (50, 60, 80, 255)),
+                              **kw)
+    elif typ == 'slider':
+        elem = loom_ui.Slider(min_value=float(d.get('min_value', 0.0)),
+                              max_value=float(d.get('max_value', 1.0)),
+                              value=float(d.get('value', 0.0)),
+                              direction=d.get('direction', 'h'),
+                              track_color=tuple(d.get('track_color') or (50, 55, 70, 255)),
+                              fill_color=tuple(d.get('fill_color') or (80, 140, 220, 255)),
+                              handle_color=tuple(d.get('handle_color') or (220, 225, 235, 255)),
+                              **kw)
+    elif typ == 'toggle':
+        elem = loom_ui.Toggle(is_on=bool(d.get('is_on', False)),
+                              label=str(d.get('label', '')),
+                              label_size=int(d.get('label_size', 16)),
+                              box_color=tuple(d.get('box_color') or (70, 80, 100, 255)),
+                              check_color=tuple(d.get('check_color') or (80, 200, 120, 255)),
+                              label_color=tuple(d.get('label_color') or (230, 230, 230)),
+                              **kw)
+    elif typ == 'progress_bar':
+        elem = loom_ui.ProgressBar(value=float(d.get('value', 0.0)),
+                                   bg_color=tuple(d.get('bg_color') or (40, 44, 54, 255)),
+                                   fill_color=tuple(d.get('fill_color') or (80, 220, 120, 255)),
+                                   **kw)
     else:
         print("[sceneio] 警告: 未知 UI 元素类型 %r, 跳过" % typ)
         return None
