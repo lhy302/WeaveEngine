@@ -2106,6 +2106,43 @@ class LoomGUI(QMainWindow):
                                 ("移除", lambda: e.remove_audio_source(m))])
             self._spin(lay, "音量", au.volume, 0, 1, 'au.vol',
                        lambda v: setattr(au, 'volume', v), step=0.05)
+            # 2026-10-18 3D 音频 (契约 §9): 类别决定空间化, music 强制 2D
+            cat_combo = QComboBox()
+            for _label, _val in (("音效", "sfx"), ("背景音乐", "music"), ("人声", "voice")):
+                cat_combo.addItem(_label, _val)
+            _ci = cat_combo.findData(au.category)
+            cat_combo.setCurrentIndex(max(0, _ci))
+
+            def _on_cat(_i, _c=cat_combo, _a=au, _m=m):
+                _v = _c.itemData(_i)
+                if not _v or _v == _a.category:
+                    return
+                e.commit_model(_m, "设置音频类别",
+                               lambda: setattr(_a, 'category', _v))
+                self._refresh_all()
+
+            cat_combo.currentIndexChanged.connect(_on_cat)
+            lay.addRow("类别", cat_combo)
+            if au.is_spatial():
+                def _mk_set(attr):
+                    def _set(v):
+                        if attr == 'min_distance' and v >= au.max_distance:
+                            e._notify("最小距离必须小于最大距离", (220, 80, 80))
+                            self._refresh_all()
+                            return
+                        if attr == 'max_distance' and v <= au.min_distance:
+                            e._notify("最大距离必须大于最小距离", (220, 80, 80))
+                            self._refresh_all()
+                            return
+                        setattr(au, attr, v)
+                    return _set
+
+                self._spin(lay, "最小距离", au.min_distance, 0.01, 10000, 'au.min',
+                           _mk_set('min_distance'), step=0.1)
+                self._spin(lay, "最大距离", au.max_distance, 0.01, 10000, 'au.max',
+                           _mk_set('max_distance'), step=1.0)
+                self._spin(lay, "衰减强度", au.rolloff, 0.01, 10, 'au.roll',
+                           _mk_set('rolloff'), step=0.1)
         else:
             self._btn_row(lay, [("＋加音频源", lambda: e.add_audio_source(m))])
         # 动画
