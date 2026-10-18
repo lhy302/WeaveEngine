@@ -25,6 +25,19 @@ import moderngl
 import numpy as np
 import pygame
 
+from loom_font import FontChain
+
+
+# 模块级单例: 字符->字体映射缓存进程内共享 (契约 §2.5.2)
+_FONT_CHAIN = None
+
+
+def _get_font_chain():
+    global _FONT_CHAIN
+    if _FONT_CHAIN is None:
+        _FONT_CHAIN = FontChain()
+    return _FONT_CHAIN
+
 
 class HudMixin:
 
@@ -82,14 +95,15 @@ class HudMixin:
         return f
 
     def _render_text(self, text, color, size=None):
-        """文本渲染 -> Surface. 单字体 (雅黑) 直渲染, 无逐字符回退.
-        (2026-08-15: 删除 M40 字体回退 —— 每字符 freetype get_metrics 判定是 CPU 瞬时负载
-        源; GUI 符号已全换成雅黑含的字形, 免回退也正常显示.)"""
-        return self._get_font(size).render(text, True, color)
+        """文本渲染 -> Surface. 2026-10-18: 走 FontChain 多字体回退
+        (契约 CanvasUI系统契约_20261018.md §2.5), 支持 UTF-8 全字符集
+        (中文/emoji/符号/日文/韩文). 字符->字体映射缓存, 第二次起零 freetype 调用."""
+        return _get_font_chain().render(text, color, size or 16)
 
     def _measure_text(self, text, size=None):
-        """文本尺寸 (供居中/裁剪)"""
-        return self._get_font(size).size(text)
+        """文本尺寸 (供居中/裁剪). 2026-10-18: 与 _render_text 同源走 FontChain,
+        保证测量宽度与实际渲染宽度一致 (混排 emoji 场景下尤其重要)."""
+        return _get_font_chain().measure(text, size or 16)
 
     def draw_text_quad(self, text, x, y, color=(255, 255, 255), size=None):
         """
