@@ -60,6 +60,8 @@ class AudioBackend:
         self._mgr = None           # AudioManager 实例
         self._handles = {}         # (path, owner) -> {'kind','obj'} (ga 句柄/pygame Sound)
         self._py_sounds = {}       # path -> pygame.mixer.Sound (pygame 后端/回退共享)
+        # 2026-10-18 3D 音频: pygame 后端不支持 3D, 只警告一次 (防每帧刷屏)
+        self._spatial_warned = False
         atexit.register(self.shutdown)   # 兜底: 进程退出前关设备线程
 
     # ---------------- 初始化 / 后端选择 ----------------
@@ -163,6 +165,63 @@ class AudioBackend:
                 self._mgr.stop_sound(ent['obj'])
             else:
                 ent['obj'].stop()
+        except Exception:
+            pass
+
+    # ---------------- 3D 空间音频 (2026-10-18, 契约 §4) ----------------
+    def set_listener(self, position, direction, up):
+        """同步监听器位置/朝向/上方向 (契约 §3). pygame 后端无此能力 -> 静默 no-op."""
+        if not self._ensure() or self._mode != 'game_audio':
+            return
+        try:
+            V = self._ga.Vec3
+            self._mgr.set_listener_position(V(*[float(x) for x in position]))
+            self._mgr.set_listener_direction(V(*[float(x) for x in direction]))
+            self._mgr.set_listener_up(V(*[float(x) for x in up]))
+        except Exception:
+            pass
+
+    def play_spatial(self, path, position, loop=False, volume=1.0,
+                     min_distance=1.0, max_distance=500.0, rolloff=1.0,
+                     owner=None):
+        """3D 播放: 设位置 + 开空间化 + 距离参数 + 播放 (契约 §4.1).
+        pygame 后端无 3D 能力 -> 警告一次 + 按 2D 播放 (D2 决策)."""
+        ent = self.load(path, owner)
+        if ent is None:
+            return None
+        v = max(0.0, min(1.0, float(volume)))
+        try:
+            if ent['kind'] == 'ga':
+                h = ent['obj']
+                V = self._ga.Vec3
+                self._mgr.set_sound_position(h, V(*[float(x) for x in position]))
+                self._mgr.set_sound_spatialization_enabled(h, True)
+                self._mgr.set_sound_min_distance(h, float(min_distance))
+                self._mgr.set_sound_max_distance(h, float(max_distance))
+                self._mgr.set_sound_rolloff(h, float(rolloff))
+                self._mgr.set_sound_looping(h, bool(loop))
+                self._mgr.set_sound_volume(h, v)
+                self._mgr.play_sound(h)
+            else:
+                if not self._spatial_warned:
+                    self._spatial_warned = True
+                    print("[audio] 警告: 当前音频后端 (pygame) 不支持 3D 音效, "
+                          "已按 2D 播放")
+                ent['obj'].set_volume(v)
+                ent['obj'].play(loops=-1 if loop else 0)
+        except Exception:
+            return None
+        return None
+
+    def update_sound_position(self, path, position, owner=None):
+        """更新已播放音源的世界位置 (物体移动时每帧调; 契约 §4.1).
+        pygame 后端/未加载/句柄无效 -> 静默跳过."""
+        ent = self._handles.get((path, owner))
+        if ent is None or ent['kind'] != 'ga':
+            return
+        try:
+            self._mgr.set_sound_position(
+                ent['obj'], self._ga.Vec3(*[float(x) for x in position]))
         except Exception:
             pass
 
