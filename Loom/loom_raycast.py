@@ -91,22 +91,35 @@ class RaycastMixin:
 
     # ---------- 内部: 物理 raycast ----------
     def _raycast_phys(self, origin, direction, max_dist, ignore_handle=0):
-        """返回 (handle, distance, hit_point_tuple) 或 None."""
+        """返回 (handle, distance, hit_point_tuple) 或 None.
+
+        ★重要（2026-10-18 探针确认）：Culverin 的 raycast 返回的 distance 是
+        **max_dist 的比例值**（0~1），不是世界单位距离。
+          真实距离 = ratio_returned * max_dist
+        必须乘回去，否则拿到的距离永远是 0~1 之间的小数（错误）。
+        """
         bridge = getattr(self, '_phys_bridge', None)
         if bridge is None or getattr(bridge, '_w', None) is None:
             return None
         try:
             o = (float(origin[0]), float(origin[1]), float(origin[2]))
             d = (float(direction[0]), float(direction[1]), float(direction[2]))
-            r = bridge._w.raycast(o, d, float(max_dist), int(ignore_handle))
+            md = float(max_dist)
+            r = bridge._w.raycast(o, d, md, int(ignore_handle))
             if r is None:
                 return None
-            handle, dist, normal = r
-            # hit_point = origin + dir * distance
-            hp = (o[0] + d[0] * dist,
-                  o[1] + d[1] * dist,
-                  o[2] + d[2] * dist)
-            return (int(handle), float(dist), hp)
+            handle, ratio, normal = r
+            # 归一化方向（hit_point 用单位方向 * 真实距离）
+            ln = math.sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2])
+            if ln < 1e-12:
+                return None
+            dn = (d[0] / ln, d[1] / ln, d[2] / ln)
+            # ★ Culverin 返回 ratio 需乘 max_dist 才是真实距离
+            real_dist = float(ratio) * md
+            hp = (o[0] + dn[0] * real_dist,
+                  o[1] + dn[1] * real_dist,
+                  o[2] + dn[2] * real_dist)
+            return (int(handle), real_dist, hp)
         except Exception:
             return None
 
