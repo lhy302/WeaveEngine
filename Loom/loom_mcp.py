@@ -126,6 +126,19 @@ TOOLS_DEF = [
          'width': {'type': 'integer'}, 'height': {'type': 'integer'},
          'z_order': {'type': 'integer'},
      }}},
+    {'name': 'loom_ui_reparent', 'description': '移动 UI 元素到另一个父元素（检查循环依赖）',
+     'inputSchema': {'type': 'object', 'properties': {
+         'name': {'type': 'string', 'description': '元素名'},
+         'new_parent': {'type': 'string', 'description': '新父元素名（缺省=Canvas root）'},
+         'canvas': {'type': 'integer', 'description': 'Canvas 序号（缺省=0）'},
+         'index': {'type': 'integer', 'description': '在新父元素下的插入位置（缺省=末尾）'},
+     }, 'required': ['name']}},
+    {'name': 'loom_ui_move_child', 'description': '同一父元素内调整 UI 元素顺序',
+     'inputSchema': {'type': 'object', 'properties': {
+         'name': {'type': 'string', 'description': '元素名'},
+         'to_index': {'type': 'integer', 'description': '目标位置（同级列表中的索引，0 起）'},
+         'canvas': {'type': 'integer', 'description': 'Canvas 序号（缺省=0）'},
+     }, 'required': ['name', 'to_index']}},
 ]
 
 RESOURCES_DEF = [
@@ -426,6 +439,12 @@ class LoomMCPServer:
 
         if name == 'loom_ui_canvas_add':
             return self._wrap(c.call('ui_canvas_add', dict(args)))
+
+        if name == 'loom_ui_reparent':
+            return self._wrap(c.call('ui_reparent', dict(args)))
+
+        if name == 'loom_ui_move_child':
+            return self._wrap(c.call('ui_move_child', dict(args)))
 
         # ---- 测试视口 ----
         if name == 'unity_playmode_toggle':
