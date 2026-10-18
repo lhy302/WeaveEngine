@@ -37,6 +37,10 @@ class UIElement:
         self.z_order = int(z_order)
         self.parent = None
         self.children = []
+        # 2026-10-18 阶段2: 交互状态 (每帧由 UIManager 分发器更新, 不序列化)
+        self._hover = False
+        self._pressed = False       # 本元素当前被按下 (按钮/滑条/勾选)
+        self._dragging = False      # 本元素正在被拖动 (滑条)
 
     # ---- 字段校验 (钳制到合法范围) ----
     @property
@@ -190,7 +194,28 @@ class UIElement:
             return None
         return self
 
-    # ---- 渲染接口 (阶段1第4步实现具体绘制, 当前空实现) ----
+    # ---- 事件接口 (阶段2, 子类覆写) ----
+    def on_mouse_enter(self):
+        """鼠标进入 (hover 开始). 子类可覆写."""
+        pass
+
+    def on_mouse_leave(self):
+        """鼠标离开. 子类可覆写."""
+        pass
+
+    def on_mouse_down(self, pos):
+        """鼠标左键在本元素上按下. 返回 True = 已消费该事件 (阻止穿透)."""
+        return False
+
+    def on_mouse_up(self, pos):
+        """鼠标左键松开 (不保证在本元素内). 返回 True = 已消费该事件."""
+        return False
+
+    def on_mouse_drag(self, pos):
+        """按住时鼠标移动 (仅 _dragging=True 的滑条等). 返回 True = 已消费."""
+        return False
+
+    # ---- 渲染接口 ----
     def draw(self, engine, screen_rect):
         """绘制自身 (子类覆写). engine 提供 draw_screen_rect / draw_text_quad 等."""
         pass
@@ -231,6 +256,10 @@ class UIManager:
 
     def __init__(self):
         self.canvases = []
+        # 2026-10-18 阶段2: 交互状态 (每帧由 dispatch_mouse 更新)
+        self._hovered = None        # 当前鼠标悬停的元素
+        self._pressed_elem = None   # 当前被按下的元素
+        self._dragging_elem = None  # 当前拖动中的元素 (滑条)
 
     def add_canvas(self, canvas):
         if canvas not in self.canvases:
@@ -271,6 +300,112 @@ class UIManager:
             if hit is not None:
                 return c, hit
         return None, None
+
+
+    # ---- 鼠标事件分发 (阶段2) ----
+    def dispatch_mouse(self, pos, pressed, released):
+        """每帧分发鼠标事件到 UI 树. 返回 True = 本帧点击被 UI 消费.
+
+        pressed / released 是「本帧新按下/松开」的键码集合 (engine 语义).
+        只处理左键 (键码 1). 见契约 §6.
+        """
+        left_down = 1 in pressed
+        left_up = 1 in released
+
+        # 1) 命中测试 (只测 screen Canvas, 从最上层 Canvas 开始)
+        hovered = None
+        hit_canvas = None
+        for c in reversed(self.canvases):
+            if c.canvas_type != 'screen':
+                continue
+            hit = c.root.hit_test(pos, (0.0, 0.0,
+                                        float(c.width), float(c.height)))
+            if hit is not None:
+                hovered = hit
+                hit_canvas = c
+                break
+
+        # 2) hover 变化通知
+        if hovered is not self._hovered:
+            if self._hovered is not None:
+                try:
+                    self._hovered.on_mouse_leave()
+                except Exception:
+                    pass
+            if hovered is not None:
+                try:
+                    hovered.on_mouse_enter()
+                except Exception:
+                    pass
+            self._hovered = hovered
+
+        consumed = False
+
+        # 3) 按下
+        if left_down and hovered is not None:
+            try:
+                if hovered.on_mouse_down(pos):
+                    self._pressed_elem = hovered
+                    consumed = True
+            except Exception:
+                pass
+
+        # 4) 拖动 (滑条等)
+        if self._dragging_elem is not None and hit_canvas is not None:
+            try:
+                sr = self._dragging_elem.screen_rect(
+                    (0.0, 0.0, float(hit_canvas.width), float(hit_canvas.height)))
+                if hasattr(self._dragging_elem, 'drag_to'):
+                    self._dragging_elem.drag_to(pos, sr)
+                    consumed = True
+            except Exception:
+                pass
+        # 若当前 hover 的是 Slider 且已按下, 开始拖动
+        if (self._pressed_elem is not None
+                and self._pressed_elem.ctype == 'slider'
+                and self._dragging_elem is None):
+            self._pressed_elem._dragging = True
+            self._dragging_elem = self._pressed_elem
+
+        # 5) 松开
+        if left_up:
+            if self._pressed_elem is not None:
+                try:
+                    if self._pressed_elem.on_mouse_up(pos):
+                        consumed = True
+                except Exception:
+                    pass
+                self._pressed_elem._pressed = False
+                if self._dragging_elem is not None:
+                    self._dragging_elem._dragging = False
+                self._pressed_elem = None
+                self._dragging_elem = None
+
+        return consumed
+
+    def update_hover_only(self, pos):
+        """仅更新 hover 状态 (无点击时每帧调, 用于按钮悬停效果)."""
+        hovered = None
+        for c in reversed(self.canvases):
+            if c.canvas_type != 'screen':
+                continue
+            hit = c.root.hit_test(pos, (0.0, 0.0,
+                                        float(c.width), float(c.height)))
+            if hit is not None:
+                hovered = hit
+                break
+        if hovered is not self._hovered:
+            if self._hovered is not None:
+                try:
+                    self._hovered.on_mouse_leave()
+                except Exception:
+                    pass
+            if hovered is not None:
+                try:
+                    hovered.on_mouse_enter()
+                except Exception:
+                    pass
+            self._hovered = hovered
 
     def draw_all(self, engine):
         """渲染所有 screen Canvas 的元素树 (渲染层末尾调用). 父先于子."""
@@ -432,5 +567,267 @@ class Image(UIElement):
             engine.draw_screen_rect(screen_rect, (80, 80, 80, 255))
             return
         engine.draw_texture_quad(self._tex, self._fit_rect(screen_rect), self.tint)
+
+
+# =================== 阶段2 元素: Button / Slider / Toggle / ProgressBar ===================
+
+class Button(UIElement):
+    """按钮 (契约 §3.3). 按下+松开在同一元素内才触发 on_click (用户决策 1=B)."""
+
+    ctype = 'button'
+
+    def __init__(self, name='button', rect=(0, 0, 120, 36), text='',
+                 font_size=16, text_color=(255, 255, 255),
+                 normal_color=(70, 80, 100, 255),
+                 hover_color=(90, 100, 125, 255),
+                 pressed_color=(50, 60, 80, 255),
+                 on_click=None, **kw):
+        super().__init__(name=name, rect=rect, **kw)
+        self.text = str(text)
+        self.font_size = int(font_size)
+        self.text_color = tuple(text_color)
+        self.normal_color = tuple(normal_color)
+        self.hover_color = tuple(hover_color)
+        self.pressed_color = tuple(pressed_color)
+        self.on_click = on_click
+
+    def on_mouse_enter(self):
+        self._hover = True
+
+    def on_mouse_leave(self):
+        self._hover = False
+        # 鼠标移出时清按下态 (移出再移回不触发)
+        self._pressed = False
+
+    def on_mouse_down(self, pos):
+        if not self.enabled:
+            return False
+        self._pressed = True
+        return True
+
+    def on_mouse_up(self, pos):
+        if not self.enabled:
+            return False
+        was_pressed = self._pressed
+        self._pressed = False
+        if was_pressed and self.on_click is not None:
+            try:
+                self.on_click()
+            except Exception:
+                pass
+            return True
+        return was_pressed
+
+    def draw(self, engine, screen_rect):
+        if self._pressed and self._hover:
+            bg = self.pressed_color
+        elif self._hover:
+            bg = self.hover_color
+        else:
+            bg = self.normal_color
+        engine.draw_screen_rect(screen_rect, bg)
+        if self.text:
+            lw = engine._measure_text(self.text, self.font_size)[0]
+            lh = engine._measure_text('Mg', self.font_size)[1] or self.font_size
+            x, y, w, h = screen_rect
+            tx = int(x + (w - lw) / 2)
+            ty = int(y + (h - lh) / 2)
+            engine.draw_text_quad(self.text, tx, ty, self.text_color, self.font_size)
+
+
+class Slider(UIElement):
+    """滑条 (契约 §3.3). 拖拽锁定 + 边界钳制 (用户决策 2=C)."""
+
+    ctype = 'slider'
+
+    def __init__(self, name='slider', rect=(0, 0, 200, 24),
+                 min_value=0.0, max_value=1.0, value=0.0,
+                 direction='h',
+                 track_color=(50, 55, 70, 255),
+                 fill_color=(80, 140, 220, 255),
+                 handle_color=(220, 225, 235, 255),
+                 on_change=None, **kw):
+        super().__init__(name=name, rect=rect, **kw)
+        self.min_value = float(min_value)
+        self.max_value = float(max_value)
+        self.direction = 'v' if direction == 'v' else 'h'
+        self._value = self._clamp(float(value))
+        self.track_color = tuple(track_color)
+        self.fill_color = tuple(fill_color)
+        self.handle_color = tuple(handle_color)
+        self.on_change = on_change
+
+    def _clamp(self, v):
+        return max(self.min_value, min(self.max_value, v))
+
+    @property
+    def value(self):
+        return self._value
+
+    @value.setter
+    def value(self, v):
+        self._set_value(float(v), notify=False)
+
+    def _set_value(self, v, notify=True):
+        v = self._clamp(v)
+        changed = (v != self._value)
+        self._value = v
+        if changed and notify and self.on_change is not None:
+            try:
+                self.on_change(v)
+            except Exception:
+                pass
+
+    def _ratio(self):
+        span = self.max_value - self.min_value
+        return (self._value - self.min_value) / span if span > 0 else 0.0
+
+    def _pos_to_value(self, pos, screen_rect):
+        x, y, w, h = screen_rect
+        if self.direction == 'h':
+            t = (pos[0] - x) / w if w > 0 else 0.0
+        else:
+            t = (y + h - pos[1]) / h if h > 0 else 0.0
+        t = max(0.0, min(1.0, t))
+        return self.min_value + t * (self.max_value - self.min_value)
+
+    def on_mouse_enter(self):
+        self._hover = True
+
+    def on_mouse_leave(self):
+        self._hover = False
+
+    def on_mouse_down(self, pos):
+        if not self.enabled:
+            return False
+        self._pressed = True
+        self._dragging = True
+        return True
+
+    def on_mouse_up(self, pos):
+        self._pressed = False
+        self._dragging = False
+        return False
+
+    def on_mouse_drag(self, pos):
+        # 阶段2 UIElement 签名是 on_mouse_drag(pos), 但滑条需 screen_rect 才能算值,
+        # 由 UIManager 分发时额外传 screen_rect (见 UIManager.dispatch_mouse).
+        return True
+
+    def drag_to(self, pos, screen_rect):
+        """UIManager 分发时调用: 用鼠标位置更新值 (边界钳制)."""
+        if not self._dragging:
+            return
+        v = self._pos_to_value(pos, screen_rect)
+        self._set_value(v, notify=True)
+
+    def draw(self, engine, screen_rect):
+        x, y, w, h = screen_rect
+        engine.draw_screen_rect(screen_rect, self.track_color)
+        ratio = self._ratio()
+        if self.direction == 'h':
+            fw = int(w * ratio)
+            if fw > 0:
+                engine.draw_screen_rect((x, y, fw, h), self.fill_color)
+            hx = int(x + w * ratio) - 4
+            engine.draw_screen_rect((hx, y - 2, 8, h + 4), self.handle_color)
+        else:
+            fh = int(h * ratio)
+            if fh > 0:
+                engine.draw_screen_rect((x, y + h - fh, w, fh), self.fill_color)
+            hy = int(y + h - h * ratio) - 4
+            engine.draw_screen_rect((x - 2, hy, w + 4, 8), self.handle_color)
+
+
+class Toggle(UIElement):
+    """勾选框 (契约 §3.3). 点击切换 is_on."""
+
+    ctype = 'toggle'
+
+    def __init__(self, name='toggle', rect=(0, 0, 160, 24),
+                 is_on=False, label='',
+                 box_color=(70, 80, 100, 255),
+                 check_color=(80, 200, 120, 255),
+                 label_color=(230, 230, 230),
+                 label_size=16,
+                 on_change=None, **kw):
+        super().__init__(name=name, rect=rect, **kw)
+        self.is_on = bool(is_on)
+        self.label = str(label)
+        self.box_color = tuple(box_color)
+        self.check_color = tuple(check_color)
+        self.label_color = tuple(label_color)
+        self.label_size = int(label_size)
+        self.on_change = on_change
+
+    def on_mouse_enter(self):
+        self._hover = True
+
+    def on_mouse_leave(self):
+        self._hover = False
+        self._pressed = False
+
+    def on_mouse_down(self, pos):
+        if not self.enabled:
+            return False
+        self._pressed = True
+        return True
+
+    def on_mouse_up(self, pos):
+        was_pressed = self._pressed
+        self._pressed = False
+        if was_pressed and self.enabled:
+            self.is_on = not self.is_on
+            if self.on_change is not None:
+                try:
+                    self.on_change(self.is_on)
+                except Exception:
+                    pass
+            return True
+        return was_pressed
+
+    def draw(self, engine, screen_rect):
+        x, y, w, h = screen_rect
+        box = min(h, 20)
+        engine.draw_screen_rect((x, y, box, box), self.box_color)
+        if self.is_on:
+            pad = 3
+            engine.draw_screen_rect((x + pad, y + pad,
+                                     box - 2 * pad, box - 2 * pad),
+                                    self.check_color)
+        if self.label:
+            engine.draw_text_quad(self.label, x + box + 8, y, self.label_color,
+                                  self.label_size)
+
+
+class ProgressBar(UIElement):
+    """只读进度条 (契约 §3.3). value: 0~1."""
+
+    ctype = 'progress_bar'
+
+    def __init__(self, name='progress', rect=(0, 0, 200, 18),
+                 value=0.0,
+                 bg_color=(40, 44, 54, 255),
+                 fill_color=(80, 220, 120, 255), **kw):
+        super().__init__(name=name, rect=rect, **kw)
+        self._value = max(0.0, min(1.0, float(value)))
+        self.bg_color = tuple(bg_color)
+        self.fill_color = tuple(fill_color)
+
+    @property
+    def value(self):
+        return self._value
+
+    @value.setter
+    def value(self, v):
+        self._value = max(0.0, min(1.0, float(v)))
+
+    def draw(self, engine, screen_rect):
+        x, y, w, h = screen_rect
+        engine.draw_screen_rect(screen_rect, self.bg_color)
+        fw = int(w * self._value)
+        if fw > 0:
+            engine.draw_screen_rect((x, y, fw, h), self.fill_color)
+
 
 
