@@ -2,6 +2,18 @@
 """
 gui.py — 即时模式 GUI (ImGui 风格, moderngl 手写, 零新依赖)
 
+【历史保留说明 2026-10-18】
+本模块为历史保留。原使用方 ui/minimal_editor_view.py（Loom.py --ui minimal 的
+极简编辑器视图）已随 pygame 窗口剥离（A2 决策）一并删除，本模块生产代码已无引用。
+保留原因:
+  1) 提供经过实战验证的 scissor 栈实现（push_scissor/pop_scissor，含嵌套求交），
+     Canvas UI 阶段的 ScrollView 裁剪逻辑可参考。
+  2) 承担 2 个单元测试的覆盖（tests/test_editor_ui.py 的 IME 转发、
+     tests/test_scrollbar.py 的 scissor 栈与滚动条行为）。
+  3) 不依赖 pygame 窗口（只用 moderngl + engine.draw_rect/draw_text_quad），
+     保留成本几乎为零。
+未来若需精简可在二者测试迁移后删除。
+
 模型:
   - 每帧 begin_frame(鼠标状态) -> 构建控件 (window_begin/button/drag_float/text_field/...)
     -> end_frame() -> render()。
