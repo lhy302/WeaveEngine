@@ -564,6 +564,17 @@ def _emit_ui_element(elem):
         base['spacing'] = [elem.spacing_x, elem.spacing_y]
         base['columns'] = int(elem.columns)
         base['bg_color'] = list(elem.bg_color)
+    elif elem.ctype == 'input_field':
+        base['text'] = elem.text
+        base['placeholder'] = elem.placeholder
+        base['max_length'] = int(elem.max_length)
+        base['bg_color'] = list(elem.bg_color)
+        base['focus_bg_color'] = list(elem.focus_bg_color)
+        base['text_color'] = list(elem.text_color)
+        base['placeholder_color'] = list(elem.placeholder_color)
+        base['cursor_color'] = list(elem.cursor_color)
+        base['font_size'] = int(elem.font_size)
+        # on_submit / on_change 不序列化 (运行时由脚本挂载, 契约 §8)
     base['children'] = [_emit_ui_element(c) for c in elem.children]
     return base
 
@@ -673,6 +684,18 @@ def _apply_ui_element(d):
                                   bg_color=tuple(d.get('bg_color') or (0, 0, 0, 0)),
                                   **kw)
         # GridLayout 子元素添加后会自动 reflow (在 add_child 里)
+    elif typ == 'input_field':
+        elem = loom_ui.InputField(
+            text=str(d.get('text', '')),
+            placeholder=str(d.get('placeholder', '')),
+            max_length=int(d.get('max_length', 200)),
+            bg_color=tuple(d.get('bg_color') or (50, 55, 70, 255)),
+            focus_bg_color=tuple(d.get('focus_bg_color') or (60, 70, 90, 255)),
+            text_color=tuple(d.get('text_color') or (255, 255, 255)),
+            placeholder_color=tuple(d.get('placeholder_color') or (140, 140, 150)),
+            cursor_color=tuple(d.get('cursor_color') or (220, 220, 230)),
+            font_size=int(d.get('font_size', 16)),
+            **kw)
     else:
         print("[sceneio] 警告: 未知 UI 元素类型 %r, 跳过" % typ)
         return None
