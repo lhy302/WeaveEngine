@@ -368,6 +368,19 @@ class UIManager:
 
         consumed = False
 
+        # 2.5) 展开的 Dropdown 优先处理点击 (列表在树外, hit_test 测不到)
+        if left_down:
+            exp_dd = self._find_expanded_dropdown()
+            if exp_dd is not None:
+                # 计算该 Dropdown 的 screen_rect (从所属 Canvas)
+                sr = self._screen_rect_of(exp_dd)
+                if sr is not None:
+                    try:
+                        if exp_dd.handle_expanded_click(pos, sr):
+                            return True
+                    except Exception:
+                        pass
+
         # 3) 按下
         if left_down and hovered is not None:
             try:
@@ -410,6 +423,37 @@ class UIManager:
 
         return consumed
 
+    def _find_expanded_dropdown(self):
+        """扫描所有 Canvas 找展开中的 Dropdown (无则 None)."""
+        for c in self.canvases:
+            if c.canvas_type != 'screen':
+                continue
+            for elem in c.root.walk():
+                if elem.ctype == 'dropdown' and getattr(elem, '_expanded', False):
+                    return elem
+        return None
+
+    def _screen_rect_of(self, target):
+        """计算目标元素在所属 Canvas 上的屏幕矩形 (无则 None)."""
+        for c in self.canvases:
+            if c.canvas_type != 'screen':
+                continue
+            # 沿父链找根, 自顶向下计算
+            chain = []
+            cur = target
+            while cur is not None:
+                chain.append(cur)
+                cur = cur.parent
+            chain.reverse()
+            if not chain or chain[0] is not c.root:
+                continue
+            parent_rect = (0.0, 0.0, float(c.width), float(c.height))
+            for elem in chain:
+                sr = elem.screen_rect(parent_rect)
+                parent_rect = sr
+            return parent_rect
+        return None
+
     def _hit_scroll_view(self, pos):
         """命中测试 + 沿父链找最近的 ScrollView (若自身就是则返回自身)."""
         c, elem = self.hit_test(pos)
@@ -448,11 +492,21 @@ class UIManager:
 
     def draw_all(self, engine):
         """渲染所有 screen Canvas 的元素树 (渲染层末尾调用). 父先于子."""
+        # 1) 主树渲染 (Dropdown 展开时其列表暂不画, 留到第 2 轮)
+        expanded_dd = self._find_expanded_dropdown()
         for c in self.canvases:
             if c.canvas_type != 'screen':
                 continue
             self._draw_elem(c.root, engine,
                             (0.0, 0.0, float(c.width), float(c.height)))
+        # 2) 展开的 Dropdown 列表画在最上层
+        if expanded_dd is not None:
+            sr = self._screen_rect_of(expanded_dd)
+            if sr is not None:
+                try:
+                    expanded_dd._draw_expanded_list(engine, sr)
+                except Exception:
+                    pass
 
     @staticmethod
     def _draw_elem(elem, engine, parent_rect):
@@ -973,6 +1027,162 @@ class ScrollView(UIElement):
             block_y = int(y + (h - block_h) * ratio)
             engine.draw_screen_rect((bar_x, block_y, self.bar_width, block_h),
                                     self.bar_color)
+
+
+
+class Dropdown(UIElement):
+    """下拉菜单 (契约 §3.3). 点击展开 -> 列表显示在框下方; 选中项后收起.
+
+    展开列表始终在 draw 时直接画出 (不依赖子元素树, 保证画在最上层).
+    """
+
+    ctype = 'dropdown'
+
+    def __init__(self, name='dropdown', rect=(0, 0, 200, 32),
+                 options=None, selected_index=0,
+                 bg_color=(70, 80, 100, 255),
+                 hover_color=(90, 100, 125, 255),
+                 list_bg=(50, 55, 70, 255),
+                 list_hover=(80, 140, 220, 255),
+                 text_color=(255, 255, 255),
+                 font_size=14,
+                 item_height=28,
+                 on_change=None, **kw):
+        super().__init__(name=name, rect=rect, **kw)
+        self.options = list(options or [])
+        self.selected_index = (max(0, min(len(self.options) - 1,
+                                          int(selected_index)))
+                               if self.options else -1)
+        self.bg_color = tuple(bg_color)
+        self.hover_color = tuple(hover_color)
+        self.list_bg = tuple(list_bg)
+        self.list_hover = tuple(list_hover)
+        self.text_color = tuple(text_color)
+        self.font_size = int(font_size)
+        self.item_height = int(item_height)
+        self.on_change = on_change
+        self._expanded = False
+        self._hover_item = -1
+
+    def _list_rect(self, screen_rect):
+        x, y, w, h = screen_rect
+        return (x, y + h, w, self.item_height * len(self.options))
+
+    def on_mouse_enter(self):
+        self._hover = True
+
+    def on_mouse_leave(self):
+        self._hover = False
+        self._hover_item = -1
+
+    def on_mouse_down(self, pos):
+        if not self.enabled:
+            return False
+        if self._expanded:
+            # 展开态: 点击由 UIManager 转发给 handle_expanded_click
+            return True
+        self._expanded = True
+        return True
+
+    def on_mouse_up(self, pos):
+        return self._expanded
+
+    def handle_expanded_click(self, pos, screen_rect):
+        """展开时 UIManager 调: 判断点击的是哪一项. 返回 True=消费."""
+        lx, ly, lw, lh = self._list_rect(screen_rect)
+        if lx <= pos[0] < lx + lw and ly <= pos[1] < ly + lh:
+            idx = int((pos[1] - ly) // self.item_height)
+            if 0 <= idx < len(self.options):
+                self.selected_index = idx
+                self._expanded = False
+                if self.on_change is not None:
+                    try:
+                        self.on_change(self.options[idx])
+                    except Exception:
+                        pass
+                return True
+        # 点击列表外 -> 收起
+        self._expanded = False
+        return True
+
+    @property
+    def selected_value(self):
+        if 0 <= self.selected_index < len(self.options):
+            return self.options[self.selected_index]
+        return ''
+
+    def draw(self, engine, screen_rect):
+        """画 box 本身 + 选中值. 展开列表由 _draw_expanded_list 单独绘制
+        (UIManager.draw_all 第 2 轮调, 保证列表画在所有元素之上)."""
+        x, y, w, h = screen_rect
+        bg = self.hover_color if self._hover else self.bg_color
+        engine.draw_screen_rect(screen_rect, bg)
+        txt = self.selected_value
+        if txt:
+            lh = engine._measure_text('Mg', self.font_size)[1] or self.font_size
+            ty = int(y + (h - lh) / 2)
+            engine.draw_text_quad(txt, x + 8, ty, self.text_color, self.font_size)
+
+    def _draw_expanded_list(self, engine, screen_rect):
+        """展开列表绘制 (单独入口: UIManager.draw_all 在所有元素之后调)."""
+        if not self._expanded or not self.options:
+            return
+        lx, ly, lw, lh = self._list_rect(screen_rect)
+        engine.draw_screen_rect((lx, ly, lw, lh), self.list_bg)
+        for i, opt in enumerate(self.options):
+            iy = ly + i * self.item_height
+            if i == self._hover_item:
+                engine.draw_screen_rect((lx, iy, lw, self.item_height),
+                                        self.list_hover)
+            lh2 = engine._measure_text('Mg', self.font_size)[1] or self.font_size
+            ty = int(iy + (self.item_height - lh2) / 2)
+            engine.draw_text_quad(opt, lx + 8, ty, self.text_color, self.font_size)
+
+
+class GridLayout(UIElement):
+    """网格布局 (契约 §3.3). 按 columns/cell_size/spacing 自动排列子元素.
+
+    自身仅绘制背景 (可选); 子元素 rect 由 _reflow 自动计算.
+    """
+
+    ctype = 'grid_layout'
+
+    def __init__(self, name='grid', rect=(0, 0, 400, 300),
+                 cell_size=(64, 64), spacing=(8, 8), columns=4,
+                 bg_color=(0, 0, 0, 0), **kw):
+        super().__init__(name=name, rect=rect, **kw)
+        self.cell_w, self.cell_h = cell_size
+        self.spacing_x, self.spacing_y = spacing
+        self.columns = max(1, int(columns))
+        self.bg_color = tuple(bg_color)
+
+    def add_child(self, child):
+        super().add_child(child)
+        self._reflow()
+        return child
+
+    def remove_child(self, child):
+        r = super().remove_child(child)
+        self._reflow()
+        return r
+
+    def _reflow(self):
+        for i, c in enumerate(self.children):
+            row = i // self.columns
+            col = i % self.columns
+            cx = col * (self.cell_w + self.spacing_x)
+            cy = row * (self.cell_h + self.spacing_y)
+            c.rect = (cx, cy, self.cell_w, self.cell_h)
+
+    def content_height(self):
+        rows = (len(self.children) + self.columns - 1) // self.columns
+        return rows * self.cell_h + max(0, rows - 1) * self.spacing_y
+
+    def draw(self, engine, screen_rect):
+        if len(self.bg_color) > 3 and self.bg_color[3] == 0:
+            return
+        engine.draw_screen_rect(screen_rect, self.bg_color)
+
 
 
 

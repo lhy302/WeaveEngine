@@ -548,6 +548,22 @@ def _emit_ui_element(elem):
         base['bar_width'] = int(elem.bar_width)
         base['show_bar'] = bool(elem.show_bar)
         base['scroll_step'] = int(elem.scroll_step)
+    elif elem.ctype == 'dropdown':
+        base['options'] = list(elem.options)
+        base['selected_index'] = int(elem.selected_index)
+        base['bg_color'] = list(elem.bg_color)
+        base['hover_color'] = list(elem.hover_color)
+        base['list_bg'] = list(elem.list_bg)
+        base['list_hover'] = list(elem.list_hover)
+        base['text_color'] = list(elem.text_color)
+        base['font_size'] = int(elem.font_size)
+        base['item_height'] = int(elem.item_height)
+        # on_change 不序列化
+    elif elem.ctype == 'grid_layout':
+        base['cell_size'] = [elem.cell_w, elem.cell_h]
+        base['spacing'] = [elem.spacing_x, elem.spacing_y]
+        base['columns'] = int(elem.columns)
+        base['bg_color'] = list(elem.bg_color)
     base['children'] = [_emit_ui_element(c) for c in elem.children]
     return base
 
@@ -638,6 +654,25 @@ def _apply_ui_element(d):
                                   **kw)
         if d.get('scroll_pos'):
             elem.scroll_pos = tuple(d['scroll_pos'])
+    elif typ == 'dropdown':
+        elem = loom_ui.Dropdown(options=list(d.get('options') or []),
+                                selected_index=int(d.get('selected_index', 0)),
+                                bg_color=tuple(d.get('bg_color') or (70, 80, 100, 255)),
+                                hover_color=tuple(d.get('hover_color') or (90, 100, 125, 255)),
+                                list_bg=tuple(d.get('list_bg') or (50, 55, 70, 255)),
+                                list_hover=tuple(d.get('list_hover') or (80, 140, 220, 255)),
+                                text_color=tuple(d.get('text_color') or (255, 255, 255)),
+                                font_size=int(d.get('font_size', 14)),
+                                item_height=int(d.get('item_height', 28)),
+                                **kw)
+    elif typ == 'grid_layout':
+        cs = tuple(d.get('cell_size') or (64, 64))
+        sp = tuple(d.get('spacing') or (8, 8))
+        elem = loom_ui.GridLayout(cell_size=cs, spacing=sp,
+                                  columns=int(d.get('columns', 4)),
+                                  bg_color=tuple(d.get('bg_color') or (0, 0, 0, 0)),
+                                  **kw)
+        # GridLayout 子元素添加后会自动 reflow (在 add_child 里)
     else:
         print("[sceneio] 警告: 未知 UI 元素类型 %r, 跳过" % typ)
         return None
@@ -645,6 +680,12 @@ def _apply_ui_element(d):
         ch = _apply_ui_element(cd)
         if ch is not None:
             elem.add_child(ch)
+    # GridLayout: 加载完成后强制 reflow (序列化恢复的 child.rect 被自动排列覆盖)
+    if typ == 'grid_layout' and hasattr(elem, '_reflow'):
+        try:
+            elem._reflow()
+        except Exception:
+            pass
     return elem
 
 
