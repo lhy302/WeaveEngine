@@ -1595,13 +1595,31 @@ class EditorApp(GLEngine):
         self.commit_model(m, "动画循环",
                           lambda: setattr(m.animator, 'loop', not m.animator.loop))
 
-    def add_script(self, m, sid):
-        """挂脚本 + 套默认参数 (可撤销)."""
+    def add_script(self, m, sid, extra_vars=None):
+        """挂脚本 + 套默认参数 (可撤销).
+
+        2026-10-19 P0-2 修复: 先校验 sid 是否注册，再动模型 —— 旧顺序是先
+        m.add_script(sid) 把组件加进去，再 get_script(sid).params，sid 不存在时
+        .params 抛 AttributeError，但坏组件已入模型且未回滚，场景被污染。
+        修复后：未注册时直接抛 ValueError，模型不变。
+
+        extra_vars: 挂载时覆盖默认参数（对齐 P1-1 script_vars 透传）。
+        """
+        import scripts as _scripts
+        cls = _scripts.get_script(sid)
+        if cls is None:
+            raise ValueError(
+                "脚本不存在: %r（先 script_reload 热重载，或用 scripts 查看已注册列表）"
+                % sid)
         before = undo_snapshot(m)
         sc = m.add_script(sid)
-        import scripts as _scripts
-        for key, _lb, default, *_ in _scripts.get_script(sid).params:
+        for key, _lb, default, *_ in cls.params:
             sc.script_vars[key] = default
+        if extra_vars and isinstance(extra_vars, dict):
+            for k, v in extra_vars.items():
+                # 只接受已声明参数，避免污染 script_vars
+                if any(p[0] == k for p in cls.params):
+                    sc.script_vars[k] = v
         self.undo.push(StateCommand("挂脚本", self, m, before, undo_snapshot(m)))
 
     def remove_script(self, m, i):

@@ -79,6 +79,8 @@ TOOLS_DEF = [
     {'name': 'unity_physics_simulate', 'description': '确定性推进 N 个逻辑帧并返回步长参数 (物理对拍; 需已 play, 建议 paused=true)', 'inputSchema': {'type': 'object', 'properties': {'frames': {'type': 'integer', 'description': '推进的逻辑帧数'}}, 'required': ['frames']}},
     {'name': 'unity_script_add', 'description': '为物体添加逻辑脚本组件 (对齐 Unity GameObject.AddComponent<Script>)', 'inputSchema': {'type': 'object', 'properties': {'name_or_id': {'type': 'string', 'description': '物体名称'}, 'script_id': {'type': 'string', 'description': '脚本标识符 (如 rotate, wasd_move 或自定义 lua 脚本)'}, 'script_vars': {'type': 'object', 'description': '脚本自定义参数字典'}}, 'required': ['name_or_id', 'script_id']}},
     {'name': 'unity_script_remove', 'description': '移除物体上的脚本组件', 'inputSchema': {'type': 'object', 'properties': {'name_or_id': {'type': 'string', 'description': '物体名称'}, 'index': {'type': 'integer', 'description': '脚本序号'}}, 'required': ['name_or_id']}},
+    {'name': 'unity_script_reload', 'description': '热重载游戏脚本目录（改完 scripts/ 下的 .py/.lua 立即生效，不必重启编辑器）', 'inputSchema': {'type': 'object', 'properties': {'dir': {'type': 'string', 'description': '可选：脚本目录路径（缺省=引擎旁 scripts/）'}}}},
+    {'name': 'unity_scripts_list', 'description': '列出所有已注册游戏脚本（id + 名称 + 参数）——在 script_add 前用它查有效 id，避免挂载失败', 'inputSchema': {'type': 'object', 'properties': {}}},
     {'name': 'unity_script_write_file', 'description': '在项目 scripts/ 目录下编写或更新纯 Lua 5.4 / Python 玩法脚本', 'inputSchema': {'type': 'object', 'properties': {'filename': {'type': 'string', 'description': '文件名 (如 player.lua 或 enemy.lua)'}, 'code': {'type': 'string', 'description': '完整的脚本代码'}}, 'required': ['filename', 'code']}},
     {'name': 'unity_playmode_toggle', 'description': '切换编辑器播放模式与编辑模式 (对齐 Unity EditorApplication.isPlaying = true/false)', 'inputSchema': {'type': 'object', 'properties': {'on': {'type': 'boolean', 'description': 'true 为开始播放, false 为停止播放'}, 'paused': {'type': 'boolean', 'description': '进入播放即冻结逻辑帧 (物理对拍用)'}}}},
     {'name': 'unity_capture_viewport', 'description': '截取当前编辑器视口渲染画面 (供多模态模型视觉检查画面对齐/缺陷排查)', 'inputSchema': {'type': 'object', 'properties': {'path': {'type': 'string', 'description': '可选保存图片文件路径'}}}},
@@ -437,10 +439,22 @@ class LoomMCPServer:
 
         # ---- 脚本玩法 ----
         if name == 'unity_script_add':
-            return self._wrap(c.call('script_add', {
+            # 2026-10-19 P1-1 修复：schema 声明的 script_vars 之前被静默丢弃，
+            # 现在透传给引擎（cmd_script_add -> editor.add_script -> extra_vars）。
+            payload = {
                 'target': args.get('name_or_id'),
                 'sid': args.get('script_id'),
-            }))
+            }
+            if args.get('script_vars'):
+                payload['vars'] = args['script_vars']
+            return self._wrap(c.call('script_add', payload))
+        if name == 'unity_script_reload':
+            payload = {}
+            if args.get('dir'):
+                payload['dir'] = args['dir']
+            return self._wrap(c.call('script_reload', payload))
+        if name == 'unity_scripts_list':
+            return self._wrap(c.call('scripts', {}))
         if name == 'unity_script_remove':
             return self._wrap(c.call('script_remove', {
                 'name': args.get('name_or_id'),

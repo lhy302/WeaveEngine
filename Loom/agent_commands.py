@@ -484,6 +484,9 @@ def cmd_object_duplicate(win, args):
 @command('script_add', '给目标挂脚本: {sid, target} (缺省当前选中)')
 def cmd_script_add(win, args):
     ed = win.editor
+    sid = args.get('sid')
+    if not sid:
+        return {'error': '必须传 sid='}
     target = args.get('target')
     if target:
         kind, obj, i = _find(ed, target)
@@ -493,8 +496,14 @@ def cmd_script_add(win, args):
         obj = ed._selected() or ed._selected_light() or ed._selected_camera()
     if obj is None:
         return {'error': '没有选中物体'}
-    ed.add_script(obj, args.get('sid'))
-    return {'sid': args.get('sid'), 'target': getattr(obj, 'name', None)}
+    # 2026-10-19 P0-2 修复: add_script 现在会抛 ValueError（脚本不存在），
+    # 捕获后返回 error dict，不崩、不留坏组件。
+    # 同时透传 vars（P1-1: MCP script_vars 一路带到引擎）。
+    try:
+        ed.add_script(obj, sid, extra_vars=args.get('vars'))
+    except ValueError as e:
+        return {'error': str(e)}
+    return {'sid': sid, 'target': getattr(obj, 'name', None)}
 
 
 # ====================================================================
@@ -1322,6 +1331,57 @@ def cmd_script_remove(win, args):
     sid = m.scripts[i].script_id
     ed.remove_script(m, i)
     return {'name': m.name, 'removed': sid}
+
+
+@command('script_reload', '热重载游戏脚本目录 (改完脚本不必重启编辑器) '
+                           '{dir? 缺省=引擎旁 scripts/}')
+def cmd_script_reload(win, args):
+    """2026-10-19 P0-2: 重新扫描脚本目录，让新写的 .py/.lua 即时可挂载。
+
+    之前 load_script_dir 只在引擎启动时调一次，Agent 每改一次脚本都要重启编辑器，
+    整个"写脚本->挂载->播放->看结果->改"闭环无法连续迭代。
+    """
+    import scripts as _scripts
+    import os as _os
+    target_dir = args.get('dir')
+    if not target_dir:
+        # 默认: 引擎目录旁的 scripts/（与 engine.py:366 一致）
+        target_dir = _os.path.join(
+            _os.path.dirname(_os.path.abspath(sys.argv[0])), 'scripts')
+    if not _os.path.isdir(target_dir):
+        return {'error': '脚本目录不存在: %s' % target_dir}
+    before = set(_scripts.SCRIPTS.keys())
+    try:
+        count = _scripts.load_script_dir(target_dir)
+    except Exception as e:
+        return {'error': '热重载失败: %r' % e}
+    after = set(_scripts.SCRIPTS.keys())
+    return {
+        'dir': target_dir,
+        'loaded': count,
+        'added': sorted(after - before),
+        'total': len(_scripts.SCRIPTS),
+    }
+
+
+@command('scripts', '列出所有已注册的游戏脚本 (id + 名称 + 参数)')
+def cmd_scripts(win, args):
+    """2026-10-19 P0-2: 供 Agent 在 script_add 前查询有效 id，
+    避免再猜一个不存在的 id 导致挂载失败。"""
+    import scripts as _scripts
+    out = []
+    for sid, cls in _scripts.SCRIPTS.items():
+        params = []
+        for p in getattr(cls, 'params', []):
+            # params 元组: (key, label, default, *extra)
+            if isinstance(p, (tuple, list)) and len(p) >= 3:
+                params.append({'key': p[0], 'label': p[1], 'default': p[2]})
+        out.append({
+            'id': sid,
+            'name': getattr(cls, 'name', sid),
+            'params': params,
+        })
+    return {'total': len(out), 'scripts': out}
 
 
 @command('script_var', '改脚本参数 (一步撤销): {name?, index, key, value}')
