@@ -1000,6 +1000,24 @@ class EditorApp(GLEngine):
         self.lights.clear()                 # M21: 新建场景无默认光源
         self.cameras.clear()                # Unity Camera: 新建场景无摄像机
         self.active_camera = None
+        # 2026-10-19 P0-4: 新建场景必须清 UI/材质/天空盒（防场景互相污染）
+        # 之前只清 models/lights/cameras，A 场景的 HUD/材质会漏进 B，场景隔离被破坏。
+        # 清 UI 后重建一个空默认 Canvas，否则 ui_add 会因 ui.canvases 为空而报"找不到 Canvas"。
+        if getattr(self, 'ui', None) is not None:
+            try:
+                self.ui.clear()
+                from loom_ui import Canvas as _Canvas
+                self.ui.add_canvas(_Canvas(
+                    canvas_type='screen',
+                    width=getattr(self, 'width', 1280),
+                    height=getattr(self, 'height', 800),
+                    z_order=0))
+            except Exception:
+                pass
+        if getattr(self, 'materials', None):
+            self.materials.clear()
+        # 2026-10-19 Fix 4: 天空盒不随场景继承（默认无天空盒 = 清屏深色底）
+        self._skybox = None
         self.undo.clear()
         self.selected_index = 0
         self.selected_light_index = -1

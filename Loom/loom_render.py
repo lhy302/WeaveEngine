@@ -50,14 +50,21 @@ class RenderMixin:
         """
         if self._skybox is None:
             return
+        # 2026-10-19 修复：编译失败用 False 哨兵（不是 None），避免每帧重试刷屏；
+        # 同时不 nuke _skybox（保留数据，用户改 shader 后可 _sky_prog=None 恢复）。
+        if self._sky_prog is False:
+            return
         if self._sky_prog is None:
             from loom_shaders import _SKY_VERT, _SKY_FRAG
             try:
                 self._sky_prog = self.ctx.program(
                     vertex_shader=_SKY_VERT, fragment_shader=_SKY_FRAG)
-                # 复用 HUD 的 _quad_vbo（2f 2f = pos + uv）
+                # 2026-10-19 关键修复（天空盒一直是黑的根因）：
+                # _SKY_VERT 只声明 in_pos（1 个 vec2），但旧代码绑 'in_pos','in_uv' 两个属性名
+                # → moderngl 对未声明属性抛 KeyError → 被 except 吞掉 → 天空盒永久禁用。
+                # 修复：只绑 in_pos，格式用 '2f 2x'（2x = 8 字节填充，跳过 UV，stride 仍 16）。
                 self._sky_vao = self.ctx.vertex_array(
-                    self._sky_prog, [(self._quad_vbo, '2f 2f', 'in_pos', 'in_uv')])
+                    self._sky_prog, [(self._quad_vbo, '2f 2x', 'in_pos')])
                 # sampler 单元固定 0（program 建后设一次即可）
                 try:
                     self._sky_prog['u_skybox'].value = 0
@@ -65,7 +72,7 @@ class RenderMixin:
                     pass
             except Exception as e:
                 print("[渲染] 天空盒 shader 编译失败: %r" % (e,))
-                self._skybox = None   # 防每帧重试刷屏
+                self._sky_prog = False   # 哨兵：永久跳过，但保留 _skybox 数据
                 return
         # 反投影矩阵: inv(VP) —— numpy 行主序 tobytes 后 GLSL 按列解读 = M^T
         # 配合 GLSL 的 u_inv_view_proj * clip（列向量乘）恰好等价 numpy 行向量 v @ M
