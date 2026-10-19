@@ -101,6 +101,163 @@ class RenderMixin:
             self.ctx.depth_func = old_depth_func
             self.ctx.enable(moderngl.CULL_FACE)
 
+    # ================ World Space UI（2026-10-19 第1档序3阶段4）================
+    def _draw_world_canvases(self):
+        """World Space UI：把 canvas_type='world' 的 Canvas 离屏渲染成纹理，
+        再在 3D 世界贴 quad（用户拍板 A 离屏纹理贴 quad 路线）。
+
+        朝向由 Canvas.billboard 决定：
+          - True（默认）：永远正对相机（血条/名字常用）
+          - False：跟随 target GameObject 的旋转（告示牌常用）
+        缩放由 Canvas.world_scale 决定（默认 0.01 = 100px = 1m，Unity 对齐）。
+        交互（点击）留到第2档，当前只渲染不拾取。
+        """
+        if getattr(self, 'ui', None) is None:
+            return
+        world_canvases = [c for c in self.ui.canvases
+                          if getattr(c, 'canvas_type', 'screen') == 'world']
+        if not world_canvases:
+            return
+        # 惰性建 program / vao（4 顶点动态 buffer：3f world_pos + 2f uv）
+        if getattr(self, '_world_ui_prog', None) is None:
+            try:
+                from loom_shaders import _WORLD_UI_VERT, _WORLD_UI_FRAG
+                self._world_ui_prog = self.ctx.program(
+                    vertex_shader=_WORLD_UI_VERT, fragment_shader=_WORLD_UI_FRAG)
+                self._world_ui_vbo = self.ctx.buffer(reserve=4 * 5 * 4)
+                self._world_ui_vao = self.ctx.vertex_array(
+                    self._world_ui_prog,
+                    [(self._world_ui_vbo, '3f 2f', 'in_world_pos', 'in_uv')])
+                try:
+                    self._world_ui_prog['u_tex'].value = 0
+                except Exception:
+                    pass
+            except Exception as e:
+                print("[渲染] World UI shader 编译失败: %r" % (e,))
+                self._world_ui_prog = None
+                return
+        # 相机 right/up（billboard 用）：view 矩阵行 0/1 即基向量
+        V = mat4_view_yaw_pitch(np,
+                                (self.camera.x, self.camera.y, self.camera.z),
+                                self.camera_yaw, self.camera_pitch,
+                                self.camera_roll)
+        cam_right = (float(V[0, 0]), float(V[0, 1]), float(V[0, 2]))
+        cam_up = (float(V[1, 0]), float(V[1, 1]), float(V[1, 2]))
+        models_by_id = {id(m): m for m in self.models}
+        for c in world_canvases:
+            try:
+                self._draw_one_world_canvas(c, cam_right, cam_up, models_by_id)
+            except Exception as e:
+                print("[渲染] World Canvas 绘制失败: %r" % (e,))
+
+    def _draw_one_world_canvas(self, c, cam_right, cam_up, models_by_id):
+        """单个 world Canvas 的完整绘制：离屏渲染 -> 3D quad 贴图."""
+        target = getattr(c, 'target', None)
+        if target is None or id(target) not in models_by_id:
+            return   # target 未绑定/已被删除 -> 跳过
+        # 离屏纹理（每 Canvas 一个，尺寸变化时重建）
+        cur_size = (int(c.width), int(c.height))
+        if (getattr(c, '_gl_tex', None) is None
+                or getattr(c, '_gl_tex_size', None) != cur_size):
+            old_fbo = getattr(c, '_gl_fbo', None)
+            old_tex = getattr(c, '_gl_tex', None)
+            try:
+                if old_fbo is not None:
+                    old_fbo.release()
+                if old_tex is not None:
+                    old_tex.release()
+            except Exception:
+                pass
+            try:
+                c._gl_tex = self.ctx.texture(cur_size, 4)
+                c._gl_tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+                c._gl_fbo = self.ctx.framebuffer(color_attachments=[c._gl_tex])
+                c._gl_tex_size = cur_size
+            except Exception as e:
+                print("[渲染] World UI 离屏纹理创建失败: %r" % (e,))
+                c._gl_tex = None
+                return
+        # 离屏渲染：临时让 _screen_fb() 返回离屏 FBO，UI 绘制全部落到纹理
+        old_ext_ctx = getattr(self, '_external_ctx', False)
+        old_ext_fb = getattr(self, '_external_fb', None)
+        old_w, old_h = self.width, self.height
+        render_ok = True
+        try:
+            self._external_ctx = True
+            self._external_fb = c._gl_fbo
+            self.width = cur_size[0]
+            self.height = cur_size[1]
+            c._gl_fbo.use()
+            self.ctx.viewport = (0, 0, cur_size[0], cur_size[1])
+            self.ctx.scissor = None
+            self.ctx.clear(0.0, 0.0, 0.0, 0.0)   # 透明底：透明处不遮挡场景
+            self.ui._draw_elem(
+                c.root, self, (0.0, 0.0, float(cur_size[0]), float(cur_size[1])))
+        except Exception as e:
+            print("[渲染] World UI 离屏渲染失败: %r" % (e,))
+            render_ok = False
+        finally:
+            self._external_ctx = old_ext_ctx
+            self._external_fb = old_ext_fb
+            self.width = old_w
+            self.height = old_h
+            self.ctx.viewport = (0, 0, old_w, old_h)
+            self._screen_fb().use()
+        if not render_ok:
+            return
+        # 3D 世界坐标 + 4 角（世界尺度由 world_scale 换算）
+        center = self.world_position(target)
+        if getattr(c, 'billboard', True):
+            right, up = cam_right, cam_up
+        else:
+            try:
+                W = self.world_rotation_matrix(target)
+                right = (float(W[0, 0]), float(W[0, 1]), float(W[0, 2]))
+                up = (float(W[1, 0]), float(W[1, 1]), float(W[1, 2]))
+            except Exception:
+                right, up = cam_right, cam_up
+        scale = float(getattr(c, 'world_scale', 0.01))
+        hw = cur_size[0] * scale * 0.5
+        hh = cur_size[1] * scale * 0.5
+        cx, cy, cz = center.x, center.y, center.z
+
+        def corner(rx, ry):
+            return (cx + right[0] * rx + up[0] * ry,
+                    cy + right[1] * rx + up[1] * ry,
+                    cz + right[2] * rx + up[2] * ry)
+
+        TL = corner(-hw, +hh)
+        TR = corner(+hw, +hh)
+        BL = corner(-hw, -hh)
+        BR = corner(+hw, -hh)
+        # 顶点数据（TRIANGLE_STRIP: TL, BL, TR, BR）
+        import struct
+        verts = struct.pack(
+            '20f',
+            TL[0], TL[1], TL[2], 0.0, 1.0,
+            BL[0], BL[1], BL[2], 0.0, 0.0,
+            TR[0], TR[1], TR[2], 1.0, 1.0,
+            BR[0], BR[1], BR[2], 1.0, 0.0,
+        )
+        self._world_ui_vbo.write(verts)
+        self._world_ui_prog['u_view_proj'].write(
+            np.ascontiguousarray(self._vp.astype('f4')).tobytes())
+        # 绘制（透明像素不遮挡场景 + 双面可见 + 不写深度）
+        old_depth_mask = self.ctx.depth_mask
+        try:
+            self.ctx.depth_mask = False
+            self.ctx.disable(moderngl.CULL_FACE)
+            self.ctx.enable(moderngl.BLEND)
+            self.ctx.blend_func = (moderngl.SRC_ALPHA,
+                                   moderngl.ONE_MINUS_SRC_ALPHA)
+            c._gl_tex.use(0)
+            self._world_ui_vao.render(moderngl.TRIANGLE_STRIP, vertices=4)
+        finally:
+            self.ctx.depth_mask = old_depth_mask
+            self.ctx.enable(moderngl.CULL_FACE)
+            self.ctx.disable(moderngl.BLEND)
+
+
     def _clear_main_fbo(self, r, g, b, a=1.0):
         """清主渲染目标 (颜色+深度). pygame 与 Qt 外部模式同一路径.
         2026-08-18 关键结论: 之前"ctx.clear 在 Qt 多采样 FBO 无效"是误判 ——
@@ -616,6 +773,8 @@ class RenderMixin:
         # 2026-10-19 第1档序13 天空盒: 几何后、HUD 前（B1 depth==1.0 才画）
         if self._skybox is not None:
             self._draw_skybox()
+        # 2026-10-19 第1档序3阶段4 World Space UI: 天空盒后、HUD 前
+        self._draw_world_canvases()
         self._prof_add('mt_main_pass', _t)
 
         _t = self._prof_t0()

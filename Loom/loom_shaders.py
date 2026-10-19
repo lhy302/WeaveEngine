@@ -330,6 +330,27 @@ void main() {
     frag_color = texture(u_tex, v_uv) * u_color;
 }"""
 
+# ================ World Space UI 着色器 (2026-10-19 第1档序3阶段4) ================
+# 用途：把离屏渲染的 Canvas 纹理贴到 3D 世界的一块 quad 上。
+# 4 个顶点是世界坐标（CPU 侧按 billboard 或 target 旋转算好），view_proj 投影。
+_WORLD_UI_VERT = """#version 330
+in vec3 in_world_pos;
+in vec2 in_uv;
+out vec2 v_uv;
+uniform mat4 u_view_proj;
+void main() {
+    gl_Position = u_view_proj * vec4(in_world_pos, 1.0);
+    v_uv = in_uv;
+}"""
+
+_WORLD_UI_FRAG = """#version 330
+in vec2 v_uv;
+uniform sampler2D u_tex;
+out vec4 frag_color;
+void main() {
+    frag_color = texture(u_tex, v_uv);
+}"""
+
 # ================ 线条着色器 (逐顶点颜色, gizmo/网格/选中框用) ================
 # core profile 线宽仅保证 1px; gizmo 端点用投影小方块 (三角形) 增强可点性
 _LINE_VERT = """#version 330

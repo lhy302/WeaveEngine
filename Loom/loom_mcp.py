@@ -120,6 +120,22 @@ TOOLS_DEF = [
          'name': {'type': 'string', 'description': '元素名'},
          'canvas': {'type': 'integer', 'description': 'Canvas 序号（缺省=0）'},
      }, 'required': ['name']}},
+    {'name': 'loom_ui_canvas_set',
+     'description': '修改 UI Canvas 属性（world 模式可设 billboard/target/world_scale）',
+     'inputSchema': {
+         'type': 'object',
+         'properties': {
+             'canvas': {'type': 'integer', 'description': 'Canvas 序号'},
+             'type': {'type': 'string', 'enum': ['screen', 'world']},
+             'width': {'type': 'integer'},
+             'height': {'type': 'integer'},
+             'z_order': {'type': 'integer'},
+             'world_scale': {'type': 'number', 'description': 'world 模式 100px=1m 默认 0.01'},
+             'billboard': {'type': 'boolean', 'description': 'world 模式是否面向相机'},
+             'target': {'type': 'string', 'description': '绑定物体 name（空串=解绑）'},
+         },
+         'required': ['canvas'],
+     }},
     {'name': 'loom_ui_canvas_add', 'description': '添加 UI Canvas',
      'inputSchema': {'type': 'object', 'properties': {
          'type': {'type': 'string', 'description': 'screen 或 world（缺省 screen）'},
@@ -496,6 +512,8 @@ class LoomMCPServer:
 
         if name == 'loom_ui_canvas_add':
             return self._wrap(c.call('ui_canvas_add', dict(args)))
+        if name == 'loom_ui_canvas_set':
+            return self._wrap(c.call('ui_canvas_set', dict(args)))
 
         if name == 'loom_ui_reparent':
             return self._wrap(c.call('ui_reparent', dict(args)))

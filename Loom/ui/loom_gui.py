@@ -1989,6 +1989,11 @@ class LoomGUI(QMainWindow):
                 elem = c.root.find(self._ui_selected_name)
                 if elem is not None:
                     return ('ui', elem)
+        # 2026-10-19 第1档序3阶段4: 选中 Canvas 节点本身 -> Canvas 属性面板
+        if self._ui_selected_name is None and self._ui_selected_canvas is not None:
+            ui = getattr(e, 'ui', None)
+            if ui is not None and self._ui_selected_canvas < len(ui.canvases):
+                return ('canvas', ui.canvases[self._ui_selected_canvas])
         m = e._selected()
         if m is not None:
             return ('obj', m)
@@ -2013,6 +2018,8 @@ class LoomGUI(QMainWindow):
         # 2026-10-18 阶段5: UI 元素用 (canvas_idx, name) 标识（元素会重建, id 不稳）
         if kind == 'ui':
             return ('ui', self._ui_selected_canvas, self._ui_selected_name)
+        if kind == 'canvas':
+            return ('canvas', self._ui_selected_canvas)
         return (kind, id(obj))
 
     def _rebuild_inspector(self):
@@ -2049,6 +2056,9 @@ class LoomGUI(QMainWindow):
             elif kind == 'ui':
                 # 2026-10-18 阶段5: UI 元素检查器
                 self._build_ui_inspector(lay, obj)
+            elif kind == 'canvas':
+                # 2026-10-19 第1档序3阶段4: Canvas 属性面板
+                self._build_canvas_inspector(lay, obj)
             else:
                 self._build_camera_inspector(lay, obj)
         finally:
@@ -2221,6 +2231,63 @@ class LoomGUI(QMainWindow):
             cur[path[1]] = value
             payload[path[0]] = tuple(cur)
         self._invoke_ui_cmd('ui_set', **payload)
+
+    # ---- 2026-10-19 第1档序3阶段4: Canvas 属性面板 ----
+    def _build_canvas_inspector(self, lay, canvas):
+        """Canvas 属性：宽高/z_order/类型；world 模式 + world_scale/billboard/target."""
+        ci = self._ui_selected_canvas
+        lay.addRow(QLabel("<b>Canvas %d</b>  [%s]" % (ci, canvas.canvas_type)))
+        self._canvas_spin(lay, "宽度", canvas.width, 1, 10000, 'width',
+                          step=1, dec=0)
+        self._canvas_spin(lay, "高度", canvas.height, 1, 10000, 'height',
+                          step=1, dec=0)
+        self._canvas_spin(lay, "z_order", canvas.z_order, -1000, 1000,
+                          'z_order', step=1, dec=0)
+        type_cb = QComboBox()
+        type_cb.addItems(['screen', 'world'])
+        type_cb.setCurrentText(canvas.canvas_type)
+        type_cb.currentTextChanged.connect(
+            lambda v: self._canvas_apply_attr('type', v))
+        lay.addRow("类型", type_cb)
+        if canvas.canvas_type == 'world':
+            self._canvas_spin(lay, "world_scale",
+                              getattr(canvas, 'world_scale', 0.01),
+                              0.0001, 10.0, 'world_scale',
+                              step=0.01, dec=4)
+            bb = QCheckBox()
+            bb.setChecked(bool(getattr(canvas, 'billboard', True)))
+            bb.stateChanged.connect(
+                lambda _s: self._canvas_apply_attr(
+                    'billboard', bool(bb.isChecked())))
+            lay.addRow("面向相机", bb)
+            tgt = getattr(canvas, 'target', None)
+            tgt_edit = QLineEdit(tgt.name if tgt is not None else '')
+            tgt_edit.setPlaceholderText("(空=不绑定物体)")
+            tgt_edit.editingFinished.connect(
+                lambda: self._canvas_apply_attr('target', tgt_edit.text()))
+            lay.addRow("宿主物体", tgt_edit)
+        lay.addRow(QLabel(
+            "(等价命令: ui_canvas_set canvas=%d ...)" % ci))
+
+    def _canvas_spin(self, lay, label, value, lo, hi, field,
+                     step=1.0, dec=3):
+        sb = QDoubleSpinBox()
+        sb.setRange(lo, hi)
+        sb.setDecimals(dec)
+        sb.setSingleStep(step)
+        sb.setValue(float(value))
+        sb.editingFinished.connect(
+            lambda: self._canvas_apply_attr(field, sb.value()))
+        lay.addRow(label, sb)
+
+    def _canvas_apply_attr(self, field, value):
+        if self._building:
+            return
+        ci = self._ui_selected_canvas
+        if ci is None:
+            return
+        payload = {'canvas': ci, field: value}
+        self._invoke_ui_cmd('ui_canvas_set', **payload)
 
     def _build_obj_inspector(self, lay, m):
         e = self.editor

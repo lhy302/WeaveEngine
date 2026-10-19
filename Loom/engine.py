@@ -45,6 +45,7 @@ from loom_log import verbose   # 2026-10-19 启动日志开关 (LOOM_QUIET 时�
 from loom_shaders import (  # noqa: E402
     _VERT_SRC, _FRAG_SRC, _HUD_VERT, _HUD_FRAG,
     _LINE_VERT, _LINE_FRAG,
+    _WORLD_UI_VERT, _WORLD_UI_FRAG,
 )
 from loom_shadow import ShadowMixin   # M29 阴影子系统 (已抽出)
 from loom_frame_components import FrameComponentMixin   # 每帧组件推进 (音频/动画/碰撞回调)

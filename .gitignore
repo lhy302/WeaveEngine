@@ -56,3 +56,6 @@ build/
 dist/
 *.spec
 nul
+tools/dist/
+tools/build_hub/
+tools/python-embed/

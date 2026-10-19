@@ -1731,6 +1731,16 @@ def _ui_canvas(win, args):
     return ui.canvases[idx]
 
 
+def _find_model_by_name(engine, name):
+    """按 name 找首个 GameObject. 找不到返回 None. (2026-10-19 World UI)"""
+    if not name:
+        return None
+    for m in getattr(engine, 'models', []):
+        if m.name == name:
+            return m
+    return None
+
+
 def _ui_parent(win, args):
     """找父元素: args['parent'] 指定 name, 缺省 = canvas root. 返回 (canvas, parent)."""
     c = _ui_canvas(win, args)
@@ -1770,8 +1780,9 @@ def _ui_to_dict(elem):
     }
 
 
-@command('ui_canvas_add', '添加 UI Canvas: {type?, width?, height?, z_order?} '
-                          '(type=screen|world, 默认 screen)')
+@command('ui_canvas_add', '添加 UI Canvas: {type?, width?, height?, z_order?, '
+                          'target?, world_scale?, billboard?} '
+                          '(type=screen|world, target=物体 name 仅 world 用)')
 def cmd_ui_canvas_add(win, args):
     from loom_ui import Canvas
     ui = getattr(win.editor, 'ui', None)
@@ -1783,13 +1794,72 @@ def cmd_ui_canvas_add(win, args):
     w = int(as_float(args.get('width', 800), 800))
     h = int(as_float(args.get('height', 600), 600))
     z = int(as_float(args.get('z_order', 0), 0))
-    c = Canvas(canvas_type=typ, width=w, height=h, z_order=z)
+    ws = as_float(args.get('world_scale', 0.01), 0.01)
+    bb = as_bool(args.get('billboard', True), True)
+    c = Canvas(canvas_type=typ, width=w, height=h, z_order=z,
+               world_scale=ws, billboard=bb)
+    if typ == 'world' and args.get('target'):
+        tgt = _find_model_by_name(win.editor, str(args['target']))
+        if tgt is None:
+            return {'error': 'target 物体不存在: %r' % args['target']}
+        c.target = tgt
     idx = len(ui.canvases)
     import undo as _undo_mod
     cmd = _undo_mod.UIAddCanvasCommand('添加 Canvas', win.editor, c, idx)
     _push_ui_undo(win, cmd)
-    return {'canvas_type': typ, 'width': w, 'height': h, 'z_order': z,
-            'total': len(ui.canvases)}
+    out = {'canvas_type': typ, 'width': w, 'height': h, 'z_order': z,
+           'total': len(ui.canvases)}
+    if typ == 'world':
+        out['world_scale'] = c.world_scale
+        out['billboard'] = c.billboard
+        out['target'] = c.target.name if c.target is not None else None
+    return out
+
+
+@command('ui_canvas_set', '修改 Canvas 属性: {canvas, width?, height?, z_order?, '
+                          'type?, world_scale?, billboard?, target?} '
+                          '(target="" 清空绑定)')
+def cmd_ui_canvas_set(win, args):
+    c = _ui_canvas(win, args)
+    if c is None:
+        return {'error': '找不到 Canvas（传 canvas= 序号）'}
+    done = {}
+    if 'width' in args:
+        c.width = int(as_float(args['width'], c.width))
+        c.root.rect = (0, 0, c.width, c.height)
+        done['width'] = c.width
+    if 'height' in args:
+        c.height = int(as_float(args['height'], c.height))
+        c.root.rect = (0, 0, c.width, c.height)
+        done['height'] = c.height
+    if 'z_order' in args:
+        c.z_order = int(as_float(args['z_order'], c.z_order))
+        done['z_order'] = c.z_order
+    if 'type' in args:
+        typ = str(args['type'])
+        if typ not in ('screen', 'world'):
+            return {'error': 'type 必须是 screen 或 world, 收到 %r' % typ}
+        c.canvas_type = typ
+        done['canvas_type'] = typ
+    if 'world_scale' in args:
+        c.world_scale = float(as_float(args['world_scale'],
+                                       getattr(c, 'world_scale', 0.01)))
+        done['world_scale'] = c.world_scale
+    if 'billboard' in args:
+        c.billboard = as_bool(args['billboard'], True)
+        done['billboard'] = c.billboard
+    if 'target' in args:
+        tv = args['target']
+        if tv is None or tv == '':
+            c.target = None
+            done['target'] = None
+        else:
+            tgt = _find_model_by_name(win.editor, str(tv))
+            if tgt is None:
+                return {'error': 'target 物体不存在: %r' % tv}
+            c.target = tgt
+            done['target'] = tgt.name
+    return {'canvas_type': c.canvas_type, 'changed': done}
 
 
 @command('ui_add', '添加 UI 元素: {type, name?, parent?, canvas?, ...字段} '
@@ -2091,14 +2161,20 @@ def cmd_ui_list(win, args):
     for i, c in enumerate(ui.canvases):
         if only_canvas is not None and int(as_float(only_canvas, -1)) != i:
             continue
-        out.append({
+        item = {
             'index': i,
             'canvas_type': c.canvas_type,
             'width': c.width,
             'height': c.height,
             'z_order': c.z_order,
             'root': _ui_to_dict(c.root),
-        })
+        }
+        if c.canvas_type == 'world':
+            tgt = getattr(c, 'target', None)
+            item['target'] = tgt.name if tgt is not None else None
+            item['world_scale'] = float(getattr(c, 'world_scale', 0.01))
+            item['billboard'] = bool(getattr(c, 'billboard', True))
+        out.append(item)
     return {'canvases': out, 'total': len(ui.canvases)}
 
 

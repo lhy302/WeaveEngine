@@ -637,13 +637,20 @@ def _emit_ui(ui_manager):
         return {'canvases': []}
     canvases = []
     for c in ui_manager.canvases:
-        canvases.append({
+        d = {
             'canvas_type': c.canvas_type,
             'z_order': int(c.z_order),
             'width': int(c.width),
             'height': int(c.height),
             'elements': [_emit_ui_element(c.root)],
-        })
+        }
+        # 2026-10-19 第1档序3阶段4 World Space UI: world 模式三字段
+        if c.canvas_type == 'world':
+            tgt = getattr(c, 'target', None)
+            d['target_id'] = getattr(tgt, 'guid', None) if tgt is not None else None
+            d['world_scale'] = float(getattr(c, 'world_scale', 0.01))
+            d['billboard'] = bool(getattr(c, 'billboard', True))
+        canvases.append(d)
     return {'canvases': canvases}
 
 
@@ -779,17 +786,47 @@ def _apply_ui(engine, ui_data):
             height=getattr(engine, 'height', 800)))
         return
     for cd in canvases:
+        typ = cd.get('canvas_type', 'screen')
         canvas = loom_ui.Canvas(
-            canvas_type=cd.get('canvas_type', 'screen'),
+            canvas_type=typ,
             width=int(cd.get('width', 1280)),
             height=int(cd.get('height', 800)),
-            z_order=int(cd.get('z_order', 0)))
+            z_order=int(cd.get('z_order', 0)),
+            world_scale=float(cd.get('world_scale', 0.01)),
+            billboard=bool(cd.get('billboard', True)))
+        # 2026-10-19 第1档序3阶段4: world target 二次绑定
+        # 此处 models 尚未建好（_apply_ui 在 _apply_object 之前），暂存 guid，
+        # 由 scene_from_dict 末尾 _link_ui_targets 补绑。
+        if typ == 'world':
+            canvas._pending_target_id = cd.get('target_id')
         for ed in (cd.get('elements') or []):
             root_el = _apply_ui_element(ed)
             if root_el is not None:
                 # 第一层元素替换 root (而非作为 root 的子元素)
                 canvas.root = root_el
         engine.ui.add_canvas(canvas)
+
+
+def _link_ui_targets(engine, id_map=None):
+    """2026-10-19 第1档序3阶段4: world Canvas target 二次绑定.
+
+    _apply_ui 早于 _apply_object 调用，此时 models 尚未建好。本函数在
+    objects + 父链建好后调用，按 guid 把 pending target_id 绑回 GameObject。
+    target 不存在（用户删了物体）-> target 保持 None（渲染时跳过）。
+    """
+    ui = getattr(engine, 'ui', None)
+    if ui is None:
+        return
+    id_map = id_map or {m.guid: m for m in engine.models if m.guid}
+    for c in ui.canvases:
+        tid = getattr(c, '_pending_target_id', None)
+        if tid is None:
+            continue
+        c.target = id_map.get(tid)
+        try:
+            delattr(c, '_pending_target_id')
+        except Exception:
+            pass
 
 
 def scene_to_dict(engine, camera=None):
@@ -843,6 +880,11 @@ def scene_from_dict(engine, data, camera_out=None):
         models.append(m)
     _link_parents(objects, models)          # 物体先建父链
     _link_camera_parents(engine, cam_links)  # 2026-08-16 相机物体化: 相机挂父引用物体, 必须在物体之后
+    # 2026-10-19 第1档序3阶段4: world Canvas target 二次绑定（物体已建好）
+    try:
+        _link_ui_targets(engine)
+    except Exception:
+        pass
     if camera_out is not None and data.get('camera'):
         cam = data['camera']
         camera_out.update({
