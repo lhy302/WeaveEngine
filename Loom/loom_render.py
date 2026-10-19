@@ -36,6 +36,71 @@ from loom_game_object import GameObject
 
 
 class RenderMixin:
+    def _draw_skybox(self):
+        """2026-10-19 第1档序13 天空盒（B1 先画几何后画天空, depth==1.0 才画）。
+
+        用户拍板 A1+B1: 全屏 quad + fragment 反投影采样 cubemap。
+        绘制时机: _draw_main_buckets 之后、_draw_hud 之前。
+        深度机制:
+          - 清屏时深度清成 1.0（_clear_main_fbo 已调用 clear）
+          - 几何体绘制时写 depth <1.0，覆盖的像素深度被更新
+          - 天空盒 quad 在 z=1.0（远平面），depth_func='<=' 允许等值通过
+          - 几何覆盖的像素 depth<1.0 无法通过（1.0 > 实际深度）-> 跳过（无 overdraw）
+        状态管理: 临时关 CULL_FACE（quad 从相机看是背面绕序）+ 不写 depth mask（防污染）。
+        """
+        if self._skybox is None:
+            return
+        if self._sky_prog is None:
+            from loom_shaders import _SKY_VERT, _SKY_FRAG
+            try:
+                self._sky_prog = self.ctx.program(
+                    vertex_shader=_SKY_VERT, fragment_shader=_SKY_FRAG)
+                # 复用 HUD 的 _quad_vbo（2f 2f = pos + uv）
+                self._sky_vao = self.ctx.vertex_array(
+                    self._sky_prog, [(self._quad_vbo, '2f 2f', 'in_pos', 'in_uv')])
+                # sampler 单元固定 0（program 建后设一次即可）
+                try:
+                    self._sky_prog['u_skybox'].value = 0
+                except Exception:
+                    pass
+            except Exception as e:
+                print("[渲染] 天空盒 shader 编译失败: %r" % (e,))
+                self._skybox = None   # 防每帧重试刷屏
+                return
+        # 反投影矩阵: inv(VP) —— numpy 行主序 tobytes 后 GLSL 按列解读 = M^T
+        # 配合 GLSL 的 u_inv_view_proj * clip（列向量乘）恰好等价 numpy 行向量 v @ M
+        try:
+            inv_vp = np.linalg.inv(self._vp)
+        except Exception:
+            return
+        self._sky_prog['u_inv_view_proj'].write(
+            np.ascontiguousarray(inv_vp.astype('f4')).tobytes())
+        cam_pos = (self.camera.x, self.camera.y, self.camera.z)
+        self._sky_prog['u_camera_pos'].value = cam_pos
+        self._sky_prog['u_skybox_tint'].value = self._skybox_tint
+        # 绑定 cubemap 到单元 0
+        try:
+            self._skybox.ensure_gl(self.ctx)
+            self._skybox.use(0)
+        except Exception as e:
+            print("[渲染] 天空盒 cubemap 绑定失败: %r" % (e,))
+            return
+        # 保存状态并临时修改
+        try:
+            old_depth_mask = self.ctx.depth_mask
+            old_depth_func = self.ctx.depth_func
+        except Exception:
+            old_depth_mask, old_depth_func = True, '<'
+        try:
+            self.ctx.depth_mask = False
+            self.ctx.depth_func = '<='
+            self.ctx.disable(moderngl.CULL_FACE)
+            self._sky_vao.render(moderngl.TRIANGLES, vertices=6)
+        finally:
+            self.ctx.depth_mask = old_depth_mask
+            self.ctx.depth_func = old_depth_func
+            self.ctx.enable(moderngl.CULL_FACE)
+
     def _clear_main_fbo(self, r, g, b, a=1.0):
         """清主渲染目标 (颜色+深度). pygame 与 Qt 外部模式同一路径.
         2026-08-18 关键结论: 之前"ctx.clear 在 Qt 多采样 FBO 无效"是误判 ——
@@ -548,6 +613,9 @@ class RenderMixin:
         self.ctx.enable(moderngl.CULL_FACE)
         # A2: 主 pass 实例化批绘制 (桶已在 _prepare_bucket_frame 备好)
         self._draw_main_buckets()
+        # 2026-10-19 第1档序13 天空盒: 几何后、HUD 前（B1 depth==1.0 才画）
+        if self._skybox is not None:
+            self._draw_skybox()
         self._prof_add('mt_main_pass', _t)
 
         _t = self._prof_t0()

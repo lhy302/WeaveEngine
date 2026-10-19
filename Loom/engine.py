@@ -271,6 +271,12 @@ class GLEngine(ShadowMixin, FrameComponentMixin, PhysicsMixin, InputMixin, HudMi
         # 着色器程序
         self.prog = self.ctx.program(vertex_shader=_VERT_SRC, fragment_shader=_FRAG_SRC)
         self.hud_prog = self.ctx.program(vertex_shader=_HUD_VERT, fragment_shader=_HUD_FRAG)
+        # 2026-10-19 第1档序13 天空盒: 全屏 quad + 反投影（A1+B1 用户拍板）
+        # _sky_vao / _sky_prog / _skybox 状态惰性建（首帧无 skybox 时零开销）
+        self._sky_prog = None
+        self._sky_vao = None
+        self._skybox = None          # 场景级默认天空盒（Cubemap 实例或 None）
+        self._skybox_tint = (1.0, 1.0, 1.0)   # 颜色乘子（调试用）
         # M36 贴图: 1x1 白纹理 (无贴图材质的默认绑定, 采样乘白=原色不改视觉)
         self._white_tex = None
         self._build_hud_quad()

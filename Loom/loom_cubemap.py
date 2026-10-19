@@ -32,6 +32,9 @@ class Cubemap:
         self._faces = faces if faces is not None else None   # [6 x (H,W,4)]
         self.paths = paths                                    # 6 面文件路径
         self.mipmaps = bool(mipmaps)
+        # 2026-10-19 天空盒: 记录纯色来源（from_solid 时设），供序列化还原
+        # paths 有值 -> 序列化存 paths；paths 为 None 且 _solid_color 有值 -> 存纯色
+        self._solid_color = None                              # (r,g,b,a) 0-255 或 None
         self._gl_tex = None
         self._gl_ctx_id = None
 
@@ -81,8 +84,12 @@ class Cubemap:
         arr = np.zeros((size, size, 4), dtype=np.uint8)
         arr[:, :, 0] = int(rgba[0]); arr[:, :, 1] = int(rgba[1])
         arr[:, :, 2] = int(rgba[2]); arr[:, :, 3] = int(rgba[3]) if len(rgba) > 3 else 255
-        return cls(size, faces=[arr.copy() for _ in range(6)], name=name,
+        cube = cls(size, faces=[arr.copy() for _ in range(6)], name=name,
                    guid=guid, mipmaps=mipmaps)
+        # 2026-10-19 天空盒: 记录纯色来源（序列化还原用）
+        cube._solid_color = (int(rgba[0]), int(rgba[1]), int(rgba[2]),
+                             int(rgba[3]) if len(rgba) > 3 else 255)
+        return cube
 
     def ensure_gl(self, ctx):
         """在 ctx 上创建 cubemap GPU 纹理（含 mipmap）。已有则直接返回。"""

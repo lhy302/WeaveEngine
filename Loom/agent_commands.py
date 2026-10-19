@@ -536,6 +536,60 @@ def cmd_light_add(win, args):
     return {'kind': args.get('kind', 'dir')}
 
 
+# ---- 2026-10-19 第1档序13 天空盒 (C3: 场景级 + 相机覆盖) ----
+@command('skybox_set', '设置场景级天空盒: {paths: [6 张图]} 或 {solid_color: "#RRGGBB"|[r,g,b,a]}, 可选 {name}')
+def cmd_skybox_set(win, args):
+    ed = win.editor
+    try:
+        from loom_cubemap import Cubemap
+    except Exception as e:
+        return {'error': 'Cubemap 模块不可用: %r' % e}
+    paths = args.get('paths')
+    solid = args.get('solid_color')
+    name = args.get('name')
+    if paths:
+        if not isinstance(paths, (list, tuple)) or len(paths) != 6:
+            return {'error': 'paths 必须是 6 个路径的数组 (px,nx,py,ny,pz,nz)'}
+        try:
+            cube = Cubemap.from_files(list(paths), name=name)
+        except Exception as e:
+            return {'error': '加载失败: %r' % e}
+    elif solid:
+        try:
+            # 支持 [r,g,b,a] 或 "#RRGGBB"
+            if isinstance(solid, str):
+                cube = Cubemap.from_solid(solid, name=name)
+            else:
+                rgba = tuple(int(x) for x in solid)
+                if len(rgba) == 3:
+                    rgba = rgba + (255,)
+                cube = Cubemap.from_solid(rgba, name=name)
+        except Exception as e:
+            return {'error': '纯色天空盒创建失败: %r' % e}
+    else:
+        return {'error': '需要 paths 或 solid_color'}
+    ed._skybox = cube
+    return {'ok': True, 'name': cube.name, 'guid': cube.guid}
+
+
+@command('skybox_clear', '清空场景级天空盒')
+def cmd_skybox_clear(win, args):
+    win.editor._skybox = None
+    return {'ok': True}
+
+
+@command('skybox_get', '读当前场景级天空盒信息')
+def cmd_skybox_get(win, args):
+    cube = getattr(win.editor, '_skybox', None)
+    if cube is None:
+        return {'skybox': None}
+    src = 'files' if getattr(cube, 'paths', None) else \
+          ('solid' if getattr(cube, '_solid_color', None) else None)
+    return {'skybox': {'name': getattr(cube, 'name', None),
+                       'guid': getattr(cube, 'guid', None),
+                       'source': src}}
+
+
 @command('camera_add', '添加摄像机')
 def cmd_camera_add(win, args):
     win.editor._add_camera()

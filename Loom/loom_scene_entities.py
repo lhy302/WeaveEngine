@@ -150,7 +150,8 @@ class CameraState:
 
     def __init__(self, position=None, yaw=0.0, pitch=0.0, roll=0.0, fov=60.0,
                  fov_locked=True, name=None, guid=None,
-                 pitch_lock=False, pitch_min=-85.0, pitch_max=85.0):
+                 pitch_lock=False, pitch_min=-85.0, pitch_max=85.0,
+                 skybox=None):
         # 默认位置 (0,1,-10) 对齐 Unity 新建 Camera
         self.position = Point3D(*position) if position is not None else Point3D(0, 1, -10)
         self.yaw   = wrap_deg(float(yaw), 0.0, 360.0)      # 度 [0,360) 水平朝向
@@ -168,6 +169,10 @@ class CameraState:
         # 摄像机只可挂 GameObject (不可当父); children 对称占位, 本期恒空不参与任何迭代.
         self.parent = None
         self.children = []
+        # 2026-10-19 第1档序13 天空盒 (C3 决策): 相机级天空盒覆盖。
+        # 语义: 非 None 时优先于场景级 engine._skybox；None 时用场景默认。
+        # 类型: loom_cubemap.Cubemap 实例或 None。
+        self.skybox = skybox
 
     @property
     def direction(self):

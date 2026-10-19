@@ -184,6 +184,18 @@ TOOLS_DEF = [
      'inputSchema': {'type': 'object', 'properties': {
          'script_id': {'type': 'string', 'description': '脚本 id（如 enemy_ai）'},
      }, 'required': ['script_id']}},
+    # 2026-10-19 第1档序13 天空盒 (C3: 场景级 + 相机覆盖)
+    {'name': 'loom_skybox_set', 'description': '设置场景级天空盒（6 面图片路径 或 纯色）',
+     'inputSchema': {'type': 'object', 'properties': {
+         'paths': {'type': 'array', 'items': {'type': 'string'},
+                   'description': '6 张图片路径（px,nx,py,ny,pz,nz）'},
+         'solid_color': {'type': 'string', 'description': '纯色天空盒（#RRGGBB）；与 paths 二选一'},
+         'name': {'type': 'string', 'description': '可选名称'},
+     }}},
+    {'name': 'loom_skybox_clear', 'description': '清空场景级天空盒',
+     'inputSchema': {'type': 'object', 'properties': {}}},
+    {'name': 'loom_skybox_get', 'description': '读当前场景级天空盒信息',
+     'inputSchema': {'type': 'object', 'properties': {}}},
 ]
 
 RESOURCES_DEF = [
@@ -510,6 +522,14 @@ class LoomMCPServer:
             return self._wrap(c.call('find_all_by_name', dict(args)))
         if name == 'loom_find_by_script':
             return self._wrap(c.call('find_by_script', dict(args)))
+
+        # ---- 天空盒 (2026-10-19) ----
+        if name == 'loom_skybox_set':
+            return self._wrap(c.call('skybox_set', dict(args)))
+        if name == 'loom_skybox_clear':
+            return self._wrap(c.call('skybox_clear', dict(args)))
+        if name == 'loom_skybox_get':
+            return self._wrap(c.call('skybox_get', dict(args)))
 
         # ---- 测试视口 ----
         if name == 'unity_playmode_toggle':

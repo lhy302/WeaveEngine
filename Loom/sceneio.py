@@ -369,6 +369,44 @@ def _apply_lights(engine, light_dicts):
 
 # ---------------- 摄像机 (Unity Camera 概念) ----------------
 
+def _emit_skybox(cube):
+    """2026-10-19 第1档序13 天空盒: Cubemap 实例 -> dict（None 时返回 None）.
+    两种来源:
+      - paths 非空: 6 面文件路径 (from_files 加载)
+      - _solid_color 非空: 纯色 (from_solid 加载)
+    都无则返回 None（视为无天空盒）。"""
+    if cube is None:
+        return None
+    out = {"name": getattr(cube, 'name', None),
+           "guid": getattr(cube, 'guid', None)}
+    paths = getattr(cube, 'paths', None)
+    if paths:
+        out["paths"] = list(paths)
+        return out
+    solid = getattr(cube, '_solid_color', None)
+    if solid:
+        out["solid_color"] = list(solid)
+        return out
+    return None   # 无可用来源（内存态 cubemap 无法序列化）
+
+
+def _apply_skybox(d):
+    """dict -> Cubemap 实例（失败返回 None，容错）。"""
+    if not d:
+        return None
+    try:
+        from loom_cubemap import Cubemap
+        if d.get('paths'):
+            return Cubemap.from_files(
+                d['paths'], name=d.get('name'), guid=d.get('guid'))
+        if d.get('solid_color'):
+            return Cubemap.from_solid(
+                tuple(d['solid_color']), name=d.get('name'), guid=d.get('guid'))
+    except Exception:
+        pass
+    return None
+
+
 def _emit_camera(cam):
     """CameraState -> dict (M41: 朝向度制 + roll + 俯仰角限制; 2026-08-16 相机物体化 parent_id)"""
     return {
@@ -384,6 +422,8 @@ def _emit_camera(cam):
         "pitch_min": cam.pitch_min,       # 度 最低俯角 (含)
         "pitch_max": cam.pitch_max,       # 度 最高仰角 (含)
         "parent_id": cam.parent.guid if cam.parent is not None else None,
+        # 2026-10-19 第1档序13 天空盒 (C3): 相机级 skybox 覆盖（None=用场景默认）
+        "skybox": _emit_skybox(getattr(cam, 'skybox', None)),
     }
 
 
@@ -406,6 +446,8 @@ def _apply_cameras(engine, cam_dicts):
             pitch_max=d.get('pitch_max', 85.0))
         if d.get('id'):
             cam.guid = d['id']
+        # 2026-10-19 天空盒: 相机级覆盖（旧文件无此键 -> None=用场景默认）
+        cam.skybox = _apply_skybox(d.get('skybox'))
         links.append((cam, d.get('parent_id')))
     return links
 
@@ -772,6 +814,8 @@ def scene_to_dict(engine, camera=None):
             "lights": [_emit_light(l) for l in engine.lights],
             "cameras": [_emit_camera(c) for c in engine.cameras],
             "active_camera": engine.active_camera,
+            # 2026-10-19 第1档序13 天空盒 (C3): 场景级默认天空盒
+            "skybox": _emit_skybox(getattr(engine, '_skybox', None)),
             "ui": _emit_ui(getattr(engine, 'ui', None)),   # 2026-10-18: Canvas UI
             "objects": objs}
 
@@ -782,6 +826,11 @@ def scene_from_dict(engine, data, camera_out=None):
     data = migrate(data)
     # 2026-08-30: 场景级重力加速度 (缺失=保留引擎当前值)
     engine.gravity = float(data.get('gravity', getattr(engine, 'gravity', -9.8)))
+    # 2026-10-19 第1档序13 天空盒 (C3): 场景级默认天空盒（旧文件无此键 -> None）
+    try:
+        engine._skybox = _apply_skybox(data.get('skybox'))
+    except Exception:
+        engine._skybox = None
     _apply_ui(engine, data.get('ui'))                # 2026-10-18: Canvas UI (清空重建)
     _apply_lights(engine, data.get('lights', []))   # M21: 场景光源 (清空重建)
     cam_links = _apply_cameras(engine, data.get('cameras', []))  # 场景摄像机 (清空重建)

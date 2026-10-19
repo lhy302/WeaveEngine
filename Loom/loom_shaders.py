@@ -385,3 +385,37 @@ void main() {
         gl_FragDepth = gl_FragCoord.z;
     }
 }"""
+
+
+# ================ 2026-10-19 第1档序13 天空盒 (A1 全屏 quad + 反投影) ================
+# 用户拍板 A1+B1:
+#   A1: 全屏 quad + fragment 反投影（性能最好，单次全屏绘制）
+#   B1: 先画几何后画天空（depth==1.0 才画，无 overdraw）
+# 反投影数学（与 engine._ray_from_screen 逐位一致: 行向量约定 clip @ inv(VP) = world）:
+#   frag NDC(x, y, 1.0) -> world = clip @ inv(VP) -> dir = normalize(world.xyz/w - cam_pos)
+# 复用 engine._quad_vbo（2f 2f = pos + uv，其中 pos 是 0..1 归一化 quad）
+_SKY_VERT = """#version 330
+in vec2 in_pos;   // quad 顶点位置 (0..1 归一化)
+out vec2 v_ndc;
+void main() {
+    // 全屏 quad: 0..1 -> NDC -1..1, z=1.0 = 远平面
+    v_ndc = in_pos * 2.0 - 1.0;
+    gl_Position = vec4(v_ndc, 1.0, 1.0);
+}"""
+
+_SKY_FRAG = """#version 330
+in vec2 v_ndc;
+uniform mat4 u_inv_view_proj;   // CPU 侧算好的 inv(VP)（行向量约定）
+uniform vec3 u_camera_pos;
+uniform samplerCube u_skybox;
+uniform vec3 u_skybox_tint;
+out vec4 frag_color;
+void main() {
+    // 行向量约定: clip = (ndc.x, ndc.y, 1.0, 1.0), world = clip @ inv(VP)
+    // GLSL 是列主序, u_inv_view_proj * v 等价 numpy 的 v @ M（M 是行主序存储）
+    vec4 clip = vec4(v_ndc.x, v_ndc.y, 1.0, 1.0);
+    vec4 world = u_inv_view_proj * clip;
+    vec3 dir = normalize(world.xyz / max(world.w, 1e-6) - u_camera_pos);
+    vec3 col = texture(u_skybox, dir).rgb * u_skybox_tint;
+    frag_color = vec4(col, 1.0);
+}"""
