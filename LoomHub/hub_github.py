@@ -28,6 +28,24 @@ API_BASE = 'https://api.github.com'
 TAG_PREFIX = 'engine-v'
 USER_AGENT = 'LoomHub/0.1.0'
 
+# 2026-10-19: GitHub release 下载在国内可能极慢（30 KB/s 级）.
+# 直连失败/慢速时自动切以下镜像（前缀拼接原 URL）.
+# 顺序：常用/稳定优先.
+MIRRORS = [
+    'https://ghfast.top/',
+    'https://gh-proxy.com/',
+    'https://ghproxy.net/',
+    'https://github.moeyy.xyz/',
+]
+
+
+def _mirror_urls(url):
+    """生成下载候选 URL 列表（原 URL 第一优先，其后各镜像）."""
+    urls = [url]
+    for prefix in MIRRORS:
+        urls.append(prefix + url)
+    return urls
+
 
 # ---------------- Token 管理（%APPDATA%\LoomHub\settings.json） ----------------
 
@@ -201,71 +219,171 @@ class CancelToken:
         return self._flag.is_set()
 
 
-def download_asset(url, dest_path, progress_cb=None,
-                   cancel_token=None, chunk_size=64 * 1024):
-    """流式下载文件到 dest_path.
+class SlowSpeedError(Exception):
+    """速度过低异常（触发切镜像）."""
+    pass
 
-    progress_cb(downloaded_bytes, total_bytes, speed_bps):
-      每块调用（total_bytes 可能为 0 = 服务器未返回 Content-Length）
 
-    cancel_token: CancelToken 实例，随时取消
+def _download_one_url(url, tmp_path, progress_cb, cancel_token,
+                      chunk_size, max_retries, per_url_timeout,
+                      low_speed_bps, low_speed_secs):
+    """单个 URL 的下载尝试（含断点续传 + 重试 + 速度监控）.
 
-    返回 True=成功 / False=取消 / 抛异常=失败
+    返回 True=成功 / False=取消 / 抛异常=失败（外层会切下一个 URL）
     """
-    req = urllib.request.Request(url)
-    req.add_header('User-Agent', USER_AGENT)
+    last_err = None
+    for attempt in range(1, max_retries + 1):
+        if cancel_token is not None and cancel_token.is_set():
+            return False
+        resume_pos = (os.path.getsize(tmp_path)
+                      if os.path.isfile(tmp_path) else 0)
+        req = urllib.request.Request(url)
+        req.add_header('User-Agent', USER_AGENT)
+        if resume_pos > 0:
+            req.add_header('Range', 'bytes=%d-' % resume_pos)
+            print('[下载] 断点续传: %d 字节 (attempt %d/%d)'
+                  % (resume_pos, attempt, max_retries))
+        try:
+            url_start = time.time()
+            with urllib.request.urlopen(req, timeout=per_url_timeout) as resp:
+                status = getattr(resp, 'status', 200)
+                if status == 206:
+                    content_range = resp.headers.get('Content-Range', '')
+                    try:
+                        total = int(content_range.split('/')[-1])
+                    except Exception:
+                        total = resume_pos + int(
+                            resp.headers.get('Content-Length', 0) or 0)
+                    mode = 'ab'
+                    downloaded = resume_pos
+                else:
+                    total = int(resp.headers.get('Content-Length', 0) or 0)
+                    mode = 'wb'
+                    downloaded = 0
+                    resume_pos = 0
 
-    # 先检查本地部分文件（断点续传——暂不做，先重新下载）
-    tmp_path = dest_path + '.part'
-    try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            total = int(resp.headers.get('Content-Length', 0) or 0)
-            downloaded = 0
-            last_time = time.time()
-            last_bytes = 0
-            with open(tmp_path, 'wb') as f:
-                while True:
-                    if cancel_token is not None and cancel_token.is_set():
-                        f.close()
-                        try:
-                            os.remove(tmp_path)
-                        except OSError:
-                            pass
-                        return False
-                    chunk = resp.read(chunk_size)
-                    if not chunk:
-                        break
-                    f.write(chunk)
-                    downloaded += len(chunk)
-                    if progress_cb is not None:
+                last_time = time.time()
+                last_bytes = downloaded
+                low_speed_start = None
+                with open(tmp_path, mode) as f:
+                    while True:
+                        if (cancel_token is not None
+                                and cancel_token.is_set()):
+                            f.close()
+                            try:
+                                os.remove(tmp_path)
+                            except OSError:
+                                pass
+                            return False
+                        # 整体超时检查
+                        if time.time() - url_start > per_url_timeout:
+                            raise SlowSpeedError(
+                                'URL 超时 (%d 秒)' % per_url_timeout)
+                        chunk = resp.read(chunk_size)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        downloaded += len(chunk)
                         now = time.time()
                         dt = now - last_time
-                        if dt >= 0.2:   # 每 0.2 秒回调一次，避免刷爆 UI
+                        if dt >= 0.2:
                             speed = (downloaded - last_bytes) / dt
-                            try:
-                                progress_cb(downloaded, total, speed)
-                            except Exception:
-                                pass
+                            if progress_cb is not None:
+                                try:
+                                    progress_cb(downloaded, total, speed)
+                                except Exception:
+                                    pass
+                            # 速度监控：连续 low_speed_secs 秒速度 < 阈值则切镜像
+                            if speed < low_speed_bps and total > 0:
+                                if low_speed_start is None:
+                                    low_speed_start = now
+                                elif now - low_speed_start >= low_speed_secs:
+                                    raise SlowSpeedError(
+                                        '速度过低 (%.1f KB/s 持续 %d 秒)'
+                                        % (speed / 1024.0, low_speed_secs))
+                            else:
+                                low_speed_start = None
                             last_time = now
                             last_bytes = downloaded
-        # 完成
-        if progress_cb is not None:
+            if total > 0 and downloaded != total:
+                raise IOError('下载不完整: %d / %d 字节'
+                              % (downloaded, total))
+            return True
+        except SlowSpeedError:
+            raise  # 不重试，直接切镜像
+        except Exception as e:
+            last_err = e
+            print('[下载] 尝试 %d 失败: %r' % (attempt, e))
+            if attempt < max_retries:
+                time.sleep(2)
+                continue
+            raise
+    if last_err:
+        raise last_err
+    return False
+
+
+def download_asset(url, dest_path, progress_cb=None,
+                   cancel_token=None, chunk_size=64 * 1024,
+                   max_retries=3, use_mirrors=True,
+                   per_url_timeout=180,
+                   low_speed_kb=80, low_speed_secs=15):
+    """流式下载文件到 dest_path（2026-10-19 强化 + 镜像加速）.
+
+    能力：
+      1) 断点续传（同 URL 内重试时）
+      2) 完整性校验（字节数 == Content-Length）
+      3) 自动重试（每 URL 内 3 次）
+      4) 镜像加速：直连慢/失败时自动切到 MIRRORS 列表
+      5) 速度监控：连续 low_speed_secs 秒 < low_speed_kb 则切镜像
+
+    progress_cb(downloaded_bytes, total_bytes, speed_bps)
+    cancel_token: CancelToken 实例
+    返回 True=成功 / False=取消 / 抛异常=所有 URL 失败
+    """
+    urls = _mirror_urls(url) if use_mirrors else [url]
+    tmp_path = dest_path + '.part'
+    low_speed_bps = low_speed_kb * 1024.0
+    last_err = None
+
+    for idx, cur_url in enumerate(urls):
+        if cancel_token is not None and cancel_token.is_set():
+            return False
+        # 换 URL 前删除 .part（避免镜像内容不一致）
+        if idx > 0 and os.path.isfile(tmp_path):
             try:
-                progress_cb(downloaded, total, 0.0)
-            except Exception:
-                pass
-        # 原子替换
-        if os.path.isfile(dest_path):
-            try:
-                os.remove(dest_path)
+                os.remove(tmp_path)
             except OSError:
                 pass
-        os.rename(tmp_path, dest_path)
-        return True
-    except Exception:
+        label = '直连' if idx == 0 else ('镜像%d' % idx)
+        if idx > 0:
+            print('[下载] 切到镜像 %s: %s' % (label, cur_url))
+            # 通知 UI 已切镜像
+            if progress_cb is not None:
+                try:
+                    progress_cb(0, 0, 0.0)
+                except Exception:
+                    pass
         try:
-            if os.path.isfile(tmp_path):
-                os.remove(tmp_path)
-        except OSError:
-            pass
-        raise
+            ok = _download_one_url(
+                cur_url, tmp_path, progress_cb, cancel_token,
+                chunk_size, max_retries, per_url_timeout,
+                low_speed_bps, low_speed_secs)
+            if ok is False:
+                return False   # 用户取消
+            # 成功：原子重命名
+            if os.path.isfile(dest_path):
+                try:
+                    os.remove(dest_path)
+                except OSError:
+                    pass
+            os.rename(tmp_path, dest_path)
+            if idx > 0:
+                print('[下载] 镜像 %s 成功完成' % label)
+            return True
+        except Exception as e:
+            last_err = e
+            print('[下载] %s 失败: %r' % (label, e))
+            continue
+
+    raise last_err or IOError('所有 URL 均失败')
