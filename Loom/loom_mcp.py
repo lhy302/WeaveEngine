@@ -164,6 +164,26 @@ TOOLS_DEF = [
          'backend': {'type': 'string'},
          'layer_mask': {'type': 'integer', 'description': '位掩码过滤（bit i 表示 layer i）'},
      }, 'required': ['px', 'py']}},
+    # 2026-10-18 阶段1档序6 SendMessage
+    {'name': 'loom_send_message', 'description': '在指定物体所有脚本上调用方法名（Unity SendMessage 语义）',
+     'inputSchema': {'type': 'object', 'properties': {
+         'model': {'type': 'string', 'description': '物体名（首个同名匹配）'},
+         'method': {'type': 'string', 'description': '要调用的脚本方法名'},
+         'args': {'type': 'array', 'description': '透传给方法的参数数组（可选）'},
+     }, 'required': ['model', 'method']}},
+    # 2026-10-18 阶段1档序8 对象查找（用户拍板 1=C 双 API / 2=A 物体列表）
+    {'name': 'loom_find_by_name', 'description': '按物体名查找首个匹配（Unity GameObject.Find 语义）',
+     'inputSchema': {'type': 'object', 'properties': {
+         'model': {'type': 'string', 'description': '物体名'},
+     }, 'required': ['model']}},
+    {'name': 'loom_find_all_by_name', 'description': '按物体名查找所有匹配（重名场景）',
+     'inputSchema': {'type': 'object', 'properties': {
+         'model': {'type': 'string', 'description': '物体名'},
+     }, 'required': ['model']}},
+    {'name': 'loom_find_by_script', 'description': '查找挂有指定脚本的物体（按行为批量查找）',
+     'inputSchema': {'type': 'object', 'properties': {
+         'script_id': {'type': 'string', 'description': '脚本 id（如 enemy_ai）'},
+     }, 'required': ['script_id']}},
 ]
 
 RESOURCES_DEF = [
@@ -478,6 +498,18 @@ class LoomMCPServer:
             return self._wrap(c.call('raycast_all', dict(args)))
         if name == 'loom_raycast_screen':
             return self._wrap(c.call('raycast_screen', dict(args)))
+
+        # ---- SendMessage (2026-10-18) ----
+        if name == 'loom_send_message':
+            return self._wrap(c.call('send_message', dict(args)))
+
+        # ---- 对象查找 (2026-10-18) ----
+        if name == 'loom_find_by_name':
+            return self._wrap(c.call('find_by_name', dict(args)))
+        if name == 'loom_find_all_by_name':
+            return self._wrap(c.call('find_all_by_name', dict(args)))
+        if name == 'loom_find_by_script':
+            return self._wrap(c.call('find_by_script', dict(args)))
 
         # ---- 测试视口 ----
         if name == 'unity_playmode_toggle':

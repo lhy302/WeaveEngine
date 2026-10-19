@@ -2237,6 +2237,65 @@ def _find_model_by_name(ed, name):
     return None
 
 
+@command('send_message', '脚本间通信: {model, method, args?} 在指定物体所有脚本上调用方法名 '
+                         '返回 {called: N}（成功调用脚本数）')
+def cmd_send_message(win, args):
+    ed = win.editor
+    model_name = args.get('model')
+    method = args.get('method')
+    if not model_name or not method:
+        return {'error': '需要 model（物体名）和 method（方法名）'}
+    call_args = args.get('args', [])
+    if not isinstance(call_args, (list, tuple)):
+        return {'error': 'args 必须是数组'}
+    try:
+        n = ed.send_message_to_name(str(model_name), str(method), *call_args)
+    except Exception as e:
+        return {'error': '调用失败: %r' % e}
+    return {'called': int(n)}
+
+
+# ---- 2026-10-18 阶段1档序8 对象查找（用户拍板 1=C 双 API / 2=A 物体列表）----
+
+def _model_brief(ed, m):
+    """返回物体的 EAI 响应格式（name + models 下标，避开 guid 可能为 None 的情况）。"""
+    try:
+        idx = ed.models.index(m)
+    except ValueError:
+        idx = -1
+    return {'name': getattr(m, 'name', ''), 'index': int(idx)}
+
+
+@command('find_by_name', '按物体名查找首个匹配: {model} 返回 {found: {...} | null}')
+def cmd_find_by_name(win, args):
+    ed = win.editor
+    name = args.get('model')
+    if not name:
+        return {'error': '需要 model（物体名）'}
+    m = ed.find_by_name(str(name))
+    return {'found': None if m is None else _model_brief(ed, m)}
+
+
+@command('find_all_by_name', '按物体名查找所有匹配: {model} 返回 {found: [...]}')
+def cmd_find_all_by_name(win, args):
+    ed = win.editor
+    name = args.get('model')
+    if not name:
+        return {'error': '需要 model（物体名）'}
+    ms = ed.find_all_by_name(str(name))
+    return {'found': [_model_brief(ed, m) for m in ms]}
+
+
+@command('find_by_script', '查找挂有指定脚本的物体: {script_id} 返回 {found: [...]}')
+def cmd_find_by_script(win, args):
+    ed = win.editor
+    sid = args.get('script_id')
+    if not sid:
+        return {'error': '需要 script_id（脚本 id）'}
+    ms = ed.find_by_script(str(sid))
+    return {'found': [_model_brief(ed, m) for m in ms]}
+
+
 @command('settings_get', '读编辑器设置: {key?} (fps_limit/cam_speed/多核 等)')
 def cmd_settings_get(win, args):
     import guiloader

@@ -258,6 +258,38 @@ class GameObject:
             return self.scripts[index]
         return None
 
+    def send_message(self, method_name, *args, **kwargs):
+        """2026-10-18 阶段1档序6 SendMessage（语义对齐 Unity GameObject.SendMessage）。
+
+        在该物体所有已实例化的脚本上调用名为 method_name 的方法（同 Unity：只调
+        已实例化脚本，不返回返回值，异常隔离不崩帧，坏脚本标记跳过）。
+        异常隔离语义与 loom_frame_components._call_collision_cb 一致。
+
+        参数:
+          method_name: 要调用的脚本方法名（str）
+          *args, **kwargs: 透传给方法的参数（Unity 只支持一个可选参数, Loom 更宽松）
+
+        返回: 成功调用的脚本数（int, 用于测试/调试；正常游戏逻辑无需关心）
+        """
+        if not isinstance(method_name, str) or not method_name:
+            return 0
+        called = 0
+        for sc in self.scripts:
+            inst = getattr(sc, '_script', None)
+            if inst is None or getattr(sc, '_script_broken', False):
+                continue
+            fn = getattr(inst, method_name, None)
+            if not callable(fn):
+                continue
+            try:
+                fn(*args, **kwargs)
+                called += 1
+            except Exception as e:
+                print("[脚本] %s(%s).%s 出错: %r"
+                      % (self.name, sc.script_id, method_name, e))
+                sc._script_broken = True
+        return called
+
     def add_rigidbody(self, mass=1.0, use_gravity=True, is_kinematic=False,
                       friction=0.5, restitution=0.0, rolling_friction=0.1):
         """M31: 给物体加刚体组件 (返回 RigidbodyComponent).
