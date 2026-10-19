@@ -2150,10 +2150,48 @@ def cmd_ui_set(win, args):
         elem.z_order = int(as_float(args['z_order'], 0))
         done['z_order'] = elem.z_order
 
+    # 2026-10-19 P1-3 修复: 颜色字段专用解析器（防 '#ffcc00' 被 tuple() 拆成字符数组）
+    _COLOR_FIELDS = {
+        'bg_color', 'color', 'tint', 'text_color', 'normal_color',
+        'hover_color', 'pressed_color', 'track_color', 'fill_color',
+        'handle_color', 'box_color', 'check_color', 'label_color',
+    }
+
+    def parse_color(v):
+        """把颜色值统一成 RGBA 元组 (r,g,b,a)。
+        支持: '#RRGGBB' -> (r,g,b,255); '#RRGGBBAA' -> (r,g,b,a);
+              '#RGB' -> (r*17,g*17,b*17,255);
+              [r,g,b] / (r,g,b) -> (r,g,b,255); [r,g,b,a] / (r,g,b,a) -> (r,g,b,a)。
+        非法值抛 ValueError（take 会捕获成 error: '...' 字段）。
+        """
+        if isinstance(v, str):
+            s = v.strip().lstrip('#')
+            if len(s) == 3:
+                s = ''.join(c * 2 for c in s) + 'ff'
+            elif len(s) == 6:
+                s = s + 'ff'
+            if len(s) != 8:
+                raise ValueError('颜色格式非法 (需 #RRGGBB / #RRGGBBAA / #RGB): %r' % v)
+            try:
+                return (int(s[0:2], 16), int(s[2:4], 16),
+                        int(s[4:6], 16), int(s[6:8], 16))
+            except ValueError:
+                raise ValueError('颜色十六进制非法: %r' % v)
+        if isinstance(v, (list, tuple)):
+            r = tuple(int(x) for x in v)
+            if len(r) == 3:
+                return r + (255,)
+            if len(r) == 4:
+                return r
+            raise ValueError('颜色数组需 3 或 4 项: %r' % (v,))
+        raise ValueError('颜色类型不支持: %r' % (v,))
+
     def take(key, conv=lambda v: v):
         if key in args and hasattr(elem, key):
             try:
-                setattr(elem, key, conv(args[key]))
+                # 颜色字段即使调用方传了 tuple 也强制走 parse_color（防字符数组 bug）
+                c = parse_color if (key in _COLOR_FIELDS and conv is tuple) else conv
+                setattr(elem, key, c(args[key]))
                 done[key] = getattr(elem, key)
             except Exception as e:
                 done[key] = 'error: %r' % e

@@ -15,6 +15,18 @@ import sys
 import threading
 import time
 import urllib.request
+
+# 2026-10-19 P1-5 修复: 强制 stdio 为 UTF-8.
+# Windows 默认 GBK 环境下，tools/list 的中文描述和错误信息会乱码，
+# 某些字符还会触发编码异常（与 P0-1 同源）。
+try:
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    if hasattr(sys.stderr, 'reconfigure'):
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+except Exception:
+    pass
+
 PROTOCOL_VERSION = '2024-11-05'
 SERVER_INFO = {'name': 'loom-engine-mcp', 'version': '1.0.0'}
 class LoomEngineClient:
@@ -82,6 +94,14 @@ TOOLS_DEF = [
     {'name': 'unity_script_reload', 'description': '热重载游戏脚本目录（改完 scripts/ 下的 .py/.lua 立即生效，不必重启编辑器）', 'inputSchema': {'type': 'object', 'properties': {'dir': {'type': 'string', 'description': '可选：脚本目录路径（缺省=引擎旁 scripts/）'}}}},
     {'name': 'unity_scripts_list', 'description': '列出所有已注册游戏脚本（id + 名称 + 参数）——在 script_add 前用它查有效 id，避免挂载失败', 'inputSchema': {'type': 'object', 'properties': {}}},
     {'name': 'unity_script_write_file', 'description': '在项目 scripts/ 目录下编写或更新纯 Lua 5.4 / Python 玩法脚本', 'inputSchema': {'type': 'object', 'properties': {'filename': {'type': 'string', 'description': '文件名 (如 player.lua 或 enemy.lua)'}, 'code': {'type': 'string', 'description': '完整的脚本代码'}}, 'required': ['filename', 'code']}},
+    {'name': 'unity_camera_add', 'description': '添加摄像机 (对齐 Unity GameObject.CreatePrimitive(Camera))', 'inputSchema': {'type': 'object', 'properties': {}}},
+    {'name': 'unity_camera_active', 'description': '设为激活相机 (对齐 Unity Camera.main 切换)', 'inputSchema': {'type': 'object', 'properties': {'name_or_id': {'type': 'string', 'description': '相机名称或 GUID (空=取消激活)'}}}},
+    {'name': 'unity_camera_set', 'description': '设置摄像机属性 (对齐 Unity Camera)', 'inputSchema': {'type': 'object', 'properties': {'name_or_id': {'type': 'string', 'description': '相机名称或 GUID'}, 'fov': {'type': 'number', 'description': '视场角 (度)'}, 'yaw': {'type': 'number', 'description': '偏航角 (度)'}, 'pitch': {'type': 'number', 'description': '俯仰角 (度)'}, 'roll': {'type': 'number', 'description': '翻滚角 (度)'}}}},
+    {'name': 'unity_light_add', 'description': '添加光源 (对齐 Unity Light: Directional/Point/Spot)', 'inputSchema': {'type': 'object', 'properties': {'kind': {'type': 'string', 'enum': ['dir', 'point', 'spot'], 'description': 'dir=平行光, point=点光源, spot=聚光灯'}}}},
+    {'name': 'unity_light_set', 'description': '设置光源属性 (对齐 Unity Light: intensity/color/方向)', 'inputSchema': {'type': 'object', 'properties': {'name_or_id': {'type': 'string', 'description': '光源名称或 GUID'}, 'intensity': {'type': 'number', 'description': '强度'}, 'r': {'type': 'number', 'description': '红色 0-1'}, 'g': {'type': 'number', 'description': '绿色 0-1'}, 'b': {'type': 'number', 'description': '蓝色 0-1'}, 'azimuth': {'type': 'number', 'description': '方位角 (度)'}, 'elevation': {'type': 'number', 'description': '仰角 (度)'}, 'shadow': {'type': 'boolean', 'description': '是否投射阴影'}, 'range': {'type': 'number', 'description': '点/聚光范围'}}}},
+    {'name': 'unity_object_set_visible', 'description': '控制物体可见性 (对齐 Unity Renderer.enabled / GameObject.SetActive)', 'inputSchema': {'type': 'object', 'properties': {'name_or_id': {'type': 'string', 'description': '物体名称或 GUID'}, 'visible': {'type': 'boolean', 'description': '是否可见'}}, 'required': ['name_or_id']}},
+    {'name': 'unity_undo', 'description': '撤销上一步操作 (对齐 Unity Editor Undo)', 'inputSchema': {'type': 'object', 'properties': {}}},
+    {'name': 'unity_redo', 'description': '重做上一步撤销 (对齐 Unity Editor Redo)', 'inputSchema': {'type': 'object', 'properties': {}}},
     {'name': 'unity_playmode_toggle', 'description': '切换编辑器播放模式与编辑模式 (对齐 Unity EditorApplication.isPlaying = true/false)', 'inputSchema': {'type': 'object', 'properties': {'on': {'type': 'boolean', 'description': 'true 为开始播放, false 为停止播放'}, 'paused': {'type': 'boolean', 'description': '进入播放即冻结逻辑帧 (物理对拍用)'}}}},
     {'name': 'unity_capture_viewport', 'description': '截取当前编辑器视口渲染画面 (供多模态模型视觉检查画面对齐/缺陷排查)', 'inputSchema': {'type': 'object', 'properties': {'path': {'type': 'string', 'description': '可选保存图片文件路径'}}}},
     {'name': 'unity_build_player', 'description': '一键将游戏项目构建打包为独立的纯 Player 免安装发布夹 (对齐 Unity BuildPipeline.BuildPlayer)', 'inputSchema': {'type': 'object', 'properties': {'game_name': {'type': 'string', 'description': '发布游戏名称'}, 'scene_path': {'type': 'string', 'description': '启动场景文件路径'}, 'output_dir': {'type': 'string', 'description': '发布目标目录'}}}},
@@ -579,6 +599,46 @@ class LoomMCPServer:
             return self._wrap(c.call('skybox_get', dict(args)))
 
         # ---- 测试视口 ----
+        # ---- 2026-10-19 P0-6: 相机 / 灯光 / 可见性 / 撤销 暴露到 MCP ----
+        # 背景：EAI 早有这些命令，但 MCP 工具面没暴露，Agent 无法控相机/布光/隐藏物体/回滚误操作。
+        # 策略：MCP 只做参数搬运，逻辑全在 EAI 命令层。
+        if name == 'unity_camera_add':
+            return self._wrap(c.call('camera_add', {}))
+        if name == 'unity_camera_active':
+            return self._wrap(c.call('camera_active',
+                                     {'name': args.get('name_or_id') or ''}))
+        if name == 'unity_camera_set':
+            payload = {}
+            key = args.get('name_or_id')
+            if key:
+                payload['name'] = key
+            for k in ('fov', 'yaw', 'pitch', 'roll'):
+                if k in args:
+                    payload[k] = args[k]
+            return self._wrap(c.call('camera_set', payload))
+        if name == 'unity_light_add':
+            return self._wrap(c.call('light_add',
+                                     {'kind': args.get('kind') or 'dir'}))
+        if name == 'unity_light_set':
+            payload = {}
+            key = args.get('name_or_id')
+            if key:
+                payload['name'] = key
+            for k in ('intensity', 'r', 'g', 'b', 'azimuth', 'elevation',
+                      'shadow', 'range', 'roll', 'size', 'mode', 'shape',
+                      'x', 'y', 'z'):
+                if k in args:
+                    payload[k] = args[k]
+            return self._wrap(c.call('light_set', payload))
+        if name == 'unity_object_set_visible':
+            payload = {'name': args.get('name_or_id')}
+            if 'visible' in args:
+                payload['on'] = bool(args['visible'])
+            return self._wrap(c.call('set_visible', payload))
+        if name == 'unity_undo':
+            return self._wrap(c.call('undo', {}))
+        if name == 'unity_redo':
+            return self._wrap(c.call('redo', {}))
         if name == 'unity_playmode_toggle':
             payload = {'on': args.get('on', True)}
             if 'paused' in args:
@@ -684,8 +744,23 @@ def run_stdio_server():
             continue
         res = server.handle_request(req)
         if res is not None:
-            sys.stdout.write(json.dumps(res, ensure_ascii=False) + '\n')
-            sys.stdout.flush()
+            # 2026-10-19 P1-5: 最终 write 兜底（防极端字符绕过 reconfigure）
+            try:
+                txt = json.dumps(res, ensure_ascii=False)
+            except Exception:
+                txt = json.dumps({
+                    'jsonrpc': '2.0', 'id': None,
+                    'error': {'code': -32603,
+                              'message': 'response serialize failed'}})
+            try:
+                sys.stdout.write(txt + '\n')
+                sys.stdout.flush()
+            except Exception:
+                try:
+                    sys.stdout.buffer.write(txt.encode('utf-8', 'replace') + b'\n')
+                    sys.stdout.buffer.flush()
+                except Exception:
+                    pass
 
 if __name__ == '__main__':
     run_stdio_server()
