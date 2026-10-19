@@ -172,6 +172,9 @@ def light_snapshot(l):
         'azimuth': l.azimuth,
         'elevation': l.elevation,
         'roll': l.roll,
+        # 2026-10-19 第1档序9 聚光灯: 内外锥角（旧快照无此键 -> apply 用默认值）
+        'spot_inner_angle': getattr(l, 'spot_inner_angle', 30.0),
+        'spot_outer_angle': getattr(l, 'spot_outer_angle', 60.0),
     }
 
 
@@ -186,6 +189,11 @@ def apply_light_snapshot(l, snap):
     l.shape = snap.get('shape', 'circle')
     l.size = snap.get('size', 5.0)
     l.shadow = snap.get('shadow', True)
+    # 2026-10-19 第1档序9 聚光灯: 内外锥角（旧快照无此键 -> 保留原值 / 默认 30/60）
+    if 'spot_inner_angle' in snap:
+        l.spot_inner_angle = snap['spot_inner_angle']
+    if 'spot_outer_angle' in snap:
+        l.spot_outer_angle = snap['spot_outer_angle']
     if 'azimuth' in snap:
         # M30: 平行光方向 3 角度 (直接写角度, 保留 roll)
         l.azimuth = snap['azimuth']

@@ -63,12 +63,15 @@ uniform float u_has_normal_map;    // 0=无 (跳过整段), 1=有
 // 多光源 (最多 8 个): 平行光 / 点光源, 场景光源由用户手动添加 (无默认光源)
 const int MAX_LIGHTS = 8;
 uniform int u_light_count;
-uniform vec3 u_light_dir[MAX_LIGHTS];    // 平行光行进方向 (点光源置 0)
-uniform vec3 u_light_pos[MAX_LIGHTS];    // 点光源位置 (平行光置 0)
+uniform vec3 u_light_dir[MAX_LIGHTS];    // 平行光/聚光灯行进方向 (点光源置 0)
+uniform vec3 u_light_pos[MAX_LIGHTS];    // 点光/聚光灯位置 (平行光置 0)
 uniform vec3 u_light_color[MAX_LIGHTS];
 uniform float u_light_intensity[MAX_LIGHTS];
-uniform float u_light_kind[MAX_LIGHTS];  // 0=平行光, 1=点光源
-uniform float u_light_range[MAX_LIGHTS]; // 点光源影响半径 (对齐 Unity Light.range; 平行光忽略)
+uniform float u_light_kind[MAX_LIGHTS];  // 0=平行光, 1=点光源, 2=聚光灯
+uniform float u_light_range[MAX_LIGHTS]; // 点光/聚光灯影响半径 (对齐 Unity Light.range; 平行光忽略)
+// 2026-10-19 第1档序9 聚光灯: 内外锥角余弦 (避免每片元 cos 计算; Python 侧上传算好)
+uniform float u_light_spot_inner[MAX_LIGHTS];  // 聚光灯内锥 cos(inner_angle)
+uniform float u_light_spot_outer[MAX_LIGHTS];  // 聚光灯外锥 cos(outer_angle)
 uniform float u_ambient_scale;           // 有光源=1.0, 无光源=0.2 (压暗提示手动加光)
 in float v_sat;                          // A2: 物体饱和度改 per-instance (0=灰阶, 1=原始, >1=增艳)
 uniform vec3 u_view_pos;
@@ -203,7 +206,7 @@ void main() {
         float diff;
         float atten = 1.0;
         if (u_light_kind[i] > 0.5) {
-            // 点光源: 位置 + 距离衰减 + range 截断 (对齐 Unity Light.range)
+            // 点光源 / 聚光灯: 位置 + 距离衰减 + range 截断 (对齐 Unity Light.range)
             vec3 to_l = u_light_pos[i] - v_world_pos;
             float dist = length(to_l);
             l = to_l / max(dist, 1e-4);
@@ -213,6 +216,16 @@ void main() {
             float rng = max(u_light_range[i], 1e-3);
             float fade = clamp(1.0 - (dist * dist) / (rng * rng), 0.0, 1.0);
             atten *= fade * fade;
+            // 2026-10-19 第1档序9 聚光灯: 锥角衰减（内锥全亮, 内→外线性衰减, 外锥外 0）
+            if (u_light_kind[i] > 1.5) {
+                vec3 spot_dir = normalize(u_light_dir[i]);   // 光源照射方向 (从光源指向场景)
+                vec3 frag_dir = -to_l / max(dist, 1e-4);      // 光源->片元方向
+                float cos_theta = dot(frag_dir, spot_dir);
+                float inner = u_light_spot_inner[i];          // cos(inner_angle)
+                float outer = u_light_spot_outer[i];          // cos(outer_angle)
+                float spot_atten = clamp((cos_theta - outer) / max(inner - outer, 1e-4), 0.0, 1.0);
+                atten *= spot_atten;
+            }
         } else {
             // 平行光: 行进方向取反即为光照方向
             l = normalize(-u_light_dir[i]);

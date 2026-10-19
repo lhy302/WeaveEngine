@@ -530,7 +530,7 @@ def cmd_play(win, args):
             'paused': bool(getattr(ed, '_logic_paused', False))}
 
 
-@command('light_add', '添加光源: dir|point')
+@command('light_add', '添加光源: dir|point|spot（2026-10-19 加聚光灯）')
 def cmd_light_add(win, args):
     win.editor._add_light(args.get('kind', 'dir'))
     return {'kind': args.get('kind', 'dir')}

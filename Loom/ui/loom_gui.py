@@ -1260,6 +1260,8 @@ class LoomGUI(QMainWindow):
         pairs = (
             ("+ 平行光", lambda: self._cmd_add_light('directional')),
             ("+ 点光源", lambda: self._cmd_add_light('point')),
+            # 2026-10-19 第1档序9 聚光灯
+            ("+ 聚光灯", lambda: self._cmd_add_light('spot')),
             ("+ 摄像机", self._cmd_add_camera),
             ("显隐", self._cmd_toggle_visible),
         )

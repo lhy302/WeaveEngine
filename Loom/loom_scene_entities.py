@@ -56,8 +56,9 @@ class LightState:
     def __init__(self, kind='directional', position=None, direction=None,
                  color=(1.0, 1.0, 1.0), intensity=1.0, name=None, guid=None,
                  mode='full', shape='circle', size=5.0, shadow=True,
-                 azimuth=None, elevation=None, roll=None, range=10.0):
-        self.kind = kind                       # 'directional' | 'point'
+                 azimuth=None, elevation=None, roll=None, range=10.0,
+                 spot_inner_angle=30.0, spot_outer_angle=60.0):
+        self.kind = kind                       # 'directional' | 'point' | 'spot'
         # 统一存 Point3D (sceneio 会传 tuple/Point3D 混用)
         self.position = Point3D(*position) if position is not None else Point3D(0, 5, 0)
         if azimuth is not None:
@@ -80,7 +81,14 @@ class LightState:
         self.shadow = bool(shadow)             # 是否投射阴影 (物理遮挡)
         # 点光源范围 (对齐 Unity Light.range, 默认 10): 超出此距离的光照衰减到 0
         self.range = float(range)
-        self.name = name or ('平行光' if kind == 'directional' else '点光源')
+        # 2026-10-19 第1档序9 聚光灯: 内外锥角（度, Unity Light.spotAngle/innerSpotAngle 语义）
+        # 内锥内全亮 → 内到外线性衰减 → 外锥外 0。默认 inner=30° outer=60°（Unity 常用）。
+        # 非 'spot' 的 kind 保留字段但不生效（上传时 kind!=2 只传 0 值）。
+        self.spot_inner_angle = float(spot_inner_angle)
+        self.spot_outer_angle = float(spot_outer_angle)
+        self.name = name or (
+            '平行光' if kind == 'directional'
+            else ('点光源' if kind == 'point' else '聚光灯'))
         self.guid = guid or uuid.uuid4().hex   # 稳定身份 (序列化引用用)
 
     @property

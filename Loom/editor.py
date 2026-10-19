@@ -703,12 +703,18 @@ class EditorApp(GLEngine):
 
     # ================ 光源管理 (M21) ================
     def _add_light(self, kind):
-        """添加场景光源 (可撤销). kind: 'directional' | 'point' (兼容 'dir')."""
+        """添加场景光源 (可撤销). kind: 'directional' | 'point' | 'spot' (兼容 'dir')."""
         if self.is_playing:
             return
         # 归一化: 命令层用 'dir' 简写, LightState 认 'directional' —
         # 不归一化会导致 kind 误判 (名字显示"点光源"但实际按平行光渲染)
-        kind = 'directional' if kind in ('dir', 'directional') else 'point'
+        # 2026-10-19 第1档序9: 加 'spot' 聚光灯 (kind 三态 dir/point/spot)
+        if kind in ('dir', 'directional'):
+            kind = 'directional'
+        elif kind == 'spot':
+            kind = 'spot'
+        else:
+            kind = 'point'
         cmd = self.undo.push(AddLightCommand("添加光源", self, kind))
         self.selected_light_index = len(self.lights) - 1
         self.selected_index = -1

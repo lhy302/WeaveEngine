@@ -332,6 +332,9 @@ def _emit_light(l):
         "size": l.size,          # M29: 光束截面尺寸 (圆=半径/矩形=半边长)
         "shadow": l.shadow,      # M29: 是否投射阴影 (物理遮挡)
         "range": l.range,        # 点光范围 (对齐 Unity Light.range)
+        # 2026-10-19 第1档序9 聚光灯: 内外锥角（旧文件无此键 -> 缺省 30/60）
+        "spot_inner_angle": getattr(l, 'spot_inner_angle', 30.0),
+        "spot_outer_angle": getattr(l, 'spot_outer_angle', 60.0),
     }
 
 
@@ -340,7 +343,8 @@ def _apply_lights(engine, light_dicts):
     engine.lights.clear()
     for d in light_dicts:
         kind = d.get('kind', 'directional')
-        if kind not in ('directional', 'point'):
+        # 2026-10-19 第1档序9: 允许 'spot'（旧文件仅 dir/point，非法值降级为 dir）
+        if kind not in ('directional', 'point', 'spot'):
             kind = 'directional'
         kwargs = dict(position=_f3(d.get('position'), (0, 5, 0)),
                       direction=_f3(d.get('direction'), (0, -1, 0)),
@@ -351,7 +355,9 @@ def _apply_lights(engine, light_dicts):
                       shape=d.get('shape', 'circle'),
                       size=_f1(d.get('size'), 5.0),
                       shadow=d.get('shadow', True),
-                      range=_f1(d.get('range'), 10.0))
+                      range=_f1(d.get('range'), 10.0),
+                      spot_inner_angle=_f1(d.get('spot_inner_angle'), 30.0),
+                      spot_outer_angle=_f1(d.get('spot_outer_angle'), 60.0))
         if d.get('azimuth') is not None:   # M30: 优先用 3 角度; 旧文件只有 direction 走反算
             kwargs['azimuth'] = d['azimuth']
             kwargs['elevation'] = d.get('elevation', 0.0)

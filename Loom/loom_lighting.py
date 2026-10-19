@@ -100,7 +100,9 @@ class LightingMixin:
                 'cols': np.zeros((8, 3), dtype='f4'),
                 'ints': np.zeros(8, dtype='f4'),
                 'kinds': np.zeros(8, dtype='f4'),
-                'ranges': np.zeros(8, dtype='f4'),  # 点光 range (对齐 Unity Light.range)
+                'ranges': np.zeros(8, dtype='f4'),  # 点光/聚光灯 range (对齐 Unity Light.range)
+                'spot_inner': np.zeros(8, dtype='f4'),  # 2026-10-19 聚光灯: cos(inner)
+                'spot_outer': np.zeros(8, dtype='f4'),  # 2026-10-19 聚光灯: cos(outer)
                 'modes': np.zeros(8, dtype='f4'),   # M29: 平行光 0=full 1=beam
                 'shapes': np.zeros(8, dtype='f4'),  # M29: beam 0=circle 1=rect
                 'orthos': np.zeros((8, 16), dtype='f4'),  # M29: 平行光 view-proj
@@ -114,6 +116,8 @@ class LightingMixin:
         b['ints'][:] = 0
         b['kinds'][:] = 0
         b['ranges'][:] = 0
+        b['spot_inner'][:] = 0
+        b['spot_outer'][:] = 0
         b['modes'][:] = 0
         b['shapes'][:] = 0
         b['orthos'][:] = 0
@@ -130,8 +134,21 @@ class LightingMixin:
             b['poss'][i] = (light.position.x, light.position.y, light.position.z)
             b['cols'][i] = (light.color[0], light.color[1], light.color[2])
             b['ints'][i] = light.intensity
-            b['kinds'][i] = 1.0 if light.kind == 'point' else 0.0
+            # 2026-10-19 第1档序9 聚光灯: kind 三态 (0=dir, 1=point, 2=spot)
+            if light.kind == 'point':
+                b['kinds'][i] = 1.0
+            elif light.kind == 'spot':
+                b['kinds'][i] = 2.0
+            else:
+                b['kinds'][i] = 0.0
             b['ranges'][i] = getattr(light, 'range', 10.0)
+            # 聚光灯：位置 + 方向 + 内外锥角余弦（着色器直接点积比较，免每片元 cos）
+            if light.kind == 'spot':
+                import math as _math
+                inner_deg = float(getattr(light, 'spot_inner_angle', 30.0))
+                outer_deg = float(getattr(light, 'spot_outer_angle', 60.0))
+                b['spot_inner'][i] = _math.cos(_math.radians(inner_deg))
+                b['spot_outer'][i] = _math.cos(_math.radians(outer_deg))
             b['modes'][i] = 1.0 if light.mode == 'beam' else 0.0
             b['shapes'][i] = 1.0 if light.shape == 'rect' else 0.0
             if light.kind == 'directional':
@@ -164,6 +181,8 @@ class LightingMixin:
         for name, arr in (('u_light_dir', b['dirs']), ('u_light_pos', b['poss']),
                           ('u_light_color', b['cols']), ('u_light_intensity', b['ints']),
                           ('u_light_kind', b['kinds']), ('u_light_range', b['ranges']),
+                          ('u_light_spot_inner', b['spot_inner']),
+                          ('u_light_spot_outer', b['spot_outer']),
                           ('u_light_mode', b['modes']),
                           ('u_light_shape', b['shapes']), ('u_light_ortho', b['orthos'])):
             raw = arr.tobytes()
