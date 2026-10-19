@@ -33,7 +33,8 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "附加任务:"; Flags: checkedonce
 
 [Files]
-Source: "build_hub\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+; 2026-10-19 方案 B: --onedir 模式产物 = exe + _internal/ 目录，整个打进来
+Source: "build_hub\LoomHub\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
