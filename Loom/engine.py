@@ -1230,6 +1230,64 @@ class GLEngine(ShadowMixin, FrameComponentMixin, PhysicsMixin, InputMixin, HudMi
                           % (m.name, sc.script_id, e))
                     sc._script_broken = True
 
+    def _dispatch_application_quit(self):
+        """2026-10-19 阶段1档序7 应用级钩子（语义对齐 Unity Application.quitting）。
+
+        在进程退出前调用一次（Qt 编辑器 closeEvent / GLFW 运行时 run 循环结束）。
+        用途：退出存档、关闭外部连接、刷日志。
+        幂等：内部 _app_quit_dispatched 标志保证只派发一次（closeEvent 可能被
+        用户取消后再触发）。零开销 + 异常隔离语义同 _dispatch_late_update。
+        """
+        if getattr(self, '_app_quit_dispatched', False):
+            return
+        self._app_quit_dispatched = True
+        for m in self.models:
+            if not m.scripts:
+                continue
+            for sc in m.scripts:
+                inst = getattr(sc, '_script', None)
+                if inst is None or getattr(sc, '_script_broken', False):
+                    continue
+                try:
+                    from scripts import Script as _Base
+                except ImportError:
+                    continue
+                if type(inst).on_application_quit is _Base.on_application_quit:
+                    continue   # 基类空实现：跳过
+                try:
+                    inst.on_application_quit()
+                except Exception as e:
+                    print("[脚本] %s(%s).on_application_quit 出错: %r"
+                          % (m.name, sc.script_id, e))
+                    sc._script_broken = True
+
+    def _dispatch_visibility_changed(self, visible):
+        """2026-10-19 阶段1档序7 应用级钩子（语义对齐 OnBecameVisible/Invisible）。
+
+        窗口最小化/恢复时调用（Qt changeEvent / GLFW iconify 回调）。
+        用途：暂停音频、降低帧率上限以省电。
+        零开销 + 异常隔离语义同 _dispatch_late_update。
+        """
+        method = 'on_became_visible' if visible else 'on_became_invisible'
+        for m in self.models:
+            if not m.scripts:
+                continue
+            for sc in m.scripts:
+                inst = getattr(sc, '_script', None)
+                if inst is None or getattr(sc, '_script_broken', False):
+                    continue
+                try:
+                    from scripts import Script as _Base
+                except ImportError:
+                    continue
+                if getattr(type(inst), method) is getattr(_Base, method):
+                    continue   # 基类空实现：跳过
+                try:
+                    getattr(inst, method)()
+                except Exception as e:
+                    print("[脚本] %s(%s).%s 出错: %r"
+                          % (m.name, sc.script_id, method, e))
+                    sc._script_broken = True
 
     def _stop_parallel(self):
         """退出清理 (run 循环结束调): 停脚本线程 + 关闭碰撞/预计算线程池. 幂等.

@@ -3329,9 +3329,37 @@ class LoomGUI(QMainWindow):
         elif e is not None and e.scene_is_dirty() and not e._confirm_unsaved():
             ev.ignore()
             return
+        # 2026-10-19 第1档序7 应用级钩子：退出前派发 on_application_quit
+        # （脚本存档/清理）。必须在 stop timer 前 —— 有些脚本需要引擎状态仍可读。
+        if e is not None:
+            try:
+                e._dispatch_application_quit()
+            except Exception as ex:
+                print("[Qt] on_application_quit 派发异常 (忽略): %r" % (ex,))
         self._render_timer.stop()
         self._refresh_timer.stop()
         ev.accept()
+
+    def changeEvent(self, ev):
+        """2026-10-19 第1档序7 应用级钩子：窗口最小化/恢复时派发
+        on_became_invisible / on_became_visible（脚本暂停音频/降帧率用）。
+        只在状态真正变化时派发一次（Qt 会重复触发 WindowStateChange）。"""
+        if ev.type() == QEvent.Type.WindowStateChange:
+            e = self.editor
+            if e is not None:
+                was_min = bool(ev.oldState() & Qt.WindowState.WindowMinimized)
+                is_min = bool(self.windowState() & Qt.WindowState.WindowMinimized)
+                if not was_min and is_min:
+                    try:
+                        e._dispatch_visibility_changed(False)
+                    except Exception as ex:
+                        print("[Qt] on_became_invisible 派发异常 (忽略): %r" % (ex,))
+                elif was_min and not is_min:
+                    try:
+                        e._dispatch_visibility_changed(True)
+                    except Exception as ex:
+                        print("[Qt] on_became_visible 派发异常 (忽略): %r" % (ex,))
+        super().changeEvent(ev)
 
 
 # =====================================================================

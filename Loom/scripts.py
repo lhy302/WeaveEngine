@@ -251,6 +251,28 @@ class Script:
         """
         pass
 
+    # ---- 2026-10-19 第1档序7 应用级钩子（路线见 §2.8 序7）----
+    # 语义对齐 Unity Application.quitting / OnApplicationFocus|Pause:
+    #   1) on_application_quit: 进程退出前调用一次（存档/清理），Qt 编辑器
+    #      closeEvent 与 GLFW 运行时 run 循环结束都会派发
+    #   2) on_became_visible / invisible: 窗口最小化/恢复时派发（性能优化，
+    #      暂停音频/降低帧率等）
+    #   3) 未定义本方法的脚本走零开销快路径（与 on_fixed_update 同）
+    def on_application_quit(self):
+        """进程退出前调用一次（Qt 关窗 / GLFW 运行循环结束）.
+        用途：退出存档、关闭外部连接、刷日志."""
+        pass
+
+    def on_became_visible(self):
+        """窗口从最小化恢复可见时调用一次（Qt 主窗口 / GLFW 主窗口）.
+        用途：恢复音频播放、恢复帧率上限."""
+        pass
+
+    def on_became_invisible(self):
+        """窗口被最小化/隐藏时调用一次.
+        用途：暂停音频、降低帧率上限以省电."""
+        pass
+
 
     # ---- 2026-10-18 协程（决策 A1 generator 风格 + B1 Script 作用域）----
     def start_coroutine(self, gen):

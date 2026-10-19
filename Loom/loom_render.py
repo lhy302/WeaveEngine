@@ -659,6 +659,12 @@ class RenderMixin:
             _elapsed = time.perf_counter() - _frame_start
             if _elapsed < _frame_dur:
                 time.sleep(_frame_dur - _elapsed)
+        # 2026-10-19 第1档序7 应用级钩子：退出前派发 on_application_quit
+        # （脚本存档/清理）。必须在 _stop_parallel 前 —— 脚本线程还在, 引擎可用。
+        try:
+            self._dispatch_application_quit()
+        except Exception as ex:
+            print("[engine] on_application_quit 派发异常 (忽略): %r" % (ex,))
         self._stop_parallel()          # 多核优化: 停脚本线程/碰撞池
         # B2 (2026-08-30): 音频后端 shutdown —— miniaudio 设备线程不关会挂死进程
         # (pygame.mixer 无此问题, 但 shutdown 幂等对两种情况都安全)

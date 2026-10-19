@@ -159,6 +159,11 @@ class GlfwWindowMixin:
         glfw.set_scroll_callback(win, _on_scroll_cb)
         glfw.set_window_size_callback(win, _on_window_size_cb)
         glfw.set_window_close_callback(win, _on_window_close_cb)
+        # 2026-10-19 第1档序7：窗口最小化/恢复 -> on_became_invisible/visible
+        try:
+            glfw.set_window_iconify_callback(win, _on_window_iconify_cb)
+        except (AttributeError, Exception):
+            pass   # 老版 glfw-python 无此 API，静默降级
 
         # B1: 无预编辑串回调（GLFW 3.4 无此 API）。中文靠 char_callback 一次提交。
 
@@ -554,3 +559,15 @@ def _on_window_close_cb(win):
             e._running = False
     except Exception:
         e._running = False
+
+
+def _on_window_iconify_cb(win, iconified):
+    """2026-10-19 第1档序7：窗口最小化/恢复 -> on_became_invisible/visible。
+    GLFW 3.4 签名：iconified=True 表示最小化，False 表示恢复。"""
+    e = _get_engine(win)
+    if e is None:
+        return
+    try:
+        e._dispatch_visibility_changed(not iconified)
+    except Exception:
+        pass
