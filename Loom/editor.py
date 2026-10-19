@@ -43,7 +43,10 @@ import filedialog
 
 # ================ 文件对话框/默认保存目录 (M19) ================
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
-DEFAULT_SAVE_DIR = os.path.join(APP_DIR, '保存')     # 默认保存文件夹 (未选过目录时)
+# 2026-10-19 用户拍板 B2: 项目目录改名 "保存" -> "Projects"（Unity 习惯）
+# 兼容：首次启动时如果旧 "保存/" 存在且 "Projects/" 不存在，自动 rename
+DEFAULT_SAVE_DIR = os.path.join(APP_DIR, 'Projects')  # 默认项目文件夹 (未选过目录时)
+_LEGACY_SAVE_DIR = os.path.join(APP_DIR, '保存')
 STATE_FILE = os.path.join(APP_DIR, 'editor_state.json')  # 记忆上次保存目录
 
 
@@ -108,7 +111,7 @@ def load_last_scene(state_file=None):
 
 
 def initial_dir(last_dir):
-    """保存/打开对话框的初始目录: 上次目录优先, 否则默认 '保存' 文件夹."""
+    """保存/打开对话框的初始目录: 上次目录优先, 否则默认 'Projects' 文件夹."""
     if last_dir and os.path.isdir(last_dir):
         return last_dir
     return DEFAULT_SAVE_DIR
@@ -149,6 +152,14 @@ class EditorApp(GLEngine):
         self.msg_color = (220, 222, 228)
         self._msg_until = 0.0
         self.last_dir = load_last_dir()   # 上次保存/打开的目录 (M19)
+        # 2026-10-19 B2: 旧"保存/"自动迁移为"Projects/"（仅首次，rename 原子操作）
+        try:
+            if (os.path.isdir(_LEGACY_SAVE_DIR)
+                    and not os.path.isdir(DEFAULT_SAVE_DIR)):
+                os.rename(_LEGACY_SAVE_DIR, DEFAULT_SAVE_DIR)
+                print("[编辑器] 项目目录已迁移: 保存/ -> Projects/")
+        except OSError as _e:
+            print("[编辑器] 项目目录迁移失败 (忽略，继续用 保存/): %r" % (_e,))
         os.makedirs(DEFAULT_SAVE_DIR, exist_ok=True)
         # 设置面板里改的"保存目录"覆盖默认保存目录 (启动器设置, 2026-08-14)
         try:

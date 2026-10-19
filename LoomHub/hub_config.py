@@ -236,12 +236,43 @@ def save_projects(projects):
     save_json_atomic(PROJECTS_FILE, {"projects": projects})
 
 
-def add_project(name, scene, version=None):
-    """登记项目 (同 scene 覆盖). 返回最新列表."""
+def add_project(name, scene, version=None, engine_dir=None):
+    """登记项目 (同 scene 覆盖). 返回最新列表.
+
+    2026-10-19 A2 归属模型: 加 engine_dir 字段（该项目的归属引擎根目录）.
+    - engine_dir=None: 尝试从 scene 路径推断（在某个 /Projects/ 或 /保存/ 下）
+    - 推断失败: 保持 None（视为"外部项目"）
+    """
+    if engine_dir is None:
+        engine_dir = infer_engine_dir(scene)
     lst = [x for x in load_projects() if x.get('scene') != scene]
-    lst.append({"name": name, "scene": scene, "version": version})
+    lst.append({
+        "name": name,
+        "scene": scene,
+        "version": version,
+        "engine_dir": engine_dir,   # 2026-10-19 归属引擎
+    })
     save_projects(lst)
     return lst
+
+
+def infer_engine_dir(scene_path):
+    """从 scene 路径推断归属引擎根目录.
+    规则: 路径形如 <engine_dir>/Projects/xxx.json 或 <engine_dir>/保存/xxx.json
+          则返回 <engine_dir>; 否则返回 None.
+    """
+    if not scene_path:
+        return None
+    try:
+        norm = os.path.abspath(scene_path)
+    except Exception:
+        return None
+    for sub in (SAVE_DIR_NAME, LEGACY_SAVE_DIR_NAME):
+        sep = os.sep + sub + os.sep
+        idx = norm.find(sep)
+        if idx > 0:
+            return norm[:idx]
+    return None
 
 
 def remove_project(scene):
@@ -252,17 +283,29 @@ def remove_project(scene):
 
 
 # ---------------- 项目发现 / 保存目录扫描 (2026-08-12) ----------------
-SAVE_DIR_NAME = "保存"      # Loom 编辑器默认保存文件夹名 (editor.py DEFAULT_SAVE_DIR)
+# 2026-10-19 用户拍板 B2: 项目目录从"保存"改为"Projects"（Unity 习惯，更直观）
+# 兼容：scan 时同时扫 保存/ 和 Projects/（老场景文件不会消失）
+SAVE_DIR_NAME = "Projects"
+LEGACY_SAVE_DIR_NAME = "保存"
 SCENE_SUFFIX = "_场景"       # 新建场景默认命名 <名>_场景.json
 
 
 def interpreter_save_dir(info=None):
-    """解释器目录下的默认保存文件夹 (Loom 编辑器保存场景的位置).
-    info 缺省取默认解释器; 无解释器返回 None. 目录可能尚未创建, 返回路径即可."""
+    """解释器目录下的默认项目文件夹 (Loom 编辑器保存场景的位置).
+    info 缺省取默认解释器; 无解释器返回 None. 目录可能尚未创建, 返回路径即可.
+    2026-10-19 B2: 默认 "Projects"（旧版是 "保存"）."""
     info = info or default_interpreter()
     if info is None or not info.get('dir'):
         return None
     return os.path.join(info['dir'], SAVE_DIR_NAME)
+
+
+def interpreter_legacy_save_dir(info=None):
+    """旧版保存目录（"保存/"）—— 迁移/扫描时兼容用（2026-10-19 B2）."""
+    info = info or default_interpreter()
+    if info is None or not info.get('dir'):
+        return None
+    return os.path.join(info['dir'], LEGACY_SAVE_DIR_NAME)
 
 
 def discover_project(directory):
@@ -283,20 +326,42 @@ def discover_project(directory):
     return os.path.splitext(jsons[0])[0], os.path.join(directory, jsons[0])
 
 
-def scan_save_dir_projects(save_dir=None):
-    """扫描保存目录下的场景文件, 全部登记为项目 (同 scene 幂等覆盖).
-    save_dir 缺省取默认解释器的保存目录. 返回本次登记的 [(name, scene)]."""
-    d = save_dir or interpreter_save_dir()
-    if not d or not os.path.isdir(d):
-        return []
+def scan_save_dir_projects(save_dir=None, engine_dir=None):
+    """扫描项目目录下的场景文件, 全部登记为项目 (同 scene 幂等覆盖).
+
+    save_dir : 显式指定扫描目录（None = 从 engine_dir 推断）
+    engine_dir: 归属引擎根目录（None = 默认解释器）
+
+    2026-10-19 B2: 同时扫描 Projects/ 和旧版 保存/（向后兼容）.
+    返回本次登记的 [(name, scene)].
+    """
+    # 解析 engine_dir
+    if engine_dir is None and save_dir is None:
+        info = default_interpreter()
+        if info is not None:
+            engine_dir = info.get('dir')
+    # 收集待扫描目录
+    dirs = []
+    if save_dir:
+        dirs.append(save_dir)
+    elif engine_dir:
+        dirs.append(os.path.join(engine_dir, SAVE_DIR_NAME))
+        # 兼容旧版：如果 Projects/ 还没建，扫旧版 保存/
+        legacy = os.path.join(engine_dir, LEGACY_SAVE_DIR_NAME)
+        if os.path.isdir(legacy) and legacy not in dirs:
+            dirs.append(legacy)
     added = []
-    for f in sorted(os.listdir(d)):
-        path = os.path.join(d, f)
-        if f.lower().endswith('.json') and os.path.isfile(path):
-            base = os.path.splitext(f)[0]
-            name = base[:-len(SCENE_SUFFIX)] if base.endswith(SCENE_SUFFIX) else base
-            add_project(name, path)
-            added.append((name, path))
+    for d in dirs:
+        if not d or not os.path.isdir(d):
+            continue
+        for f in sorted(os.listdir(d)):
+            path = os.path.join(d, f)
+            if f.lower().endswith('.json') and os.path.isfile(path):
+                base = os.path.splitext(f)[0]
+                name = (base[:-len(SCENE_SUFFIX)]
+                        if base.endswith(SCENE_SUFFIX) else base)
+                add_project(name, path, engine_dir=engine_dir)
+                added.append((name, path))
     return added
 
 

@@ -48,6 +48,8 @@ class TkHubView(IHubView):
         self._build()
         self.root.protocol("WM_DELETE_WINDOW", self.root.destroy)
         self._last_rows = None   # 列表内容签名缓存 (签名不变不重建, 保 Listbox 选中)
+        # 2026-10-19 A2: 项目列表当前显示项（含归属标记），供 _selected 反查
+        self._proj_items = []
 
     def attach(self, controller):
         self.ctrl = controller
@@ -76,10 +78,20 @@ class TkHubView(IHubView):
                              ("从 GitHub 安装", self._github_install)])
         self._btn_row(left, [("设为默认", self._set_default),
                              ("移除", self._remove_interp)])
+        # 2026-10-19 D1: 双击解释器 = 切换（自动扫描该引擎项目目录）
+        self.interp_list.bind('<Double-Button-1>', self._on_interp_dblclick)
 
         # 右: 项目
         right = tk.LabelFrame(self.root, text="项目", padx=6, pady=6)
         right.pack(side="left", fill="both", expand=True, padx=6, pady=6)
+        # 2026-10-19 A2: 过滤复选框（只显示当前引擎项目）
+        filter_row = tk.Frame(right)
+        filter_row.pack(fill="x", pady=(0, 4))
+        self.filter_current_var = tk.BooleanVar(value=False)
+        tk.Checkbutton(
+            filter_row, text="只显示当前引擎的项目",
+            variable=self.filter_current_var,
+            command=lambda: self._refresh_lists(force=True)).pack(side="left")
         frame = tk.Frame(right)
         frame.pack(fill="both", expand=True)
         self.proj_list = tk.Listbox(frame, height=13)
@@ -87,6 +99,12 @@ class TkHubView(IHubView):
         sb = tk.Scrollbar(frame, command=self.proj_list.yview)
         sb.pack(side="right", fill="y")
         self.proj_list.config(yscrollcommand=sb.set)
+        # 2026-10-19 A2: 项目列表三种颜色（当前引擎=黑，外部=橙，其他引擎=灰）
+        self.proj_list.tag_config('current', foreground='#222')
+        self.proj_list.tag_config('external', foreground='#b06a00')
+        self.proj_list.tag_config('other', foreground='#999')
+        # 双击项目 = 打开
+        self.proj_list.bind('<Double-Button-1>', lambda _e: self._open_project())
         self._btn_row(right, [("新建", self.ctrl.new_project),
                               ("导入", self.ctrl.import_project_dir),
                               ("打开", self._open_project)])
@@ -171,6 +189,15 @@ class TkHubView(IHubView):
             on_success=lambda installed_dir: self.ctrl.set_msg(
                 "安装完成: %s" % installed_dir))
 
+    def _on_interp_dblclick(self, _evt=None):
+        """2026-10-19 D1: 双击解释器 = 切换默认 + 自动扫描该引擎项目目录."""
+        interp = self._selected(self.interp_list)
+        if not interp:
+            return
+        r = self.ctrl.switch_to_interpreter(interp)
+        # 强制下次 _refresh_lists 重建（引擎变了，项目列表也要变）
+        self._last_rows = None
+
     def _set_default(self):
         self.ctrl.set_default(self._selected(self.interp_list))
 
@@ -208,30 +235,76 @@ class TkHubView(IHubView):
         i = sel[0]
         if listbox is self.interp_list:
             return self.ctrl.interpreters[i] if i < len(self.ctrl.interpreters) else None
-        return self.ctrl.projects[i] if i < len(self.ctrl.projects) else None
+        # 2026-10-19 A2: 项目列表可能被过滤，按显示行索引反查真实项目
+        if i < len(self._proj_items):
+            item = self._proj_items[i]
+            # 返回原始 project dict 的拷贝（带 engine_dir 供 open/remove 用）
+            return {
+                'name': item['name'],
+                'scene': item['scene'],
+                'version': item.get('version'),
+                'engine_dir': item.get('engine_dir'),
+            }
+        return None
 
     # ---------------- 刷新 ----------------
-    def _refresh_lists(self):
+    def _refresh_lists(self, force=False):
         """列表 + 状态刷新. 关键 (2026-08-18): 列表内容签名不变时不重建 ——
         全清重建 (delete+insert) 会重置 Listbox 选中, 用户点击项目后 300ms 内
-        被轮询重建 -> 选中瞬间丢失 (点击项目瞬间取消选中根因). 状态文本每轮更新."""
+        被轮询重建 -> 选中瞬间丢失 (点击项目瞬间取消选中根因).
+
+        2026-10-19 A2: 项目列表按归属显示（当前引擎=黑，外部=橙，其他引擎=灰），
+        filter_current_var=True 时只显示当前引擎的项目。
+        """
+        # 当前引擎
+        dflt = self.ctrl.default_interpreter()
+        cur_engine = dflt.get('dir') if dflt else None
+        only_cur = bool(self.filter_current_var.get())
+        # 拿带归属标记的项目列表
+        try:
+            proj_items = self.ctrl.projects_for_engine(
+                cur_engine, include_external=not only_cur)
+        except Exception:
+            proj_items = []
+        # 缓存签名（包含过滤态 + 当前引擎 + 项目内容）
+        sig_proj = tuple(
+            (it['name'], os.path.basename(it['scene']),
+             it.get('is_current'), it.get('is_external'))
+            for it in proj_items
+        )
         ips = tuple((it.get('default'), it['name'], it['version'], it['kind'])
                     for it in self.ctrl.interpreters)
-        pps = tuple((p['name'], os.path.basename(p['scene'])) for p in self.ctrl.projects)
-        if (ips, pps) != self._last_rows:
-            self._last_rows = (ips, pps)
+        pps = sig_proj
+        cur_sig = (ips, pps, only_cur, cur_engine)
+        if force or cur_sig != self._last_rows:
+            self._last_rows = cur_sig
+            # 解释器列表
             self.interp_list.delete(0, tk.END)
             for it in self.ctrl.interpreters:
                 tag = "★ " if it.get('default') else ""
                 self.interp_list.insert(tk.END, "%s%s  (v%s, %s)"
                                         % (tag, it['name'], it['version'], it['kind']))
+            # 项目列表（带颜色标记）
             self.proj_list.delete(0, tk.END)
-            for p in self.ctrl.projects:
-                self.proj_list.insert(tk.END, "%s  —  %s"
-                                     % (p['name'], os.path.basename(p['scene'])))
+            self._proj_items = proj_items
+            for i, p in enumerate(proj_items):
+                if p.get('is_current'):
+                    suffix = ""
+                    row_tag = 'current'
+                elif p.get('is_external'):
+                    suffix = "  [外部]"
+                    row_tag = 'external'
+                else:
+                    suffix = "  [%s]" % p.get('belongs_to', '?')
+                    row_tag = 'other'
+                text = "%s  —  %s%s" % (p['name'],
+                                         os.path.basename(p['scene']), suffix)
+                self.proj_list.insert(tk.END, text)
+                self.proj_list.itemconfig(i, {'foreground':
+                    '#222' if row_tag == 'current'
+                    else ('#b06a00' if row_tag == 'external' else '#999')})
         # 安装根 / 默认解释器 状态 (pygame 视图也实时显示, 保持一致)
         self.root_label.config(text="默认安装根: %s" % self.ctrl.install_root)
-        dflt = self.ctrl.default_interpreter()
         if dflt:
             self.interp_status.config(
                 text="默认解释器: %s v%s (%s)" % (dflt['name'], dflt['version'],

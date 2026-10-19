@@ -256,9 +256,19 @@ class HubController:
         self.set_msg("已创建项目 %s (%s)" % (name, os.path.basename(path)))
 
     def import_project_dir(self):
-        """用系统目录对话框选项目目录, 发现其中的场景文件并登记."""
+        """导入项目目录（2026-10-19 C3: 强制复制到当前解释器 Projects/）.
+
+        流程:
+          1) 选源目录
+          2) 发现场景文件
+          3) 复制整个源目录到 <当前引擎>/Projects/<目录名>/
+          4) 登记为项目, engine_dir=当前引擎
+
+        没有默认解释器时降级为纯登记（外部项目）。
+        """
         directory = filedialog.choose_directory(
-            "选择项目目录 (含场景文件)", initial_dir=self.default_save_dir())
+            "选择要导入的项目目录（含场景文件）",
+            initial_dir=self.default_save_dir())
         if not directory:
             return
         found = cfg.discover_project(directory)
@@ -266,18 +276,138 @@ class HubController:
             self.set_msg("该目录没有项目场景文件 (*.json)", 'err')
             return
         name, scene = found
-        cfg.add_project(name, scene)
+        interp = self.default_interpreter()
+        if interp is None:
+            # 降级：无解释器 -> 纯登记（外部项目）
+            cfg.add_project(name, scene)
+            self._refresh()
+            self.set_msg("已导入项目 %s（无解释器，作为外部项目管理）" % name, 'dim')
+            return
+        # 有解释器 -> 强制复制
+        engine_dir = interp.get('dir')
+        projects_root = os.path.join(engine_dir, cfg.SAVE_DIR_NAME)
+        try:
+            os.makedirs(projects_root, exist_ok=True)
+        except OSError as e:
+            self.set_msg("无法创建 Projects 目录: %r" % (e,), 'err')
+            return
+        # 目标子目录（用源目录名，冲突时加后缀）
+        src_dirname = os.path.basename(os.path.normpath(directory))
+        target_subdir = os.path.join(projects_root, src_dirname)
+        idx = 1
+        while os.path.exists(target_subdir):
+            target_subdir = os.path.join(projects_root, '%s_%d' % (src_dirname, idx))
+            idx += 1
+        # 复制（整目录）
+        import shutil
+        try:
+            shutil.copytree(directory, target_subdir)
+        except OSError as e:
+            self.set_msg("复制项目失败: %r" % (e,), 'err')
+            return
+        # 找目标目录里的场景文件（保持同名）
+        new_found = cfg.discover_project(target_subdir)
+        if new_found is None:
+            self.set_msg("复制后未找到场景文件（异常）", 'err')
+            return
+        new_name, new_scene = new_found
+        cfg.add_project(new_name, new_scene, engine_dir=engine_dir)
         self._refresh()
-        self.set_msg("已导入项目 %s (%s)" % (name, os.path.basename(scene)))
+        self.set_msg("已导入并复制项目 %s → %s"
+                     % (new_name, target_subdir), 'ok')
 
     def scan_save_dir_projects(self):
-        """扫描默认解释器保存目录, 把已有场景文件登记为项目."""
-        found = cfg.scan_save_dir_projects()
+        """扫描当前默认解释器项目目录, 把已有场景文件登记为项目."""
+        interp = self.default_interpreter()
+        engine_dir = interp.get('dir') if interp else None
+        found = cfg.scan_save_dir_projects(engine_dir=engine_dir)
         if not found:
-            self.set_msg("默认解释器保存目录下没有项目场景文件", 'dim')
+            self.set_msg("默认解释器项目目录下没有项目场景文件", 'dim')
             return
         self._refresh()
         self.set_msg("扫描到 %d 个项目并登记" % len(found))
+
+    # ---------------- 2026-10-19 A2+D1 项目归属模型 ----------------
+    def projects_for_engine(self, engine_dir, include_external=True):
+        """返回带归属标记的项目列表（2026-10-19 A2 用户拍板）.
+
+        engine_dir: 当前选中引擎根目录
+        include_external: 是否包含"外部项目"（不属于任何引擎的项目）
+
+        返回: [{name, scene, version, engine_dir,
+               'is_current': bool,   # 属于当前引擎
+               'is_external': bool,  # 不属于任何引擎
+               'belongs_to': str},   # 归属版本描述（"0.1.0.beta1" 或 "外部"）
+              ...]
+
+        排序: 当前引擎项目优先, 外部次之, 其他引擎最后
+        """
+        cur_engine = os.path.abspath(engine_dir).rstrip('/\\' if os.sep == '/'
+                                                        else '\\/') if engine_dir else None
+        out = []
+        for p in self.projects:
+            p_engine = p.get('engine_dir')
+            if not p_engine:
+                # 尝试从 scene 推断（兼容旧数据）
+                p_engine = cfg.infer_engine_dir(p.get('scene'))
+            is_current = bool(p_engine and cur_engine
+                              and os.path.normcase(os.path.normpath(p_engine))
+                              == os.path.normcase(os.path.normpath(cur_engine)))
+            is_external = not p_engine
+            if is_external and not include_external:
+                continue
+            # 归属版本：从引擎配置里找匹配的
+            belongs_to = '外部'
+            if p_engine:
+                for it in self.interpreters:
+                    if os.path.normcase(os.path.normpath(it.get('dir', ''))) \
+                       == os.path.normcase(os.path.normpath(p_engine)):
+                        belongs_to = 'v' + it.get('version', '?')
+                        break
+                else:
+                    belongs_to = os.path.basename(p_engine.rstrip('/\\')) or '未知'
+            out.append({
+                'name': p['name'],
+                'scene': p['scene'],
+                'version': p.get('version'),
+                'engine_dir': p_engine,
+                'is_current': is_current,
+                'is_external': is_external,
+                'belongs_to': belongs_to,
+            })
+        # 排序：当前引擎 > 外部 > 其他
+        def _key(x):
+            if x['is_current']:
+                return (0, x['name'])
+            if x['is_external']:
+                return (1, x['name'])
+            return (2, x['name'])
+        out.sort(key=_key)
+        return out
+
+    def switch_to_interpreter(self, interp):
+        """切换当前工作解释器（2026-10-19 D1: 自动扫描新引擎目录）.
+
+        行为:
+          1) 设为默认解释器
+          2) 自动扫描该引擎的 Projects/ 和 保存/ 下的场景, 登记为项目
+          3) 刷新列表
+        返回 {'ok': bool, 'scanned': N, 'message': '...'}
+        """
+        if not interp:
+            return {'ok': False, 'message': '无解释器'}
+        # 设为默认
+        self.set_default(interp)
+        # 自动扫描
+        engine_dir = interp.get('dir')
+        if not engine_dir:
+            return {'ok': False, 'message': '解释器目录缺失'}
+        found = cfg.scan_save_dir_projects(engine_dir=engine_dir)
+        self._refresh()
+        msg = "已切换到 %s v%s，扫描到 %d 个项目" % (
+            interp.get('name', '?'), interp.get('version', '?'), len(found))
+        self.set_msg(msg, 'ok')
+        return {'ok': True, 'scanned': len(found), 'message': msg}
 
     def _auto_scan_save_dir(self):
         """启动默认扫描解释器保存目录下的项目 (失败静默)."""

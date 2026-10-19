@@ -47,7 +47,8 @@ def show_zip_preview(parent, controller, zip_path, on_success=None):
 
     dlg = tk.Toplevel(parent)
     dlg.title('安装 Loom 解释器')
-    dlg.geometry('560x360')
+    dlg.geometry('560x400')
+    dlg.resizable(False, False)   # 2026-10-19: 锁定窗口大小
     dlg.transient(parent)
     dlg.grab_set()
 
@@ -60,10 +61,16 @@ def show_zip_preview(parent, controller, zip_path, on_success=None):
     # 信息区
     body = tk.Frame(dlg, padx=20, pady=10)
     body.pack(fill='both', expand=True)
+    # 类型推断：优先 kind 字段，否则从 main/main_py 推断
+    kind = info.get('kind')
+    if not kind:
+        main = (info.get('main') or '').lower()
+        main_py = (info.get('main_py') or '').lower()
+        kind = 'py' if (main.endswith('.py') or main_py.endswith('.py')) else 'exe'
     rows = [
         ('版本号', version or '(未读)'),
         ('名称', info.get('name', '?')),
-        ('类型', info.get('kind', '?')),
+        ('类型', kind),
         ('Python 版本', info.get('python_version', '?')),
         ('压缩包大小', '%.2f MB' % size_mb),
         ('说明', (info.get('description') or '(无)')[:120]),
@@ -148,7 +155,8 @@ def show_github_install(parent, controller, on_success=None):
     """GitHub 引擎版本列表 + 下载进度 + 自动进入安装（非阻塞 Toplevel）."""
     dlg = tk.Toplevel(parent)
     dlg.title('从 GitHub 安装 Loom 引擎')
-    dlg.geometry('700x480')
+    dlg.geometry('700x520')
+    dlg.resizable(False, False)
     dlg.transient(parent)
     dlg.grab_set()
 
@@ -375,6 +383,7 @@ def _show_token_dialog(parent, controller, on_reload=None):
     dlg = tk.Toplevel(parent)
     dlg.title('GitHub Token 设置（可选）')
     dlg.geometry('560x320')
+    dlg.resizable(False, False)
     dlg.transient(parent)
     dlg.grab_set()
 
@@ -457,7 +466,8 @@ def show_remove_interp(parent, controller, interp, on_success=None):
 
     dlg = tk.Toplevel(parent)
     dlg.title('移除解释器')
-    dlg.geometry('560x260')
+    dlg.geometry('560x280')
+    dlg.resizable(False, False)
     dlg.transient(parent)
     dlg.grab_set()
 
