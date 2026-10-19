@@ -238,6 +238,10 @@ if __name__ == "__main__":
                 # QOpenGLWidget 承载 moderngl 视口 + Qt 原生面板 (见记忆
                 # sdl-window-contaminates-ime). 控制器命令层/GL 渲染管线复用.
                 # 2026-10-18 选项1: --ui default/minimal 旧 pygame 视图路径彻底删除.
+                # 2026-10-19 单实例锁：仅编辑器模式加锁（--run / --benchmark / 游戏配置
+                # 玩家模式不加锁，允许同时开多个游戏实例）。防止连点开 N 个编辑器。
+                from loom_single_instance import ensure_editor_single_instance
+                ensure_editor_single_instance(scene_path=open_scene)
                 from ui.loom_gui import run_loom_gui
                 run_loom_gui(scene_path=open_scene)
                 sys.exit(0)

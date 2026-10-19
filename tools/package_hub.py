@@ -50,10 +50,14 @@ def run_pyinstaller(version):
     entry = os.path.join(HUB_DIR, 'LoomHub.py')
     if not os.path.isfile(entry):
         raise SystemExit('[错误] 找不到入口: %s' % entry)
+    splash_path = os.path.join(ROOT, 'tools', 'build_assets', 'splash.png')
     cmd = [
         sys.executable, '-m', 'PyInstaller',
         '--noconfirm', '--clean',
-        '--onefile', '--windowed',
+        # 2026-10-19 方案 B: --onedir（0.3 秒启动）替代 --onefile（2~5 秒解压）
+        # 用户报告"连点开 17 个窗口"根因是 onefile 启动慢 + 用户以为没反应。
+        # onedir 直接从磁盘读 _internal/ 子目录，秒开。单实例锁仍是兜底防线。
+        '--onedir', '--windowed',
         '--name', 'LoomHub',
         '--distpath', BUILD_DIR,
         '--workpath', os.path.join(BUILD_DIR, '_work'),
@@ -72,11 +76,16 @@ def run_pyinstaller(version):
         '--hidden-import', 'hub_controller',
         '--hidden-import', 'hub_config',
         '--hidden-import', 'hub_install',
-        entry,
+        '--hidden-import', 'hub_single_instance',
     ]
+    # splash 图存在才加（缺图也能打，只是没启动画面）
+    if os.path.isfile(splash_path):
+        cmd += ['--splash', splash_path]
+    cmd.append(entry)
     print('[打包] PyInstaller 运行中...')
     subprocess.check_call(cmd, cwd=ROOT)
-    exe_path = os.path.join(BUILD_DIR, 'LoomHub.exe')
+    # onedir 产物 = BUILD_DIR/LoomHub/LoomHub.exe + _internal/
+    exe_path = os.path.join(BUILD_DIR, 'LoomHub', 'LoomHub.exe')
     if not os.path.isfile(exe_path):
         raise SystemExit('[错误] PyInstaller 未产出 exe: %s' % exe_path)
     print('[打包] LoomHub.exe: %.2f MB' % (os.path.getsize(exe_path) / (1024 * 1024)))
@@ -119,7 +128,8 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "附加任务:"; Flags: checkedonce
 
 [Files]
-Source: "build_hub\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+; 2026-10-19 方案 B: --onedir 模式产物 = exe + _internal/ 目录，整个打进来
+Source: "build_hub\LoomHub\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"

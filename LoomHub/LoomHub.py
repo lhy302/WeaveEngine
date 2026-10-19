@@ -9,6 +9,11 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+# 2026-10-19 单实例锁：防止 PyInstaller --onefile 启动慢时用户连点导致多开窗口。
+# 放在所有 import 之前——第一个实例才继续往下执行，否则本进程直接退出。
+from hub_single_instance import ensure_single_instance
+ensure_single_instance('LoomHub — 项目管理器', 'Global\\LoomHub_SingleInstance')
+
 from LoomHubGUI import LoomHubGUI, main   # noqa: F401  (LoomHubGUI 供测试/外部 import)
 
 if __name__ == "__main__":
