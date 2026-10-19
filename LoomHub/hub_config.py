@@ -384,26 +384,51 @@ def _py_launcher_python():
     return None
 
 
-def default_python():
+def default_python(engine_dir=None):
     """系统默认 python 命令. 2026-08-20 安全加固 (Qoder 报告低危8):
     优先当前进程自己的解释器 (sys.executable, 最可信, 不受 PATH 污染),
-    再回退 .py 默认打开应用绑定的解释器; PATH 兜底最后才用."""
+    再回退 .py 默认打开应用绑定的解释器; PATH 兜底最后才用.
+
+    2026-10-19 关键修复（PyInstaller 打包后启动 Loom 失败根因）:
+      - LoomHub 打包成 exe 后 sys.executable = LoomHub.exe，不是 python
+      - 直接用它启动 Loom.py 会"再启动一个 LoomHub"，被单实例锁拦截 -> 看起来没反应
+      - 修复：检测 sys.frozen 跳过 sys.executable；优先用引擎自带嵌入式 python
+
+    engine_dir: 引擎源码目录（如 <engine>/Loom），用于定位同级 <engine>/python/python.exe
+    """
     import sys
-    if getattr(sys, 'executable', None):
-        return sys.executable
+    # 1. 引擎自带嵌入式 Python 优先（发布包 zip 设计如此：开箱即用）
+    if engine_dir:
+        try:
+            py_dir = os.path.join(os.path.dirname(os.path.abspath(engine_dir)), 'python')
+            emb = os.path.join(py_dir, 'python.exe')
+            if os.path.isfile(emb):
+                return emb
+        except Exception:
+            pass
+    # 2. PyInstaller 打包环境：sys.executable = LoomHub.exe，不能用
+    if not getattr(sys, 'frozen', False):
+        if getattr(sys, 'executable', None):
+            return sys.executable
+    # 3. 系统 py 启动器
     p = _py_launcher_python()
     if p:
         return p
+    # 4. PATH
     p = shutil.which('python')
     if p:
         return p
     return 'python'
 
 
-def python_version(cmd=None):
-    """返回默认 python 的版本字符串 (如 '3.12.10'), 不可用返回 None."""
+def python_version(cmd=None, engine_dir=None):
+    """返回默认 python 的版本字符串 (如 '3.12.10'), 不可用返回 None.
+
+    2026-10-19: 加 engine_dir 参数（PyInstaller 环境 sys.executable = LoomHub.exe 时，
+    必须传引擎目录才能拿到嵌入式 python 版本）."""
     try:
-        out = subprocess.run([cmd or default_python(), "--version"],
+        exe = cmd or default_python(engine_dir=engine_dir)
+        out = subprocess.run([exe, "--version"],
                              capture_output=True, text=True, timeout=10)
         txt = (out.stdout or out.stderr).strip()
         if "Python" in txt:
@@ -424,14 +449,16 @@ def build_launch_command(info, scene_path=None, mode='open', prefer=None):
     main_py = resolve_runtime_path(info.get('main_py'))
     main_exe = resolve_runtime_path(info.get('main_exe'))
     main_path = resolve_runtime_path(info.get('path'))
+    # 2026-10-19: 传 engine_dir 让 default_python 优先用引擎自带嵌入式 Python
+    py_exe = default_python(engine_dir=info.get('dir'))
     if prefer == 'py' and main_py and os.path.isfile(main_py):
-        cmd = [default_python(), main_py]
+        cmd = [py_exe, main_py]
     elif prefer == 'exe' and main_exe and os.path.isfile(main_exe):
         cmd = [main_exe]
     elif info.get('kind') == 'exe':
         cmd = [main_path]
     else:
-        cmd = [default_python(), main_path]
+        cmd = [py_exe, main_path]
     if scene_path:
         cmd += ['--open' if mode == 'open' else '--run', scene_path]
     return cmd
