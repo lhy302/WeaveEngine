@@ -127,23 +127,64 @@ class HubController:
         self._refresh()
         self.set_msg("已导入解释器 %s %s (%s)" % (info['name'], info['version'], info['kind']))
 
-    def do_install_zip(self, version):
-        """安装 .zip 解释器包到安装根/<版本号>. version 由 UI 输入框拿到."""
-        version = (version or "").strip()
-        if not version:
-            self.set_msg("版本号不能为空", 'err')
-            return
-        zip_path = filedialog.open_file("选择 Loom 解释器安装包", initial_dir=None,
-                                        filter_str=ZIP_FILTER)
+    def preview_zip(self, zip_path):
+        """读取 zip 元数据（供 UI 预览对话框）.
+
+        返回 {'ok': True, 'info': {...}, 'inner_prefix': 'Loom/'} 或
+             {'ok': False, 'error': '...'}
+        """
+        info, prefix = inst.read_zip_metadata(zip_path)
+        if info is None:
+            return {'ok': False, 'error':
+                    '压缩包里没有找到 %s（不是有效的 Loom 解释器包）' % cfg.META_NAME}
+        return {'ok': True, 'info': info, 'inner_prefix': prefix}
+
+    def do_install_zip(self, version=None, zip_path=None, target_root=None):
+        """统一 zip 安装入口（2026-10-19 增强）.
+
+        参数:
+          version    : 版本号（None = 从 zip 元数据自动读）
+          zip_path   : zip 路径（None = 弹系统文件对话框选）
+          target_root: 安装根（None = 用 self.install_root）
+
+        返回 dict:
+          {'ok': True, 'installed_dir': '...', 'info': {...}, 'message': '...'}
+          {'ok': False, 'message': '...'}
+        """
+        # 1) 选 zip
         if not zip_path:
-            self.set_msg("已取消安装", 'dim')
-            return
+            zip_path = filedialog.open_file(
+                "选择 Loom 解释器安装包", initial_dir=None,
+                filter_str=ZIP_FILTER)
+            if not zip_path:
+                self.set_msg("已取消安装", 'dim')
+                return {'ok': False, 'message': '用户取消', 'cancelled': True}
+        # 2) 读元数据（版本号缺失时）
+        if not version:
+            info, _ = inst.read_zip_metadata(zip_path)
+            if info is None:
+                self.set_msg("压缩包内缺少 %s，不是有效的 Loom 解释器包"
+                             % cfg.META_NAME, 'err')
+                return {'ok': False, 'message': '缺少元数据'}
+            version = (info.get('version') or '').strip()
+            if not version:
+                self.set_msg("压缩包内 %s 缺少 version 字段" % cfg.META_NAME, 'err')
+                return {'ok': False, 'message': '缺少 version 字段'}
+        version = str(version).strip()
+        # 3) 确定安装根
+        if target_root is None:
+            target_root = self.install_root
+        # 4) 安装
         try:
-            target = inst.install_from_zip(zip_path, version, self.install_root)
+            target = inst.install_from_zip(
+                zip_path, version, target_root=target_root)
             self._refresh()
             self.set_msg("安装完成 → %s (已登记)" % target)
+            return {'ok': True, 'installed_dir': target,
+                    'version': version, 'message': '安装完成'}
         except inst.InstallError as e:
             self.set_msg("安装失败: %s" % e, 'err')
+            return {'ok': False, 'message': str(e)}
 
     def set_default(self, interp):
         """把指定解释器设为默认 (interp 为登记项 dict 或 None)."""
@@ -153,13 +194,38 @@ class HubController:
         self._refresh()
         self.set_msg("默认解释器已设为 %s %s" % (interp['name'], interp['version']))
 
-    def remove_interpreter(self, interp):
-        """从列表移除解释器 (不删磁盘文件)."""
+    def remove_interpreter(self, interp, delete_files=False):
+        """从列表移除解释器.
+
+        delete_files=False: 只从 interpreters.json 移除登记，磁盘保留（默认）
+        delete_files=True : 同时物理删除解释器目录（危险，UI 侧必须二次确认）
+
+        返回 dict: {'ok': bool, 'message': str, 'deleted_dir': str or None}
+        """
         if not interp:
-            return
+            return {'ok': False, 'message': '无解释器'}
+        ver = interp.get('version', '?')
+        # 先从列表移除
         cfg.remove_interpreter(interp)
         self._refresh()
-        self.set_msg("已从列表移除 %s (未删除磁盘文件)" % interp['version'], 'dim')
+        # 可选：物理删除
+        deleted = None
+        if delete_files:
+            d = interp.get('dir')
+            if d and os.path.isdir(d):
+                try:
+                    import shutil as _shutil
+                    _shutil.rmtree(d, ignore_errors=False)
+                    deleted = d
+                    self.set_msg("已删除 %s 并移除登记（磁盘目录已清空）" % ver, 'dim')
+                except Exception as e:
+                    self.set_msg("已移除登记，但磁盘删除失败: %r" % (e,), 'err')
+                    return {'ok': False, 'message': '磁盘删除失败: %r' % (e,)}
+            else:
+                self.set_msg("已移除登记 %s（目录不存在，无需删除）" % ver, 'dim')
+        else:
+            self.set_msg("已从列表移除 %s（磁盘文件保留）" % ver, 'dim')
+        return {'ok': True, 'message': '已移除', 'deleted_dir': deleted}
 
     # ---------------- 项目动作 ----------------
     def new_project(self):

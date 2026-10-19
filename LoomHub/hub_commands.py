@@ -187,42 +187,146 @@ def cmd_interpreter_add(args):
     return {'added': info}
 
 
-@command('interpreter_install_zip', '.zip 安装解释器: {zip, version} (校验+登记; '
-         'root 参数已禁用, 固定安装根)')
+def _safe_install_root(root):
+    """校验自定义安装根在白名单内（2026-10-19 放开自定义根）.
+
+    白名单: DEFAULT_INSTALL_ROOT / %LOCALAPPDATA% / %USERPROFILE% 下路径.
+    root=None/空 -> 用 DEFAULT_INSTALL_ROOT. 非法返回 None.
+    """
+    if root is None or root == '':
+        return cfg.DEFAULT_INSTALL_ROOT
+    try:
+        r = os.path.abspath(os.path.normpath(str(root)))
+    except Exception:
+        return None
+    if '..' in r:
+        return None
+    prefixes = []
+    try:
+        prefixes.append(os.path.abspath(cfg.DEFAULT_INSTALL_ROOT).rstrip('/' + os.sep))
+    except Exception:
+        pass
+    for env in ('LOCALAPPDATA', 'USERPROFILE'):
+        v = os.environ.get(env)
+        if v:
+            prefixes.append(os.path.abspath(v).rstrip('/' + os.sep))
+    for p in prefixes:
+        if r == p or r.startswith(p + os.sep):
+            return r
+    return None
+
+
+@command('interpreter_install_zip', '.zip 安装解释器: {zip, version?, root?} '
+         '(version 缺省=从 zip 元数据自动读; root 缺省=默认根; 自定义 root 限白名单)')
 def cmd_interpreter_install_zip(args):
-    """2026-08-28 二轮(高危4): root 参数**不再接受自定义** —— 原实现
-    root 完全不校验, 攻击链"恶意 zip + root=任意目录"直接把文件释放进
-    Startup 等目录 (路线C 实机 RELEASED)。现在只允许固定的
-    cfg.DEFAULT_INSTALL_ROOT (显式传同等值=放行, 其余值=拒绝)。"""
+    """2026-10-19: 放开自定义 root（白名单限制）; version 可省略从 zip 自动读."""
     z = args.get('zip')
-    ver = args.get('version')
     if not z or not os.path.isfile(z):
         return {'error': 'zip 不存在: %s' % z}
+    ver = (args.get('version') or '').strip()
     if not ver:
-        return {'error': '需要 version (x.y.z 或 x.y.z.betaN)'}
-    root = args.get('root')
-    if root:
-        try:
-            rn = os.path.abspath(os.path.normpath(root)).rstrip('\\/')
-            dn = os.path.abspath(cfg.DEFAULT_INSTALL_ROOT).rstrip('\\/')
-            if rn != dn:
-                return {'error': '自定义安装根已禁用: %s (只允许 %s)'
-                        % (root, cfg.DEFAULT_INSTALL_ROOT)}
-        except Exception as e:
-            return {'error': 'root 校验失败: %r' % e}
-    target = inst.install_from_zip(z, ver, target_root=cfg.DEFAULT_INSTALL_ROOT)
-    return {'installed': target}
+        info, _ = inst.read_zip_metadata(z)
+        if info is None:
+            return {'error': 'zip 内缺少 %s 且未传 version' % cfg.META_NAME}
+        ver = (info.get('version') or '').strip()
+        if not ver:
+            return {'error': 'zip 内 %s 缺 version 字段' % cfg.META_NAME}
+    target_root = _safe_install_root(args.get('root'))
+    if target_root is None:
+        return {'error': '自定义安装根不在白名单内（限默认根/LocalAppData/用户目录）'}
+    try:
+        target = inst.install_from_zip(z, ver, target_root=target_root)
+    except inst.InstallError as e:
+        return {'error': str(e)}
+    return {'installed': target, 'version': ver, 'root': target_root}
 
 
-@command('interpreter_remove', '移除解释器登记: {dir} (不删目录文件)')
+@command('interpreter_remove', '移除解释器: {dir, delete_files?} '
+         '(delete_files=false 默认仅移除登记; true=物理删除目录)')
 def cmd_interpreter_remove(args):
     d = args.get('dir')
+    delete_files = str(args.get('delete_files', '')).lower() in (
+        '1', 'true', 'yes', 'on')
     its = cfg.load_interpreters()
     for i in its:
         if i.get('dir') == d or i.get('version') == d:
             cfg.remove_interpreter(i)
-            return {'removed': d}
+            result = {'removed': d, 'delete_files': delete_files}
+            if delete_files:
+                dirp = i.get('dir')
+                if dirp and os.path.isdir(dirp):
+                    safe = _safe_install_root(dirp)
+                    if safe is None:
+                        result['error'] = ('删除路径不在白名单内: %s' % dirp)
+                        return result
+                    try:
+                        import shutil as _shutil
+                        _shutil.rmtree(dirp, ignore_errors=False)
+                        result['deleted_dir'] = dirp
+                    except Exception as e:
+                        result['error'] = '删除失败: %r' % (e,)
+            return result
     return {'error': '未登记: %s (先 interpreter_list 查看)' % d}
+
+
+@command('interpreter_github_list', '拉取 GitHub 上引擎 release 列表: {token?}')
+def cmd_interpreter_github_list(args):
+    """2026-10-19: Agent 也能拉引擎版本列表（token 缺省=本地保存或匿名）."""
+    import hub_github as _gh
+    token = args.get('token') or _gh.load_token() or None
+    try:
+        r = _gh.list_engine_releases(token=token, max_count=50)
+    except Exception as e:
+        return {'error': '拉取失败: %r' % (e,)}
+    return r
+
+
+@command('interpreter_github_install', 'GitHub 在线安装: {version|tag, root?}')
+def cmd_interpreter_github_install(args):
+    """2026-10-19: Agent 也可在线安装引擎（下载 + 装到白名单根）."""
+    import hub_github as _gh
+    import tempfile
+    target_ver = (args.get('version') or args.get('tag') or '').strip()
+    if not target_ver:
+        return {'error': '需要 version (0.1.0.beta1) 或 tag (engine-v0.1.0.beta1)'}
+    if target_ver.startswith(_gh.TAG_PREFIX):
+        version = target_ver[len(_gh.TAG_PREFIX):]
+    else:
+        version = target_ver
+    token = _gh.load_token() or None
+    r = _gh.list_engine_releases(token=token, max_count=50)
+    if not r.get('ok'):
+        return {'error': '拉取版本列表失败: %s' % r.get('error', '?')}
+    target = None
+    for rel in r.get('releases', []):
+        if rel.get('version') == version:
+            target = rel
+            break
+    if target is None:
+        return {'error': '找不到版本: %s (可用: %s)'
+                % (version, [x['version'] for x in r.get('releases', [])])}
+    url = target.get('download_url')
+    if not url:
+        return {'error': '该版本无下载链接'}
+    tmpdir = os.path.join(tempfile.gettempdir(), 'LoomHub_download')
+    os.makedirs(tmpdir, exist_ok=True)
+    dest = os.path.join(tmpdir, target.get('asset_name') or ('Loom-%s.zip' % version))
+    try:
+        _gh.download_asset(url, dest)
+    except Exception as e:
+        return {'error': '下载失败: %r' % (e,)}
+    target_root = _safe_install_root(args.get('root'))
+    if target_root is None:
+        return {'error': '安装根不在白名单内'}
+    try:
+        installed = inst.install_from_zip(dest, version, target_root=target_root)
+    except inst.InstallError as e:
+        return {'error': '安装失败: %s' % e}
+    try:
+        os.remove(dest)
+    except OSError:
+        pass
+    return {'installed': installed, 'version': version}
 
 
 @command('interpreter_default', '设默认解释器: {dir} (不匹配报列表)')

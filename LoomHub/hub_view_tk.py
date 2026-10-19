@@ -32,6 +32,8 @@ sys.path.insert(0, HUB_DIR)
 sys.path.insert(0, os.path.join(HUB_DIR, '..', 'Loom'))  # guiloader (设置.json 读写)
 
 from hub_controller import HubController, IHubView
+import hub_install_ui
+import hub_github as _gh
 
 APP_TITLE = "LoomHub — 项目管理器"
 
@@ -69,8 +71,9 @@ class TkHubView(IHubView):
         sb.pack(side="right", fill="y")
         self.interp_list.config(yscrollcommand=sb.set)
         self._btn_row(left, [("扫描", self.ctrl.scan_interpreters),
-                             ("导入目录", self.ctrl.import_interpreter_dir),
-                             ("安装 .zip", self._install_zip)])
+                             ("导入目录", self.ctrl.import_interpreter_dir)])
+        self._btn_row(left, [("安装 .zip", self._install_zip),
+                             ("从 GitHub 安装", self._github_install)])
         self._btn_row(left, [("设为默认", self._set_default),
                              ("移除", self._remove_interp)])
 
@@ -144,17 +147,40 @@ class TkHubView(IHubView):
             self.ctrl.set_install_root(v)
 
     def _install_zip(self):
-        from tkinter import simpledialog
-        v = simpledialog.askstring("安装 .zip", "版本号 (如 1.0.0)",
-                                   parent=self.root)
-        if v:
-            self.ctrl.do_install_zip(v)
+        """2026-10-19: 选 zip → 预览元数据 + 安装位置 → 确认安装."""
+        import filedialog
+        zp = filedialog.open_file(
+            "选择 Loom 解释器安装包", initial_dir=None,
+            filter_str="解释器安装包 (*.zip)\0*.zip\0所有文件 (*.*)\0*.*\0")
+        if not zp:
+            self.ctrl.set_msg("已取消安装", 'dim')
+            return
+        self._install_zip_path(zp)
+
+    def _install_zip_path(self, zip_path):
+        """统一入口：从任意来源（对话框/拖拽/GitHub 下载完）拿到 zip 后调这里."""
+        hub_install_ui.show_zip_preview(
+            self.root, self.ctrl, zip_path,
+            on_success=lambda installed_dir: self.ctrl.set_msg(
+                "安装完成: %s" % installed_dir))
+
+    def _github_install(self):
+        """从 GitHub Release 在线安装."""
+        hub_install_ui.show_github_install(
+            self.root, self.ctrl,
+            on_success=lambda installed_dir: self.ctrl.set_msg(
+                "安装完成: %s" % installed_dir))
 
     def _set_default(self):
         self.ctrl.set_default(self._selected(self.interp_list))
 
     def _remove_interp(self):
-        self.ctrl.remove_interpreter(self._selected(self.interp_list))
+        """2026-10-19: 移除三选一（仅移除登记 / 彻底删除 / 取消）."""
+        interp = self._selected(self.interp_list)
+        if not interp:
+            self.ctrl.set_msg("请先在列表中选择一个解释器", 'dim')
+            return
+        hub_install_ui.show_remove_interp(self.root, self.ctrl, interp)
 
     def _open_project(self):
         self.ctrl.open_project(self._selected(self.proj_list))
@@ -214,6 +240,16 @@ class TkHubView(IHubView):
             self.interp_status.config(text="默认解释器: (无) — 请先扫描/导入/安装",
                                       fg="#666")
 
+    def _close_splash(self):
+        """2026-10-19: 关闭 PyInstaller --splash 启动图.
+        pyi_splash 模块只在 PyInstaller 打包后存在（源码运行时 import 会失败，
+        忽略即可）。必须在 mainloop 前调用，否则 splash 会一直盖在主窗口上。"""
+        try:
+            import pyi_splash
+            pyi_splash.close()
+        except Exception:
+            pass
+
     def run(self):
         colors = {'ok': '#222', 'err': '#c00', 'dim': '#666'}
 
@@ -223,6 +259,8 @@ class TkHubView(IHubView):
                                fg=colors.get(self.ctrl.msg_level, '#222'))
             self.root.after(300, _poll)
 
+        # 主窗口即将进入事件循环 → 关闭启动 splash
+        self._close_splash()
         _poll()
         self.root.mainloop()
 

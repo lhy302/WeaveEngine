@@ -7,6 +7,7 @@ hub_install.py — LoomHub 解释器安装
   2) 远程下载安装 (预留接口, 未接服务器): RemoteDownloader 占位, 后续实现 download().
 默认安装根 = C:\Program Files\Loom (解释器默认目录名 = 项目名 Loom, 多版本按版本号分目录).
 """
+import json
 import os
 import zipfile
 
@@ -32,18 +33,53 @@ def _safe_extract(zf, target_dir):
         zf.extract(member, target_dir)
 
 
-def install_from_zip(zip_path, version, target_root=DEFAULT_INSTALL_ROOT):
+def read_zip_metadata(zip_path):
+    """读 zip 内的 解释器.json 元数据（不解压全包，只读这一个文件）.
+
+    返回 (info_dict, inner_prefix) 或 (None, None):
+      info_dict   : 解释器.json 解析后的 dict
+      inner_prefix: zip 内解释器所在的前缀目录（如 'Loom/' 或 '' 表示根）
+    """
+    if not zip_path or not os.path.isfile(zip_path):
+        return None, None
+    try:
+        with zipfile.ZipFile(zip_path) as zf:
+            for name in zf.namelist():
+                # 找 "*/解释器.json" 或 "解释器.json"
+                if name == META_NAME or name.endswith('/' + META_NAME):
+                    with zf.open(name) as f:
+                        try:
+                            data = json.loads(f.read().decode('utf-8'))
+                        except Exception:
+                            return None, None
+                    prefix = name[:-len(META_NAME)].rstrip('/')
+                    if prefix:
+                        prefix += '/'
+                    return data, prefix
+    except (zipfile.BadZipFile, OSError):
+        return None, None
+    return None, None
+
+
+def install_from_zip(zip_path, version, target_root=None):
     """把解释器 .zip 安装到 <target_root>/<version>/ 并登记到配置.
 
-    返回安装目录; 失败抛 InstallError (不写入配置).
-    zip 内应含解释器主程序 + 解释器.json (元数据); 允许包内多一层目录 (自动找)."""
+    target_root: 安装根（None = 用 hub_config.DEFAULT_INSTALL_ROOT）
+
+    返回实际登记的解释器目录（可能是 target 本身，也可能是 target/Loom）.
+
+    2026-10-19 增强：
+      - 支持自定义 target_root（原只允许固定默认根）
+      - 兼容我们发布的 zip 结构（顶层 Loom/ + python/ + Loom.bat）：
+        这种情况下直接登记 target_root/version/Loom，不复制残影
+      - 兼容标准包内一层包裹（如 <version>/<dir>/解释器.json）：
+        保持旧语义：把子目录内容提升到 target_root/version
+    """
+    if target_root is None:
+        target_root = DEFAULT_INSTALL_ROOT
     if not zip_path or not os.path.isfile(zip_path):
         raise InstallError("找不到 zip 文件: %s" % zip_path)
     version = str(version).strip()
-    # 2026-08-20 安全加固 (Qoder 报告低危4): 版本号格式白名单 ——
-    # 版本号直接拼安装路径, 未清洗可经 "..\.." 越权写任意目录
-    # (RemoteDownloader 远程安装预留路径, 必须现在堵住).
-    # 2026-08-22: 支持 x.y.z.betaN 内测版 (同 hub_config._VERSION_RE, 合同第九节).
     if not _VERSION_RE.match(version):
         raise InstallError("版本号格式非法 (需 x.y.z 或 x.y.z.betaN): %s" % version)
     target = os.path.join(target_root, version)
@@ -53,30 +89,55 @@ def install_from_zip(zip_path, version, target_root=DEFAULT_INSTALL_ROOT):
             _safe_extract(zf, target)
     except (zipfile.BadZipFile, OSError, InstallError) as e:
         raise InstallError("解压失败: %s" % e)
-    # 校验: 目标目录下应有解释器 (直接或包内一层子目录)
+
+    # 情形 1: target 直接有解释器
     info = discover_interpreter(target)
-    if info is None:
-        # zip 顶层可能包了一层目录 (如 <版本号>/), 把该子目录内容整体提升到 target
-        for entry in os.listdir(target):
-            sub = os.path.join(target, entry)
-            if os.path.isdir(sub) and discover_interpreter(sub) is not None:
-                import shutil
-                for item in os.listdir(sub):
-                    s = os.path.join(sub, item)
-                    d = os.path.join(target, item)
-                    try:
-                        if os.path.isdir(s):
-                            shutil.copytree(s, d, dirs_exist_ok=True)
-                        else:
-                            shutil.copy2(s, d)
-                    except OSError:
-                        pass
-                info = discover_interpreter(target)
-                break
-    if info is None:
+    if info is not None:
+        add_interpreter(info)
+        return target
+
+    # 情形 2: target 下有一层子目录含解释器
+    subdirs_with_interp = []
+    for entry in os.listdir(target):
+        sub = os.path.join(target, entry)
+        if os.path.isdir(sub):
+            sub_info = discover_interpreter(sub)
+            if sub_info is not None:
+                subdirs_with_interp.append((entry, sub, sub_info))
+
+    if not subdirs_with_interp:
         raise InstallError("压缩包里没有找到解释器 (缺少 %s 或主程序)" % META_NAME)
-    add_interpreter(info)
-    return target
+
+    if len(subdirs_with_interp) == 1:
+        entry, sub, sub_info = subdirs_with_interp[0]
+        # 判断是否为 "发布包结构"（target 下除了这个子目录还有其他文件，如 python/ Loom.bat）
+        other_items = [n for n in os.listdir(target)
+                       if os.path.join(target, n) != sub]
+        is_release_package = bool(other_items) and entry == 'Loom'
+        if is_release_package:
+            # 发布包结构：登记 target/Loom，不动其他文件
+            add_interpreter(sub_info)
+            return sub
+        # 标准包内包裹：提升到 target
+        import shutil
+        for item in os.listdir(sub):
+            s = os.path.join(sub, item)
+            d = os.path.join(target, item)
+            try:
+                if os.path.isdir(s):
+                    shutil.copytree(s, d, dirs_exist_ok=True)
+                else:
+                    shutil.copy2(s, d)
+            except OSError:
+                pass
+        info = discover_interpreter(target)
+        if info is not None:
+            add_interpreter(info)
+            return target
+
+    # 情形 3: 多个子目录都有解释器 —— 不确定该装哪个，报错
+    raise InstallError("压缩包内有多个子目录含解释器, 无法确定安装哪个: %s"
+                       % [e for e, _, _ in subdirs_with_interp])
 
 
 class RemoteDownloader:
