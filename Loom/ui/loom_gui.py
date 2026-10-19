@@ -956,7 +956,9 @@ class LoomGUI(QMainWindow):
 
     # ---------------- UI 树 dock (2026-10-18 阶段5) ----------------
     def _build_ui_tree_dock(self):
-        """底部 UI 树 dock（与命令行坞并列，默认显示）."""
+        """底部 UI 树 dock（与命令行坞并列，默认显示）.
+        2026-10-19 修复: 坞被用户点 X 关闭时同步状态栏按钮态,
+        避免按钮"显示已打开"但坞已关。"""
         from ui import qt_uitree
         self.uitree = qt_uitree.UITreeDock(self)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.uitree)
@@ -966,6 +968,18 @@ class LoomGUI(QMainWindow):
         except Exception:
             pass
         self.uitree.show()
+        # 2026-10-19: 坞可见性 -> 按钮状态同步（对齐 console 同款）
+        self.uitree.visibilityChanged.connect(
+            lambda vis: self._btn_uitree.setChecked(bool(vis)))
+
+    def _cmd_uitree(self, checked=None):
+        """2026-10-19: [UI树] 按钮 / F11: 开关 UI 树坞."""
+        show = not self.uitree.isVisible() if checked is None else bool(checked)
+        self.uitree.setVisible(show)
+        self._btn_uitree.setChecked(show)
+        if show:
+            self.uitree.raise_()   # 从 tab 切到前台（与 console 同款行为）
+        return show
 
     def _invoke_ui_cmd(self, cmd_name, **args):
         """所有 UI 树操作走这里（决策 B4 命令壳）。
@@ -1082,6 +1096,26 @@ class LoomGUI(QMainWindow):
         tb.setMovable(False)
         self.addToolBar(tb)
         e_get = lambda: self.editor
+
+        # 2026-10-19 用户要求: dock 开关按钮放左上角（工具栏最左）
+        # 之前放状态栏，窗口小时被挤掉看不见。改成工具栏按钮保证始终可见。
+        # 与 F11 (UI树) / F12 (命令行) 快捷键同源，都调 _cmd_uitree/_cmd_console。
+        self._btn_uitree = QToolButton()
+        self._btn_uitree.setText("UI树")
+        self._btn_uitree.setCheckable(True)
+        self._btn_uitree.setChecked(True)   # UI 树默认显示
+        self._btn_uitree.setToolTip("开关 UI 树坞 (F11)")
+        self._btn_uitree.clicked.connect(self._cmd_uitree)
+        tb.addWidget(self._btn_uitree)
+
+        self._btn_console = QToolButton()
+        self._btn_console.setText("命令行")
+        self._btn_console.setCheckable(True)
+        self._btn_console.setChecked(False)  # 命令行坞默认隐藏
+        self._btn_console.setToolTip("开关命令行坞 (F12)")
+        self._btn_console.clicked.connect(self._cmd_console)
+        tb.addWidget(self._btn_console)
+        tb.addSeparator()
 
         self._act_play = QAction("→播放", self)
         self._act_play.triggered.connect(lambda: self._cmd_play())
@@ -1274,13 +1308,8 @@ class LoomGUI(QMainWindow):
         self._msg_label = QLabel("")
         self._msg_label.setStyleSheet("color:#666;")
         self.statusBar().addPermanentWidget(self._msg_label)
-        # 命令行坞开关 (坞由 _build_console 创建, 这里只留按钮位; 见 _cmd_console)
-        self._btn_console = QToolButton()
-        self._btn_console.setText("命令行")
-        self._btn_console.setAutoRaise(True)
-        self._btn_console.setCheckable(True)
-        self._btn_console.clicked.connect(self._cmd_console)
-        self.statusBar().addPermanentWidget(self._btn_console)
+        # 2026-10-19 移动: UI树/命令行开关按钮移到主工具栏左上角（用户要求）
+        # 原因: 状态栏在窗口较小时可能被挤掉看不见，工具栏始终可见。
         sb = QToolButton()
         sb.setText("设置")
         sb.setAutoRaise(True)
@@ -1721,6 +1750,10 @@ class LoomGUI(QMainWindow):
             # 先于 QShortcutMap 拿到按键并 return True, QShortcut 永远不会触发.
             if t == QEvent.Type.KeyPress and ev.key() == Qt.Key.Key_F12:
                 self._cmd_console()
+                return True
+            # 2026-10-19: F11 = UI 树坞开关（与 F12 同款机制）
+            if t == QEvent.Type.KeyPress and ev.key() == Qt.Key.Key_F11:
+                self._cmd_uitree()
                 return True
             if t in (QEvent.Type.KeyPress, QEvent.Type.KeyRelease):
                 fw = QApplication.focusWidget()

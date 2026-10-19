@@ -44,16 +44,20 @@ class LightingMixin:
     def add_light(self, kind='directional', position=None, direction=None,
                   color=(1.0, 1.0, 1.0), intensity=1.0, name=None, guid=None,
                   mode='full', shape='circle', size=5.0, shadow=True,
-                  azimuth=None, elevation=None, roll=None, range=10.0):
+                  azimuth=None, elevation=None, roll=None, range=10.0,
+                  spot_inner_angle=30.0, spot_outer_angle=60.0):
         """添加场景光源 (不可见实体, 不渲染网格/不参与拾取). 返回 LightState.
         M29: mode='full'|'beam', shape='circle'|'rect', size=截面尺寸, shadow=是否投射阴影.
         M30: 平行光方向用 azimuth/elevation/roll (度); 旧 direction 向量仍兼容 (自动反算).
-        range: 点光影响半径 (对齐 Unity Light.range, 默认 10)."""
+        range: 点光影响半径 (对齐 Unity Light.range, 默认 10).
+        2026-10-19 序9 聚光灯: kind='spot' 时 spot_inner_angle/outer_angle 生效."""
         light = LightState(kind=kind, position=position, direction=direction,
                            color=color, intensity=intensity, name=name, guid=guid,
                            mode=mode, shape=shape, size=size, shadow=shadow,
                            azimuth=azimuth, elevation=elevation, roll=roll,
-                           range=range)
+                           range=range,
+                           spot_inner_angle=spot_inner_angle,
+                           spot_outer_angle=spot_outer_angle)
         self.lights.append(light)
         return light
 
