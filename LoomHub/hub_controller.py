@@ -233,7 +233,8 @@ class HubController:
             return
         # 2026-08-20 安全加固 (Qoder 报告提示12): 场景路径校验 ——
         # projects.json 被篡改时避免用 --open 打开任意路径文件
-        scene = project.get('scene')
+        # 2026-10-19 启动路径 bug 修复: 相对路径按工作区根解析
+        scene = cfg.resolve_runtime_path(project.get('scene'))
         if not scene or not os.path.isfile(scene):
             self.set_msg("项目场景文件不存在", 'err')
             return
@@ -249,7 +250,8 @@ class HubController:
             prefer = None
         cmd = cfg.build_launch_command(interp, scene, mode='open', prefer=prefer)
         env = dict(os.environ)
-        cwd = interp.get('dir') or cfg.HUB_DIR
+        # 2026-10-19 启动路径 bug 修复: cwd 也解析成绝对（否则子进程相对父进程 cwd 解析）
+        cwd = cfg.resolve_runtime_path(interp.get('dir')) or cfg.HUB_DIR
         try:
             subprocess.Popen(cmd, cwd=cwd, env=env)
             note = "用系统默认 Python 环境启动" if interp['kind'] == 'py' else "直接运行 exe"

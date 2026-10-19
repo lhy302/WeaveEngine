@@ -357,7 +357,8 @@ def launch_spec(args, info=None):
     info = info or cfg.default_interpreter()
     if info is None:
         return None, '无默认解释器 (先 interpreter_add 或 interpreter_default)'
-    scene = args.get('scene')
+    # 2026-10-19 启动路径 bug 修复: 相对路径按工作区根解析（与 GUI open_project 同构）
+    scene = cfg.resolve_runtime_path(args.get('scene'))
     if scene:
         # GUI 同款校验 (2026-08-20 安全加固: projects.json 被篡改时不打开任意文件)
         if not os.path.isfile(scene):
@@ -376,7 +377,9 @@ def launch_spec(args, info=None):
     cmd_parts = cfg.build_launch_command(info, scene, mode=mode, prefer=prefer)
     if as_bool(args.get('agent')):
         cmd_parts.append('--agent')
-    return {'cmd': cmd_parts, 'cwd': info.get('dir') or cfg.HUB_DIR,
+    # 2026-10-19 启动路径 bug 修复: cwd 也解析成绝对（与 GUI open_project 同构）
+    cwd_resolved = cfg.resolve_runtime_path(info.get('dir')) or cfg.HUB_DIR
+    return {'cmd': cmd_parts, 'cwd': cwd_resolved,
             'env': dict(os.environ), 'prefer': prefer, 'mode': mode,
             'interpreter': info}, None
 

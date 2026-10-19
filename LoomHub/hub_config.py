@@ -23,6 +23,33 @@ import subprocess
 APP_NAME = "Loom"          # 解释器名 = 项目名
 HUB_NAME = "LoomHub"       # 项目管理器名 = 解释器名 + "Hub"
 HUB_DIR = os.path.dirname(os.path.abspath(__file__))
+# 2026-10-19 启动路径 bug 修复：interpreters.json / projects.json 里用相对路径
+# (dir="Loom" / path="Loom/Loom.py" / scene="Loom/保存/x.json") 时，Popen(cwd="Loom")
+# + argv[1]="Loom/Loom.py" 会在子进程里找 "Loom/Loom/Loom.py" -> 必败。
+# 修复：相对路径一律按"LoomHub 的父目录 = 工作区根"解析。
+# 用户从任何 cwd 启动 LoomHub 都一致（不受双击/命令行 cwd 影响）。
+WORKSPACE = os.path.dirname(HUB_DIR)
+
+
+def resolve_runtime_path(p):
+    """把配置里的路径解析成运行时绝对路径.
+
+    规则（2026-10-19 修 LoomHub 启动路径 bug）：
+      - None / 空串 -> 原样返回（保持语义）
+      - 绝对路径   -> 原样返回
+      - 相对路径   -> 按 WORKSPACE（LoomHub 的父目录 = 工作区根）解析
+    调用方拿到绝对路径后可以放心 Popen(cwd=...) / isfile(...)。
+    """
+    if not p:
+        return p
+    try:
+        if os.path.isabs(p):
+            return p
+        return os.path.normpath(os.path.join(WORKSPACE, p))
+    except Exception:
+        return p
+
+
 INTERPRETERS_FILE = os.path.join(HUB_DIR, "interpreters.json")
 PROJECTS_FILE = os.path.join(HUB_DIR, "projects.json")
 PROGRAM_FILES = os.environ.get("ProgramFiles", r"C:\Program Files")
@@ -327,14 +354,19 @@ def build_launch_command(info, scene_path=None, mode='open', prefer=None):
     mode: 'open' = 编辑器打开项目场景 / 'run' = 播放场景 / None = 纯启动编辑器.
     prefer: None=按 kind 默认 / 'py'=优先 .py 源码 / 'exe'=优先 .exe 封装
     (启动器设置 open_py, 2026-08-14; 无对应文件时回退按 kind)."""
-    if prefer == 'py' and info.get('main_py') and os.path.isfile(info['main_py']):
-        cmd = [default_python(), info['main_py']]
-    elif prefer == 'exe' and info.get('main_exe') and os.path.isfile(info['main_exe']):
-        cmd = [info['main_exe']]
+    # 2026-10-19 启动路径 bug 修复：所有路径经 resolve_runtime_path 解析成绝对路径，
+    # 避免 Popen(cwd=相对) + argv[1]=相对 在子进程里二次拼接出错。
+    main_py = resolve_runtime_path(info.get('main_py'))
+    main_exe = resolve_runtime_path(info.get('main_exe'))
+    main_path = resolve_runtime_path(info.get('path'))
+    if prefer == 'py' and main_py and os.path.isfile(main_py):
+        cmd = [default_python(), main_py]
+    elif prefer == 'exe' and main_exe and os.path.isfile(main_exe):
+        cmd = [main_exe]
     elif info.get('kind') == 'exe':
-        cmd = [info['path']]
+        cmd = [main_path]
     else:
-        cmd = [default_python(), info['path']]
+        cmd = [default_python(), main_path]
     if scene_path:
         cmd += ['--open' if mode == 'open' else '--run', scene_path]
     return cmd
