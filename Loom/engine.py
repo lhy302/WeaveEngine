@@ -870,6 +870,13 @@ class GLEngine(ShadowMixin, FrameComponentMixin, PhysicsMixin, InputMixin, HudMi
 
         # ② 通用 Python 脚本逐个调度
         # ★B3 退役: 删 batch_move 死代码段 (engine 的 move/linear_move 分流从未被触发)
+        # 2026-10-18 阶段1档序12 执行顺序：按 Script.order 稳定排序（小者先；同 order
+        # 保持物体顺序+脚本列表顺序，list.sort 稳定）。脚本数通常 <100，sorted 开销可忽略。
+        if generic_items:
+            try:
+                generic_items.sort(key=lambda t: getattr(type(t[2]), 'order', 0))
+            except Exception:
+                pass   # 防御：排序失败降级原顺序
         for m, sc, s in generic_items:
             try:
                 s.update(delta_time)
@@ -892,6 +899,10 @@ class GLEngine(ShadowMixin, FrameComponentMixin, PhysicsMixin, InputMixin, HudMi
           [事件派发] → [插值翻页].
         物理**不再是**独立 accumulator 回调 — Unity 模型: 物理在逻辑帧内
         自动子步, fixed_dt 一个时钟 (批5 删除双 accumulator)."""
+        # 2026-10-18 阶段1档序10 FixedUpdate：物理子步前派发（用户改速度本步生效）
+        _t = self._prof_t0()
+        self._dispatch_fixed_update(fixed_dt)
+        self._prof_add('mt_fixed_update', _t)
         _t = self._prof_t0()
         self._run_scripts(fixed_dt)
         self._prof_add('mt_scripts', _t)
@@ -1155,6 +1166,59 @@ class GLEngine(ShadowMixin, FrameComponentMixin, PhysicsMixin, InputMixin, HudMi
         except BaseException:
             # 脚本线程异常/死亡: 回退内联, 游戏不崩 (本帧脚本照跑)
             self.update_scripts(dt)
+
+    def _dispatch_fixed_update(self, fixed_dt):
+        """2026-10-18 阶段1档序10 FixedUpdate（语义对齐 Unity FixedUpdate）。
+
+        在 _logic_frame 的 _run_scripts 之前调用（用户改速度/位置本步物理生效）。
+        零开销：基类空实现跳过（未覆盖 on_fixed_update 的脚本不进热路径）。
+        异常隔离：打印 + 标记坏脚本（与 _call_collision_cb 一致）。
+        """
+        for m in self.models:
+            if not m.scripts:
+                continue
+            for sc in m.scripts:
+                inst = getattr(sc, '_script', None)
+                if inst is None or getattr(sc, '_script_broken', False):
+                    continue
+                try:
+                    from scripts import Script as _Base
+                except ImportError:
+                    continue
+                if type(inst).on_fixed_update is _Base.on_fixed_update:
+                    continue   # 基类空实现：跳过
+                try:
+                    inst.on_fixed_update(fixed_dt)
+                except Exception as e:
+                    print("[脚本] %s(%s).on_fixed_update 出错: %r"
+                          % (m.name, sc.script_id, e))
+                    sc._script_broken = True
+
+    def _dispatch_late_update(self, render_dt):
+        """2026-10-18 阶段1档序11 LateUpdate（语义对齐 Unity LateUpdate）。
+
+        在渲染帧 update 之后、UI 渲染之前调用（相机跟随、HUD 同步用）。
+        零开销 + 异常隔离语义同 _dispatch_fixed_update。
+        """
+        for m in self.models:
+            if not m.scripts:
+                continue
+            for sc in m.scripts:
+                inst = getattr(sc, '_script', None)
+                if inst is None or getattr(sc, '_script_broken', False):
+                    continue
+                try:
+                    from scripts import Script as _Base
+                except ImportError:
+                    continue
+                if type(inst).on_late_update is _Base.on_late_update:
+                    continue   # 基类空实现：跳过
+                try:
+                    inst.on_late_update(render_dt)
+                except Exception as e:
+                    print("[脚本] %s(%s).on_late_update 出错: %r"
+                          % (m.name, sc.script_id, e))
+                    sc._script_broken = True
 
 
     def _stop_parallel(self):

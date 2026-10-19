@@ -488,6 +488,9 @@ class RenderMixin:
             self.update_audio(delta_time)
             # M35: 动画推进 (关键帧插值应用变换)
             self.update_animations(delta_time)
+        # 2026-10-18 阶段1档序11 LateUpdate：两模式汇合后、世界矩阵重算前派发
+        # （分离模式逻辑帧已跑完 → 此处即"所有 update 之后"；非分离模式 483-490 刚跑完）
+        self._dispatch_late_update(delta_time)
         # 编辑态插值失同步修复 (2026-09-06): 物体被直接改位 → 快照对齐
         self._consume_xform_gen()
         # 多核优化: 当帧批量世界矩阵 (脚本/物理已改位形, 阴影与主 pass 共享同一批)

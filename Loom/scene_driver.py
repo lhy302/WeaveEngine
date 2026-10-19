@@ -194,7 +194,9 @@ class SceneDriver:
     # ---------------- 每帧步进 ----------------
     def _logic_frame(self, fixed_dt):
         """逻辑步 = 最高同步点 (批5): 脚本 → 物理子步 ×N → 动画
-        (次序同 engine._logic_frame)."""
+        (次序同 engine._logic_frame).
+        2026-10-18 阶段1档序10 FixedUpdate：_update_scripts 前派发。"""
+        self._dispatch_fixed_update(fixed_dt)
         self._update_scripts(fixed_dt)
         clk = self._clock
         sdt = clk.sub_dt if clk is not None else fixed_dt
@@ -220,10 +222,14 @@ class SceneDriver:
             if it is not None:
                 it._extrap_mode = (1 if (self._interp_mode == 'extrapolate'
                                          and not self._clock.steps) else 0)
+            # 2026-10-18 阶段1档序11 LateUpdate（渲染帧尾, 逻辑步全部跑完之后）
+            self._dispatch_late_update(render_dt)
             return r
         self._update_scripts(render_dt)
         self._step_physics(render_dt)
         self._update_animations(render_dt)
+        # 2026-10-18 阶段1档序11 LateUpdate（绑死模式: update 之后）
+        self._dispatch_late_update(render_dt)
         return (1, 1)
 
     def render_pose(self, aspect=None):
@@ -282,7 +288,10 @@ class SceneDriver:
 
     def _update_scripts(self, dt):
         """复刻 engine.GLEngine.update_scripts: 惰性实例化 + update (坏脚本标记跳过).
-        组2: 引用迭代 (与 engine 同改; 契约: update 不增删本物体脚本组件)."""
+        组2: 引用迭代 (与 engine 同改; 契约: update 不增删本物体脚本组件).
+        2026-10-18 阶段1档序12 执行顺序：按 Script.order 稳定排序后再 update。"""
+        # 先收集所有脚本实例（惰性实例化）
+        items = []
         for m in self.models:
             for sc in m.scripts:
                 if not sc.script_id:
@@ -310,16 +319,68 @@ class SceneDriver:
                         sc._script = None
                         sc._script_broken = True
                         continue
+                items.append((m, sc, s))
+        # 按 order 稳定排序（小者先；同 order 保持物体+脚本顺序）
+        if items:
+            try:
+                items.sort(key=lambda t: getattr(type(t[2]), 'order', 0))
+            except Exception:
+                pass
+        for m, sc, s in items:
+            try:
+                s.update(dt)
+                # 2026-10-18 协程：Vk 路径同步推进
+                if hasattr(s, '_drive_coroutines'):
+                    s._drive_coroutines(dt)
+            except Exception as e:
+                print("[脚本] %s(%s) 出错: %r" % (m.name, sc.script_id, e))
+                if hasattr(s, 'stop_all_coroutines'):
+                    s.stop_all_coroutines()
+                sc._script = None
+                sc._script_broken = True
+
+    def _dispatch_fixed_update(self, fixed_dt):
+        """2026-10-18 阶段1档序10 FixedUpdate（Vk 后端同步版）。"""
+        try:
+            from scripts import Script as _Base
+        except ImportError:
+            return
+        for m in self.models:
+            if not m.scripts:
+                continue
+            for sc in m.scripts:
+                inst = getattr(sc, '_script', None)
+                if inst is None or getattr(sc, '_script_broken', False):
+                    continue
+                if type(inst).on_fixed_update is _Base.on_fixed_update:
+                    continue
                 try:
-                    s.update(dt)
-                    # 2026-10-18 协程：Vk 路径同步推进
-                    if hasattr(s, '_drive_coroutines'):
-                        s._drive_coroutines(dt)
+                    inst.on_fixed_update(fixed_dt)
                 except Exception as e:
-                    print("[脚本] %s(%s) 出错: %r" % (m.name, sc.script_id, e))
-                    if hasattr(s, 'stop_all_coroutines'):
-                        s.stop_all_coroutines()
-                    sc._script = None
+                    print("[脚本] %s(%s).on_fixed_update 出错: %r"
+                          % (m.name, sc.script_id, e))
+                    sc._script_broken = True
+
+    def _dispatch_late_update(self, render_dt):
+        """2026-10-18 阶段1档序11 LateUpdate（Vk 后端同步版）。"""
+        try:
+            from scripts import Script as _Base
+        except ImportError:
+            return
+        for m in self.models:
+            if not m.scripts:
+                continue
+            for sc in m.scripts:
+                inst = getattr(sc, '_script', None)
+                if inst is None or getattr(sc, '_script_broken', False):
+                    continue
+                if type(inst).on_late_update is _Base.on_late_update:
+                    continue
+                try:
+                    inst.on_late_update(render_dt)
+                except Exception as e:
+                    print("[脚本] %s(%s).on_late_update 出错: %r"
+                          % (m.name, sc.script_id, e))
                     sc._script_broken = True
 
     def _update_animations(self, dt):

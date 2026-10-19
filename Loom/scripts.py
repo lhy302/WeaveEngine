@@ -174,6 +174,10 @@ class Script:
     script_id = None   # 唯一标识 (小写蛇形, 序列化用)
     name = '脚本'
     params = ()        # ((key, label, default, vmin, vmax, fmt), ...)
+    # 2026-10-18 第1档序12 执行顺序（语义对齐 Unity Script Execution Order）:
+    # 数值小的先执行（默认 0）；同 order 保持"物体顺序 + 脚本列表顺序"（稳定排序）。
+    # 用法：子类里写 order = -100 让它比默认脚本更早 update。
+    order = 0
 
     def __init__(self):
         self.obj = None       # 宿主物体 (GameObject)
@@ -227,6 +231,24 @@ class Script:
     def on_trigger_stay(self, other):
         """持续处于触发区每逻辑帧. 对应 Unity OnTriggerStay.
         未定义本方法的脚本走零开销快路径."""
+        pass
+
+    # ---- 2026-10-18 第1档序10 FixedUpdate / 序11 LateUpdate / 序12 执行顺序 ----
+    def on_fixed_update(self, fixed_dt):
+        """固定步钩子（语义对齐 Unity FixedUpdate）：每个逻辑帧调用一次，
+        在物理子步之前（用户改速度/位置本步物理生效）。
+
+        调用频率：固定 TPS（通常 30），与渲染帧率解耦。
+        dt 参数：fixed_dt（恒为 sub_steps × sub_dt，与 _logic_frame 一致）。
+        """
+        pass
+
+    def on_late_update(self, render_dt):
+        """晚更新钩子（语义对齐 Unity LateUpdate）：每个渲染帧调用一次，
+        在所有 update 之后、UI 渲染之前（相机跟随、HUD 同步用）。
+
+        dt 参数：render_dt（渲染帧实际 dt）。
+        """
         pass
 
 
