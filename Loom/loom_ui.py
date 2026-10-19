@@ -13,6 +13,77 @@
 import math
 
 
+# 2026-10-19 P0-5: 声明式事件绑定的派发基础。
+# UIManager.draw_all(engine) 每帧把 engine 写到这里，事件触发时用它找脚本实例。
+# 原因：UI 事件（on_mouse_up 等）在输入轮询里触发，不经过 update 循环，
+# 需要 module 级引用才能从"某个 UI 元素"反查"引擎里挂了这个脚本的物体"。
+_ACTIVE_ENGINE = None
+
+
+def _find_script_instances(script_id, owner_guid=None):
+    """从 _ACTIVE_ENGINE 的所有物体里找挂指定 script_id 的脚本实例列表。
+
+    owner_guid 非空时只返回该 guid 物体的脚本实例。
+    返回 [(obj, script_instance), ...]
+    """
+    if _ACTIVE_ENGINE is None:
+        return []
+    out = []
+    try:
+        for m in getattr(_ACTIVE_ENGINE, 'models', []):
+            if owner_guid and getattr(m, 'guid', None) != owner_guid:
+                continue
+            for sc in getattr(m, 'scripts', []):
+                if getattr(sc, 'script_id', None) == script_id:
+                    out.append((m, sc))
+    except Exception:
+        pass
+    return out
+
+
+def _fire_binding(elem, event, *args):
+    """派发声明式事件绑定 (2026-10-19 P0-5).
+
+    elem.event_bindings[event] = {'script': sid, 'method': name, 'owner_guid'?}
+    在 _ACTIVE_ENGINE 里找挂 sid 的脚本实例，调用 instance.method(*args)。
+    返回 是否触发成功（找到并调用）。
+    异常不向上抛（防 UI 元素拖崩整帧），但会打印到 stdout 供排查。
+    """
+    try:
+        bindings = getattr(elem, 'event_bindings', None)
+        if not bindings:
+            return False
+        cfg = bindings.get(event)
+        if not cfg:
+            return False
+        sid = cfg.get('script')
+        method = cfg.get('method') or ('on_' + event)
+        owner_guid = cfg.get('owner_guid')
+        if not sid:
+            return False
+        insts = _find_script_instances(sid, owner_guid)
+        if not insts:
+            print('[UI 事件] 找不到脚本实例: sid=%r owner_guid=%r event=%r'
+                  % (sid, owner_guid, event))
+            return False
+        fired = False
+        for obj, sc in insts:
+            fn = getattr(sc, method, None)
+            if fn is None:
+                print('[UI 事件] 脚本 %r 无方法 %r（触发自 %r.%r）'
+                      % (sid, method, getattr(obj, 'name', '?'), elem.name))
+                continue
+            try:
+                fn(*args)
+                fired = True
+            except Exception as e:
+                print('[UI 事件] 调用 %r.%r 异常: %r' % (sid, method, e))
+        return fired
+    except Exception as e:
+        print('[UI 事件] _fire_binding 兜底异常: %r' % (e,))
+        return False
+
+
 class UIElement:
     """UI 元素基类.
 
@@ -49,6 +120,11 @@ class UIElement:
         self.on_pointer_down = None     # (pos)           左键按下
         self.on_pointer_up = None       # (pos)           左键松开
         self.on_pointer_drag = None     # (pos, delta)    拖动中（仅 dragging 元素）
+        # 2026-10-19 P0-5: 声明式事件绑定（可 JSON 序列化，替代 Python callable）。
+        # 结构: {'click': {'script': 'sid', 'method': 'on_click', 'owner_guid': None},
+        #        'submit': ..., 'change': ...}
+        # 派发逻辑在 loom_ui._fire_binding()，由 Button/InputField 等触发点调用。
+        self.event_bindings = {}
 
     # ---- 字段校验 (钳制到合法范围) ----
     @property
@@ -595,6 +671,9 @@ class UIManager:
 
     def draw_all(self, engine):
         """渲染所有 screen Canvas 的元素树 (渲染层末尾调用). 父先于子."""
+        # 2026-10-19 P0-5: 每帧刷新 _ACTIVE_ENGINE（供 _fire_binding 查脚本实例）
+        global _ACTIVE_ENGINE
+        _ACTIVE_ENGINE = engine
         # 1) 主树渲染 (Dropdown 展开时其列表暂不画, 留到第 2 轮)
         expanded_dd = self._find_expanded_dropdown()
         for c in self.canvases:
@@ -855,11 +934,14 @@ class Button(UIElement):
             return False
         was_pressed = self._pressed
         self._pressed = False
-        if was_pressed and self.on_click is not None:
-            try:
-                self.on_click()
-            except Exception:
-                pass
+        if was_pressed:
+            # 2026-10-19 P0-5: Python callable 与声明式绑定并存
+            if self.on_click is not None:
+                try:
+                    self.on_click()
+                except Exception:
+                    pass
+            _fire_binding(self, 'click')
             return True
         return was_pressed
 
@@ -1220,11 +1302,14 @@ class InputField(UIElement):
             new_text = new_text[:self.max_length]
         self.text = new_text
         self._cursor = max(0, min(self._cursor, len(self.text)))
-        if notify and new_text != old and self.on_change is not None:
-            try:
-                self.on_change(new_text)
-            except Exception:
-                pass
+        if notify and new_text != old:
+            # 2026-10-19 P0-5: Python callable 与声明式绑定并存
+            if self.on_change is not None:
+                try:
+                    self.on_change(new_text)
+                except Exception:
+                    pass
+            _fire_binding(self, 'change', new_text)
 
     def _insert(self, s):
         """在光标处插入字符串 (支持多字符)"""
@@ -1250,11 +1335,13 @@ class InputField(UIElement):
             # 光标不动
 
     def _submit(self):
+        # 2026-10-19 P0-5: Python callable 与声明式绑定并存
         if self.on_submit is not None:
             try:
                 self.on_submit(self.text)
             except Exception:
                 pass
+        _fire_binding(self, 'submit', self.text)
 
     # ---- 键盘事件 (UIManager 分发, 只在 focused=True 时) ----
     def on_key_down(self, key_name):

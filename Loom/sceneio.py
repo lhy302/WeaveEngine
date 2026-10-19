@@ -627,6 +627,10 @@ def _emit_ui_element(elem):
         base['cursor_color'] = list(elem.cursor_color)
         base['font_size'] = int(elem.font_size)
         # on_submit / on_change 不序列化 (运行时由脚本挂载, 契约 §8)
+    # 2026-10-19 P0-5: 声明式事件绑定可序列化（{event: {script, method, owner_guid}}）
+    eb = getattr(elem, 'event_bindings', None)
+    if eb:
+        base['event_bindings'] = dict(eb)
     base['children'] = [_emit_ui_element(c) for c in elem.children]
     return base
 
@@ -758,6 +762,14 @@ def _apply_ui_element(d):
     else:
         print("[sceneio] 警告: 未知 UI 元素类型 %r, 跳过" % typ)
         return None
+    # 2026-10-19 P0-5: 恢复声明式事件绑定
+    eb = d.get('event_bindings')
+    if eb and isinstance(eb, dict):
+        try:
+            elem.event_bindings = {k: dict(v) if isinstance(v, dict) else v
+                                   for k, v in eb.items()}
+        except Exception:
+            pass
     for cd in (d.get('children') or []):
         ch = _apply_ui_element(cd)
         if ch is not None:

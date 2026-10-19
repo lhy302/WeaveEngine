@@ -132,6 +132,8 @@ TOOLS_DEF = [
          'enabled': {'type': 'boolean'},
          'z_order': {'type': 'integer'},
      }, 'required': ['type']}},
+    {'name': 'loom_ui_bind_event', 'description': '给 UI 元素绑定声明式事件到脚本方法（可序列化，Agent 可独立完成的 UI 交互）', 'inputSchema': {'type': 'object', 'properties': {'name': {'type': 'string', 'description': 'UI 元素名'}, 'event': {'type': 'string', 'enum': ['click', 'change', 'submit', 'pointer_enter', 'pointer_exit', 'pointer_down', 'pointer_up', 'pointer_drag'], 'description': '事件类型'}, 'script': {'type': 'string', 'description': '脚本 script_id（必须是已注册的）'}, 'method': {'type': 'string', 'description': '脚本方法名（缺省=on_<event>）'}, 'owner_guid': {'type': 'string', 'description': '可选：限定某物体的脚本实例；缺省=任意挂该脚本的物体'}, 'canvas': {'type': 'integer', 'description': 'Canvas 序号（缺省 0）'}}, 'required': ['name', 'event', 'script']}},
+    {'name': 'loom_ui_unbind_event', 'description': '移除 UI 元素的声明式事件绑定（给 event 则只移除该项，否则清空全部）', 'inputSchema': {'type': 'object', 'properties': {'name': {'type': 'string', 'description': 'UI 元素名'}, 'event': {'type': 'string', 'description': '可选：只移除该事件；缺省=清空全部'}, 'canvas': {'type': 'integer', 'description': 'Canvas 序号'}}, 'required': ['name']}},
     {'name': 'loom_ui_set', 'description': '修改 UI 元素字段（含 type-specific 字段）',
      'inputSchema': {'type': 'object', 'properties': {
          'name': {'type': 'string', 'description': '元素名'},
@@ -552,6 +554,11 @@ class LoomMCPServer:
         if name == 'loom_ui_add':
             # 直接透传 args（含 type / name / parent / canvas / rect 等）
             return self._wrap(c.call('ui_add', dict(args)))
+
+        if name == 'loom_ui_bind_event':
+            return self._wrap(c.call('ui_bind_event', dict(args)))
+        if name == 'loom_ui_unbind_event':
+            return self._wrap(c.call('ui_unbind_event', dict(args)))
 
         if name == 'loom_ui_set':
             return self._wrap(c.call('ui_set', dict(args)))
