@@ -18,7 +18,7 @@ ENGINE_DIR = os.path.join(ROOT, 'Loom')
 DIST_DIR = os.path.join(ROOT, 'tools', 'dist')
 META_PATH = os.path.join(ENGINE_DIR, '解释器.json')
 
-EXCLUDE_DIRS = {'tests', '保存', '__pycache__', '.pytest_cache', 'assets'}
+EXCLUDE_DIRS = {'tests', '保存', 'Projects', '__pycache__', '.pytest_cache', 'assets'}
 EXCLUDE_EXTS = {'.pyc', '.pyo', '.log', '.tmp'}
 EXCLUDE_FILES = {'解释器.json.bak'}
 
