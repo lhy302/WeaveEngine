@@ -99,10 +99,7 @@ class TkHubView(IHubView):
         sb = tk.Scrollbar(frame, command=self.proj_list.yview)
         sb.pack(side="right", fill="y")
         self.proj_list.config(yscrollcommand=sb.set)
-        # 2026-10-19 A2: 项目列表三种颜色（当前引擎=黑，外部=橙，其他引擎=灰）
-        self.proj_list.tag_config('current', foreground='#222')
-        self.proj_list.tag_config('external', foreground='#b06a00')
-        self.proj_list.tag_config('other', foreground='#999')
+        # 2026-10-19 A2: 项目列表三种颜色（在 _refresh_lists 里用 itemconfig 逐行设色）
         # 双击项目 = 打开
         self.proj_list.bind('<Double-Button-1>', lambda _e: self._open_project())
         self._btn_row(right, [("新建", self.ctrl.new_project),
