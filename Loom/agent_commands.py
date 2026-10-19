@@ -49,12 +49,22 @@ _CMDS_DESC = {}          # 命令名 -> 用途说明 (GUI 控制台提示)
 
 
 def log(msg):
-    """统一调试日志环 (命令/错误/事件; GUI 控制台与 Agent /logs 共用)."""
+    """统一调试日志环 (命令/错误/事件; GUI 控制台与 Agent /logs 共用).
+
+    2026-10-19 P0-1 修复: str(msg) 强制 utf-8 'replace' 往返一次，清洗孤立代理字符
+    (Windows surrogateescape 残留会导致后续 /logs 的 json.dumps().encode('utf-8')
+    抛 UnicodeEncodeError -> 空断连 -> Agent 看不到日志且重试会重复执行命令).
+    """
     global _LOG_SEQ
+    s = str(msg)
+    try:
+        s.encode('utf-8')
+    except UnicodeEncodeError:
+        s = s.encode('utf-8', 'replace').decode('utf-8', 'replace')
     with _LOG_LOCK:
         _LOG_SEQ += 1
         seq = _LOG_SEQ
-        LOG_RING.append((seq, time.strftime('%H:%M:%S'), str(msg)))
+        LOG_RING.append((seq, time.strftime('%H:%M:%S'), s))
     return seq
 
 
@@ -2516,7 +2526,18 @@ class _CmdHandler(BaseHTTPRequestHandler):
         return host in ('127.0.0.1', 'localhost', '')
 
     def _json(self, code, obj):
-        body = json.dumps(obj, ensure_ascii=False).encode('utf-8')
+        # 2026-10-19 P0-1 修复: 两层兜底，绝不让编码异常空断连
+        #   ① encode('utf-8', 'replace') —— 孤立代理字符替换为 '?'，避免 UnicodeEncodeError
+        #   ② 最外层 try/except —— json.dumps 本身失败（循环引用等）时返回最小错误 JSON
+        try:
+            body = json.dumps(obj, ensure_ascii=False).encode('utf-8', 'replace')
+        except Exception as e:
+            try:
+                err_txt = repr(e).encode('utf-8', 'replace').decode('utf-8', 'replace')
+            except Exception:
+                err_txt = 'unknown encoding error'
+            body = json.dumps({'ok': False, 'error': 'json dump failed',
+                               'detail': err_txt}).encode('utf-8', 'replace')
         self.send_response(code)
         self.send_header('Content-Type', 'application/json; charset=utf-8')
         self.send_header('Content-Length', str(len(body)))
@@ -2524,39 +2545,57 @@ class _CmdHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):
-        if not self._auth():
-            return self._json(401, {'ok': False, 'error': 'bad token'})
-        if self.path.startswith('/logs'):
-            after = 0
-            if 'after=' in self.path:
-                try:
-                    after = int(self.path.split('after=')[1].split('&')[0])
-                except Exception:
-                    after = 0
-            return self._json(200, {'ok': True, 'seq': _LOG_SEQ,
-                                    'lines': log_since(after)})
-        if self.path.startswith('/status'):
-            # self.service 是类属性 None (handler 实例上没有), 服务实例只在
-            # self.server.service —— 曾写成 self.service.started 直接 500.
-            return self._json(200, {'ok': True, 'pid': os.getpid(),
-                                    'alive': self.server.service.started})
-        return self._json(200, {'ok': True, 'service': 'loom-agent',
-                                'commands': list(_COMMANDS)})
+        # 2026-10-19 P0-1 修复: 外层兜底，任何路径异常都返回 500 JSON，绝不空断连
+        try:
+            if not self._auth():
+                return self._json(401, {'ok': False, 'error': 'bad token'})
+            if self.path.startswith('/logs'):
+                after = 0
+                if 'after=' in self.path:
+                    try:
+                        after = int(self.path.split('after=')[1].split('&')[0])
+                    except Exception:
+                        after = 0
+                return self._json(200, {'ok': True, 'seq': _LOG_SEQ,
+                                        'lines': log_since(after)})
+            if self.path.startswith('/status'):
+                # self.service 是类属性 None (handler 实例上没有), 服务实例只在
+                # self.server.service —— 曾写成 self.service.started 直接 500.
+                return self._json(200, {'ok': True, 'pid': os.getpid(),
+                                        'alive': self.server.service.started})
+            return self._json(200, {'ok': True, 'service': 'loom-agent',
+                                    'commands': list(_COMMANDS)})
+        except Exception as e:
+            try:
+                self._json(500, {'ok': False, 'error': 'do_GET crashed',
+                                 'detail': repr(e)[:300]})
+            except Exception:
+                pass
 
     def do_POST(self):
-        if not self._auth():
-            return self._json(401, {'ok': False, 'error': 'bad token'})
-        if not self.path.startswith('/cmd'):
-            return self._json(404, {'ok': False, 'error': 'not found'})
+        # 2026-10-19 P0-1 修复: 外层兜底，命令执行后若 _json 抛异常，客户端至少
+        # 能收到 500 JSON（带"可能已执行"提示），避免误判失败后重试重复操作。
         try:
-            req = json.loads(self.rfile.read(
-                int(self.headers.get('Content-Length', 0)) or 0)
-                .decode('utf-8'))
+            if not self._auth():
+                return self._json(401, {'ok': False, 'error': 'bad token'})
+            if not self.path.startswith('/cmd'):
+                return self._json(404, {'ok': False, 'error': 'not found'})
+            try:
+                req = json.loads(self.rfile.read(
+                    int(self.headers.get('Content-Length', 0)) or 0)
+                    .decode('utf-8'))
+            except Exception as e:
+                return self._json(400, {'ok': False, 'error': repr(e)})
+            cmd, args = req.get('cmd'), req.get('args') or {}
+            result = self.server.service.submit(cmd, args)
+            self._json(200, result)
         except Exception as e:
-            return self._json(400, {'ok': False, 'error': repr(e)})
-        cmd, args = req.get('cmd'), req.get('args') or {}
-        result = self.server.service.submit(cmd, args)
-        self._json(200, result)
+            try:
+                self._json(500, {'ok': False,
+                                 'error': 'do_POST crashed (可能已执行, 勿盲目重试)',
+                                 'detail': repr(e)[:300]})
+            except Exception:
+                pass
 
 
 class AgentService:
