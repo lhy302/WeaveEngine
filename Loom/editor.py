@@ -651,9 +651,13 @@ class EditorApp(GLEngine):
     # ================ 工具栏 ================
 
     def _add_primitive(self, typ):
-        """添加基元物体 (可撤销)"""
+        """添加基元物体 (可撤销).
+
+        2026-10-19 P0-3: 返回创建的 model（原来返回 None，导致命令层拿不到 guid，
+        只能盲猜 models[-1]，并发/撤销后必错）。
+        """
         if self.is_playing:
-            return
+            return None
         from mesh import create_cube, create_plane, create_sphere
         # 基元尺寸对齐 Unity 默认 (2026-10-13): Cube 边长 1 / Sphere 半径 0.5
         # (直径 1) / Plane 10x10 —— 同一操作序列在两引擎得到同尺寸物体。
@@ -668,6 +672,7 @@ class EditorApp(GLEngine):
             normal_mode='flat' if typ != 'sphere' else 'vertex',
             name="%s%d" % (name, n + 1), color=color)).model
         self._select_model(len(self.models) - 1)   # 2026-08-15: 清光源/摄像机选中
+        return m
 
     def _import_obj(self, path=None):
         """M36: 文件对话框选 .obj -> 加载网格放入场景 (可撤销). obj 文件路径随场景

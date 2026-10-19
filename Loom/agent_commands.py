@@ -386,18 +386,43 @@ def cmd_scene_load(win, args):
 @command('object_add', '添加基元: cube|sphere|plane')
 def cmd_object_add(win, args):
     typ = args.get('type', 'cube')
-    win.editor._add_primitive(typ)
-    return {'type': typ}
+    # 2026-10-19 P0-3: _add_primitive 现在返回 model，命令层直接拿到 guid/name，
+    # 不再"创建完让 Agent 猜最后一个"（重名/撤销后必错）。
+    m = win.editor._add_primitive(typ)
+    return {
+        'type': typ,
+        'guid': getattr(m, 'guid', None),
+        'name': getattr(m, 'name', None),
+    }
 
 
-def _find_all(ed, name):
-    """按名字找出**全部**同名目标 [(kind, obj, index)...].
-    场景里重名是允许的 (复制/Prefab 实例常见), 命令层必须知道有没有歧义."""
+def _find_all(ed, name_or_id):
+    """按 name 或 guid 找出目标 [(kind, obj, index)...].
+
+    2026-10-19 P0-3: 支持 GUID 精确寻址（Agent 用稳定 ID 定位，重名也不误中）。
+    匹配优先级：
+      1) guid 精确匹配（若 name_or_id 看起来像 guid 且命中）
+      2) name 匹配（可能有多个同名，返回全部供 _resolve 判断歧义）
+    场景里重名是允许的 (复制/Prefab 实例常见)，命令层必须知道有没有歧义。
+    """
+    if not name_or_id:
+        return []
+    # 第一优先级：guid 精确匹配
+    guid_hits = []
+    for kind, seq in (('model', ed.models), ('light', ed.lights),
+                      ('camera', ed.cameras)):
+        for i, o in enumerate(seq):
+            g = getattr(o, 'guid', None)
+            if g and g == name_or_id:
+                guid_hits.append((kind, o, i))
+    if guid_hits:
+        return guid_hits
+    # 回退：name 匹配
     hits = []
     for kind, seq in (('model', ed.models), ('light', ed.lights),
                       ('camera', ed.cameras)):
         for i, o in enumerate(seq):
-            if o.name == name:
+            if o.name == name_or_id:
                 hits.append((kind, o, i))
     return hits
 
@@ -414,12 +439,18 @@ def cmd_object_list(win, args):
     ed = win.editor
     sel = getattr(ed._selected(), 'name', None) if ed._selected() else None
     return {
-        'models': [{'index': i, 'name': m.name, 'parent':
-                    getattr(getattr(m, 'parent', None), 'name', None)}
+        # 2026-10-19 P0-3: 每项带 guid（稳定 ID），Agent 可用它精确寻址
+        'models': [{'index': i, 'name': m.name,
+                    'guid': getattr(m, 'guid', None),
+                    'parent': getattr(getattr(m, 'parent', None), 'name', None)}
                    for i, m in enumerate(ed.models)],
-        'lights': [{'index': i, 'name': l.name, 'kind_of': getattr(l, 'kind', None)}
+        'lights': [{'index': i, 'name': l.name,
+                    'guid': getattr(l, 'guid', None),
+                    'kind_of': getattr(l, 'kind', None)}
                    for i, l in enumerate(ed.lights)],
-        'cameras': [{'index': i, 'name': c.name} for i, c in enumerate(ed.cameras)],
+        'cameras': [{'index': i, 'name': c.name,
+                     'guid': getattr(c, 'guid', None)}
+                    for i, c in enumerate(ed.cameras)],
         'selected': sel,
     }
 
@@ -456,17 +487,37 @@ def cmd_object_select(win, args):
 @command('object_rename', '改名: {name, new}')
 def cmd_object_rename(win, args):
     ed = win.editor
+    # 2026-10-19 P0-3: 支持 guid 寻址（_find -> _find_all 已支持 guid）
     kind, obj, i = _find(ed, args.get('name'))
     if obj is None:
         return {'error': '找不到: %s' % args.get('name')}
     new = args.get('new')
+    if not new or not str(new).strip():
+        return {'error': '新名字不能为空'}
+    new = str(new).strip()
+    old = obj.name
     if kind == 'model':
-        ed.rename(obj, new, obj.name)
+        ed.rename(obj, new, old)
     elif kind == 'light':
-        ed.rename_light(obj, new, obj.name)
+        ed.rename_light(obj, new, old)
     else:
-        ed.rename_camera(obj, new, obj.name)
-    return {'renamed': [args.get('name'), new]}
+        ed.rename_camera(obj, new, old)
+    # 2026-10-19 P0-3 关键修复: ed.rename 重名时只弹 GUI 提示不抛异常，
+    # 旧代码无论成功失败都返回 renamed=[old,new] -> Agent 误以为成功。
+    # 修复：事后检查 obj.name 才是真实结果。
+    actual = getattr(obj, 'name', None)
+    if actual != new:
+        return {
+            'error': '改名失败（重名或非法名）',
+            'requested': new,
+            'actual': actual,
+            'guid': getattr(obj, 'guid', None),
+        }
+    return {
+        'renamed': [old, new],
+        'actual': actual,
+        'guid': getattr(obj, 'guid', None),
+    }
 
 
 @command('object_delete', '删除当前选中')

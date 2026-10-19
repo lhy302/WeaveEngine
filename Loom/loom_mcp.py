@@ -299,11 +299,24 @@ class LoomMCPServer:
             if not r0.get('ok'):
                 return self._wrap(r0)
             results = [r0]
-            new_name = self._find_last_model()
-            if args.get('name') and new_name:
-                r1 = c.call('object_rename', {'name': new_name, 'new': args['name']})
-                results.append(r1)
-                new_name = args['name']
+            # 2026-10-19 P0-3 修复：改用 object_add 返回的 guid + name 定位新物体，
+            # 不再 _find_last_model() 盲猜"最后一个"（撤销/并发/重名时必错）。
+            add_result = r0.get('result') or {}
+            new_guid = add_result.get('guid')
+            new_name = add_result.get('name') or self._find_last_model()
+            if args.get('name'):
+                # 用 guid 定位改名（若有），否则回退 name
+                rename_target = new_guid or new_name
+                if rename_target:
+                    r1 = c.call('object_rename',
+                                {'name': rename_target, 'new': args['name']})
+                    results.append(r1)
+                    # 用 rename 的 actual 字段（P0-3 修复后如实返回）
+                    actual = (r1.get('result') or {}).get('actual')
+                    new_name = actual or args['name']
+                    if not r1.get('ok'):
+                        # 改名失败（重名等）：不静默继续，返回错误
+                        return self._merge(*results)
             # 位置/旋转/缩放: set_transform（引擎用 x,y,z / rx,ry,rz 度 / sx,sy,sz）
             tf = {}
             if 'position' in args and args['position']:
@@ -318,7 +331,9 @@ class LoomMCPServer:
                 sc = list(args['scale'])
                 tf.update({'sx': sc[0], 'sy': sc[1], 'sz': sc[2]})
             if tf:
-                tf['name'] = new_name or ''
+                # 2026-10-19 P0-3：优先用 guid 定位（_resolve 已支持 guid 匹配），
+                # 回退 name。改名失败时 new_name 可能已被覆盖为 error，用 guid 最稳。
+                tf['name'] = new_guid or new_name or ''
                 r2 = c.call('set_transform', tf)
                 results.append(r2)
             return self._merge(*results)
