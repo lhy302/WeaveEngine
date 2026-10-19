@@ -179,6 +179,17 @@ class HubController:
             target = inst.install_from_zip(
                 zip_path, version, target_root=target_root)
             self._refresh()
+            # 2026-10-19: 安装后自检（防安全软件篡改 .py 导致启动崩溃）
+            verify_ok, corrupted = inst._verify_install_integrity(target)
+            if not verify_ok:
+                msg = ("安装完成，但检测到 %d 个 .py 文件被安全软件篡改（全零字节）。"
+                       "引擎可能无法启动。请关闭杀软后重装或加入白名单：%s"
+                       % (len(corrupted),
+                          '; '.join(os.path.basename(f) for f in corrupted[:3])))
+                self.set_msg(msg, 'err')
+                return {'ok': True, 'installed_dir': target,
+                        'version': version, 'message': msg,
+                        'verify_warnings': corrupted}
             self.set_msg("安装完成 → %s (已登记)" % target)
             return {'ok': True, 'installed_dir': target,
                     'version': version, 'message': '安装完成'}

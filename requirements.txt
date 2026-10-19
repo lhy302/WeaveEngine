@@ -4,4 +4,7 @@ pygame>=2.5
 moderngl>=5.8
 numpy>=1.24
 PySide6>=6.6        # Qt 编辑器 (qt_view.py)
+glfw>=2.6           # 2026-10-19 补充: GLFW 窗口 (loom_glfw_window.py)
+wgpu>=0.32          # 2026-10-19 补充: Vulkan 后端 (vk_player.py, 可选但装了不崩)
+pillow>=10.0        # 2026-10-19 补充: 图片处理 (发行工具/纹理)
 # cupy 仅 --benchmark 可选使用, 不强制

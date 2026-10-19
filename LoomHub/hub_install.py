@@ -61,7 +61,40 @@ def read_zip_metadata(zip_path):
     return None, None
 
 
-def install_from_zip(zip_path, version, target_root=None):
+def _verify_install_integrity(target_dir):
+    """2026-10-19 安装后自检: 检测 .py 文件是否被 AV 篡改成全零.
+
+    背景: 部分安全软件（360 等）在 Program Files 下扫描 .py 时会
+    把文件改成全零字节（+128 字节差异），导致引擎启动神秘崩溃。
+    安装完成后立即检测，发现损坏时提示用户。
+
+    返回 (ok, corrupted_files)
+    """
+    if not target_dir or not os.path.isdir(target_dir):
+        return True, []
+    corrupted = []
+    try:
+        for dirpath, dirnames, filenames in os.walk(target_dir):
+            dirnames[:] = [d for d in dirnames
+                           if d not in ('tests', '__pycache__', '保存',
+                                        'Projects', 'assets', '.git')]
+            for fn in filenames:
+                if not fn.endswith('.py'):
+                    continue
+                fp = os.path.join(dirpath, fn)
+                try:
+                    with open(fp, 'rb') as f:
+                        head = f.read(8192)
+                    if len(head) >= 16 and head.count(b'\x00') == len(head):
+                        corrupted.append(fp)
+                except OSError:
+                    pass
+    except Exception:
+        pass
+    return (len(corrupted) == 0), corrupted
+
+
+def _install_from_zip_impl(zip_path, version, target_root=None):
     """把解释器 .zip 安装到 <target_root>/<version>/ 并登记到配置.
 
     target_root: 安装根（None = 用 hub_config.DEFAULT_INSTALL_ROOT）
@@ -138,6 +171,32 @@ def install_from_zip(zip_path, version, target_root=None):
     # 情形 3: 多个子目录都有解释器 —— 不确定该装哪个，报错
     raise InstallError("压缩包内有多个子目录含解释器, 无法确定安装哪个: %s"
                        % [e for e, _, _ in subdirs_with_interp])
+
+
+def install_from_zip(zip_path, version, target_root=None):
+    """公开安装入口（2026-10-19: 包装 _install_from_zip_impl + 完整性自检）.
+
+    安装后自动检测 .py 文件是否被安全软件篡改成全零字节，
+    发现时打印警告到 stderr（不抛异常，但用户可感知）。
+    """
+    target = _install_from_zip_impl(zip_path, version, target_root=target_root)
+    # 安装后自检
+    try:
+        ok, corrupted = _verify_install_integrity(target)
+        if not ok:
+            import sys as _sys
+            print('[警告] 检测到 %d 个 .py 文件被篡改（全零字节）:' % len(corrupted),
+                  file=_sys.stderr)
+            for fp in corrupted[:5]:
+                print('  ' + fp, file=_sys.stderr)
+            if len(corrupted) > 5:
+                print('  ... 还有 %d 个' % (len(corrupted) - 5),
+                      file=_sys.stderr)
+            print('[警告] 请关闭安全软件后重新安装，或将安装目录加入白名单',
+                  file=_sys.stderr)
+    except Exception:
+        pass
+    return target
 
 
 class RemoteDownloader:

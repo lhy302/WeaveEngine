@@ -172,8 +172,66 @@ def _benchmark_math(n_tri=5000, n_iter=100):
     return gpu_ms is not None
 
 
+def _self_check_sources():
+    """2026-10-19 启动自检: 检测 .py 文件是否被篡改（全零）。
+
+    背景: 部分安全软件（360 等）在安装到 C:/Program Files 后会把 .py 文件
+    改成全零字节（+128 字节差异），导致 Python 启动时抛
+    "source code string cannot contain null bytes"，用户难以理解。
+
+    本自检在启动最开始运行（<50ms 开销），发现问题时给出明确指引，
+    引导用户重新解压安装包或关闭安全软件后重装。
+    """
+    import os as _os
+    app_dir = _os.path.dirname(_os.path.abspath(__file__))
+    bad = []
+    try:
+        for dirpath, dirnames, filenames in _os.walk(app_dir):
+            # 跳过测试/缓存/资源目录
+            dirnames[:] = [d for d in dirnames
+                           if d not in ('tests', '__pycache__', '保存',
+                                        'Projects', 'assets', '.git')]
+            for fn in filenames:
+                if not fn.endswith('.py'):
+                    continue
+                fp = _os.path.join(dirpath, fn)
+                try:
+                    with open(fp, 'rb') as f:
+                        head = f.read(8192)
+                    # 简单检测：前 8KB 全是零 -> 损坏
+                    if len(head) >= 16 and head.count(b'\x00') == len(head):
+                        bad.append(fp)
+                except OSError:
+                    pass
+    except Exception:
+        return
+    if bad:
+        print()
+        print('=' * 60)
+        print('[错误] 检测到引擎源码文件损坏（全零字节）')
+        print('=' * 60)
+        print('可能原因：安全软件（360 安全卫士 / Windows Defender 等）')
+        print('在安装或首次扫描时篡改了 .py 文件。')
+        print()
+        print('受损文件：')
+        for b in bad[:10]:
+            print('  - %s' % b)
+        if len(bad) > 10:
+            print('  ... 还有 %d 个' % (len(bad) - 10))
+        print()
+        print('修复方法：')
+        print('  1. 用 LoomHub 重新安装引擎（推荐）')
+        print('  2. 或从 zip 重新解压覆盖上述文件')
+        print('  3. 长期方案：把安全软件加入白名单，排除 Loom 安装目录')
+        print('=' * 60)
+        print()
+        sys.exit(1)
+
+
 # 主程序入口
 if __name__ == "__main__":
+    # 2026-10-19 首行自检：损坏文件明确报错（防 AV 篡改导致神秘崩溃）
+    _self_check_sources()
     benchmark, n_tri, n_iter, run_scene, open_scene, editor, ui = _parse_args(sys.argv[1:])
 
     if benchmark:
