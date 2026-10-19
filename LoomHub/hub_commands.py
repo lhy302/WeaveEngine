@@ -379,8 +379,11 @@ def launch_spec(args, info=None):
         cmd_parts.append('--agent')
     # 2026-10-19 启动路径 bug 修复: cwd 也解析成绝对（与 GUI open_project 同构）
     cwd_resolved = cfg.resolve_runtime_path(info.get('dir')) or cfg.HUB_DIR
+    # 2026-10-19 启动日志: LoomHub 启动的引擎静默（与 GUI 同语义）
+    env = dict(os.environ)
+    env['LOOM_QUIET'] = '1'
     return {'cmd': cmd_parts, 'cwd': cwd_resolved,
-            'env': dict(os.environ), 'prefer': prefer, 'mode': mode,
+            'env': env, 'prefer': prefer, 'mode': mode,
             'interpreter': info}, None
 
 

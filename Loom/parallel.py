@@ -239,7 +239,8 @@ def get_parallel(script_cores=2):
         if _PARALLEL['applied']:
             p = policy
             kind = '大小核(混合)' if p['is_hybrid'] else '均质'
-            print("[parallel] %s | 逻辑核 %d (P %d / E %d) | 脚本预留 %d 核 | "
+            from loom_log import verbose
+            verbose("[parallel] %s | 逻辑核 %d (P %d / E %d) | 脚本预留 %d 核 | "
                   "进程亲和已应用 (mask=0x%X)" %
                   (kind, p['n_logical'], p['n_perf'], p['n_eff'],
                    p['script_cores'], p['process_mask']))

@@ -250,6 +250,9 @@ class HubController:
             prefer = None
         cmd = cfg.build_launch_command(interp, scene, mode='open', prefer=prefer)
         env = dict(os.environ)
+        # 2026-10-19 启动日志: LoomHub 启动的引擎静默（用户拍板）
+        # 命令行直接启动 Loom.py 时无此环境变量，保留完整启动信息
+        env['LOOM_QUIET'] = '1'
         # 2026-10-19 启动路径 bug 修复: cwd 也解析成绝对（否则子进程相对父进程 cwd 解析）
         cwd = cfg.resolve_runtime_path(interp.get('dir')) or cfg.HUB_DIR
         try:

@@ -169,7 +169,8 @@ class GLViewport(QOpenGLWidget):
                                     scene_path=self._scene_path,
                                     view=self._window, ctx=self.ctx)
             self._window.bind_editor(self.editor)
-            print("[Qt] EditorApp 创建成功 (嵌入式 ctx 模式)")
+            from loom_log import verbose
+            verbose("[Qt] EditorApp 创建成功 (嵌入式 ctx 模式)")
         except Exception:
             import traceback
             traceback.print_exc()

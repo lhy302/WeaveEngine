@@ -39,6 +39,7 @@ from scheduler import (NgilPool, sched_wm_chunk,       # 调度重构期1: nogil
 import script_glue as _sg
 
 from loom_types import Point3D   # 已抽出：原 engine.py 内联 namedtuple
+from loom_log import verbose   # 2026-10-19 启动日志开关 (LOOM_QUIET 时抑制)
 
 # ---- 着色器源码常量（已抽出到 loom_shaders.py，原 45-307 行） ----
 from loom_shaders import (  # noqa: E402
@@ -539,11 +540,13 @@ class GLEngine(ShadowMixin, FrameComponentMixin, PhysicsMixin, InputMixin, HudMi
                         _topo, exclude_bits=_pol.get('script_mask') or 0,
                         interval=0.0)
                     _cb = self._main_core_sched.current_bit()
-                    print("[parallel] 主线程锁定到负载最低的大核 #%s (启动锁一次, 不周期跳核)"
-                          % ("?" if _cb is None else _cb))
-                print("[parallel] 预计算池 %d worker (目标 8 核均摊, pool_mask=0x%X)"
-                      % (_nw, _pm))
+                    verbose("[parallel] 主线程锁定到负载最低的大核 #%s "
+                            "(启动锁一次, 不周期跳核)"
+                            % ("?" if _cb is None else _cb))
+                verbose("[parallel] 预计算池 %d worker (目标 8 核均摊, pool_mask=0x%X)"
+                        % (_nw, _pm))
             except Exception as e:
+                # 初始化失败是真实错误：保留 print（用户需看到）
                 print("[parallel] 初始化失败, 回退单线程:", e)
                 self.parallel = None
                 self._script_runner = None
@@ -565,11 +568,12 @@ class GLEngine(ShadowMixin, FrameComponentMixin, PhysicsMixin, InputMixin, HudMi
                 _snw = max(2, min(4, _snw))
                 self._sched_pool = NgilPool(n_workers=_snw, name='loom-sched')
                 self._sched_pool_built = True
-                print("[sched] NgilPool 就绪: %d worker (LOOM_NO_SCHED=1 旁路)"
-                      % _snw)
+                verbose("[sched] NgilPool 就绪: %d worker (LOOM_NO_SCHED=1 旁路)"
+                        % _snw)
             except Exception as e:
                 self._sched_pool = None
                 self._sched_pool_built = False
+                # 池建失败是真实错误：保留 print（用户需看到）
                 print("[sched] NgilPool 建失败, 回退串行:", e)
 
 

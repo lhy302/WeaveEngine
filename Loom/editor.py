@@ -8,9 +8,13 @@ editor.py — EditorApp: 3D 游戏引擎编辑器 (Unity/Godot 风格)
 后续里程碑: M8 射线拾取, M9 平移 gizmo, M10 旋转 gizmo, M11 轨道相机交互, M12 序列化
 """
 import math
-import os
 import json
+import os
 import time
+
+# 2026-10-19 启动日志开关: 屏蔽 pygame "Hello from the pygame community" 横幅
+# 必须在 import pygame 之前设置（pygame 导入时读一次）
+os.environ.setdefault('PYGAME_HIDE_SUPPORT_PROMPT', '1')
 
 import numpy as np
 import pygame
