@@ -761,6 +761,83 @@ _init_key_name_map()
 
 # =================== 阶段1 元素: Panel / Text (2026-10-18) ===================
 
+class Shape(UIElement):
+    """2D 图形元素 (2026-10-20 沙盘支持).
+
+    支持 4 种形状，用 shape_type 区分：
+      - 'line'     两点直线段
+      - 'polyline' 折线（不闭合）
+      - 'polygon'  多边形（自动闭合，可填充）
+      - 'circle'   圆（近似 32 段）
+
+    坐标约定:
+      - points 是元素内相对坐标 [(px, py), ...]，需转成绝对像素后绘制。
+      - circle 只用 rect 的边界（填满矩形），radius > 0 时按 radius 覆盖 rect 中心。
+      - polygon 的填充用三角形扇（从第 0 点扇出），对凸多边形精确；凹多边形会有瑕疵。
+
+    颜色: (r, g, b) 或 (r, g, b, a) 0~255。
+    线宽: stroke_width 像素（>=1）。
+    """
+
+    ctype = 'shape'
+
+    def __init__(self, name='shape', rect=(0, 0, 100, 100),
+                 shape_type='line', points=None, radius=0.0,
+                 stroke_color=(255, 255, 255, 255), stroke_width=2,
+                 fill_color=None, segments=32, close=False, **kw):
+        super().__init__(name=name, rect=rect, **kw)
+        self.shape_type = str(shape_type)
+        if self.shape_type not in ('line', 'polyline', 'polygon', 'circle'):
+            self.shape_type = 'line'
+        self.points = list(points or [])
+        self.radius = float(radius)
+        self.stroke_color = tuple(stroke_color) if stroke_color else None
+        self.stroke_width = max(1, int(stroke_width))
+        self.fill_color = tuple(fill_color) if fill_color else None
+        self.segments = max(8, int(segments))
+        # close: 是否在 polyline 上自动闭合（polygon 恒闭合，不需此字段）
+        self.close = bool(close)
+
+    def _resolve_points_px(self):
+        """返回绝对像素坐标列表（元素内坐标 + 屏幕位置）。"""
+        x, y, w, h = self._screen_rect_cached
+        if self.shape_type == 'circle':
+            import math
+            r = self.radius if self.radius > 0 else min(w, h) / 2.0
+            cx, cy = x + w / 2.0, y + h / 2.0
+            out = []
+            for i in range(self.segments + 1):
+                a = 2 * math.pi * i / self.segments
+                out.append((cx + r * math.cos(a), cy + r * math.sin(a)))
+            return out
+        # 其它形状：points 是元素内坐标 (0..w, 0..h)
+        return [(x + float(px), y + float(py)) for (px, py) in self.points]
+
+    def draw(self, engine, screen_rect):
+        # 保存屏幕 rect（供 _resolve_points_px 用）
+        self._screen_rect_cached = screen_rect
+        pts_px = self._resolve_points_px()
+        if not pts_px:
+            return
+        # 填充（polygon / circle 支持）
+        if self.fill_color and len(pts_px) >= 3:
+            try:
+                engine.draw_screen_polygon(pts_px, self.fill_color)
+            except Exception:
+                pass
+        # 描边
+        if self.stroke_color and len(pts_px) >= 2:
+            close = (self.shape_type == 'polygon' or
+                     self.shape_type == 'circle' or
+                     self.close)
+            try:
+                engine.draw_screen_lines(pts_px, self.stroke_color,
+                                         width=self.stroke_width,
+                                         close=close)
+            except Exception:
+                pass
+
+
 class Panel(UIElement):
     """纯色矩形 (契约 §3.3). bg_color=(r,g,b) 或 (r,g,b,a) 0~255."""
 

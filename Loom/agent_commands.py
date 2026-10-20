@@ -156,6 +156,45 @@ def as_float(v, default=0.0):
         return default
 
 
+# 2026-10-20 提到模块级（原在 cmd_ui_set 局部，cmd_ui_add 也要用）
+_COLOR_FIELDS = {
+    'bg_color', 'color', 'tint', 'text_color', 'normal_color',
+    'hover_color', 'pressed_color', 'track_color', 'fill_color',
+    'handle_color', 'box_color', 'check_color', 'label_color',
+    'stroke_color',
+}
+
+
+def parse_color(v):
+    """把颜色值统一成 RGBA 元组 (r,g,b,a)。
+    支持: '#RRGGBB' -> (r,g,b,255); '#RRGGBBAA' -> (r,g,b,a);
+          '#RGB' -> (r*17,g*17,b*17,255);
+          [r,g,b] / (r,g,b) -> (r,g,b,255); [r,g,b,a] / (r,g,b,a) -> (r,g,b,a)。
+    非法值抛 ValueError（调用方用 take() 捕获成 error: '...' 字段）。
+    """
+    if isinstance(v, str):
+        s = v.strip().lstrip('#')
+        if len(s) == 3:
+            s = ''.join(c * 2 for c in s) + 'ff'
+        elif len(s) == 6:
+            s = s + 'ff'
+        if len(s) != 8:
+            raise ValueError('颜色格式非法 (需 #RRGGBB / #RRGGBBAA / #RGB): %r' % v)
+        try:
+            return (int(s[0:2], 16), int(s[2:4], 16),
+                    int(s[4:6], 16), int(s[6:8], 16))
+        except ValueError:
+            raise ValueError('颜色十六进制非法: %r' % v)
+    if isinstance(v, (list, tuple)):
+        r = tuple(int(x) for x in v)
+        if len(r) == 3:
+            return r + (255,)
+        if len(r) == 4:
+            return r
+        raise ValueError('颜色数组需 3 或 4 项: %r' % (v,))
+    raise ValueError('颜色类型不支持: %r' % (v,))
+
+
 def vec_set(obj, field, axis, v):
     """namedtuple 向量单轴写入: 重建整个元组, 只改 axis 分量 (其余不动).
     2026-08-22 修复记录: Point3D 是 namedtuple —— 对实例 setattr 无效 (会静默
@@ -1819,7 +1858,7 @@ def cmd_list_layers(win, args):
 
 _UI_TYPE_NAMES = ('panel', 'text', 'image', 'button', 'slider', 'toggle',
                   'progress_bar', 'scroll_view', 'input_field', 'dropdown',
-                  'grid_layout')
+                  'grid_layout', 'shape')
 
 
 def _push_ui_undo(win, cmd, auto_do=True):
@@ -2108,6 +2147,17 @@ def cmd_ui_add(win, args):
         take('columns', lambda v: int(as_float(v, 4)))
         take('bg_color', tuple)
         elem = loom_ui.GridLayout(**kw)
+    elif typ == 'shape':
+        # 2026-10-20 沙盘 2D 绘制（line/polyline/polygon/circle）
+        take('shape_type', str)
+        take('points', list)
+        take('radius', float)
+        take('stroke_color', parse_color)
+        take('stroke_width', lambda v: max(1, int(as_float(v, 2))))
+        take('fill_color', parse_color)
+        take('segments', lambda v: max(8, int(as_float(v, 32))))
+        take('close', bool)
+        elem = loom_ui.Shape(**kw)
     else:
         return {'error': '内部错误: type %r 未实现' % typ}
 
@@ -2159,42 +2209,7 @@ def cmd_ui_set(win, args):
         elem.z_order = int(as_float(args['z_order'], 0))
         done['z_order'] = elem.z_order
 
-    # 2026-10-19 P1-3 修复: 颜色字段专用解析器（防 '#ffcc00' 被 tuple() 拆成字符数组）
-    _COLOR_FIELDS = {
-        'bg_color', 'color', 'tint', 'text_color', 'normal_color',
-        'hover_color', 'pressed_color', 'track_color', 'fill_color',
-        'handle_color', 'box_color', 'check_color', 'label_color',
-    }
-
-    def parse_color(v):
-        """把颜色值统一成 RGBA 元组 (r,g,b,a)。
-        支持: '#RRGGBB' -> (r,g,b,255); '#RRGGBBAA' -> (r,g,b,a);
-              '#RGB' -> (r*17,g*17,b*17,255);
-              [r,g,b] / (r,g,b) -> (r,g,b,255); [r,g,b,a] / (r,g,b,a) -> (r,g,b,a)。
-        非法值抛 ValueError（take 会捕获成 error: '...' 字段）。
-        """
-        if isinstance(v, str):
-            s = v.strip().lstrip('#')
-            if len(s) == 3:
-                s = ''.join(c * 2 for c in s) + 'ff'
-            elif len(s) == 6:
-                s = s + 'ff'
-            if len(s) != 8:
-                raise ValueError('颜色格式非法 (需 #RRGGBB / #RRGGBBAA / #RGB): %r' % v)
-            try:
-                return (int(s[0:2], 16), int(s[2:4], 16),
-                        int(s[4:6], 16), int(s[6:8], 16))
-            except ValueError:
-                raise ValueError('颜色十六进制非法: %r' % v)
-        if isinstance(v, (list, tuple)):
-            r = tuple(int(x) for x in v)
-            if len(r) == 3:
-                return r + (255,)
-            if len(r) == 4:
-                return r
-            raise ValueError('颜色数组需 3 或 4 项: %r' % (v,))
-        raise ValueError('颜色类型不支持: %r' % (v,))
-
+    # 2026-10-20：parse_color / _COLOR_FIELDS 已提到模块级（cmd_ui_add 共用）
     def take(key, conv=lambda v: v):
         if key in args and hasattr(elem, key):
             try:
@@ -2282,6 +2297,16 @@ def cmd_ui_set(win, args):
                 elem._reflow()
             except Exception:
                 pass
+    elif typ == 'shape':
+        # 2026-10-20 沙盘 2D 绘制字段
+        take('shape_type', str)
+        take('points', list)
+        take('radius', float)
+        take('stroke_color', parse_color)
+        take('stroke_width', lambda v: max(1, int(as_float(v, 2))))
+        take('fill_color', parse_color)
+        take('segments', lambda v: max(8, int(as_float(v, 32))))
+        take('close', bool)
 
     if not done:
         return {'error': '没有可改的字段（检查参数名）', 'type': typ}

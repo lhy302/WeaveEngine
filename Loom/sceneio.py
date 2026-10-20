@@ -627,6 +627,18 @@ def _emit_ui_element(elem):
         base['cursor_color'] = list(elem.cursor_color)
         base['font_size'] = int(elem.font_size)
         # on_submit / on_change 不序列化 (运行时由脚本挂载, 契约 §8)
+    elif elem.ctype == 'shape':
+        # 2026-10-20 沙盘 2D 绘制（line/polyline/polygon/circle）
+        base['shape_type'] = getattr(elem, 'shape_type', 'line')
+        base['points'] = [list(p) for p in (getattr(elem, 'points', []) or [])]
+        base['radius'] = float(getattr(elem, 'radius', 0.0))
+        sc = getattr(elem, 'stroke_color', None)
+        base['stroke_color'] = list(sc) if sc else None
+        base['stroke_width'] = int(getattr(elem, 'stroke_width', 2))
+        fc = getattr(elem, 'fill_color', None)
+        base['fill_color'] = list(fc) if fc else None
+        base['segments'] = int(getattr(elem, 'segments', 32))
+        base['close'] = bool(getattr(elem, 'close', False))
     # 2026-10-19 P0-5: 声明式事件绑定可序列化（{event: {script, method, owner_guid}}）
     eb = getattr(elem, 'event_bindings', None)
     if eb:
@@ -758,6 +770,20 @@ def _apply_ui_element(d):
             placeholder_color=tuple(d.get('placeholder_color') or (140, 140, 150)),
             cursor_color=tuple(d.get('cursor_color') or (220, 220, 230)),
             font_size=int(d.get('font_size', 16)),
+            **kw)
+    elif typ == 'shape':
+        # 2026-10-20 沙盘 2D 绘制（line/polyline/polygon/circle）
+        sc = d.get('stroke_color')
+        fc = d.get('fill_color')
+        elem = loom_ui.Shape(
+            shape_type=str(d.get('shape_type') or 'line'),
+            points=list(d.get('points') or []),
+            radius=float(d.get('radius', 0.0)),
+            stroke_color=tuple(sc) if sc else None,
+            stroke_width=int(d.get('stroke_width', 2)),
+            fill_color=tuple(fc) if fc else None,
+            segments=int(d.get('segments', 32)),
+            close=bool(d.get('close', False)),
             **kw)
     else:
         print("[sceneio] 警告: 未知 UI 元素类型 %r, 跳过" % typ)

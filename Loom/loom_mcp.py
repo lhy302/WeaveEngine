@@ -138,9 +138,9 @@ TOOLS_DEF = [
     {'name': 'loom_ui_list', 'description': '列出所有 UI Canvas 与元素树（CanvasUI 契约 §8）',
      'inputSchema': {'type': 'object', 'properties': {
          'canvas': {'type': 'integer', 'description': '指定 Canvas 序号（缺省=全部）'}}}},
-    {'name': 'loom_ui_add', 'description': '添加 UI 元素：11 种类型 (panel/text/image/button/slider/toggle/progress_bar/scroll_view/input_field/dropdown/grid_layout)',
+    {'name': 'loom_ui_add', 'description': '添加 UI 元素：12 种类型 (panel/text/image/button/slider/toggle/progress_bar/scroll_view/input_field/dropdown/grid_layout/shape)。shape 支持 line/polyline/polygon/circle 2D 图形（沙盘用）',
      'inputSchema': {'type': 'object', 'properties': {
-         'type': {'type': 'string', 'description': '元素类型'},
+         'type': {'type': 'string', 'enum': ['panel', 'text', 'image', 'button', 'slider', 'toggle', 'progress_bar', 'scroll_view', 'input_field', 'dropdown', 'grid_layout', 'shape'], 'description': '元素类型'},
          'name': {'type': 'string', 'description': '元素名（缺省自动生成 {type}_{n}）'},
          'parent': {'type': 'string', 'description': '父元素名（缺省=Canvas root）'},
          'canvas': {'type': 'integer', 'description': 'Canvas 序号（缺省=0）'},
@@ -150,7 +150,20 @@ TOOLS_DEF = [
          'visible': {'type': 'boolean'},
          'enabled': {'type': 'boolean'},
          'z_order': {'type': 'integer'},
+         # ---- shape 专用（仅 type='shape' 时有效）----
+         'shape_type': {'type': 'string', 'enum': ['line', 'polyline', 'polygon', 'circle'], 'description': '[shape] 形状类型'},
+         'points': {'type': 'array', 'description': '[shape] 相对元素内坐标 [[x,y], ...]（line 2点 / polyline N点 / polygon N点）'},
+         'radius': {'type': 'number', 'description': '[shape-circle] 半径（像素，0=用 rect 最小边一半）'},
+         'stroke_color': {'description': '[shape] 描边颜色（#RRGGBB / [r,g,b,a] / null 不画描边）'},
+         'stroke_width': {'type': 'integer', 'description': '[shape] 描边宽度（像素，默认 2）'},
+         'fill_color': {'description': '[shape] 填充颜色（#RRGGBB / [r,g,b,a] / null 不填充）'},
+         'segments': {'type': 'integer', 'description': '[shape-circle] 圆的分段数（默认 32，越大越圆）'},
+         'close': {'type': 'boolean', 'description': '[shape-polyline] 是否闭合首尾'},
      }, 'required': ['type']}},
+    # 2026-10-20 沙盘专用快捷工具（简化 ui_add 的常见用法）
+    {'name': 'loom_ui_add_line', 'description': '绘制直线（沙盘快捷）—单位移动箭头/连线用', 'inputSchema': {'type': 'object', 'properties': {'name': {'type': 'string'}, 'canvas': {'type': 'integer'}, 'parent': {'type': 'string'}, 'x1': {'type': 'number'}, 'y1': {'type': 'number'}, 'x2': {'type': 'number'}, 'y2': {'type': 'number'}, 'color': {'type': 'string', 'description': '#RRGGBB 或 #RRGGBBAA'}, 'width': {'type': 'integer', 'description': '线宽像素，默认 2'}}, 'required': ['x1', 'y1', 'x2', 'y2']}},
+    {'name': 'loom_ui_add_polygon', 'description': '绘制多边形（沙盘快捷）—领土/视野扇形用', 'inputSchema': {'type': 'object', 'properties': {'name': {'type': 'string'}, 'canvas': {'type': 'integer'}, 'parent': {'type': 'string'}, 'points': {'type': 'array', 'description': '绝对像素坐标 [[x,y], ...]'}, 'stroke_color': {'type': 'string'}, 'fill_color': {'type': 'string'}, 'stroke_width': {'type': 'integer'}}, 'required': ['points']}},
+    {'name': 'loom_ui_add_circle', 'description': '绘制圆（沙盘快捷）—单位图标/视野范围用', 'inputSchema': {'type': 'object', 'properties': {'name': {'type': 'string'}, 'canvas': {'type': 'integer'}, 'parent': {'type': 'string'}, 'cx': {'type': 'number', 'description': '中心 x 像素'}, 'cy': {'type': 'number', 'description': '中心 y 像素'}, 'radius': {'type': 'number', 'description': '半径像素'}, 'stroke_color': {'type': 'string'}, 'stroke_width': {'type': 'integer'}, 'fill_color': {'type': 'string'}, 'segments': {'type': 'integer'}}, 'required': ['cx', 'cy', 'radius']}},
     {'name': 'loom_ui_bind_event', 'description': '给 UI 元素绑定声明式事件到脚本方法（可序列化，Agent 可独立完成的 UI 交互）', 'inputSchema': {'type': 'object', 'properties': {'name': {'type': 'string', 'description': 'UI 元素名'}, 'event': {'type': 'string', 'enum': ['click', 'change', 'submit', 'pointer_enter', 'pointer_exit', 'pointer_down', 'pointer_up', 'pointer_drag'], 'description': '事件类型'}, 'script': {'type': 'string', 'description': '脚本 script_id（必须是已注册的）'}, 'method': {'type': 'string', 'description': '脚本方法名（缺省=on_<event>）'}, 'owner_guid': {'type': 'string', 'description': '可选：限定某物体的脚本实例；缺省=任意挂该脚本的物体'}, 'canvas': {'type': 'integer', 'description': 'Canvas 序号（缺省 0）'}}, 'required': ['name', 'event', 'script']}},
     {'name': 'loom_ui_unbind_event', 'description': '移除 UI 元素的声明式事件绑定（给 event 则只移除该项，否则清空全部）', 'inputSchema': {'type': 'object', 'properties': {'name': {'type': 'string', 'description': 'UI 元素名'}, 'event': {'type': 'string', 'description': '可选：只移除该事件；缺省=清空全部'}, 'canvas': {'type': 'integer', 'description': 'Canvas 序号'}}, 'required': ['name']}},
     {'name': 'loom_ui_set', 'description': '修改 UI 元素字段（含 type-specific 字段）',
@@ -615,6 +628,70 @@ class LoomMCPServer:
             if 'canvas' in args:
                 payload['canvas'] = args['canvas']
             return self._wrap(c.call('ui_list', payload))
+
+        # 2026-10-20 沙盘快捷工具：把 loom_ui_add_shape 的常见用法简化为 3 个工具
+        if name == 'loom_ui_add_line':
+            x1 = float(args.get('x1', 0)); y1 = float(args.get('y1', 0))
+            x2 = float(args.get('x2', 0)); y2 = float(args.get('y2', 0))
+            col = args.get('color') or '#FFFFFF'
+            payload = {
+                'type': 'shape', 'shape_type': 'line',
+                'points': [[0.0, 0.0], [x2 - x1, y2 - y1]],
+                'rect': [x1, y1, max(1, abs(x2 - x1)), max(1, abs(y2 - y1))],
+                'stroke_color': col,
+                'stroke_width': int(args.get('width', 2)),
+            }
+            for k in ('name', 'canvas', 'parent'):
+                if k in args:
+                    payload[k] = args[k]
+            return self._wrap(c.call('ui_add', payload))
+
+        if name == 'loom_ui_add_polygon':
+            pts = args.get('points') or []
+            if len(pts) < 3:
+                return self._err('points 至少 3 个顶点')
+            # 转成元素内坐标（相对包围盒左上）
+            xs = [float(p[0]) for p in pts]
+            ys = [float(p[1]) for p in pts]
+            x0, y0 = min(xs), min(ys)
+            w, h = max(1, max(xs) - x0), max(1, max(ys) - y0)
+            local = [[float(p[0]) - x0, float(p[1]) - y0] for p in pts]
+            payload = {
+                'type': 'shape', 'shape_type': 'polygon',
+                'rect': [x0, y0, w, h],
+                'points': local,
+            }
+            if args.get('stroke_color'):
+                payload['stroke_color'] = args['stroke_color']
+            if args.get('fill_color'):
+                payload['fill_color'] = args['fill_color']
+            if 'stroke_width' in args:
+                payload['stroke_width'] = int(args['stroke_width'])
+            for k in ('name', 'canvas', 'parent'):
+                if k in args:
+                    payload[k] = args[k]
+            return self._wrap(c.call('ui_add', payload))
+
+        if name == 'loom_ui_add_circle':
+            cx = float(args.get('cx', 0)); cy = float(args.get('cy', 0))
+            r0 = float(args.get('radius', 20))
+            payload = {
+                'type': 'shape', 'shape_type': 'circle',
+                'rect': [cx - r0, cy - r0, r0 * 2, r0 * 2],
+                'radius': r0,
+            }
+            if args.get('stroke_color'):
+                payload['stroke_color'] = args['stroke_color']
+            if 'stroke_width' in args:
+                payload['stroke_width'] = int(args['stroke_width'])
+            if args.get('fill_color'):
+                payload['fill_color'] = args['fill_color']
+            if 'segments' in args:
+                payload['segments'] = int(args['segments'])
+            for k in ('name', 'canvas', 'parent'):
+                if k in args:
+                    payload[k] = args[k]
+            return self._wrap(c.call('ui_add', payload))
 
         if name == 'loom_ui_add':
             # 直接透传 args（含 type / name / parent / canvas / rect 等）

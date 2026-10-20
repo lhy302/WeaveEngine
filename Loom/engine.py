@@ -688,7 +688,8 @@ class GLEngine(ShadowMixin, FrameComponentMixin, PhysicsMixin, InputMixin, HudMi
             (1, 1), 4, _np.array([255, 255, 255, 255], dtype='u1').tobytes())
         self._hud_white_tex.filter = (moderngl.NEAREST, moderngl.NEAREST)
 
-    def draw_lines(self, verts, colors, mode=moderngl.LINES, view_proj=None):
+    def draw_lines(self, verts, colors, mode=moderngl.LINES, view_proj=None,
+                   line_width=2.0):
         """
         渲染世界空间折线 (逐顶点颜色). verts: (N,3), colors: (N,3) 或 (N,4) 0..1.
         用独立 line 着色器 (不光照, 不深度).
@@ -696,6 +697,9 @@ class GLEngine(ShadowMixin, FrameComponentMixin, PhysicsMixin, InputMixin, HudMi
         6+ 次调用 (gizmo/图标/选中框) 不再逐次建+毁 GL 对象 (旧实现每次
         ctx.buffer+vertex_array+双 release 的 GL churn); 字节布局/着色器/渲染
         语义逐位不变 ('3f 4f' 交错, 同 program, 同 uniform, render vertices=N).
+
+        2026-10-20 沙盘支持: 加 line_width 参数（默认 2.0 保持旧行为）。
+        UI Shape 元素用该参数配置描边宽度。
         """
         if mode == moderngl.LINES:
             # 2026-08-18 关键修复: Qt 外部模式下 moderngl scope 的 C 层会把
@@ -703,7 +707,7 @@ class GLEngine(ShadowMixin, FrameComponentMixin, PhysicsMixin, InputMixin, HudMi
             # 光栅化失败, 网格/选中框等一切线全部不可见 (空场景黑屏 + 网格闪烁根因).
             # 每次画线前显式重设线宽, 与 scope 内外无关; pygame 模式无副作用.
             try:
-                self.ctx.line_width = 2.0
+                self.ctx.line_width = float(line_width)
             except Exception:
                 pass
         # 2026-08-18: 外部模式绘制前绑定缓存 widget FBO (scope 退出会把绑定
@@ -747,6 +751,65 @@ class GLEngine(ShadowMixin, FrameComponentMixin, PhysicsMixin, InputMixin, HudMi
             self._line_u_vp = self._line_prog['u_view_proj']
         self._line_u_vp.write(np.asarray(vp, dtype='f4'))
         vao.render(mode, vertices=len(packed))
+
+    # ============ 2026-10-20 沙盘 2D 绘制助手（供 UI Shape 元素用）============
+    def _px_to_ndc(self, px, py):
+        """屏幕像素坐标 -> NDC (-1..1)。Y 轴翻转（像素 y 向下 = NDC y 向上）。"""
+        sw = max(1, self.width)
+        sh = max(1, self.height)
+        return (px / sw * 2.0 - 1.0, 1.0 - py / sh * 2.0)
+
+    def draw_screen_lines(self, pts_2d, color, width=2.0, close=False):
+        """屏幕空间折线描边（UI 层用，不深度测试）。
+
+        参数:
+            pts_2d: [(px, py), ...] 物理像素坐标
+            color:  (r,g,b) 或 (r,g,b,a) 0-255
+            width:  线宽（像素，>=1）
+            close:  True=自动闭合首尾（画多边形轮廓）
+        """
+        if not pts_2d or len(pts_2d) < 2:
+            return
+        c = [v / 255.0 for v in (color[:4] if len(color) >= 4
+                                  else list(color) + [255])]
+        segs = [(pts_2d[i], pts_2d[i + 1]) for i in range(len(pts_2d) - 1)]
+        if close:
+            segs.append((pts_2d[-1], pts_2d[0]))
+        verts, colors = [], []
+        for (p0, p1) in segs:
+            for (px, py) in (p0, p1):
+                nx, ny = self._px_to_ndc(px, py)
+                verts.append((nx, ny, 0.0))
+                colors.append(c)
+        try:
+            self.draw_lines(verts, colors, mode=moderngl.LINES,
+                            view_proj=np.eye(4, dtype='f4'),
+                            line_width=max(1.0, float(width)))
+        except Exception:
+            pass
+
+    def draw_screen_polygon(self, pts_2d, color):
+        """屏幕空间三角形扇填充（UI 层用，不深度测试）。
+
+        pts_2d: 顶点列表（像素坐标），从第 0 点扇形三角化。
+        适用于凸多边形；凹多边形会有视觉瑕疵（但对单位图标/圆/矩形够用）。
+        """
+        if not pts_2d or len(pts_2d) < 3:
+            return
+        c = [v / 255.0 for v in (color[:4] if len(color) >= 4
+                                  else list(color) + [255])]
+        verts, colors = [], []
+        p0 = pts_2d[0]
+        for i in range(1, len(pts_2d) - 1):
+            for (px, py) in (p0, pts_2d[i], pts_2d[i + 1]):
+                nx, ny = self._px_to_ndc(px, py)
+                verts.append((nx, ny, 0.0))
+                colors.append(c)
+        try:
+            self.draw_lines(verts, colors, mode=moderngl.TRIANGLES,
+                            view_proj=np.eye(4, dtype='f4'))
+        except Exception:
+            pass
 
 
 
