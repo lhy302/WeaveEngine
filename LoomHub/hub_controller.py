@@ -460,15 +460,28 @@ class HubController:
         # 2026-10-19 启动日志: LoomHub 启动的引擎静默（用户拍板）
         # 命令行直接启动 Loom.py 时无此环境变量，保留完整启动信息
         env['LOOM_QUIET'] = '1'
+        # 2026-10-20 白屏修复：默认启用 remote-mode（离屏 GL readback）。
+        # 用户环境（Oray 虚拟显示器 + RustDesk + NVIDIA 1050Ti）下 QOpenGLWidget
+        # native present 失败，客户区白屏但 win.grab() 正常。
+        # remote-mode 用离屏 GL + QImage 显示，稳定跨环境。
+        # 性能敏感用户可通过设置关闭（TODO：LoomHub 加开关）。
+        env['LOOM_REMOTE_MODE'] = '1'
         # 2026-10-19 启动路径 bug 修复: cwd 也解析成绝对（否则子进程相对父进程 cwd 解析）
         cwd = cfg.resolve_runtime_path(interp.get('dir')) or cfg.HUB_DIR
         try:
-            # 2026-10-20 白屏修复 P0-3：Windows 下隐藏 console 窗口
-            creationflags = 0
-            if os.name == 'nt':
-                creationflags = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
-            subprocess.Popen(cmd, cwd=cwd, env=env,
-                             creationflags=creationflags)
+            # 2026-10-20 白屏修复 P0-3 修正版：不用 CREATE_NO_WINDOW。
+            # 根因：CREATE_NO_WINDOW 让 Windows 给 GUI 子进程传 STARTUPINFO.wShowWindow=SW_HIDE，
+            # Qt 遵循这个状态把窗口藏到 (-25600,-25600) —— 用户看到白屏（其实是窗口被隐藏）。
+            # 正确做法：优先用 pythonw.exe（无控制台但 GUI 正常显示），回退 python.exe 无 flag。
+            cmd_to_run = list(cmd)
+            if interp['kind'] == 'py' and cmd_to_run:
+                py_exe = cmd_to_run[0]
+                # 同目录找 pythonw.exe
+                py_dir = os.path.dirname(py_exe)
+                pyw = os.path.join(py_dir, 'pythonw.exe') if py_dir else None
+                if pyw and os.path.isfile(pyw):
+                    cmd_to_run[0] = pyw
+            subprocess.Popen(cmd_to_run, cwd=cwd, env=env)
             note = "用系统默认 Python 环境启动" if interp['kind'] == 'py' else "直接运行 exe"
             self.set_msg("已启动: %s %s (%s) %s" % (interp['name'], interp['version'],
                                                     interp['kind'], note))

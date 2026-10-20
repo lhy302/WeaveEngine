@@ -486,6 +486,7 @@ def launch_spec(args, info=None):
     # 2026-10-19 启动日志: LoomHub 启动的引擎静默（与 GUI 同语义）
     env = dict(os.environ)
     env['LOOM_QUIET'] = '1'
+    env['LOOM_REMOTE_MODE'] = '1'  # 2026-10-20 白屏修复：readback fallback
     return {'cmd': cmd_parts, 'cwd': cwd_resolved,
             'env': env, 'prefer': prefer, 'mode': mode,
             'interpreter': info}, None
@@ -503,13 +504,18 @@ def cmd_launch_engine(args):
     # cwd=解释器目录、env=当前环境副本、不加 CREATE_NO_WINDOW (窗口可见).
     import subprocess
     t0 = time.time()
-    # 2026-10-20 白屏修复 P0-3：Windows 下用 CREATE_NO_WINDOW 隐藏控制台窗口。
-    # 之前用 python.exe 启动会弹 ConsoleWindowClass，抢在编辑器前面，用户误以为白屏。
-    creationflags = 0
-    if os.name == 'nt':
-        creationflags = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
-    p = subprocess.Popen(cmd_parts, cwd=spec['cwd'], env=spec['env'],
-                         creationflags=creationflags)
+    # 2026-10-20 白屏修复 P0-3 修正版：不用 CREATE_NO_WINDOW。
+    # 根因：CREATE_NO_WINDOW 让 Windows 给 GUI 子进程传 STARTUPINFO.wShowWindow=SW_HIDE，
+    # Qt 把窗口藏到 (-25600,-25600) —— 用户看到白屏。
+    # 正确做法：优先 pythonw.exe（无控制台但 GUI 正常显示），回退 python.exe 无 flag。
+    cmd_to_run = list(cmd_parts)
+    if info.get('kind') == 'py' and cmd_to_run:
+        py_exe = cmd_to_run[0]
+        py_dir = os.path.dirname(py_exe)
+        pyw = os.path.join(py_dir, 'pythonw.exe') if py_dir else None
+        if pyw and os.path.isfile(pyw):
+            cmd_to_run[0] = pyw
+    p = subprocess.Popen(cmd_to_run, cwd=spec['cwd'], env=spec['env'])
     _LAUNCHED[p.pid] = (p, info)
     out = {'pid': p.pid, 'command': ' '.join(cmd_parts), 'interpreter': info['dir'],
            'cwd': spec['cwd'], 'prefer': spec['prefer'], 'mode': spec['mode']}
