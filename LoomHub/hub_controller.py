@@ -463,7 +463,12 @@ class HubController:
         # 2026-10-19 启动路径 bug 修复: cwd 也解析成绝对（否则子进程相对父进程 cwd 解析）
         cwd = cfg.resolve_runtime_path(interp.get('dir')) or cfg.HUB_DIR
         try:
-            subprocess.Popen(cmd, cwd=cwd, env=env)
+            # 2026-10-20 白屏修复 P0-3：Windows 下隐藏 console 窗口
+            creationflags = 0
+            if os.name == 'nt':
+                creationflags = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+            subprocess.Popen(cmd, cwd=cwd, env=env,
+                             creationflags=creationflags)
             note = "用系统默认 Python 环境启动" if interp['kind'] == 'py' else "直接运行 exe"
             self.set_msg("已启动: %s %s (%s) %s" % (interp['name'], interp['version'],
                                                     interp['kind'], note))

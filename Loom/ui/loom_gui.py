@@ -58,7 +58,8 @@ _init_winmm_timer()
 from PySide6.QtCore import Qt, QTimer, QByteArray, QMimeData, QEvent
 from PySide6.QtGui import (
     QAction, QActionGroup, QColor, QBrush, QPainter, QCursor, QGuiApplication,
-    QSurfaceFormat,
+    QSurfaceFormat, QImage, QPixmap,
+    QOpenGLContext, QOffscreenSurface,
 )
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
@@ -201,6 +202,28 @@ class GLViewport(QOpenGLWidget):
         if (e.width, e.height) != (w, h):
             e.width, e.height = w, h
             self.ctx.viewport = (0, 0, w, h)
+        # 2026-10-20 白屏修复 P1：GL 诊断日志（LOOM_GL_DEBUG=1 时输出）。
+        # 报告要求：size/DPR/FBO/paintGL 计数，用于定位 native present 失败。
+        if os.environ.get('LOOM_GL_DEBUG') == '1':
+            self._dbg_paint_n = getattr(self, '_dbg_paint_n', 0) + 1
+            first = self._dbg_paint_n == 1
+            every300 = self._dbg_paint_n % 300 == 0
+            if first or every300:
+                try:
+                    scr = self.window().windowHandle().screen() if self.window().windowHandle() else None
+                    scr_name = scr.name() if scr else '?'
+                    scr_geom = scr.geometry() if scr else None
+                    scr_dpr = scr.devicePixelRatio() if scr else '?'
+                    print('[GLDBG] paint=%d widget=%dx%d dpr=%.2f fbo=%dx%d '
+                          'screen=%s geom=%s dpr=%s fmt=%s'
+                          % (self._dbg_paint_n, self.width(), self.height(),
+                             dpr, w, h, scr_name, scr_geom, scr_dpr,
+                             self.format().version()))
+                    err = self.ctx.error
+                    if err != 'GL_NO_ERROR':
+                        print('[GLDBG] glGetError: %s' % err)
+                except Exception as _e:
+                    print('[GLDBG] 诊断异常: %r' % (_e,))
         # ★2026-09-07 相机卡顿修复②: 渲染帧 dt 时钟 time.time()->perf_counter
         # (引擎 _last_frame_time 同步切)。time.time() 走系统定时器 (1-15.6ms 粒度),
         # 轻帧 (6ms) 下 delta 量化 = 逻辑时钟/相机速率逐帧抖动源之一;
@@ -414,6 +437,270 @@ class GLViewport(QOpenGLWidget):
             self.releaseMouse()
 
 
+
+
+
+# =====================================================================
+# RemoteViewport — 远程/虚拟显示下的 readback fallback（2026-10-20 白屏修复）
+# =====================================================================
+class RemoteViewport(QWidget):
+    """离屏 GL 渲染 + QImage 显示，绕过 QOpenGLWidget 在远程/虚拟显示下的
+    native present 失败（客户区白屏，但 QWidget.grab() 正常）。
+
+    使用 --remote-mode 或 LOOM_REMOTE_MODE=1 启用。
+    接口与 GLViewport 完全兼容，可无缝替换。
+
+    工作方式：
+      1) QOpenGLContext + QOffscreenSurface 创建离屏 GL（不依赖窗口原生 surface）
+      2) moderngl 复用该 context
+      3) 每帧渲染到 moderngl Framebuffer，fbo.read() 读回像素
+      4) 用 QImage + QPixmap 显示到 QLabel（普通 QWidget paintEvent，稳定跨平台）
+      5) 事件（鼠标/键盘）转发给 editor（同 GLViewport 逻辑）
+
+    代价：每帧 GPU readback + QImage 上传，几 ms/帧；编辑器可接受。
+    运行时（--run）不要用，因为延迟会比 native present 高一些。
+    """
+
+    def __init__(self, window, scene_path=None, width=1280, height=800):
+        super().__init__()
+        self._window = window
+        self._scene_path = scene_path
+        self._init_w = max(320, int(width))
+        self._init_h = max(240, int(height))
+        self.editor = None
+        self.ctx = None
+        self.init_error = None
+        self._last_move = None
+
+        # 显示层
+        self._label = QLabel(self)
+        self._label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._label.setStyleSheet('background: black;')
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        lay.addWidget(self._label)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setAcceptDrops(True)
+
+        # 离屏 GL
+        try:
+            self._init_offscreen_gl()
+            self._init_editor()
+        except Exception:
+            import traceback
+            traceback.print_exc()
+            self.init_error = repr(sys.exc_info()[1])
+
+        # 渲染循环
+        self._last_frame = time.perf_counter()
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._tick)
+        self._timer.start(16)   # ~60fps
+
+    # ---------------- 初始化 ----------------
+    def _init_offscreen_gl(self):
+        from PySide6.QtGui import QOpenGLContext, QOffscreenSurface
+        fmt = QSurfaceFormat()
+        fmt.setVersion(3, 3)
+        fmt.setProfile(QSurfaceFormat.OpenGLContextProfile.CoreProfile)
+        fmt.setDepthBufferSize(24)
+        fmt.setSamples(0)       # 无 MSAA（readback 路径用不上）
+        fmt.setSwapInterval(0)
+        self._gl_ctx = QOpenGLContext()
+        self._gl_ctx.setFormat(fmt)
+        if not self._gl_ctx.create():
+            raise RuntimeError('QOpenGLContext.create 失败')
+        self._surface = QOffscreenSurface()
+        self._surface.setFormat(fmt)
+        self._surface.create()
+        if not self._gl_ctx.makeCurrent(self._surface):
+            raise RuntimeError('QOpenGLContext.makeCurrent 失败')
+        self.ctx = moderngl.create_context()
+        self.ctx.enable(moderngl.DEPTH_TEST)
+        # moderngl framebuffer（color + depth）
+        color_tex = self.ctx.texture((self._init_w, self._init_h), 4)
+        depth_tex = self.ctx.depth_texture((self._init_w, self._init_h))
+        self._fbo = self.ctx.framebuffer(
+            color_attachments=[color_tex],
+            depth_attachment=depth_tex)
+
+    def _init_editor(self):
+        from editor import EditorApp
+        self.editor = EditorApp(self._init_w, self._init_h,
+                                scene_path=self._scene_path,
+                                view=self._window, ctx=self.ctx)
+        self.editor._external_fb = self._fbo
+        self._window.bind_editor(self.editor)
+        from loom_log import verbose
+        verbose('[Remote] EditorApp 创建成功 (离屏 GL readback 模式)')
+
+    # ---------------- 渲染循环 ----------------
+    def _tick(self):
+        e = self.editor
+        if e is None or self.ctx is None:
+            return
+        try:
+            self._gl_ctx.makeCurrent(self._surface)
+            now = time.perf_counter()
+            delta = min(now - self._last_frame, 0.1)
+            self._last_frame = now
+            # 尺寸同步（父窗口 resize 时更新）
+            dpr = self.devicePixelRatioF()
+            w = max(1, int(self.width() * dpr))
+            h = max(1, int(self.height() * dpr))
+            if (e.width, e.height) != (w, h):
+                e.width, e.height = w, h
+                self.ctx.viewport = (0, 0, w, h)
+                # 重建 FBO（尺寸变了）
+                try:
+                    self._fbo.release()
+                except Exception:
+                    pass
+                color_tex = self.ctx.texture((w, h), 4)
+                depth_tex = self.ctx.depth_texture((w, h))
+                self._fbo = self.ctx.framebuffer(
+                    color_attachments=[color_tex],
+                    depth_attachment=depth_tex)
+                e._external_fb = self._fbo
+            self._fbo.use()
+            if not getattr(e, '_logic_async', False):
+                e.advance_logic(delta)
+            e.render(delta)
+            # 读回像素
+            data = self._fbo.read(components=3, alignment=1)
+            img = QImage(data, e.width, e.height, e.width * 3,
+                         QImage.Format.Format_RGB888)
+            self._label.setPixmap(QPixmap.fromImage(img.copy()))
+        except Exception as ex:
+            # 不刷屏：每 300 帧才打印一次
+            self._tick_err_n = getattr(self, '_tick_err_n', 0) + 1
+            if self._tick_err_n == 1 or self._tick_err_n % 300 == 0:
+                print('[Remote] tick 异常 (%d): %r' % (self._tick_err_n, ex))
+
+    # ---------------- 兼容 GLViewport 接口 ----------------
+    def makeCurrent(self):
+        """Qt 兼容接口：切到离屏 GL 上下文（editor 里的 bind 调用需要）。"""
+        if getattr(self, '_gl_ctx', None) is not None:
+            try:
+                self._gl_ctx.makeCurrent(self._surface)
+            except Exception:
+                pass
+
+    def key_pressed_array(self):
+        from collections import defaultdict
+        e = self.editor
+        if e is None:
+            return defaultdict(int)
+        return defaultdict(int, {k: 1 for k, v in e.key_state.items() if v})
+
+    def _phys(self, pos):
+        dpr = self.devicePixelRatioF()
+        return (int(pos.x() * dpr), int(pos.y() * dpr))
+
+    def _sync_mouse(self, pos):
+        e = self.editor
+        if e is None:
+            return
+        e.mouse_pos = self._phys(pos)
+        e._mods = _qt_mods(QGuiApplication.keyboardModifiers())
+        e.buttons = _qt_buttons(QGuiApplication.mouseButtons())
+
+    def mousePressEvent(self, ev):
+        e = self.editor
+        if e is None:
+            return
+        self.setFocus()
+        self._sync_mouse(ev.position())
+        btn = _qt_button(ev.button())
+        if btn:
+            e.pressed.add(btn)
+            e.mouse_press_pos[btn] = e.mouse_pos
+            e._cam_prev_mouse = e.mouse_pos
+        self._last_move = None
+        super().mousePressEvent(ev)
+
+    def mouseMoveEvent(self, ev):
+        e = self.editor
+        if e is None:
+            return
+        self._sync_mouse(ev.position())
+        e.buttons = _qt_buttons(ev.buttons())
+        if self._last_move is not None:
+            d = ev.position() - self._last_move
+            e.mouse_rel = (int(d.x()), int(d.y()))
+        self._last_move = ev.position()
+        super().mouseMoveEvent(ev)
+
+    def mouseReleaseEvent(self, ev):
+        e = self.editor
+        if e is None:
+            return
+        self._sync_mouse(ev.position())
+        btn = _qt_button(ev.button())
+        if btn:
+            e.released.add(btn)
+            e.mouse_press_pos.pop(btn, None)
+        self._last_move = None
+        super().mouseReleaseEvent(ev)
+
+    def wheelEvent(self, ev):
+        e = self.editor
+        if e is None:
+            return
+        e.mouse_pos = self._phys(ev.position())
+        e.mouse_wheel = ev.angleDelta().y() / 120.0
+        super().wheelEvent(ev)
+
+    def keyPressEvent(self, ev):
+        e = self.editor
+        if e is None:
+            return
+        e._mods = _qt_mods(ev.modifiers())
+        k = _QT_TO_PG.get(ev.key())
+        if k is not None:
+            e.key_state[k] = True
+        e.on_key_event(SimpleNamespace(type='KEYDOWN', key=k or 0, mod=e._mods))
+        super().keyPressEvent(ev)
+
+    def keyReleaseEvent(self, ev):
+        e = self.editor
+        if e is None:
+            return
+        e._mods = _qt_mods(ev.modifiers())
+        k = _QT_TO_PG.get(ev.key())
+        if k is not None:
+            e.key_state[k] = False
+        e.on_key_event(SimpleNamespace(type='KEYUP', key=k or 0, mod=e._mods))
+        super().keyReleaseEvent(ev)
+
+    def set_mouse_locked(self, locked):
+        if locked:
+            self.setCursor(Qt.CursorShape.BlankCursor)
+            self.grabMouse()
+        else:
+            self.unsetCursor()
+            self.releaseMouse()
+
+    def dragEnterEvent(self, ev):
+        if ev.mimeData().hasFormat(_MIME_ASSET):
+            ev.acceptProposedAction()
+
+    def dropEvent(self, ev):
+        e = self.editor
+        if e is None:
+            return
+        raw = bytes(ev.mimeData().data(_MIME_ASSET)).decode('utf-8', 'replace')
+        try:
+            key = json.loads(raw)
+        except Exception:
+            return
+        it = e._find_asset((key.get('type'), key.get('key')))
+        if it is not None:
+            e._asset_drop_to_scene(it, self._phys(ev.position()))
+        ev.acceptProposedAction()
+
+
 # =====================================================================
 # 数值拖拽调节 (2026-08-22 用户需求): 选中可调数值行后在底部弹出拖拽区,
 # 按住左右拖动调值 —— 不是滑动条, 是一整块区域
@@ -535,9 +822,39 @@ class LoomGUI(QMainWindow):
         self._scene_path = scene_path
         self._init_w, self._init_h = width, height
         self.setWindowTitle("Loom — 编辑器 (Qt)")
-        self.resize(width + 500, height + 60)
+        # 2026-10-20 白屏修复 P0-1：窗口尺寸钳制到屏幕可用区域。
+        # 之前固定 resize(width+500, height+60) = 1780×860，在 1536×864 屏上超宽；
+        # 加 DPI 缩放后原生 surface 与 FBO 尺寸脱节，导致整个客户区白屏
+        # （win.grab() 正常但屏幕白 —— Qt native present 失败）。
+        # 修复：取屏幕 availableGeometry，宽高取 min(请求值, available-80)，
+        # 位置居中，避免超屏。
+        try:
+            screen = QGuiApplication.primaryScreen()
+            if screen is not None:
+                avail = screen.availableGeometry()
+                req_w = width + 500
+                req_h = height + 60
+                clamp_w = min(req_w, max(800, avail.width() - 80))
+                clamp_h = min(req_h, max(600, avail.height() - 80))
+                self.resize(clamp_w, clamp_h)
+                cx = avail.x() + (avail.width() - clamp_w) // 2
+                cy = avail.y() + (avail.height() - clamp_h) // 2
+                self.move(cx, cy)
+            else:
+                self.resize(width + 500, height + 60)
+        except Exception:
+            self.resize(width + 500, height + 60)
 
-        self.viewport = GLViewport(self, scene_path, width, height)
+        # 2026-10-20 白屏修复 P1：远程/虚拟显示下 QOpenGLWidget native present
+        # 可能失败（客户区白屏但 win.grab() 正常）。--remote-mode 或
+        # LOOM_REMOTE_MODE=1 时改用离屏 GL + QImage readback，绕过 native present。
+        _remote = ('--remote-mode' in sys.argv
+                   or os.environ.get('LOOM_REMOTE_MODE') == '1')
+        if _remote:
+            print('[Qt] 远程/虚拟显示模式启用（离屏 GL readback）')
+            self.viewport = RemoteViewport(self, scene_path, width, height)
+        else:
+            self.viewport = GLViewport(self, scene_path, width, height)
 
         self._build_toolbar()
         self._build_central()          # 层级/资源 | 视口 | 检查器
@@ -3519,6 +3836,34 @@ def run_loom_gui(scene_path=None, width=1280, height=800):
     if auto_close > 0:
         QTimer.singleShot(int(auto_close * 1000), win.close)
     win.show()
+    # 2026-10-20 白屏修复 P0-2：show 后确保窗口在屏幕内并激活。
+    # 报告发现第二次启动 Qt 主窗口出现在 -25600,-25600 / 159×27（WM 记住了上次最小化状态），
+    # 同时可见窗口是 ConsoleWindowClass —— 用户看到的是 console/白底而不是编辑器。
+    # 修复：showNormal + 屏幕外强制移回 + raise/activate + 触发 surface 重建。
+    try:
+        win.showNormal()
+        g = win.geometry()
+        # -25600 是某些 WM 把窗口"藏到屏幕外"时的标记值
+        if g.x() < -1000 or g.y() < -1000 or g.width() < 400 or g.height() < 300:
+            screen = QGuiApplication.primaryScreen()
+            if screen is not None:
+                avail = screen.availableGeometry()
+                w = min(1280, avail.width() - 80)
+                h = min(720, avail.height() - 80)
+                win.resize(max(800, w), max(600, h))
+                win.move(avail.x() + 40, avail.y() + 40)
+                print('[Qt] 窗口从异常位置 (%d,%d %dx%d) 移回屏幕'
+                      % (g.x(), g.y(), g.width(), g.height()))
+        win.raise_()
+        win.activateWindow()
+        # 触发 QOpenGLWidget surface 重建（已知 DPI/远程桌面下首次 show 会白屏）
+        try:
+            win.viewport.update()
+            win.viewport.repaint()
+        except Exception:
+            pass
+    except Exception as e:
+        print('[Qt] 窗口激活异常: %r' % e)
     if not auto_close:
         # 核心插件信任闸: 待确认弹窗 (自动关闭冒烟模式跳过)
         try:

@@ -503,7 +503,13 @@ def cmd_launch_engine(args):
     # cwd=解释器目录、env=当前环境副本、不加 CREATE_NO_WINDOW (窗口可见).
     import subprocess
     t0 = time.time()
-    p = subprocess.Popen(cmd_parts, cwd=spec['cwd'], env=spec['env'])
+    # 2026-10-20 白屏修复 P0-3：Windows 下用 CREATE_NO_WINDOW 隐藏控制台窗口。
+    # 之前用 python.exe 启动会弹 ConsoleWindowClass，抢在编辑器前面，用户误以为白屏。
+    creationflags = 0
+    if os.name == 'nt':
+        creationflags = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+    p = subprocess.Popen(cmd_parts, cwd=spec['cwd'], env=spec['env'],
+                         creationflags=creationflags)
     _LAUNCHED[p.pid] = (p, info)
     out = {'pid': p.pid, 'command': ' '.join(cmd_parts), 'interpreter': info['dir'],
            'cwd': spec['cwd'], 'prefer': spec['prefer'], 'mode': spec['mode']}
