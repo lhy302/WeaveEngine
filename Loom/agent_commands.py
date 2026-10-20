@@ -639,12 +639,21 @@ def cmd_skybox_set(win, args):
     else:
         return {'error': '需要 paths 或 solid_color'}
     ed._skybox = cube
+    # 2026-10-20 Bug C：skybox 换了要重建 GPU 资源
+    # （防上次编译失败留下的 False 哨兵，以及强制走新 2f VBO 路径）
+    ed._sky_prog = None
+    ed._sky_vao = None
+    ed._sky_vbo = None
     return {'ok': True, 'name': cube.name, 'guid': cube.guid}
 
 
 @command('skybox_clear', '清空场景级天空盒')
 def cmd_skybox_clear(win, args):
     win.editor._skybox = None
+    # 2026-10-20 Bug C：清理 GPU 资源状态
+    win.editor._sky_prog = None
+    win.editor._sky_vao = None
+    win.editor._sky_vbo = None
     return {'ok': True}
 
 

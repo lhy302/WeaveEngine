@@ -70,7 +70,26 @@ class LoomEngineClient:
             with urllib.request.urlopen(req, timeout=5.0) as r:
                 return json.loads(r.read().decode('utf-8'))
         except Exception as e: return {'ok': False, 'error': str(e)}
+    def get_status(self):
+        """2026-10-20: 读 EAI 根路径，返回 {ok, service, commands: [...]}。
+        EAI 的 do_GET 根路径返回全部命令名列表 —— 供 loom_eai_list 工具使用。"""
+        info = self.get_info()
+        if not info:
+            return {'ok': False, 'error': '引擎未运行'}
+        req = urllib.request.Request(
+            f'http://127.0.0.1:{info["port"]}/',
+            headers={'X-Agent-Token': info['token']})
+        try:
+            with urllib.request.urlopen(req, timeout=5.0) as r:
+                return json.loads(r.read().decode('utf-8'))
+        except Exception as e:
+            return {'ok': False, 'error': str(e)}
 TOOLS_DEF = [
+    # 2026-10-20 新增：EAI 命令透传工具。
+    # 解决"缺 MCP 工具时 Agent 完全无法操作"的根本问题：
+    # 85 个 EAI 命令始终可用，不必等每个都补 MCP 包装。
+    {'name': 'loom_eai_list', 'description': '列出引擎当前已注册的所有 EAI 命令名（MCP 工具只是 EAI 命令的子集，缺 MCP 工具时用 loom_eai_call 透传）', 'inputSchema': {'type': 'object', 'properties': {}}},
+    {'name': 'loom_eai_call', 'description': '直接透传调用任意 EAI 命令（参数原样传给引擎，返回引擎原始结果）。用于 MCP 未暴露的 EAI 命令，如 import_obj/prefab_*/animator/audio/material_new/settings_get/camera_preview 等。先用 loom_eai_list 查可用命令名。', 'inputSchema': {'type': 'object', 'properties': {'cmd': {'type': 'string', 'description': 'EAI 命令名（如 camera_preview / import_obj / material_new / settings_get）'}, 'args': {'type': 'object', 'description': '命令参数对象（结构由具体 EAI 命令决定）'}}, 'required': ['cmd']}},
     {'name': 'unity_scene_new', 'description': '创建一个全新的空白场景 (对齐 Unity SceneManager.CreateScene)', 'inputSchema': {'type': 'object', 'properties': {}}},
     {'name': 'unity_scene_save', 'description': '保存当前场景到指定 json 文件 (对齐 Unity EditorSceneManager.SaveScene)', 'inputSchema': {'type': 'object', 'properties': {'path': {'type': 'string', 'description': '场景相对或绝对文件路径'}}, 'required': ['path']}},
     {'name': 'unity_scene_load', 'description': '加载并打开指定 json 场景文件 (对齐 Unity EditorSceneManager.OpenScene)', 'inputSchema': {'type': 'object', 'properties': {'path': {'type': 'string', 'description': '场景相对或绝对文件路径'}}, 'required': ['path']}},
@@ -229,7 +248,12 @@ TOOLS_DEF = [
      'inputSchema': {'type': 'object', 'properties': {
          'paths': {'type': 'array', 'items': {'type': 'string'},
                    'description': '6 张图片路径（px,nx,py,ny,pz,nz）'},
-         'solid_color': {'type': 'string', 'description': '纯色天空盒（#RRGGBB）；与 paths 二选一'},
+         'solid_color': {'oneOf': [
+             {'type': 'string', 'description': '十六进制颜色 #RRGGBB'},
+             {'type': 'array', 'items': {'type': 'number'},
+              'minItems': 3, 'maxItems': 4,
+              'description': 'RGBA 数组 [r,g,b] 或 [r,g,b,a]，0-255'},
+         ], 'description': '纯色天空盒；与 paths 二选一'},
          'name': {'type': 'string', 'description': '可选名称'},
      }}},
     {'name': 'loom_skybox_clear', 'description': '清空场景级天空盒',
@@ -305,6 +329,24 @@ class LoomMCPServer:
     def dispatch_tool(self, name, args):
         import math
         c = self.client
+
+        # 2026-10-20: EAI 命令透传（放在最前，作为逃生舱）。
+        if name == 'loom_eai_list':
+            st = c.get_status()
+            if not st.get('ok'):
+                return self._wrap(st)
+            cmds = sorted(st.get('commands') or [])
+            return self._mk('EAI 命令共 %d 个：\n%s' % (
+                len(cmds), '\n'.join(cmds)))
+        if name == 'loom_eai_call':
+            cmd = (args.get('cmd') or '').strip()
+            if not cmd:
+                return self._err('必须传 cmd=（EAI 命令名，可先用 loom_eai_list 查）')
+            payload_args = args.get('args') or {}
+            if not isinstance(payload_args, dict):
+                return self._err('args 必须是对象（JSON object）')
+            r = c.call(cmd, payload_args)
+            return self._wrap(r)
 
         # ---- 场景管理 ----
         if name == 'unity_scene_new':

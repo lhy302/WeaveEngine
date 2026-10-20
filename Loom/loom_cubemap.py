@@ -75,20 +75,47 @@ class Cubemap:
 
     @classmethod
     def from_solid(cls, color, size=4, name=None, guid=None, mipmaps=True):
-        """单色立方体贴图（占位/纯色环境）。color=(r,g,b,a) 0-255 或 '#RRGGBB'。"""
+        """单色立方体贴图（占位/纯色环境）。color=(r,g,b,a) 0-255 或 '#RRGGBB'。
+
+        2026-10-20 Bug A 修复：字符串路径 _hex_rgba 返回 0-1 浮点，旧代码直接
+        int(0.227)=0 导致 #3a7bd5 变全黑 [0,0,0,1]。修复：
+          - 字符串路径：显式乘 255 再取整
+          - tuple 路径：若所有通道都 ≤ 1.0 视为 0-1 浮点（含 alpha=1.0），也乘 255
+        这样 hex / [0-1 浮点] / [0-255 整数] 三种输入都能得到正确颜色。
+        """
+        def _to_255(v):
+            v = float(v)
+            if 0.0 <= v <= 1.0:
+                return int(round(v * 255))
+            return int(round(v))
+
         if isinstance(color, str):
             from loom_color import _hex_rgba
-            rgba = _hex_rgba(color)
+            rf = _hex_rgba(color)  # 0-1 floats
+            rgba = (int(round(rf[0] * 255)), int(round(rf[1] * 255)),
+                    int(round(rf[2] * 255)), int(round(rf[3] * 255)))
         else:
-            rgba = color
+            rgba = list(color)
+            # 若全在 0-1 范围内（含 1.0 alpha），视为浮点输入放大到 0-255
+            try:
+                vals = [float(v) for v in rgba[:4]]
+                if len(vals) >= 3 and all(0.0 <= v <= 1.0 for v in vals):
+                    rgba = [_to_255(v) for v in vals]
+                    if len(rgba) < 4:
+                        rgba.append(255)
+            except Exception:
+                pass
+            if len(rgba) < 4:
+                rgba = list(rgba) + [255]
+
         arr = np.zeros((size, size, 4), dtype=np.uint8)
         arr[:, :, 0] = int(rgba[0]); arr[:, :, 1] = int(rgba[1])
-        arr[:, :, 2] = int(rgba[2]); arr[:, :, 3] = int(rgba[3]) if len(rgba) > 3 else 255
+        arr[:, :, 2] = int(rgba[2]); arr[:, :, 3] = int(rgba[3])
         cube = cls(size, faces=[arr.copy() for _ in range(6)], name=name,
                    guid=guid, mipmaps=mipmaps)
         # 2026-10-19 天空盒: 记录纯色来源（序列化还原用）
         cube._solid_color = (int(rgba[0]), int(rgba[1]), int(rgba[2]),
-                             int(rgba[3]) if len(rgba) > 3 else 255)
+                             int(rgba[3]))
         return cube
 
     def ensure_gl(self, ctx):

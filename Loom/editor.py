@@ -1979,6 +1979,13 @@ class EditorApp(GLEngine):
         _t = self._prof_t0()
         self._draw_main_buckets()
         self._prof_add('mt_mp_draws', _t)
+        # 2026-10-20 Bug B 修复：编辑器主 pass 之前没调 _draw_skybox（只有 PlayerApp
+        # 的 GLEngine.render 调了），所以编辑器里设了天空盒也永远看不到。
+        if getattr(self, '_skybox', None) is not None:
+            try:
+                self._draw_skybox()
+            except Exception as _e:
+                print('[渲染] 天空盒绘制失败: %r' % (_e,))
         self._prof_add('mt_main_pass', _t_mp)
 
         # UI 层 (IEditorView): 视口叠加 + 全部面板 + 播放期游戏 HUD. 播放期不画编辑辅助

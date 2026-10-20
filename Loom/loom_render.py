@@ -59,12 +59,20 @@ class RenderMixin:
             try:
                 self._sky_prog = self.ctx.program(
                     vertex_shader=_SKY_VERT, fragment_shader=_SKY_FRAG)
-                # 2026-10-19 关键修复（天空盒一直是黑的根因）：
-                # _SKY_VERT 只声明 in_pos（1 个 vec2），但旧代码绑 'in_pos','in_uv' 两个属性名
-                # → moderngl 对未声明属性抛 KeyError → 被 except 吞掉 → 天空盒永久禁用。
-                # 修复：只绑 in_pos，格式用 '2f 2x'（2x = 8 字节填充，跳过 UV，stride 仍 16）。
+                # 2026-10-20 Bug C 根因修复（天空盒一直黑的第二层问题）：
+                # 之前以为是 VAO 绑了未声明的 in_uv，改成 '2f 2x' 后创建不报错，
+                # 但实测渲染是黑的 —— moderngl 的 '2f 2x' 不是 padding 语义！
+                # 它把格式解析为"2 个属性"，第二个 2x 无对应属性名导致整个
+                # VAO 数据布局错乱，顶点坐标读到垃圾数据 -> quad 不覆盖屏幕。
+                # 正确做法：给天空盒独立建一个只含 position (2f/顶点) 的 VBO。
+                import numpy as _np
+                sky_quad = _np.array([
+                    0.0, 0.0,   1.0, 0.0,   1.0, 1.0,
+                    0.0, 0.0,   1.0, 1.0,   0.0, 1.0,
+                ], dtype='f4')
+                self._sky_vbo = self.ctx.buffer(sky_quad.tobytes())
                 self._sky_vao = self.ctx.vertex_array(
-                    self._sky_prog, [(self._quad_vbo, '2f 2x', 'in_pos')])
+                    self._sky_prog, [(self._sky_vbo, '2f', 'in_pos')])
                 # sampler 单元固定 0（program 建后设一次即可）
                 try:
                     self._sky_prog['u_skybox'].value = 0

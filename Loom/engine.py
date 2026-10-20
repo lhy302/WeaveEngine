@@ -277,6 +277,7 @@ class GLEngine(ShadowMixin, FrameComponentMixin, PhysicsMixin, InputMixin, HudMi
         # _sky_vao / _sky_prog / _skybox 状态惰性建（首帧无 skybox 时零开销）
         self._sky_prog = None
         self._sky_vao = None
+        self._sky_vbo = None   # 2026-10-20 Bug C：天空盒独立 2f VBO（不复用 HUD 的 4f _quad_vbo）
         self._skybox = None          # 场景级默认天空盒（Cubemap 实例或 None）
         self._skybox_tint = (1.0, 1.0, 1.0)   # 颜色乘子（调试用）
         # M36 贴图: 1x1 白纹理 (无贴图材质的默认绑定, 采样乘白=原色不改视觉)
