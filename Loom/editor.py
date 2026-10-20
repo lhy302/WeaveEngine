@@ -2152,7 +2152,8 @@ class EditorApp(GLEngine):
         # camera_distance (旧"播放态推拉相机本体"自由相机分支删除)。
         if (not _ui_lock and self.mouse_wheel
                 and self._in_viewport(self.mouse_pos)):
-            self.camera_distance = max(0.5, min(200.0,
+            # 2026-10-20 视距提升：相机滚动上限 200→1000（匹配 far=1000）
+            self.camera_distance = max(0.5, min(1000.0,
                 self.camera_distance * math.exp(-self.mouse_wheel * 0.1)))
 
         # 2026-08-12: 右键转视角 = 视口内按下即激活, 拖动过程(即使拖出视口)持续, 松开停

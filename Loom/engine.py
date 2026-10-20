@@ -202,7 +202,10 @@ class GLEngine(ShadowMixin, FrameComponentMixin, PhysicsMixin, InputMixin, HudMi
         self.fov_deg = fov_deg
         self._fov = math.radians(fov_deg)
         self.near = 0.1
-        self.far = 100.0
+        # 2026-10-20 视距提升：far 100→1000（Unity 默认值，看远景/大场景）。
+        # 用户环境做游戏，100 米视距太短（RTS/沙盘类常需要看 200~500m）。
+        # near 保持 0.1（近距编辑需要），深度比 1:10000 对 24-bit 深度缓冲可接受。
+        self.far = 1000.0
 
         # ================ 相机/渲染参数 (可在此处修改) ================
         self.camera = Point3D(0, 0, -5)   # 初始相机位置 (2026-08-28: camera_initial 死字段已并)
