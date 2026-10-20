@@ -16,15 +16,21 @@ import sceneio
 
 
 class PlayerApp(GLEngine):
-    """只读场景播放器: 无编辑器 UI, 轨道相机 + 默认引擎键位."""
+    """只读场景播放器: 无编辑器 UI, 轨道相机 + 默认引擎键位.
+
+    2026-10-20 P0-1 白屏修复：支持 ctx 参数（外部 GL 上下文）。
+    远程/虚拟显示下 GLFW native present 失败时，可用离屏 GL + 外部窗口
+    （Qt，见 loom_player_window.py）显示，绕过 GLFW 窗口。
+    """
 
     def __init__(self, scene_path=None, width=1280, height=800,
-                 scene_data=None, title=None):
-        super().__init__(width, height)
+                 scene_data=None, title=None, ctx=None):
+        super().__init__(width, height, ctx=ctx)
         for m in list(self.models):
             self.remove_model(m)                 # 清默认场景
         if title:
             # 2026-10-18 A2: GLFW 窗口标题（原 pygame.display.set_caption）
+            # 2026-10-20 P0-1: 外部 ctx 模式无 GLFW 窗口，跳过
             try:
                 import glfw
                 win = getattr(self, '_glfw_win', None)

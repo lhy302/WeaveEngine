@@ -257,6 +257,12 @@ if __name__ == "__main__":
     try:
         if run_scene is not None:
             # Player 模式 (运行时, 无编辑器)
+            # 2026-10-20 P0-1 白屏修复：远程/虚拟显示环境下 GLFW native present 失败，
+            # 用离屏 GL + Qt 窗口显示绕过（见 loom_player_window.py）。LOOM_REMOTE_MODE=1 时启用。
+            if os.environ.get('LOOM_REMOTE_MODE') == '1':
+                from loom_player_window import run_player_window
+                run_player_window(run_scene, width=1280, height=800)
+                sys.exit(0)
             from runtime import PlayerApp
             engine = PlayerApp(run_scene, 1280, 800)
         else:
