@@ -492,11 +492,11 @@ class RemoteViewport(QWidget):
         # 用 QTimer.singleShot 延迟到事件循环启动后（LoomGUI.__init__ 已完成）。
         QTimer.singleShot(0, self._init_editor_deferred)
 
-        # 渲染循环（2026-10-20：30fps，减少 Qt 事件循环压力，之前 60fps 卡顿）
+        # 渲染循环（2026-10-20：60fps —— readback 实测仅 3ms/帧，30fps 是人为保守限制）
         self._last_frame = time.perf_counter()
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
-        self._timer.start(33)   # ~30fps
+        self._timer.start(16)   # ~60fps
 
     # ---------------- 初始化 ----------------
     def _init_offscreen_gl(self):
@@ -576,18 +576,36 @@ class RemoteViewport(QWidget):
                     depth_attachment=depth_tex)
                 e._external_fb = self._fbo
             self._fbo.use()
+            # 2026-10-20 修复：RemoteViewport 漏了 GLViewport.paintGL 的异步逻辑线程启动，
+            # 导致 _logic_async=True 时 advance_logic 从不被调用、播放模式 logic_steps 恒 0。
+            _t0 = time.perf_counter()
             if not getattr(e, '_logic_async', False):
                 e.advance_logic(delta)
+            else:
+                clk = e._ensure_split()
+                if clk is not None:
+                    e._start_logic_thread(clk)
+            _t1 = time.perf_counter()
             e.render(delta)
+            _t2 = time.perf_counter()
             # 读回像素 → 存 QImage → 触发 paintEvent
             # 2026-10-20 修复 Y 翻转：OpenGL fbo.read() 返回左下原点（从下往上），
             # QImage 默认左上原点（从上往下），需垂直镜像一次。
             data = self._fbo.read(components=3, alignment=1)
+            _t3 = time.perf_counter()
             img = QImage(data, e.width, e.height, e.width * 3,
                          QImage.Format.Format_RGB888)
             # mirrored(horizontal=False, vertical=True) = 上下翻转
             self._current_img = img.mirrored(False, True)
+            _t4 = time.perf_counter()
             self.update()                     # 异步请求重绘（不阻塞事件循环）
+            # 2026-10-20 性能诊断：LOOM_REMOTE_PROFILE=1 时打印各段耗时
+            if os.environ.get('LOOM_REMOTE_PROFILE') == '1':
+                self._prof_n = getattr(self, '_prof_n', 0) + 1
+                if self._prof_n % 30 == 0:  # 每 30 帧打一次（每秒 1 次）
+                    print('[RPROF] logic=%.1fms render=%.1fms readback=%.1fms mirror=%.1fms'
+                          % ((_t1-_t0)*1000, (_t2-_t1)*1000,
+                             (_t3-_t2)*1000, (_t4-_t3)*1000))
         except Exception as ex:
             # 不刷屏：每 300 帧才打印一次
             self._tick_err_n = getattr(self, '_tick_err_n', 0) + 1
@@ -598,6 +616,7 @@ class RemoteViewport(QWidget):
     def paintEvent(self, ev):
         """2026-10-20：直接画 _current_img 到 widget（不用 QLabel，避免 layout 风暴）。"""
         from PySide6.QtGui import QPainter
+        _tp0 = time.perf_counter()
         painter = QPainter(self)
         try:
             painter.fillRect(self.rect(), QColor(0, 0, 0))
@@ -606,6 +625,11 @@ class RemoteViewport(QWidget):
                 painter.drawImage(self.rect(), self._current_img)
         finally:
             painter.end()
+        if os.environ.get('LOOM_REMOTE_PROFILE') == '1':
+            _dt = (time.perf_counter() - _tp0) * 1000
+            self._pprof_n = getattr(self, '_pprof_n', 0) + 1
+            if self._pprof_n % 60 == 0:
+                print('[PPROF] paintEvent=%.1fms' % _dt)
 
     # ---------------- 兼容 GLViewport 接口 ----------------
     def makeCurrent(self):

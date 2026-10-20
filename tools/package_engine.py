@@ -95,9 +95,13 @@ def build_embed_pyzip(version, out_dir):
 def write_launcher(out_dir):
     # 2026-10-20 白屏修复：用 pythonw.exe 替代 python.exe（无控制台窗口）。
     # python.exe 启动会弹 ConsoleWindowClass 抢在编辑器前面，用户误以为白屏。
+    # 2026-10-20 P0-2 修复：bat 里显式设置 LOOM_REMOTE_MODE=1（离屏 GL readback），
+    # 否则用户直接双击 bat 时 QOpenGLWidget native present 失败会白屏。
+    # 用户已手动设置则不覆盖（if not defined）。
     # 纯 ASCII 编码（Windows cmd 对 UTF-8 BAT 支持差，中文会乱码）。
     bat = ('@echo off\r\n'
            'setlocal\r\n'
+           'if not defined LOOM_REMOTE_MODE set LOOM_REMOTE_MODE=1\r\n'
            'cd /d "%~dp0"\r\n'
            '"%~dp0python\\pythonw.exe" "%~dp0Loom\\Loom.py" %*\r\n')
     with open(os.path.join(out_dir, 'Loom.bat'), 'w', encoding='ascii') as f:
