@@ -338,6 +338,46 @@ class Script:
         """协程等 1 帧。用法: yield self.wait_frame()"""
         return None
 
+    # ============ 2026-10-20 网络助手（纯标准库，见 loom_net.py）============
+    def http_get(self, url, headers=None, timeout=10.0, verify=True):
+        """同步 HTTP GET（会阻塞当前逻辑帧）。返回 {'ok', 'status', 'body', 'error'}。
+
+        推荐在协程里用异步版 http_async，避免卡帧。
+        """
+        import loom_net
+        return loom_net.http_get(url, headers=headers,
+                                 timeout=timeout, verify=verify)
+
+    def http_post_json(self, url, obj, headers=None,
+                       timeout=10.0, verify=True):
+        """同步 POST JSON（会阻塞当前逻辑帧）。返回同 http_request。"""
+        import loom_net
+        return loom_net.http_post_json(url, obj, headers=headers,
+                                       timeout=timeout, verify=verify)
+
+    def http_request(self, method, url, headers=None, body=None,
+                     timeout=10.0, verify=True):
+        """同步 HTTP 通用请求。"""
+        import loom_net
+        return loom_net.http_request(method, url, headers=headers, body=body,
+                                     timeout=timeout, verify=verify)
+
+    def http_async(self, method, url, headers=None, body=None,
+                   timeout=10.0, verify=True):
+        """异步 HTTP（后台线程，不阻塞逻辑帧）。返回 HttpRequestAsync。
+
+        用法:
+            if self._req is None:
+                self._req = self.http_async('GET', url)
+            elif self._req.is_done():
+                r = self._req.result()
+                ...
+                self._req = None
+        """
+        import loom_net
+        return loom_net.http_async(method, url, headers=headers, body=body,
+                                   timeout=timeout, verify=verify)
+
     def _drive_coroutines(self, dt):
         """内部方法：由引擎 update_scripts 每帧推进本脚本的所有协程。"""
         if not self._coroutines:

@@ -260,6 +260,29 @@ TOOLS_DEF = [
      'inputSchema': {'type': 'object', 'properties': {}}},
     {'name': 'loom_skybox_get', 'description': '读当前场景级天空盒信息',
      'inputSchema': {'type': 'object', 'properties': {}}},
+    # 2026-10-20 网络助手：供 Agent 直接调外部 API（LLM 服务、游戏服务器等）
+    # 底层走 loom_net.py（纯标准库，内置 CA 证书），与游戏脚本共用同一套实现。
+    {'name': 'loom_http_get', 'description': 'HTTP GET（同步，10 秒默认超时）。返回 {ok, status, headers, body, error}',
+     'inputSchema': {'type': 'object', 'properties': {
+         'url': {'type': 'string', 'description': '完整 URL（http:// 或 https://）'},
+         'headers': {'type': 'object', 'description': '请求头（dict[str, str]）'},
+         'timeout': {'type': 'number', 'description': '超时秒数（1~60，默认 10）'},
+     }, 'required': ['url']}},
+    {'name': 'loom_http_post_json', 'description': 'HTTP POST JSON（自动 Content-Type: application/json）',
+     'inputSchema': {'type': 'object', 'properties': {
+         'url': {'type': 'string', 'description': '完整 URL'},
+         'body': {'type': 'object', 'description': 'JSON 请求体'},
+         'headers': {'type': 'object', 'description': '额外请求头'},
+         'timeout': {'type': 'number', 'description': '超时秒数（1~60，默认 10）'},
+     }, 'required': ['url', 'body']}},
+    {'name': 'loom_http_request', 'description': '通用 HTTP 请求（GET/POST/PUT/DELETE/PATCH）',
+     'inputSchema': {'type': 'object', 'properties': {
+         'method': {'type': 'string', 'description': 'HTTP 方法（GET/POST/PUT/DELETE/PATCH）'},
+         'url': {'type': 'string', 'description': '完整 URL'},
+         'headers': {'type': 'object', 'description': '请求头'},
+         'body': {'type': 'string', 'description': '请求体字符串（GET 忽略）'},
+         'timeout': {'type': 'number', 'description': '超时秒数（1~60，默认 10）'},
+     }, 'required': ['method', 'url']}},
 ]
 
 RESOURCES_DEF = [
@@ -646,6 +669,28 @@ class LoomMCPServer:
             return self._wrap(c.call('skybox_clear', dict(args)))
         if name == 'loom_skybox_get':
             return self._wrap(c.call('skybox_get', dict(args)))
+
+        # ---- 2026-10-20 网络助手（HTTP）----
+        if name == 'loom_http_get':
+            payload = {'url': args.get('url')}
+            if args.get('headers'):
+                payload['headers'] = args['headers']
+            if args.get('timeout'):
+                payload['timeout'] = args['timeout']
+            return self._wrap(c.call('http_get', payload))
+        if name == 'loom_http_post_json':
+            payload = {'url': args.get('url'), 'body': args.get('body')}
+            if args.get('headers'):
+                payload['headers'] = args['headers']
+            if args.get('timeout'):
+                payload['timeout'] = args['timeout']
+            return self._wrap(c.call('http_post_json', payload))
+        if name == 'loom_http_request':
+            payload = {'method': args.get('method'), 'url': args.get('url')}
+            for k in ('headers', 'body', 'timeout'):
+                if k in args:
+                    payload[k] = args[k]
+            return self._wrap(c.call('http_request', payload))
 
         # ---- 测试视口 ----
         # ---- 2026-10-19 P0-6: 相机 / 灯光 / 可见性 / 撤销 暴露到 MCP ----
