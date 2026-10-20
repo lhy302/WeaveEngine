@@ -472,31 +472,31 @@ class RemoteViewport(QWidget):
         self.init_error = None
         self._last_move = None
 
-        # 显示层
-        self._label = QLabel(self)
-        self._label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._label.setStyleSheet('background: black;')
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(0)
-        lay.addWidget(self._label)
+        # 2026-10-20 显示层修复：不用 QLabel.setPixmap（60fps 会触发 60 次 layout
+        # 导致卡顿且画面不显示）。改用 QWidget.paintEvent 直接 QPainter.drawImage。
+        self._current_img = None   # 当前帧的 QImage（_tick 更新，paintEvent 消费）
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setAcceptDrops(True)
 
         # 离屏 GL
         try:
             self._init_offscreen_gl()
-            self._init_editor()
         except Exception:
             import traceback
             traceback.print_exc()
             self.init_error = repr(sys.exc_info()[1])
 
-        # 渲染循环
+        # 2026-10-20 修复：EditorApp 不能在 __init__ 里创建 —— 那时
+        # LoomGUI.viewport 还没赋值，EditorApp._seed_scene 会触发 gl_guard()
+        # 访问 self._window.viewport.makeCurrent() 崩 AttributeError。
+        # 用 QTimer.singleShot 延迟到事件循环启动后（LoomGUI.__init__ 已完成）。
+        QTimer.singleShot(0, self._init_editor_deferred)
+
+        # 渲染循环（2026-10-20：30fps，减少 Qt 事件循环压力，之前 60fps 卡顿）
         self._last_frame = time.perf_counter()
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
-        self._timer.start(16)   # ~60fps
+        self._timer.start(33)   # ~30fps
 
     # ---------------- 初始化 ----------------
     def _init_offscreen_gl(self):
@@ -524,6 +524,18 @@ class RemoteViewport(QWidget):
         self._fbo = self.ctx.framebuffer(
             color_attachments=[color_tex],
             depth_attachment=depth_tex)
+
+    def _init_editor_deferred(self):
+        """延迟初始化 EditorApp —— 等 LoomGUI.__init__ 完成并设置 self.viewport 后。"""
+        try:
+            # 重新切到离屏 GL 上下文
+            self._gl_ctx.makeCurrent(self._surface)
+            self._init_editor()
+            print('[Remote] EditorApp 创建成功 (离屏 GL readback 模式)')
+        except Exception:
+            import traceback
+            traceback.print_exc()
+            self.init_error = repr(sys.exc_info()[1])
 
     def _init_editor(self):
         from editor import EditorApp
@@ -567,16 +579,33 @@ class RemoteViewport(QWidget):
             if not getattr(e, '_logic_async', False):
                 e.advance_logic(delta)
             e.render(delta)
-            # 读回像素
+            # 读回像素 → 存 QImage → 触发 paintEvent
+            # 2026-10-20 修复 Y 翻转：OpenGL fbo.read() 返回左下原点（从下往上），
+            # QImage 默认左上原点（从上往下），需垂直镜像一次。
             data = self._fbo.read(components=3, alignment=1)
             img = QImage(data, e.width, e.height, e.width * 3,
                          QImage.Format.Format_RGB888)
-            self._label.setPixmap(QPixmap.fromImage(img.copy()))
+            # mirrored(horizontal=False, vertical=True) = 上下翻转
+            self._current_img = img.mirrored(False, True)
+            self.update()                     # 异步请求重绘（不阻塞事件循环）
         except Exception as ex:
             # 不刷屏：每 300 帧才打印一次
             self._tick_err_n = getattr(self, '_tick_err_n', 0) + 1
             if self._tick_err_n == 1 or self._tick_err_n % 300 == 0:
                 print('[Remote] tick 异常 (%d): %r' % (self._tick_err_n, ex))
+
+    # ---------------- 显示层 ----------------
+    def paintEvent(self, ev):
+        """2026-10-20：直接画 _current_img 到 widget（不用 QLabel，避免 layout 风暴）。"""
+        from PySide6.QtGui import QPainter
+        painter = QPainter(self)
+        try:
+            painter.fillRect(self.rect(), QColor(0, 0, 0))
+            if self._current_img is not None:
+                # 保持宽高比缩放到 widget 矩形
+                painter.drawImage(self.rect(), self._current_img)
+        finally:
+            painter.end()
 
     # ---------------- 兼容 GLViewport 接口 ----------------
     def makeCurrent(self):
@@ -3840,10 +3869,17 @@ def run_loom_gui(scene_path=None, width=1280, height=800):
     # 报告发现第二次启动 Qt 主窗口出现在 -25600,-25600 / 159×27（WM 记住了上次最小化状态），
     # 同时可见窗口是 ConsoleWindowClass —— 用户看到的是 console/白底而不是编辑器。
     # 修复：showNormal + 屏幕外强制移回 + raise/activate + 触发 surface 重建。
+    #
+    # 2026-10-20 二次强化：根因是 LoomHub 用 CREATE_NO_WINDOW 启动时 Windows 给
+    # 子进程传 STARTUPINFO.wShowWindow=SW_HIDE，Qt 遵循把窗口藏到 (-25600,-25600)，
+    # 用户看到"白屏"（其实是窗口隐藏）。修复：Qt 侧 + Win32 侧双保险强制可见。
     try:
+        # 1) 强制清除隐藏/最小化状态
+        win.setWindowState(Qt.WindowState.WindowNoState)
         win.showNormal()
+        # 2) 检查几何位置
         g = win.geometry()
-        # -25600 是某些 WM 把窗口"藏到屏幕外"时的标记值
+        moved = False
         if g.x() < -1000 or g.y() < -1000 or g.width() < 400 or g.height() < 300:
             screen = QGuiApplication.primaryScreen()
             if screen is not None:
@@ -3852,16 +3888,32 @@ def run_loom_gui(scene_path=None, width=1280, height=800):
                 h = min(720, avail.height() - 80)
                 win.resize(max(800, w), max(600, h))
                 win.move(avail.x() + 40, avail.y() + 40)
+                moved = True
                 print('[Qt] 窗口从异常位置 (%d,%d %dx%d) 移回屏幕'
                       % (g.x(), g.y(), g.width(), g.height()))
+        # 3) Win32 兜底：强制 ShowWindow(SW_SHOWNORMAL) + SetForegroundWindow
+        # 对付 STARTUPINFO.wShowWindow=SW_HIDE 的 Qt 底层表现
+        try:
+            import ctypes
+            hwnd = int(win.winId())
+            SW_SHOWNORMAL = 1
+            ctypes.windll.user32.ShowWindow(hwnd, SW_SHOWNORMAL)
+            ctypes.windll.user32.SetForegroundWindow(hwnd)
+            ctypes.windll.user32.BringWindowToTop(hwnd)
+        except Exception as _we:
+            print('[Qt] Win32 兜底异常: %r' % _we)
+        # 4) Qt 高层激活
         win.raise_()
         win.activateWindow()
-        # 触发 QOpenGLWidget surface 重建（已知 DPI/远程桌面下首次 show 会白屏）
+        # 5) 触发 QOpenGLWidget surface 重建
         try:
             win.viewport.update()
             win.viewport.repaint()
         except Exception:
             pass
+        # 6) 最终几何兜底（Win32 调用后 Qt geometry 可能不同步）
+        if moved:
+            win.move(win.x(), win.y())
     except Exception as e:
         print('[Qt] 窗口激活异常: %r' % e)
     if not auto_close:
