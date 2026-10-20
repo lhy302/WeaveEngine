@@ -93,8 +93,14 @@ def build_embed_pyzip(version, out_dir):
 
 
 def write_launcher(out_dir):
-    bat = '@echo off\r\nsetlocal\r\ncd /d "%~dp0"\r\n"%~dp0python\\python.exe" "%~dp0Loom\\Loom.py" %*\r\n'
-    with open(os.path.join(out_dir, 'Loom.bat'), 'w', encoding='utf-8') as f:
+    # 2026-10-20 白屏修复：用 pythonw.exe 替代 python.exe（无控制台窗口）。
+    # python.exe 启动会弹 ConsoleWindowClass 抢在编辑器前面，用户误以为白屏。
+    # 纯 ASCII 编码（Windows cmd 对 UTF-8 BAT 支持差，中文会乱码）。
+    bat = ('@echo off\r\n'
+           'setlocal\r\n'
+           'cd /d "%~dp0"\r\n'
+           '"%~dp0python\\pythonw.exe" "%~dp0Loom\\Loom.py" %*\r\n')
+    with open(os.path.join(out_dir, 'Loom.bat'), 'w', encoding='ascii') as f:
         f.write(bat)
 
 
