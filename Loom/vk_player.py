@@ -463,6 +463,11 @@ def run_vk(scene=None, frames_n=None, keep=False, mini=False, no_shadow=False,
             canvas.set_title("%s | %.0f FPS" % (title, fps))
             result[0] = fps
 
+    # 2026-11-07 修复(P0): 看门狗依赖的 last_ok 原先只在启动时初始化、渲染循环里
+    # **从不更新** -> 任何 Vulkan 游戏启动满 60s 必被自己 os._exit(9) 杀掉
+    # (玩家表现 = "玩一半突然崩掉/窗口消失")。现在每成功渲染一帧就刷新。
+    last_ok = [time.perf_counter()]
+
     # 2026-11-07: 脚本 request_game_exit() -> driver.request_quit -> 关窗退出
     _orig_draw = draw
 
@@ -475,11 +480,12 @@ def run_vk(scene=None, frames_n=None, keep=False, mini=False, no_shadow=False,
                 return
         except Exception:
             pass
-        return _orig_draw(*a, **k)
+        _r = _orig_draw(*a, **k)
+        last_ok[0] = time.perf_counter()      # 渲染有进展 -> 喂狗
+        return _r
 
     canvas.request_draw(draw)
     import threading
-    last_ok = [time.perf_counter()]
 
 
     def _heartbeat():

@@ -28,6 +28,62 @@ import sys
 _EXE_DIR = os.path.dirname(os.path.abspath(sys.argv[0]))
 
 
+def _bootstrap_logging():
+    """2026-11-07: 打包版无控制台, 崩溃信息全丢 -> 落盘到 exe 旁 日志.txt。
+
+    - stdout/stderr tee 到 日志.txt (脚本 print / Nuitka / wgpu 警告都留证);
+    - sys.excepthook 写完整 traceback;
+    - faulthandler 捕获硬崩溃 (段错误/访问冲突) 的栈。
+    """
+    try:
+        import faulthandler
+        import time
+        import traceback
+        path = os.path.join(_EXE_DIR, '日志.txt')
+        f = open(path, 'a', encoding='utf-8', buffering=1)
+
+        class _Tee:
+            def __init__(self, *streams):
+                self._s = [x for x in streams if x is not None]
+
+            def write(self, t):
+                for x in self._s:
+                    try:
+                        x.write(t)
+                    except Exception:
+                        pass
+
+            def flush(self):
+                for x in self._s:
+                    try:
+                        x.flush()
+                    except Exception:
+                        pass
+
+            def isatty(self):
+                return False
+
+        sys.stdout = _Tee(sys.__stdout__, f)
+        sys.stderr = _Tee(sys.__stderr__, f)
+        try:
+            faulthandler.enable(file=f, all_threads=True)
+        except Exception:
+            pass
+
+        def _hook(t, v, tb):
+            print("\n[崩溃] %s: %s" % (t.__name__, v))
+            traceback.print_exception(t, v, tb)
+
+        sys.excepthook = _hook
+        print("\n===== 启动 %s | exe=%s =====\n"
+              % (time.strftime("%Y-%m-%d %H:%M:%S"), sys.argv[0]))
+    except Exception:
+        pass
+
+
+_bootstrap_logging()
+
+
 def _run_from_pack():
     """游戏包启动: 返回 PlayerApp 实例或 None (无有效包 = 不启动).
     包查找: exe 目录优先, 其次当前目录 (源码开发时 Ctrl+F5 便捷)."""

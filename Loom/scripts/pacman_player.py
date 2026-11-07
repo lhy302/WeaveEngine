@@ -16,12 +16,14 @@ class PacmanPlayerScript(Script):
     script_id = "pacman_player"
     name = "吃豆人玩家"
     params = (("speed", "速度", 4.0, 0.5, 15.0, "%.1f"),
-              ("eat_r", "吃豆半径", 0.55, 0.1, 2.0, "%.2f"))
+              ("eat_r", "吃豆半径", 0.55, 0.1, 2.0, "%.2f"),
+              ("invuln", "复活无敌秒", 1.5, 0.0, 5.0, "%.2f"))
 
     def on_start(self):
         self.score = 0
         self.caught = 0
         self.won = False
+        self._invuln = 0.0        # 复活无敌剩余秒数 (经典吃豆人: 复活不被秒)
         # 只统计"可见"的豆子 (隐藏的不算目标, 便于分关卡/调试)
         self.total = sum(1 for m in self.engine.models
                          if (getattr(m, "name", "") or "").startswith("豆子")
@@ -118,6 +120,8 @@ class PacmanPlayerScript(Script):
     def update(self, dt):
         if self.won:
             return
+        if self._invuln > 0.0:
+            self._invuln = max(0.0, self._invuln - float(dt))
         e = self.engine
         a = e.get_action
         dx = (1 if a("向右") else 0) - (1 if a("向左") else 0)
@@ -146,14 +150,15 @@ class PacmanPlayerScript(Script):
             else:
                 self.obj.position = Point3D(p.x + ddx / dist * step, self._y,
                                             p.z + ddz / dist * step)
-        # 被幽灵抓住
+        # 被幽灵抓住 (无敌期内跳过)
         p = e.world_position(self.obj)
-        for g in list(e.models):
+        for g in ([] if self._invuln > 0.0 else list(e.models)):
             if not (getattr(g, "name", "") or "").startswith("幽灵"):
                 continue
             gp = e.world_position(g)
             if (p.x - gp.x) ** 2 + (p.z - gp.z) ** 2 <= 0.55 ** 2:
                 self.caught += 1
+                self._invuln = 1.5        # 1.5s 无敌, 避免复活即被同一只幽灵连续吃掉
                 self.obj.position = Point3D(self._spawn[0], self._y, self._spawn[1])
                 self._cx, self._cz = int(self._spawn[0]), int(self._spawn[1])
                 self._tx, self._tz = self._cx, self._cz
