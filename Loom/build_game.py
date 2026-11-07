@@ -91,6 +91,17 @@ def _build_runtime():
            '--output-dir=%s' % DEFAULT_RUNTIME_DIR,
            '--output-filename=MyGame.exe',
            os.path.join(BIN_DIR, 'game_player.py')]
+    # 2026-11-07: wgpu-native 的 DLL 不是 package-data, 必须显式带进 dist,
+    # 否则打包版 Vulkan 报 'Could not find WGPU library libwpgu_native'。
+    try:
+        import wgpu as _wgpu
+        _dll = os.path.join(os.path.dirname(_wgpu.__file__), 'resources',
+                            'wgpu_native-release.dll')
+        if os.path.isfile(_dll):
+            cmd.append('--include-data-files=%s=wgpu/resources/wgpu_native-release.dll' % _dll)
+            print('包含 wgpu-native DLL:', _dll)
+    except Exception as _e:
+        print('警告: 未包含 wgpu-native DLL (%r)' % (_e,))
     print("打包玩家运行时:", ' '.join(cmd))
     subprocess.check_call(cmd)
     exe = os.path.join(DEFAULT_RUNTIME_DIR, 'game_player.dist', 'MyGame.exe')

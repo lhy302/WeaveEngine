@@ -466,14 +466,16 @@ def run_vk(scene=None, frames_n=None, keep=False, mini=False, no_shadow=False,
     # 2026-11-07: 脚本 request_game_exit() -> driver.request_quit -> 关窗退出
     _orig_draw = draw
 
-    def draw(dt=None):
+    def draw(*a, **k):
+        # 2026-11-07 修复: 原 draw 可能是无参签名, 必须原样转发, 不能固定传 dt
+        # (旧实现 _orig_draw(dt) -> "takes 0 positional arguments but 1 was given")
         try:
             if getattr(driver, 'request_quit', False):
                 canvas.close()
                 return
         except Exception:
             pass
-        return _orig_draw(dt)
+        return _orig_draw(*a, **k)
 
     canvas.request_draw(draw)
     import threading
