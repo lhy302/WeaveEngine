@@ -139,6 +139,19 @@ def make_zip(version):
     tmp_py = build_embed_pyzip(version, tmp_dir)
     target_py = os.path.join(tmp_dir, 'python')
     shutil.move(tmp_py, target_py)
+    # 2026-11-07 修复: --version 只改 zip 文件名, 包内 解释器.json 仍是旧版本 ->
+    # LoomHub 按元数据登记会装成旧版本 (实测 beta3 包被登记成 beta2)。
+    # 这里把请求的 version 写回包内元数据, 保证"文件名/元数据/安装目录"三者一致。
+    try:
+        _meta_dst = os.path.join(tmp_dir, 'Loom', os.path.basename(META_PATH))
+        with open(_meta_dst, 'r', encoding='utf-8') as _f:
+            _meta = json.load(_f)
+        _meta['version'] = version
+        with open(_meta_dst, 'w', encoding='utf-8') as _f:
+            json.dump(_meta, _f, ensure_ascii=False, indent=2)
+        print('[打包] 元数据版本 -> %s' % version)
+    except Exception as _e:
+        print('[打包] 警告: 元数据版本回写失败: %r' % _e)
     write_launcher(tmp_dir)
     write_meta_readme(tmp_dir, version)
     zip_path = os.path.join(DIST_DIR, 'Loom-%s.zip' % version)
