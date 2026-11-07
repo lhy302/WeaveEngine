@@ -67,6 +67,12 @@ def _resolve_runtime(runtime_arg):
             return os.path.dirname(p)
         raise SystemExit("--runtime 不存在: %s" % p)
     if os.path.isdir(DEFAULT_RUNTIME_DIR):
+        # 2026-11-07 修复: _build_runtime 的产物在 player_runtime/game_player.dist/,
+        # 旧实现直接返回 player_runtime -> 发布夹里 exe 被多套一层子目录
+        # (Desktop/PacMan2D/game_player.dist/MyGame.exe), 用户双击找不到 exe.
+        _dist = os.path.join(DEFAULT_RUNTIME_DIR, 'game_player.dist')
+        if os.path.isfile(os.path.join(_dist, 'MyGame.exe')):
+            return _dist
         return DEFAULT_RUNTIME_DIR
     raise SystemExit("缺少玩家运行时: 先 --build-runtime 打包, 或 --runtime 指定")
 

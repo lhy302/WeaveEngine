@@ -56,6 +56,15 @@ class PlayerApp(GLEngine):
             self.camera_distance = clamp_camera_distance(cam_out['distance'])
             self.camera_yaw = cam_out['yaw']
             self.camera_pitch = cam_out['pitch']
+            # 2026-11-07: 播放器也套用场景相机投影 (ortho/fov), 与编辑器播放一致
+            try:
+                self.ortho = bool(cam_out.get('ortho', False))
+                self.ortho_size = float(cam_out.get('ortho_size', 12.0))
+                import math as _m
+                if cam_out.get('fov') is not None:
+                    self._fov = _m.radians(float(cam_out['fov']))
+            except Exception:
+                pass
         # 玩家视角: 场景 active_camera (Unity Camera) 优先, 否则默认轨道相机
         cam = self.active_camera_object()
         if cam is not None:
