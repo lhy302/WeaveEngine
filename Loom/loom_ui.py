@@ -68,7 +68,11 @@ def _fire_binding(elem, event, *args):
             return False
         fired = False
         for obj, sc in insts:
-            fn = getattr(sc, method, None)
+            # 2026-11-07 修复: 方法在"运行时脚本实例"上, 不在 ScriptComponent 上。
+            # 旧实现直接 getattr(组件, method) 永远 None -> 声明式 UI 事件
+            # (ui_bind_event) 绑定后点击从不触发。
+            target = getattr(sc, '_script', None) or sc
+            fn = getattr(target, method, None)
             if fn is None:
                 print('[UI 事件] 脚本 %r 无方法 %r（触发自 %r.%r）'
                       % (sid, method, getattr(obj, 'name', '?'), elem.name))

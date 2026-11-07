@@ -1050,6 +1050,12 @@ def scene_to_dict(engine, camera=None):
     if isinstance(camera, dict):
         camera.setdefault("ortho", bool(getattr(engine, "ortho", False)))
         camera.setdefault("ortho_size", float(getattr(engine, "ortho_size", 12.0)))
+        # 2026-11-07: fov 随场景保存 (度), 播放时强制套用 = 完整相机初始化
+        try:
+            import math as _m
+            camera.setdefault("fov", float(_m.degrees(getattr(engine, "_fov", 1.0472))))
+        except Exception:
+            camera.setdefault("fov", 60.0)
     return {"version": SCENE_VERSION, "camera": camera,
             "gravity": getattr(engine, 'gravity', -9.8),   # 2026-08-30: 场景重力加速度
             "materials": [_emit_material(m) for m in mats],
@@ -1110,6 +1116,7 @@ def scene_from_dict(engine, data, camera_out=None):
             # 2026-11-07 2D: 投影模式随场景传递 (editor._apply_camera 消费)
             'ortho': bool(cam.get('ortho', False)),
             'ortho_size': _f1(cam.get('ortho_size'), 12.0),
+            'fov': _f1(cam.get('fov'), 60.0),
         })
     return models
 

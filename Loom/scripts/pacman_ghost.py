@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""pacman_ghost.py — 2D 吃豆人幽灵：沿走廊网格移动（不再绕圈）。
+"""pacman_ghost.py — 2D 吃豆人幽灵：走廊网格移动 + 同伴防重叠。
 
-约定: 墙名 墙_<x>_<z>，x/z 为整数世界格坐标；幽灵在格心之间直线移动，
-到格心后从"可通行且非反向"的邻居里随机选方向。
+约定: 墙名 墙_<x>_<z>；幽灵在格心间直线移动，到格心后从可通行且非反向的
+邻居里选方向。发现与同伴距离过近时立刻掉头，并有 0.1s 冷却防抖动。
 """
 import math
 import random
@@ -16,7 +16,9 @@ class PacmanGhostScript(Script):
     script_id = "pacman_ghost"
     name = "吃豆人幽灵"
     params = (("speed", "速度", 4.0, 0.5, 8.0, "%.1f"),
-              ("turn_bias", "转向概率", 0.25, 0.0, 1.0, "%.2f"))
+              ("turn_bias", "转向概率", 0.25, 0.0, 1.0, "%.2f"),
+              ("avoid_r", "同伴间距", 0.8, 0.2, 3.0, "%.2f"),
+              ("avoid_cd", "掉头冷却", 0.1, 0.0, 2.0, "%.2f"))
 
     def on_start(self):
         self._walls = set()
@@ -34,6 +36,7 @@ class PacmanGhostScript(Script):
         self._cx, self._cz = int(round(p.x)), int(round(p.z))
         self._tx, self._tz = self._cx, self._cz
         self._dir = None
+        self._avoid_cd = 0.0
         self._choose_dir()
 
     def _open(self, x, z):
@@ -61,8 +64,32 @@ class PacmanGhostScript(Script):
         self._tx = self._cx + self._dir[0]
         self._tz = self._cz + self._dir[1]
 
+    def _avoid(self, dt):
+        """同伴防重叠: 靠太近就掉头 (带冷却, 防抖)。"""
+        self._avoid_cd = max(0.0, self._avoid_cd - dt)
+        if self._avoid_cd > 0.0 or not self._dir:
+            return
+        p = self.engine.world_position(self.obj)
+        lim = float(self.vals["avoid_r"]) ** 2
+        for g in self.engine.models:
+            if g is self.obj:
+                continue
+            if not (getattr(g, "name", "") or "").startswith("幽灵"):
+                continue
+            gp = self.engine.world_position(g)
+            if (p.x - gp.x) ** 2 + (p.z - gp.z) ** 2 < lim:
+                back = (self._cx - self._dir[0], self._cz - self._dir[1])
+                self._dir = (-self._dir[0], -self._dir[1])
+                if self._open(*back):
+                    self._tx, self._tz = back
+                else:
+                    self._tx, self._tz = self._cx, self._cz
+                self._avoid_cd = float(self.vals["avoid_cd"])
+                return
+
     def update(self, dt):
         e = self.engine
+        self._avoid(dt)
         p = e.world_position(self.obj)
         tx, tz = float(self._tx), float(self._tz)
         dx, dz = tx - p.x, tz - p.z

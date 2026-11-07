@@ -10,7 +10,8 @@
     "yaw": 0.0,
     "pitch": -1.55,
     "ortho": true,
-    "ortho_size": 13.0
+    "ortho_size": 13.0,
+    "fov": 59.99999999999999
   },
   "gravity": -9.8,
   "materials": [
@@ -1233,7 +1234,174 @@
             "visible": true,
             "enabled": true,
             "z_order": 0,
-            "children": []
+            "children": [
+              {
+                "type": "panel",
+                "name": "通关面板",
+                "rect": [
+                  255.0,
+                  120.0,
+                  400.0,
+                  220.0
+                ],
+                "anchor": [
+                  0.0,
+                  0.0
+                ],
+                "pivot": [
+                  0.0,
+                  0.0
+                ],
+                "visible": true,
+                "enabled": true,
+                "z_order": 0,
+                "bg_color": [
+                  0,
+                  0,
+                  0,
+                  128
+                ],
+                "children": [
+                  {
+                    "type": "text",
+                    "name": "通关标题",
+                    "rect": [
+                      0.0,
+                      16.0,
+                      400.0,
+                      60.0
+                    ],
+                    "anchor": [
+                      0.0,
+                      0.0
+                    ],
+                    "pivot": [
+                      0.0,
+                      0.0
+                    ],
+                    "visible": true,
+                    "enabled": true,
+                    "z_order": 0,
+                    "text": "通 关 !",
+                    "font_size": 16,
+                    "color": [
+                      255,
+                      255,
+                      255
+                    ],
+                    "align": "left",
+                    "wrap_width": 0,
+                    "children": []
+                  },
+                  {
+                    "type": "button",
+                    "name": "重开按钮",
+                    "rect": [
+                      30.0,
+                      110.0,
+                      160.0,
+                      56.0
+                    ],
+                    "anchor": [
+                      0.0,
+                      0.0
+                    ],
+                    "pivot": [
+                      0.0,
+                      0.0
+                    ],
+                    "visible": true,
+                    "enabled": true,
+                    "z_order": 0,
+                    "text": "新开一局",
+                    "font_size": 16,
+                    "text_color": [
+                      255,
+                      255,
+                      255
+                    ],
+                    "normal_color": [
+                      70,
+                      80,
+                      100,
+                      255
+                    ],
+                    "hover_color": [
+                      90,
+                      100,
+                      125,
+                      255
+                    ],
+                    "pressed_color": [
+                      50,
+                      60,
+                      80,
+                      255
+                    ],
+                    "event_bindings": {
+                      "click": {
+                        "script": "pacman_player",
+                        "method": "on_restart"
+                      }
+                    },
+                    "children": []
+                  },
+                  {
+                    "type": "button",
+                    "name": "退出按钮",
+                    "rect": [
+                      215.0,
+                      110.0,
+                      160.0,
+                      56.0
+                    ],
+                    "anchor": [
+                      0.0,
+                      0.0
+                    ],
+                    "pivot": [
+                      0.0,
+                      0.0
+                    ],
+                    "visible": true,
+                    "enabled": true,
+                    "z_order": 0,
+                    "text": "退出游戏",
+                    "font_size": 16,
+                    "text_color": [
+                      255,
+                      255,
+                      255
+                    ],
+                    "normal_color": [
+                      70,
+                      80,
+                      100,
+                      255
+                    ],
+                    "hover_color": [
+                      90,
+                      100,
+                      125,
+                      255
+                    ],
+                    "pressed_color": [
+                      50,
+                      60,
+                      80,
+                      255
+                    ],
+                    "event_bindings": {
+                      "click": {
+                        "script": "pacman_player",
+                        "method": "on_quit"
+                      }
+                    },
+                    "children": []
+                  }
+                ]
+              }
+            ]
           }
         ]
       }

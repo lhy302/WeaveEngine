@@ -463,6 +463,18 @@ def run_vk(scene=None, frames_n=None, keep=False, mini=False, no_shadow=False,
             canvas.set_title("%s | %.0f FPS" % (title, fps))
             result[0] = fps
 
+    # 2026-11-07: 脚本 request_game_exit() -> driver.request_quit -> 关窗退出
+    _orig_draw = draw
+
+    def draw(dt=None):
+        try:
+            if getattr(driver, 'request_quit', False):
+                canvas.close()
+                return
+        except Exception:
+            pass
+        return _orig_draw(dt)
+
     canvas.request_draw(draw)
     import threading
     last_ok = [time.perf_counter()]

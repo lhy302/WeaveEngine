@@ -411,6 +411,18 @@ class SceneDriver:
         self.yaw = 0.0
         self.pitch = 0.0
         self.fov = math.radians(60.0)
+        # 2026-11-07: 暂停 / 退出 (与 EditorApp 同语义, 供脚本统一调用)
+        self.logic_paused = False
+        self.request_quit = False
+        self._request_exit_play = False
+        # 2026-11-07 修复: VK 播放器此前**从不加载** scripts/ 游戏脚本目录
+        # (GL 播放器继承 GLEngine.__init__ 会加载), 导致打包后自定义脚本不生效。
+        try:
+            import os as _os
+            from scripts import load_script_dir as _lsd
+            _lsd(_os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 'scripts'))
+        except Exception:
+            pass
         self.near = 0.1
         # 2026-11-06 R-02 修复 (双后端一致性): 这里原来写死 100.0, 而 GL 引擎
         # 在 2026-10-20 已把 far 提到 1000.0 (engine.py, 用户做远景/大场景需要)。
@@ -531,6 +543,11 @@ class SceneDriver:
         _def_yaw, _def_pitch = (0.6, -0.35) if _has_cam else (0.0, 0.0)
         # 2026-11-07 2D: 场景相机投影模式 (与 GL 编辑器同源)
         self.ortho = bool(cam.get('ortho', False))
+        # 2026-11-07: 玩家相机 fov (度) + 暂停/退出状态
+        try:
+            self.fov = float(cam.get('fov', 60.0)) * 3.141592653589793 / 180.0
+        except Exception:
+            pass
         self.ortho_size = float(cam.get('ortho_size', 12.0))
         self.target = _f3(cam.get('target'), (0, 0, 0))
         # 2026-11-06 R-03: 场景是外部输入, 距离在**入口**钳制 (与 GL 加载路径同语义).
@@ -596,6 +613,14 @@ class SceneDriver:
         if self._interp is not None:
             self._interp.advance()
 
+    def set_logic_paused(self, paused):
+        """2026-11-07: 统一暂停接口 (VK 播放器)."""
+        self.logic_paused = bool(paused)
+
+    def request_game_exit(self):
+        """2026-11-07: 统一退出接口 (VK 播放器 -> 关窗退出)."""
+        self.request_quit = True
+
     def _physics_frame(self, phys_dt):
         """分离批1: 60Hz 物理步 (R1: 只改调用时机, 桥三段一行不动)."""
         self._step_physics(phys_dt)
@@ -606,6 +631,10 @@ class SceneDriver:
         (★B7b 2026-10-16: 删 LOOM_NO_SPLIT 逃生门; 绑死模式仅由设置触发)."""
         # 2026-11-06 输入/相机帧首 (与 GL 同序: 鼠标结算 -> 挂父相机重应用 ->
         # 开发者视角鼠标 -> 逻辑步 (脚本)) —— 脚本后写仍覆盖, 契约不变。
+        # 2026-11-07 通关暂停: 逻辑帧冻结 (脚本/物理/动画都不走), 渲染继续
+        if getattr(self, 'logic_paused', False):
+            self._end_frame_input()
+            return (0, 0)
         self.consume_mouse_input()
         self._refresh_player_camera()
         # 2026-11-06 对齐 GL PlayerApp: 播放器本身**没有**开发者视角鼠标

@@ -831,6 +831,18 @@ class GLEngine(ShadowMixin, FrameComponentMixin, PhysicsMixin, InputMixin, HudMi
     # rebind_action 已抽出到 loom_input.InputMixin (见类定义继承).
 
     # ================ 脚本系统 (M27) ================
+    def set_logic_paused(self, paused):
+        """2026-11-07: 统一暂停接口 (脚本/编辑器/播放器同语义)."""
+        self._logic_paused = bool(paused)
+
+    def request_game_exit(self):
+        """2026-11-07: 统一"退出游戏"接口.
+        编辑器播放 -> 退出播放回编辑态; 独立播放器 -> 结束主循环."""
+        if getattr(self, 'is_playing', False):
+            self._request_exit_play = True
+        else:
+            self._running = False
+
     def update_scripts(self, delta_time):
         """播放期每帧调用: 遍历物体上所有脚本组件 (M25: 可多个), 惰性实例化并 update.
         优化 (2026-10-01): 快速早退与活跃脚本过滤 —— 场景无脚本时 0 迭代直接退出，

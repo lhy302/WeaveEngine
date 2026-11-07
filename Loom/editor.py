@@ -956,6 +956,13 @@ class EditorApp(GLEngine):
         # 2026-11-07 2D: 场景相机投影模式 (ortho=True 为正交, size=可见高度)
         self.ortho = bool(cam.get('ortho', False))
         self.ortho_size = float(cam.get('ortho_size', 12.0))
+        # 2026-11-07: 播放/加载时强制套用场景 fov (度 -> 弧度)
+        try:
+            import math as _m
+            if cam.get('fov') is not None:
+                self._fov = _m.radians(float(cam['fov']))
+        except Exception:
+            pass
         # 2026-11-06 R-03: 场景恢复同样在入口钳制 (与 Vk 后端一致)
         from loom_camera import clamp_camera_distance
         self.camera_distance = clamp_camera_distance(cam.get('distance', 10.0))
@@ -965,6 +972,8 @@ class EditorApp(GLEngine):
         # 恢复后编辑器打开即"无网格", 转动时才闪出 (实测根因之一). 运行时拖动
         # 仍可仰视 (编辑自由度), 仅恢复路径修正.
         self.camera_pitch = max(-1.55, min(0.0, cam.get('pitch', -0.35)))
+        # 2026-11-07: 记录场景相机 (播放时强制套用, 不让编辑态拖动后的视角带进播放)
+        self._scene_cam = dict(cam)
 
     def _save_scene(self, path=None):
         """保存场景. path 为 None 时弹系统文件对话框 (M19). 返回保存路径, 取消返回 None."""
@@ -1805,6 +1814,13 @@ class EditorApp(GLEngine):
                                    self.camera_yaw, self.camera_pitch,
                                    self.camera_roll, self.orbit_mode)   # 编辑器轨道视角, 退出恢复
             self.is_playing = True
+            # 2026-11-07: 播放强制相机 —— 编辑态滑到哪都不影响, 一律回到场景相机
+            try:
+                _sc = getattr(self, '_scene_cam', None)
+                if isinstance(_sc, dict) and _sc:
+                    self._apply_camera(_sc)
+            except Exception:
+                pass
             # 2026-11-07 可玩性修复: 点"播放"按钮后键盘焦点在工具栏按钮上，
             # 视口收不到 WASD（key_state 为空）-> 脚本 is_key/get_action 恒 False，
             # 表现为"播放了但角色不动"。进播放即把焦点交还视口。
@@ -1829,6 +1845,7 @@ class EditorApp(GLEngine):
             # 分离批5: 进播放清暂停态 (F9 暂停不跨播放会话; 按钮文字由 GUI 复位)
             self._logic_paused = False
             self._step_requested = False
+            self._request_exit_play = False   # 脚本可置 True 请求退出播放 (通关UI的"退出游戏")
             self._dev_cam_active = False     # 开发者相机接管不跨播放会话
             self._dev_cam_moved = False      # 自由移动盖回保护同复位 (重新回玩家视角)
             # 分离批2: 播放边界对齐 (快照首抓 = 当前编辑态位姿, 首帧不插值)
@@ -2106,6 +2123,14 @@ class EditorApp(GLEngine):
         # 下帧 advance 消费). FPS 预画帧不预取/不计数; 关闭时零开销.
         if not getattr(self, '_preframing', False):
             self._framebuf_prefetch(getattr(self, '_frame_start', time.perf_counter()))
+        # 2026-11-07 通关 UI 的"退出游戏": 脚本置 _request_exit_play,
+        # 帧末再退出播放 (不能在脚本迭代中还原场景)
+        if getattr(self, '_request_exit_play', False):
+            self._request_exit_play = False
+            try:
+                self.toggle_play()
+            except Exception:
+                pass
         if not self._external_ctx:      # 外部模式: 宿主 (QOpenGLWidget) 自动交换缓冲
             # 2026-10-18 A2: GLFW swap（原 pygame.display.flip）
             self._glfw_swap_buffers()
