@@ -175,27 +175,37 @@ def push_tag(tag):
         print('[发布] tag 已推送')
 
 
-ENGINE_BODY = """## Loom 引擎 0.1.0.beta1
+ENGINE_BODY = """## Loom 引擎 {version}
 
-首个内测版本。含嵌入式 Python 3.12 运行时（开箱即用，无需安装 Python）。
+> 内测版本序列：beta1 → beta2 → **{version}**（共 3 个内测版本）。含嵌入式 Python 3.12 运行时，开箱即用，无需安装 Python。
+
+### 本版要点
+
+- **预编译玩家运行时随包分发**（约 97 MB）：游戏开发机**无需 Python / 无需 C 编译器**，打包游戏约 2 秒（对齐 Unity 预置 UnityPlayer 的做法）
+- **渲染后端可切换**：`游戏设置.json` 的 `render_api`（`vulkan` / `opengl` / `auto`）；Vulkan 不兼容时自动崩一次并把配置回退为 OpenGL
+- **正交投影**（2D 游戏）+ 播放时强制套用场景相机（位置/朝向/距离/正交/FOV）
+- **鼠标锁定配置化**：`mouse_lock_allowed` / `mouse_locked`，并保留强制解锁键（可改键）
+- **键位可配置**：`key_bindings`（解锁键不再固定 Tab）；键位表 30 → **76 键**（F1–F12 / Esc / Enter / 字母数字 / 标点）
+- **修复**：Vulkan 看门狗 60 秒必杀（"玩一半闪退"）、VK 打包版所有 UI 按钮点击无效、播放器退出残留鼠标捕获
+- **崩溃日志落盘**：打包游戏目录生成 `日志.txt`（含完整 traceback 与 faulthandler 硬崩栈）
 
 ### 安装方式
 
 **方式 1：LoomHub 在线安装**
-LoomHub -> 解释器面板 -> 「从 GitHub 安装」-> 选 0.1.0.beta1 -> 下载并安装
+LoomHub -> 解释器面板 -> 「从 GitHub 安装」-> 选 {version} -> 下载并安装
 
 **方式 2：LoomHub 离线安装**
-下载下方 Loom-0.1.0.beta1.zip -> LoomHub -> 「安装 .zip」-> 选 zip
+下载下方 Loom-{version}.zip -> LoomHub -> 「安装 .zip」-> 选 zip
 
 **方式 3：手动解压**
-下载 zip -> 解压到任意目录 -> 双击 Loom.bat 启动
+下载 zip -> 解压到任意目录 -> 双击 `Loom.bat` 启动
 或 LoomHub -> 「导入目录」-> 选解压后的 Loom 子目录
 
 ### 系统要求
 Windows 10 64-bit 或更高（Python 已内置）
 """
 
-HUB_BODY = """## LoomHub 项目管理器 0.1.0
+HUB_BODY = """## LoomHub 项目管理器 {version}
 
 Loom 引擎的官方项目管理器。
 
@@ -208,9 +218,10 @@ Loom 引擎的官方项目管理器。
 - 目录导入：已手动解压的引擎可直接导入
 - 三模式移除：仅从列表移除 / 彻底删除磁盘文件 / 取消
 - 单实例保护：连点不会开多个窗口
+- **打开项目自动启用 Agent 通道**（`--agent`）：外部 Agent / MCP 可直接连上编辑器
 
 ### 安装
-下载下方 LoomHub-0.1.0-Setup.exe，双击安装。桌面会创建快捷方式，控制面板可卸载。
+下载下方 LoomHub-{version}-Setup.exe，双击安装。桌面会创建快捷方式，控制面板可卸载。
 
 ### 系统要求
 Windows 10 64-bit 或更高
@@ -224,7 +235,7 @@ def publish_engine(token):
     print('=' * 60)
     tag = 'engine-v%s' % ENGINE_VERSION
     title = 'Loom 引擎 %s' % ENGINE_VERSION
-    body = ENGINE_BODY.replace('0.1.0.beta1', ENGINE_VERSION)
+    body = ENGINE_BODY.format(version=ENGINE_VERSION)
     create_local_tag(tag, title)
     rel = create_release(tag, title, body, token, prerelease=True)
     upload_asset(rel, ENGINE_ZIP, token)
@@ -238,7 +249,7 @@ def publish_hub(token):
     print('=' * 60)
     tag = 'hub-v%s' % HUB_VERSION
     title = 'LoomHub 项目管理器 %s' % HUB_VERSION
-    body = HUB_BODY.replace('0.1.0', HUB_VERSION)
+    body = HUB_BODY.format(version=HUB_VERSION)
     create_local_tag(tag, title)
     rel = create_release(tag, title, body, token, prerelease=False)
     upload_asset(rel, HUB_SETUP, token)
