@@ -31,7 +31,7 @@ import numpy as np
 # 2026-10-18 A2: import pygame 已删（GLFW 窗口剥离；本文件不再引用 pygame 常量）
 import moderngl
 
-from matlib import mat4_perspective, mat4_view_yaw_pitch
+from matlib import mat4_perspective, mat4_ortho, mat4_view_yaw_pitch
 from loom_game_object import GameObject
 
 
@@ -783,7 +783,15 @@ class RenderMixin:
             self.apply_orbit_camera()
         V = mat4_view_yaw_pitch(np, (self.camera.x, self.camera.y, self.camera.z),
                                 self.camera_yaw, self.camera_pitch, self.camera_roll)
-        P = mat4_perspective(np, self._fov, self.width / self.height, self.near, self.far)
+        # 2026-11-07 2D: 播放器 (PlayerApp/GL) 也要支持正交投影 (与编辑器播放同源)
+        if getattr(self, 'ortho', False):
+            _h = float(getattr(self, 'ortho_size', 12.0))
+            _asp = self.width / max(1, self.height)
+            P = mat4_ortho(np, -_h * _asp * 0.5, _h * _asp * 0.5,
+                           -_h * 0.5, _h * 0.5, self.near, self.far)
+        else:
+            P = mat4_perspective(np, self._fov, self.width / self.height,
+                                 self.near, self.far)
         self._vp = V @ P                                      # 供 draw_lines / 射线拾取
         # 组6件3: u_view_proj / u_view_pos 差分上传 (相机静止帧跳过 GL 调用)
         vp4 = self._vp.astype('f4').tobytes()
