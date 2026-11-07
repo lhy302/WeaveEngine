@@ -58,9 +58,61 @@ def _parse_args(argv):
     return benchmark, n_tri, n_iter, run_scene, open_scene, editor, ui
 
 
-# 2026-10-18 选项1: _make_editor_view 已删除（--ui default/minimal 旧 pygame 视图
-# 路径随 pygame 窗口剥离一并移除，只剩 Qt 编辑器）。
+def _make_editor_view(ui_name, base=None):
+    """按 --ui 选择编辑器视图实现 (IEditorView). 返回 None = 用默认 LoomGUI.
+    2026-08-14: 'default' 时读设置选 GUI (自定义 GUI 来自 GUI/ 文件夹, 重启后生效;
+    加载失败自动回退官方返回 None).
+    2026-08-28: 默认官方 GUI = LoomGUI (ui/loom_gui.py, Qt 原生视图).
+    2026-11-06 恢复: 487120c「剥离 pygame 窗口」把它与 MinimalEditorView 一并删除,
+    但 editor.py:137 仍以 MinimalEditorView 作为"未注入 view 时的兜底", 且
+    build_entry.py:77 仍调用本函数 —— 删除直接造成 ModuleNotFoundError。
+    二者按当年实现恢复; Qt 编辑器仍是实际运行入口 (本函数只服务显式 --ui 路径)。"""
+    if ui_name == 'minimal':
+        from ui.minimal_editor_view import MinimalEditorView
+        return MinimalEditorView()
+    if ui_name in ('default', None, ''):
+        from guiloader import resolve_gui
+        return resolve_gui('loom', base=base)
+    return None
 
+
+def _cli_backend(argv):
+    """取 --backend <vulkan|opengl|auto> (缺省 None = 交给设置/默认).
+
+    2026-11-06 R-04 修复 (复核 B 指出): 本入口的 --run / 游戏配置.json 分支
+    原来直连 runtime.PlayerApp (恒 OpenGL), 既不解析 --backend 也不读
+    render_api —— 同一份发布物从 run_player/game_player 启动是 Vk,
+    从 Loom.py 启动却是 GL, "API 自由切换"在这个入口完全失效。
+    这里只解析参数, 真正的后端选择仍走 run_player.resolve_backend 单一事实。"""
+    for i, a in enumerate(argv):
+        if a == "--backend" and i + 1 < len(argv):
+            return argv[i + 1]
+    return None
+
+
+def _launch_player(scene, width=1280, height=800):
+    """按 --backend > 设置 render_api > 默认 的统一策略启动播放器.
+
+    LOOM_REMOTE_MODE=1 (离屏 GL + Qt 窗口白屏兜底) 强制 GL —— 该模式本身就是
+    "GL 不可见时改走离屏读回", 与 Vulkan 无关, 必须优先。
+
+    2026-11-07 (scan_11 P-07 修复): 这条优先规则**在本函数体里实现**, 不再只靠
+    --run 分支调用前的提前 return。原因是游戏配置.json 分支 (打包游戏双击启动)
+    也走本函数, 那条路径原先完全没有远程模式兜底 —— 远程/虚拟显示环境双击游戏
+    仍会命中 P0-1 白屏。(选择"实现分支"而不是删 docstring: 白屏兜底是真需求。)
+
+    显式 --backend 由 _cli_backend 判定, 交给 run_player 的后端策略
+    (Q6: 显式 vulkan 失败只报错不改写设置; 设置/默认走到 vulkan 失败则把
+    设置回退成 opengl 并崩一次)。
+    """
+    if os.environ.get('LOOM_REMOTE_MODE') == '1':
+        from loom_player_window import run_player_window
+        run_player_window(scene, width=width, height=height)
+        return
+    from run_player import resolve_backend, run_backend
+    cli = _cli_backend(sys.argv)
+    run_backend(resolve_backend(cli), scene, width=width, height=height,
+                explicit=(cli is not None))
 
 def _benchmark_math(n_tri=5000, n_iter=100):
     """
@@ -263,8 +315,9 @@ if __name__ == "__main__":
                 from loom_player_window import run_player_window
                 run_player_window(run_scene, width=1280, height=800)
                 sys.exit(0)
-            from runtime import PlayerApp
-            engine = PlayerApp(run_scene, 1280, 800)
+            # 2026-11-06 R-04: 走统一后端选择 (--backend > 设置 render_api > 默认)
+            _launch_player(run_scene)
+            sys.exit(0)
         else:
             # 游戏封装 (M38, Unity Build 模型): 无参数时若 exe/脚本旁有 游戏配置.json
             # 且含 "scene" -> 直接进游戏 (玩家双击启动 exe 即玩, 无需命令行/编辑器).
@@ -294,8 +347,10 @@ if __name__ == "__main__":
                 except SystemExit as e:
                     print(e)
                     sys.exit(1)
-                from runtime import PlayerApp
-                engine = PlayerApp(_scene, 1280, 800)
+                # 2026-11-06 R-04: 同上 —— 该入口也必须遵守后端选择,
+                # 否则"编辑器的游戏配置双击启动"与 run_player 行为不一致。
+                _launch_player(_scene)
+                sys.exit(0)
             else:
                 # Qt 编辑器 (2026-08-17): 原生 Qt 控件全重写 —— pygame(SDL) 窗口
                 # 会进程级污染中文输入法(IME)候选框, 编辑器弃用 pygame 做窗口;

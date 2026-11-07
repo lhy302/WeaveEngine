@@ -29,6 +29,90 @@
       "name": "场景",
       "scene": "Loom/保存/场景.json",
       "version": null
+    },
+    {
+      "name": "_m3_100obj",
+      "scene": "D:\\my-project - 副本\\Loom(py源代码-工作区)\\Loom\\保存\\_m3_100obj.json",
+      "version": null,
+      "engine_dir": "D:\\my-project - 副本\\Loom(py源代码-工作区)\\Loom"
+    },
+    {
+      "name": "_m3_noshadow",
+      "scene": "D:\\my-project - 副本\\Loom(py源代码-工作区)\\Loom\\保存\\_m3_noshadow.json",
+      "version": null,
+      "engine_dir": "D:\\my-project - 副本\\Loom(py源代码-工作区)\\Loom"
+    },
+    {
+      "name": "mcp_procedural_arena",
+      "scene": "D:\\my-project - 副本\\Loom(py源代码-工作区)\\Loom\\保存\\mcp_procedural_arena.json",
+      "version": null,
+      "engine_dir": "D:\\my-project - 副本\\Loom(py源代码-工作区)\\Loom"
+    },
+    {
+      "name": "压测500混合",
+      "scene": "D:\\my-project - 副本\\Loom(py源代码-工作区)\\Loom\\保存\\压测500混合.json",
+      "version": null,
+      "engine_dir": "D:\\my-project - 副本\\Loom(py源代码-工作区)\\Loom"
+    },
+    {
+      "name": "压测500球",
+      "scene": "D:\\my-project - 副本\\Loom(py源代码-工作区)\\Loom\\保存\\压测500球.json",
+      "version": null,
+      "engine_dir": "D:\\my-project - 副本\\Loom(py源代码-工作区)\\Loom"
+    },
+    {
+      "name": "压测50球",
+      "scene": "D:\\my-project - 副本\\Loom(py源代码-工作区)\\Loom\\保存\\压测50球.json",
+      "version": null,
+      "engine_dir": "D:\\my-project - 副本\\Loom(py源代码-工作区)\\Loom"
+    },
+    {
+      "name": "场景",
+      "scene": "D:\\my-project - 副本\\Loom(py源代码-工作区)\\Loom\\保存\\场景.json",
+      "version": null,
+      "engine_dir": "D:\\my-project - 副本\\Loom(py源代码-工作区)\\Loom"
+    },
+    {
+      "name": "_m3_100obj",
+      "scene": "D:\\my-project - 副本\\Loom(py源代码-工作区)\\Loom\\Projects\\_m3_100obj.json",
+      "version": null,
+      "engine_dir": "D:\\my-project - 副本\\Loom(py源代码-工作区)\\Loom"
+    },
+    {
+      "name": "_m3_noshadow",
+      "scene": "D:\\my-project - 副本\\Loom(py源代码-工作区)\\Loom\\Projects\\_m3_noshadow.json",
+      "version": null,
+      "engine_dir": "D:\\my-project - 副本\\Loom(py源代码-工作区)\\Loom"
+    },
+    {
+      "name": "mcp_procedural_arena",
+      "scene": "D:\\my-project - 副本\\Loom(py源代码-工作区)\\Loom\\Projects\\mcp_procedural_arena.json",
+      "version": null,
+      "engine_dir": "D:\\my-project - 副本\\Loom(py源代码-工作区)\\Loom"
+    },
+    {
+      "name": "压测500混合",
+      "scene": "D:\\my-project - 副本\\Loom(py源代码-工作区)\\Loom\\Projects\\压测500混合.json",
+      "version": null,
+      "engine_dir": "D:\\my-project - 副本\\Loom(py源代码-工作区)\\Loom"
+    },
+    {
+      "name": "压测500球",
+      "scene": "D:\\my-project - 副本\\Loom(py源代码-工作区)\\Loom\\Projects\\压测500球.json",
+      "version": null,
+      "engine_dir": "D:\\my-project - 副本\\Loom(py源代码-工作区)\\Loom"
+    },
+    {
+      "name": "压测50球",
+      "scene": "D:\\my-project - 副本\\Loom(py源代码-工作区)\\Loom\\Projects\\压测50球.json",
+      "version": null,
+      "engine_dir": "D:\\my-project - 副本\\Loom(py源代码-工作区)\\Loom"
+    },
+    {
+      "name": "场景",
+      "scene": "D:\\my-project - 副本\\Loom(py源代码-工作区)\\Loom\\Projects\\场景.json",
+      "version": null,
+      "engine_dir": "D:\\my-project - 副本\\Loom(py源代码-工作区)\\Loom"
     }
   ]
 }

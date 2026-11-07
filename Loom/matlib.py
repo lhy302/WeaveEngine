@@ -81,14 +81,22 @@ def decompose_euler(R):
       R[0,2] = -sinβ,  R[1,2] = sinα·cosβ,  R[2,2] = cosα·cosβ
       R[0,1] = cosβ·sinγ, R[0,0] = cosβ·cosγ
     -> β = asin(-R[0,2]); α = atan2(R[1,2], R[2,2]); γ = atan2(R[0,1], R[0,0])
+
+    万向锁 (|cosβ| < 1e-9, 即 β=±π/2): 令 γ=0, 只剩 α∓γ 可辨, 但 β 的**符号**
+    决定 α 的 atan2 取法 (2026-11-07 P-13/P-14 修复, 原代码只对 β=+π/2 正确):
+      β=+π/2: R[1,0]=sin(α-γ), R[1,1]=cos(α-γ) -> α=atan2(R[1,0], R[1,1])
+      β=-π/2: R[1,0]=-sin(α+γ), R[1,1]=cos(α+γ) -> α=atan2(-R[1,0], R[1,1])
+    重建仍满足 mat4_rotation(α,β,0) == R (误差 < 1e-15), 故 set_parent 在奇点
+    仍保持世界旋转.
     """
     import numpy as _np
     R = _np.asarray(R, dtype=_np.float64)
     r = R[:3, :3]
     beta = math.asin(max(-1.0, min(1.0, -float(r[0, 2]))))
     cb = math.cos(beta)
-    if abs(cb) < 1e-9:      # 万向锁: 令 γ=0, α 从剩余分量取
-        alpha = math.atan2(float(r[1, 0]), float(r[1, 1]))
+    if abs(cb) < 1e-9:      # 万向锁: 令 γ=0, α 从剩余分量取 (符号随 β 正负)
+        s = 1.0 if beta > 0.0 else -1.0
+        alpha = math.atan2(s * float(r[1, 0]), float(r[1, 1]))
         gamma = 0.0
     else:
         alpha = math.atan2(float(r[1, 2]), float(r[2, 2]))

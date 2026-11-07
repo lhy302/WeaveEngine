@@ -27,10 +27,19 @@ plugin_loader.py — Loom 插件加载器 (L1 分级重设计, 2026-08-27)
     _RESTRICTED_MODULES 注释, 引擎能力一律走 api.*)
   - 文件系统: 插件资源走 api.read_asset(name) (限插件目录, 只读)
   - 动态代码: exec/eval 不可用; __import__ 换白名单版
-  - **信任级别**: 本环境拦截"随手抓系统" (直写/直导入/拼接名), **不拦截
-    有意元编程** (__import__.__globals__ / __subclasses__ 属性链是 Python
-    语言机制, 进程内无隔离方案) —— 带毒插件与带毒脚本同级威胁, 只投放
-    可信来源; 真正隔离方案 (插件子进程最小权限) 见《Loom插件系统分级方案.txt》L2 待办
+  - 2026-11-07 (审计 scan_09 P-01/P-02, 裁决 Q1=A "受限环境是安全边界"):
+    白名单模块只以 plugin_sandbox._ModuleProxy 代理交付 (下划线属性/子模块
+    一律 AttributeError → collections._sys / random._os / json.codecs /
+    re.enum 四条链断根); 受限插件拿到的 api 是 plugin_sandbox._GuardedApi
+    代理, 宿主异常在边界被清洗成无宿主栈的新异常 (e.__traceback__ 只能看到
+    插件自己 + 沙箱帧, 拿不到本模块 f_globals 的 os/sys/importlib);
+    traceback/frame/code 族同时进 _RESTRICTED_ATTR_NAMES (AST 直接书写拒载)。
+  - **信任级别 (2026-11-07 按裁决 Q1=A 重述)**: 受限环境按**安全边界**维护
+    —— 已证实的逃逸链 (白名单模块命名空间 / 异常 traceback / __globals__ 等)
+    全部堵死并有固定靶场回归 (tests/test_plugin_sandbox_escape.py), 名单式
+    防御不再当作"可选护栏"。**仍未覆盖**的是刻意混淆的未列名反射面 (Python
+    进程内无强隔离), 因此: 带毒插件与带毒脚本同级威胁, 只投放可信来源;
+    真正的硬隔离方案 (插件子进程最小权限) 见《Loom插件系统分级方案.txt》L2 待办
 
 插件目录结构 (投放式, 放进即装/删掉即卸载):
   plugins/player/<任意目录名>/
@@ -125,7 +134,7 @@ def _engine_ok(min_engine):
 #   插件要引擎能力一律走 api.* (L1: register_script / register_editor_button
 #   / read_asset)。
 from plugin_sandbox import (          # noqa: E402
-    _RESTRICTED_MODULES, _BANNED_MODULES, restricted_import,
+    _RESTRICTED_MODULES, _BANNED_MODULES, restricted_import, guard_api,
 )
 
 
@@ -190,10 +199,25 @@ def _restricted_builtins():
 # dir/getattr(黑面名) 调用)。AST 拦的是"直接写" —— 正常插件 (api.register_
 # script/register_editor_button/read_asset + 纯数学) 0 误伤; 刻意混淆仍可绕
 # (诚实档位=防误用拦阻, 真安全边界 = L2 子进程最小权限, 见方案文档)。
+# 2026-11-07 (审计 scan_09 P-02, 裁决 Q1=A): 补 traceback/frame/code 族 ——
+# 逃逸链 2 的实锤形态是 `e.__traceback__.tb_next.tb_frame.f_globals`
+# (异常由宿主 api 校验抛出, tb_frame.f_globals 就是 plugin_loader 命名空间,
+# os/sys/importlib 全在)。这条不依赖白名单模块, 属"未列名反射面"。
+# 运行时侧由 plugin_sandbox.guard_api 兜底 (宿主异常在边界被替换成无宿主栈
+# 的新异常), 这里的 AST 名单是"直接书写"的第一道门 (纵深防御)。
 _RESTRICTED_ATTR_NAMES = frozenset((
     '__globals__', '__subclasses__', '__builtins__', '__class__',
     '__bases__', '__mro__', '__dict__', '__reduce__', '__reduce_ex__',
     '__getattribute__', '__setattr__', '__getattr__',
+    # ---- traceback / frame / code 族 (scan_09 P-02) ----
+    '__traceback__', '__traceback_hide__', '__context__', '__cause__',
+    'tb_frame', 'tb_next', 'tb_prev', 'tb_lineno', 'tb_lasti',
+    'f_globals', 'f_locals', 'f_builtins', 'f_back', 'f_code', 'f_trace',
+    'f_lasti', 'f_lineno', 'f_contiguous',
+    'gi_frame', 'gi_code', 'gi_yieldfrom',
+    'cr_frame', 'cr_code', 'cr_await', 'cr_origin',
+    'ag_frame', 'ag_code', 'ag_await',
+    '__code__', '__closure__', '__defaults__', '__kwdefaults__',
 ))
 _RESTRICTED_RETRIEVER_FUNCS = frozenset((
     'vars', 'locals', 'globals', 'dir', 'getattr',
@@ -254,6 +278,50 @@ def _load_entry_restricted(entry_path, mod_name):
     ns = mod.__dict__
     ns['__builtins__'] = _restricted_builtins()
     exec(code, ns)
+    sys.modules[mod_name] = mod
+    return mod
+
+
+def _read_entry_bytes(entry_path):
+    """一次性读入口文件 bytes (后续哈希与编译都用这一份)."""
+    with open(entry_path, 'rb') as f:
+        return f.read()
+
+
+def _verify_entry_bytes(info, dir_path, entry_path, src, base=None):
+    """核心插件入口的二次校验: 被执行的字节必须等于信任表指纹 (scan_09 P-03).
+
+    信任闸 core_trust_state 先对目录算 SHA256、_load_one 再重新 open(entry)
+    执行, 两步之间文件可被替换 (TOCTOU): 哈希的是 benign, 执行的是 malicious。
+    这里对**即将 compile 的同一份 bytes** 重算 SHA256 并比对信任表:
+      - 替换发生在读取前 -> 指纹不符 -> 拒载 (broken);
+      - 替换发生在读取后 -> 执行的就是已校验的那份 bytes, 攻击者赢不了窗口。
+    """
+    rec = _load_trust(base).get(info['id'])
+    if not rec or rec.get('path') != dir_path:
+        raise ValueError('核心插件信任记录缺失/路径不匹配 (TOCTOU 防护): %s'
+                         % info['id'])
+    rel = os.path.relpath(entry_path, dir_path).replace('\\', '/')
+    expected = (rec.get('files') or {}).get(rel)
+    if not expected:
+        raise ValueError('核心插件信任表缺少入口指纹 (TOCTOU 防护): %s' % rel)
+    actual = hashlib.sha256(src).hexdigest()
+    if actual != expected:
+        raise ValueError('核心插件入口与信任指纹不一致 (TOCTOU 防护): %s'
+                         % rel)
+
+
+def _load_entry_unrestricted(src, entry_path, mod_name):
+    """全权插件入口: 编译并执行**调用方已校验的同一份 bytes** (scan_09 P-03).
+
+    不再让 SourceFileLoader.exec_module 重新读盘 (那会在 hash 与执行之间
+    再开一次 TOCTOU 窗口); 仍用 spec/module_from_spec 保留 __spec__ /
+    __loader__ / __package__ 语义, 与旧加载方式对插件可见的行为一致。
+    """
+    spec = importlib.util.spec_from_file_location(mod_name, entry_path)
+    mod = importlib.util.module_from_spec(spec)
+    mod.__file__ = entry_path
+    exec(compile(src, entry_path, 'exec'), mod.__dict__)
     sys.modules[mod_name] = mod
     return mod
 
@@ -388,6 +456,10 @@ class PluginAPI:
         self.pending = []
         self._sids = set()
         self._path = path                # 插件目录 (read_asset 根)
+        # 2026-11-07 (scan_09 P-02): 受限插件实际拿到的是
+        # plugin_sandbox.guard_api(self) 代理壳; 本字段保存该壳, 供
+        # deactivate 钩子以同一对象调用 (插件视角前后一致)。
+        self._gapi = None
 
     def register(self, kind, item):
         if kind == 'script':
@@ -398,12 +470,24 @@ class PluginAPI:
               (self.info['id'], kind))
 
     def register_script(self, cls):
-        """注册行为脚本类 (与 scripts.SCRIPTS @register 同池, 检查器可挂)."""
+        """注册行为脚本类 (与 scripts.SCRIPTS @register 同池, 检查器可挂).
+
+        2026-11-07 (审计 scan_09 P-05, 裁决 Q2=A): **禁止覆盖任何已存在 id**
+        —— 内建 (rotate/bob/orbit/...) 与别的插件已注册的 id 都不许被顶掉。
+        覆盖后卸载按 id pop 会让内建/他人脚本永久消失 (无备份可恢复), 属
+        "注册表无所有权"缺陷。冲突 = 抛 ValueError, 由 _load_one 事务回滚
+        (load 报 broken, 不留残渣)。同一插件重复注册**同一个类**是幂等,
+        不算冲突 (register 被调两次的容错)。"""
         from scripts import SCRIPTS
         sid = getattr(cls, 'script_id', None)
         if not isinstance(sid, str) or not sid.strip():
             raise ValueError('register_script 需要 Script 子类且 '
                              'script_id 非空字符串')
+        owner = SCRIPTS.get(sid)
+        if owner is not None and owner is not cls:
+            raise ValueError('插件 %s 注册脚本 id 冲突: %r 已被占用'
+                             ' (禁止覆盖内建/其他插件脚本, Q2=A)'
+                             % (self.info.get('id', '?'), sid))
         SCRIPTS[sid] = cls
         self._sids.add(sid)
 
@@ -461,22 +545,65 @@ def core_plugin_root(base=None):
     return os.path.join(base or _PROGRAM_DIR, CORE_PLUGIN_DIR_NAME)
 
 
-def _load_one(dir_path, info, kind, layer):
+def _registry_snapshot():
+    """注册表快照 (事务回滚用): (脚本 id 集合, 按钮表副本)."""
+    from scripts import SCRIPTS
+    return set(SCRIPTS), list(_EDITOR_BUTTONS)
+
+
+def _rollback_load(api, mod_name, sids_before, buttons_before):
+    """加载失败回滚 (2026-11-07, 审计 scan_09 P-04 注册事务化).
+
+    register() 可能在**部分注册之后**抛异常 (依赖缺失/参数错/脚本 bug 均可)。
+    修复前: SCRIPTS/工具栏按钮/sys.modules 三项残留, 而 _LOADED 不写入 →
+    unload_plugin 走"插件未加载"直接返回, 清理链不可达 (坏插件"没加载"却
+    仍在检查器下拉里可挂载执行)。现在失败路径在这三张表上全部还原。
+    """
+    from scripts import SCRIPTS
+    for sid in list(getattr(api, '_sids', ()) or ()):
+        if sid not in sids_before:       # 只撤本次新增, 不伤既有条目
+            SCRIPTS.pop(sid, None)
+    _EDITOR_BUTTONS[:] = buttons_before
+    try:
+        sys.modules.pop(mod_name, None)
+    except Exception:
+        pass
+
+
+def _load_one(dir_path, info, kind, layer, base=None):
     """加载单插件 entry.py (普通插件按 _MODE 受限/全权, 核心恒全权).
-    返回 (api, mod); 异常向上抛由调用方隔离."""
+    返回 (api, mod); 异常向上抛由调用方隔离.
+
+    2026-11-07 (审计 scan_09 P-02/P-03/P-04):
+      - 受限模式 (kind=standard 且 _MODE=editor) 下, register(api) 拿到的是
+        plugin_sandbox.guard_api(api) 代理壳: 宿主异常到不了插件手 (无宿主栈);
+      - 核心插件 (kind=core) 先读入口 bytes、按信任表指纹二次校验, 再编译
+        **同一份 bytes** —— 关闭 hash→exec 的 TOCTOU 窗口 (P-03);
+      - 全过程事务化: 任一步抛异常 → _rollback_load 还原 SCRIPTS/按钮/
+        sys.modules, 不留半注册残渣。"""
     api = PluginAPI(info, kind=kind, layer=layer, path=dir_path)
     entry_path = os.path.join(dir_path, info['entry'])
     mod_name = 'loom_plugin_' + re.sub(r'[^A-Za-z0-9_]', '_', info['id'])
-    if kind == 'standard' and _MODE == 'editor':
-        mod = _load_entry_restricted(entry_path, mod_name)
-    else:
-        spec = importlib.util.spec_from_file_location(mod_name, entry_path)
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-    reg = getattr(mod, 'register', None)
-    if not callable(reg):
-        raise ValueError('entry.py 未提供 register(api) 钩子')
-    reg(api)
+    restricted = (kind == 'standard' and _MODE == 'editor')
+    sids_before, buttons_before = _registry_snapshot()
+    try:
+        if restricted:
+            mod = _load_entry_restricted(entry_path, mod_name)
+        else:
+            # P-03: 一次读取 -> (核心) 校验指纹 -> 编译执行同一份 bytes。
+            src = _read_entry_bytes(entry_path)
+            if kind == 'core':
+                _verify_entry_bytes(info, dir_path, entry_path, src, base)
+            mod = _load_entry_unrestricted(src, entry_path, mod_name)
+        reg = getattr(mod, 'register', None)
+        if not callable(reg):
+            raise ValueError('entry.py 未提供 register(api) 钩子')
+        target = guard_api(api) if restricted else api
+        api._gapi = target
+        reg(target)
+    except Exception:
+        _rollback_load(api, mod_name, sids_before, buttons_before)
+        raise
     return api, mod
 
 
@@ -521,7 +648,7 @@ def _try_scan_folder(folder, kind, result, base, seen):
         if info['id'] in _DISABLED:
             continue
         try:
-            api, mod = _load_one(d, info, kind, layer)
+            api, mod = _load_one(d, info, kind, layer, base)
         except Exception as e:
             result['broken'].append({'id': info['id'], 'error': repr(e)})
             print('[插件] 加载「%s」失败, 已跳过回退官方: %r'
@@ -529,7 +656,8 @@ def _try_scan_folder(folder, kind, result, base, seen):
             continue
         _LOADED[info['id']] = {'info': info, 'path': d,
                                'layer': layer, 'kind': kind,
-                               'api': api, 'mod': mod}
+                               'api': api, 'mod': mod,
+                               'gapi': getattr(api, '_gapi', None)}
         result['loaded'].append(info['id'])
         print('[插件] 已加载「%s」%s v%s (%s层%s)' % (
             info['id'], info.get('name', ''), info['version'], layer,
@@ -573,15 +701,23 @@ def _load_from_src(src, mod_name):
 def load_plugin_from_pack(plugin_id, entry_src, assets, info, layer):
     """封装游戏玩家端: 从解密后的插件包加载单插件 (全权, 内容已可信).
     assets = {相对路径: bytes} (插件资源, 供 read_asset 类扩展; L1 仅 entry).
-    返回 (api, mod) 或抛异常. 供 game_player 用."""
+    返回 (api, mod) 或抛异常. 供 game_player 用.
+
+    2026-11-07 (审计 scan_09 P-04): 与 _load_one 同一套事务语义 —— 部分注册后
+    抛异常时回滚 SCRIPTS/按钮/sys.modules, 不把半成品留给运行中的玩家进程。"""
     api = PluginAPI(info, kind='core', layer=layer, path='')
     mod_name = 'loom_gameplugin_' + re.sub(r'[^A-Za-z0-9_]', '_',
                                            info['id'])
-    mod = _load_from_src(entry_src, mod_name)
-    reg = getattr(mod, 'register', None)
-    if not callable(reg):
-        raise ValueError('entry.py 未提供 register(api) 钩子')
-    reg(api)
+    sids_before, buttons_before = _registry_snapshot()
+    try:
+        mod = _load_from_src(entry_src, mod_name)
+        reg = getattr(mod, 'register', None)
+        if not callable(reg):
+            raise ValueError('entry.py 未提供 register(api) 钩子')
+        reg(api)
+    except Exception:
+        _rollback_load(api, mod_name, sids_before, buttons_before)
+        raise
     return api, mod
 
 
@@ -640,12 +776,23 @@ def unload_plugin(plugin_id, disable=True):
     try:
         deact = getattr(entry['mod'], 'deactivate', None)
         if callable(deact):
-            deact(entry['api'])
+            # 2026-11-07 (scan_09 P-02): 受限插件始终拿到同一个代理壳, 卸载
+            # 钩子里也不会突然拿到真 PluginAPI (否则卸钩子可绕过异常清洗)。
+            deact(entry.get('gapi') or entry['api'])
         from scripts import SCRIPTS
         for sid in entry['api']._sids:
             SCRIPTS.pop(sid, None)
         _EDITOR_BUTTONS[:] = [b for b in _EDITOR_BUTTONS
                               if b[2] != plugin_id]
+        # 2026-11-07 (审计 scan_09 P-10): 卸载必须摘掉本插件加载时写入
+        # sys.modules 的模块, 否则已卸载插件的代码/globals 仍被解释器缓存
+        # (import 仍命中旧代码, 热重载表现为"旧插件常驻")。
+        # 只摘自己那份: 仅当 sys.modules 里的同名条目**就是**本次加载的模块
+        # 对象时才 pop —— 名字被别人替换/同名系统模块一律不动。
+        mod = entry.get('mod')
+        mod_name = getattr(mod, '__name__', None)
+        if mod_name and sys.modules.get(mod_name) is mod:
+            sys.modules.pop(mod_name, None)
     except Exception as e:
         return False, repr(e)
     del _LOADED[plugin_id]

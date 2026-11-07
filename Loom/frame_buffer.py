@@ -133,7 +133,13 @@ class RenderFrameBuffer:
         # 离屏画布 (engine 持 GL ctx; 惰性建, 尺寸跟随)
         self._fb = None
         self._fbo = None
+        self._depth = None             # 深度附件 (预画需要真实深度测试)
         self._size = (0, 0)
+        # 2026-11-07 P1 (Q8=A): 预画必须真正落到离屏 FBO. e.render 内部通过
+        # engine._screen_fb() 绑定渲染目标; begin() 需要临时把 engine 的
+        # _external_fb 指向本 FBO, commit/abort 再恢复.
+        self._engine = None
+        self._prev_external = None     # (external_ctx, external_fb) 恢复用
         # 状态机: idle(无预画) -> ready(预画完成待 blit)
         self.state = 'idle'
         # 度量
@@ -176,32 +182,112 @@ class RenderFrameBuffer:
 
     # ---------- GL 资源 (engine 侧驱动) ----------
     def ensure_canvas(self, ctx, w, h):
-        """离屏画布 (RGB + 深度), 尺寸变化重建."""
+        """离屏画布 (RGB + 深度), 尺寸变化重建.
+        2026-11-07 Q8=A: 旧实现只有颜色附件 -> 预画帧无深度缓冲, 深度测试
+        失效 (近处物体被远处覆盖/黑帧). 补 depth renderbuffer 附件."""
         if self._fb is not None and self._size == (w, h):
             return
         self._release()
         self._fb = ctx.texture((w, h), 4, dtype='f1')
         self._fb.filter = (3553, 3553)  # GL_LINEAR
-        self._fbo = ctx.framebuffer(color_attachments=[self._fb])
+        depth = None
+        try:
+            depth = ctx.depth_renderbuffer((w, h))
+        except Exception:
+            try:
+                depth = ctx.depth_texture((w, h))
+            except Exception:
+                depth = None           # 测试桩/旧 moderngl: 无深度附件也不崩
+        self._depth = depth
+        kwargs = {'color_attachments': [self._fb]}
+        if depth is not None:
+            kwargs['depth_attachment'] = depth
+        self._fbo = ctx.framebuffer(**kwargs)
         self._size = (w, h)
 
-    def begin(self, ctx, w, h):
-        """预画开始: 绑定离屏 FBO. 返回 True = 可以画."""
+    def _resolve_engine(self, ctx):
+        """找到持有本缓冲的引擎 (engine.__init__ 只 new 本对象, 未回传引用).
+
+        优先按 _render_buf is self 精确匹配; 退化按 ctx 身份匹配. 只在 begin
+        时惰性解析, 无额外生命周期假设.
+        """
+        if self._engine is not None:
+            return self._engine
+        try:
+            from engine import GLEngine
+            live = [r() for r in tuple(getattr(GLEngine, '_LIVE_INSTANCES', ()))]
+            for e in live:
+                if e is not None and getattr(e, '_render_buf', None) is self:
+                    self._engine = e
+                    return e
+            for e in live:
+                if e is not None and getattr(e, 'ctx', None) is ctx:
+                    self._engine = e
+                    return e
+        except Exception:
+            pass
+        return None
+
+    def _restore_external_fb(self):
+        """恢复引擎渲染目标 (预画把 _external_fb 临时指向离屏 FBO)."""
+        if self._engine is not None and self._prev_external is not None:
+            ext_ctx, ext_fb = self._prev_external
+            try:
+                if ext_ctx is not None:
+                    self._engine._external_ctx = ext_ctx
+                self._engine._external_fb = ext_fb
+            except Exception:
+                pass
+        self._prev_external = None
+
+    def begin(self, ctx, w, h, engine=None):
+        """预画开始: 绑定离屏 FBO + 临时重定向引擎渲染目标. 返回 True = 可以画.
+
+        2026-11-07 Q8=A: e.render 内部经 engine._screen_fb() 绑定 widget FBO,
+        旧 begin 只 use() 离屏 FBO -> 实际画到屏幕, 离屏空白, 下一拍 blit
+        空白 = 黑帧. 这里在渲染期间把 engine._external_fb 指向离屏 FBO.
+        """
         if not self.enabled:
             return False
         self.ensure_canvas(ctx, w, h)
+        eng = engine if engine is not None else self._resolve_engine(ctx)
+        if eng is not None:
+            self._engine = eng
+        self._prev_external = None
+        if eng is not None:
+            self._prev_external = (getattr(eng, '_external_ctx', None),
+                                   getattr(eng, '_external_fb', None))
+            try:
+                eng._external_ctx = True      # 强制走 _screen_fb() 分支
+                eng._external_fb = self._fbo
+            except Exception:
+                self._prev_external = None
         self._fbo.use()
+        try:
+            ctx.viewport = (0, 0, w, h)
+            ctx.scissor = None
+        except Exception:
+            pass
+        try:
+            ctx.clear(0.0, 0.0, 0.0, 1.0, depth=1.0)
+        except TypeError:
+            try:
+                ctx.clear(0.0, 0.0, 0.0, 1.0)
+            except Exception:
+                pass
         return True
 
     def commit(self):
-        """预画完成 → ready (等待节拍点消费)."""
+        """预画完成 → ready (等待节拍点消费). 恢复引擎渲染目标."""
         if self.enabled and self._fbo is not None:
             self.state = 'ready'
             self.preframes += 1
+        self._restore_external_fb()
 
     def abort(self):
-        """预画中断 (异常/resize): 作废回 idle."""
+        """预画中断 (异常/resize): 作废回 idle. 恢复引擎渲染目标."""
         self.state = 'idle'
+        self._restore_external_fb()
 
     # ---------- 消费 ----------
     def has_ready(self):
@@ -218,12 +304,27 @@ class RenderFrameBuffer:
         return True
 
     def _release(self):
+        # 预画中途释放: 先恢复引擎原渲染目标 (若 begin 已临时改写)
+        self._restore_external_fb()
+        # 引擎若仍指向本 FBO, 摘掉引用防悬空绑定
+        if self._engine is not None and \
+                getattr(self._engine, '_external_fb', None) is self._fbo:
+            try:
+                self._engine._external_fb = None
+            except Exception:
+                pass
         if self._fbo is not None:
             try:
                 self._fbo.release()
             except Exception:
                 pass
             self._fbo = None
+        if self._depth is not None:
+            try:
+                self._depth.release()
+            except Exception:
+                pass
+            self._depth = None
         if self._fb is not None:
             try:
                 self._fb.release()

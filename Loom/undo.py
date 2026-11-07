@@ -24,6 +24,48 @@ import sceneio
 
 # ---------------- 快照工具 ----------------
 
+def _material_state(mat):
+    """材质内容快照 (2026-11-07): albedo/PBR/env 等修改也要可撤销.
+
+    材质是共享资产: 快照只存字段引用, undo 时写回同一材质对象 (所有引用者
+    一起回滚), 与"改一个材质全变"的资产语义一致.
+    """
+    if mat is None:
+        return None
+    return {
+        'color': mat.color,
+        'saturation': mat.saturation,
+        'metallic': getattr(mat, 'metallic', 0.0),
+        'roughness': getattr(mat, 'roughness', 0.5),
+        'pbr': getattr(mat, 'pbr', False),
+        'albedo': getattr(mat, 'albedo', None),
+        'normal_map': getattr(mat, 'normal_map', None),
+        'env_map': getattr(mat, 'env_map', None),
+    }
+
+
+def _apply_material_state(mat, state):
+    """把材质内容快照写回 (undo/redo 共用). 旧快照无 material_state -> 跳过."""
+    if mat is None or not state:
+        return
+    if 'color' in state:
+        mat.color = state['color']
+    if 'saturation' in state:
+        mat.saturation = state['saturation']
+    if 'metallic' in state:
+        mat.metallic = state['metallic']
+    if 'roughness' in state:
+        mat.roughness = state['roughness']
+    if 'pbr' in state:
+        mat.pbr = state['pbr']
+    if 'albedo' in state:
+        mat.albedo = state['albedo']
+    if 'normal_map' in state:
+        mat.normal_map = state['normal_map']
+    if 'env_map' in state:
+        mat.env_map = state['env_map']
+
+
 def snapshot(m):
     """物体可撤销字段 -> dict (不变式: 与 apply 成对)"""
     return {
@@ -40,6 +82,18 @@ def snapshot(m):
         'tag': m.tag,
         # M23: 材质引用 (换材质时恢复原材质). 恒存在, 但颜色改动的命令前后同引用.
         'material': m.renderer.material,
+        # 2026-11-07 Q5=A: 材质内容 (albedo/PBR/env) 也进快照, 否则检查器改
+        # 材质后 undo 只回引用不回内容 (共享材质内容仍是改后的值).
+        'material_state': _material_state(m.renderer.material),
+        # 2026-11-07 Q5=A: 法线模式/Prefab 归属/LOD 配置 (旧快照无此键 -> apply 跳过)
+        'normal_mode': m.normal_mode,
+        'prefab_ref': getattr(m, 'prefab_ref', None),
+        'lod_levels': (list(m.renderer.lod_levels)
+                       if getattr(m.renderer, 'lod_levels', None) else None),
+        'lod_screen_levels': (list(m.renderer.lod_screen_levels)
+                              if getattr(m.renderer, 'lod_screen_levels', None)
+                              else None),
+        'lod_bias': getattr(m.renderer, 'lod_bias', 1.0),
         # M25 组件化: 快照全部脚本组件 (可多个). 元组 (id, vars 副本) 列表.
         'scripts': [(sc.script_id, dict(sc.script_vars)) for sc in m.scripts],
         # M28: 碰撞体 (shape, enabled, friction, restitution) — B1 加接触材质;
@@ -77,8 +131,25 @@ def apply_snapshot(m, snap):
     m.scale = tuple(snap['scale'])
     m.color = snap['color']
     m.saturation = snap['saturation']
+    # 2026-11-07 Q5=A: 材质内容 (albedo/PBR/env/金属度/粗糙度) 回写
+    if 'material_state' in snap:
+        _apply_material_state(m.renderer.material, snap['material_state'])
     m.visible = snap['visible']
     m.name = snap['name']
+    # 2026-11-07 Q5=A: 法线模式/Prefab 归属/LOD 配置 (旧快照跳过)
+    if 'normal_mode' in snap:
+        m.normal_mode = snap['normal_mode']
+    if 'prefab_ref' in snap:
+        m.prefab_ref = snap['prefab_ref']
+    if ('lod_levels' in snap or 'lod_screen_levels' in snap
+            or 'lod_bias' in snap):
+        m.renderer.lod_levels = (list(snap['lod_levels'])
+                                 if snap.get('lod_levels') else None)
+        m.renderer.lod_screen_levels = (list(snap['lod_screen_levels'])
+                                        if snap.get('lod_screen_levels') else None)
+        m.renderer.lod_bias = snap.get('lod_bias', 1.0)
+        m.renderer._lod_cur = None       # 强制下帧重新评估 LOD
+        m.renderer._lod_radius = None
     if 'layer' in snap:                    # Layer/Tag (2026-10-18; 旧快照跳过)
         m.layer = snap['layer']
     if 'tag' in snap:
@@ -169,6 +240,7 @@ def light_snapshot(l):
         'shape': l.shape,
         'size': l.size,
         'shadow': l.shadow,
+        'range': getattr(l, 'range', 10.0),   # 2026-11-07 Q5=A: 点光范围也须可撤销
         'azimuth': l.azimuth,
         'elevation': l.elevation,
         'roll': l.roll,
@@ -189,6 +261,8 @@ def apply_light_snapshot(l, snap):
     l.shape = snap.get('shape', 'circle')
     l.size = snap.get('size', 5.0)
     l.shadow = snap.get('shadow', True)
+    if 'range' in snap:                    # 2026-11-07: 点光范围 (旧快照跳过)
+        l.range = snap['range']
     # 2026-10-19 第1档序9 聚光灯: 内外锥角（旧快照无此键 -> 保留原值 / 默认 30/60）
     if 'spot_inner_angle' in snap:
         l.spot_inner_angle = snap['spot_inner_angle']
@@ -661,6 +735,18 @@ def ui_elem_snapshot(elem):
         snap['placeholder_color'] = tuple(elem.placeholder_color)
         snap['cursor_color'] = tuple(elem.cursor_color)
         snap['font_size'] = int(elem.font_size)
+    elif typ == 'shape':
+        # 2026-11-07 REGRESSION: ui_set 可改 Shape 字段, 快照/回写必须有 shape 分支
+        snap['shape_type'] = str(getattr(elem, 'shape_type', 'line'))
+        snap['points'] = [tuple(p) for p in (getattr(elem, 'points', []) or [])]
+        snap['radius'] = float(getattr(elem, 'radius', 0.0))
+        sc = getattr(elem, 'stroke_color', None)
+        snap['stroke_color'] = tuple(sc) if sc else None
+        snap['stroke_width'] = int(getattr(elem, 'stroke_width', 2))
+        fc = getattr(elem, 'fill_color', None)
+        snap['fill_color'] = tuple(fc) if fc else None
+        snap['segments'] = int(getattr(elem, 'segments', 32))
+        snap['close'] = bool(getattr(elem, 'close', False))
     elif typ == 'dropdown':
         snap['options'] = list(elem.options)
         snap['selected_index'] = int(elem.selected_index)
@@ -750,6 +836,15 @@ def ui_apply_snapshot(elem, snap):
         elem.font_size = snap['font_size']
         if hasattr(elem, '_cursor'):
             elem._cursor = min(elem._cursor, len(elem.text))
+    elif typ == 'shape':
+        elem.shape_type = snap['shape_type']
+        elem.points = [tuple(p) for p in snap['points']]
+        elem.radius = snap['radius']
+        elem.stroke_color = snap['stroke_color']
+        elem.stroke_width = snap['stroke_width']
+        elem.fill_color = snap['fill_color']
+        elem.segments = snap['segments']
+        elem.close = snap['close']
     elif typ == 'dropdown':
         elem.options = list(snap['options'])
         elem.selected_index = snap['selected_index']

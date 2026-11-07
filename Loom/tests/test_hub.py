@@ -1,8 +1,59 @@
 # -*- coding: utf-8 -*-
+
 """
 test_hub.py — LoomHub 项目管理器核心逻辑测试 (hub_config / hub_install), 全无头.
 不弹窗口/不启动解释器/不改真实配置 (全部用临时目录 + monkeypatch 模块常量).
 """
+
+# 2026-11-06 P-02 修复: Windows 控制台默认 GBK, 末尾 print 的 ✅/❌/≤ 等字符会抛
+# UnicodeEncodeError, 让"测试通过"被记录成 exit=1 的假失败 (48/51 曾被误判)。
+# 统一把 stdout/stderr 切到 UTF-8(replace), 失败信号重新只由断言决定。
+import sys as _sys_utf8
+try:
+    _sys_utf8.stdout.reconfigure(encoding='utf-8', errors='replace')
+    _sys_utf8.stderr.reconfigure(encoding='utf-8', errors='replace')
+except Exception:
+    pass
+
+# 2026-11-06 失败退出码闸门 (复核 A 指出: 54 个测试里仅 18 个有 sys.exit(1),
+# 其余 FAIL 也 exit 0 -> run_all 假绿, 失败被静默吞掉)。
+# 做法: 包一层 stdout, 出现以 "FAIL" 开头的行就在进程退出时把状态码改成 1。
+# 只在真出现 FAIL 时才改码, 全 PASS 的测试行为完全不变。
+import atexit as _atexit_gate
+import os as _os_gate
+import sys as _sys_gate
+
+
+class _FailGateStream:
+    def __init__(self, stream):
+        self._stream = stream
+        self.failed = False
+
+    def write(self, text):
+        if isinstance(text, str) and (text.startswith("FAIL") or "\nFAIL" in text):
+            self.failed = True
+        return self._stream.write(text)
+
+    def __getattr__(self, name):
+        return getattr(self._stream, name)
+
+
+_fail_gate = _FailGateStream(_sys_gate.stdout)
+_sys_gate.stdout = _fail_gate
+
+
+@_atexit_gate.register
+def _enforce_fail_exit_code():
+    if not _fail_gate.failed:
+        return
+    try:
+        _sys_gate.stdout.flush()
+        _sys_gate.stderr.flush()
+    except Exception:
+        pass
+    _os_gate._exit(1)
+
+
 import os
 import sys
 import tempfile
@@ -247,7 +298,9 @@ def t_projects_crud():
 def t_launch_command(monkey_env=None):
     with tempfile.TemporaryDirectory() as tmp:
         old = cfg.default_python
-        cfg.default_python = lambda: "python"
+        # P-08c 修复 (2026-11-06): hub_config.default_python 现签名
+        # (engine_dir=None), 桩 lambda 必须接受该关键字参数
+        cfg.default_python = lambda engine_dir=None: "python"
         try:
             py = {"name": "Loom", "version": "1.0.0", "kind": "py",
                   "path": os.path.join(tmp, "Loom.py")}
@@ -387,11 +440,16 @@ def t_new_project_scene():
 def t_save_dir_discover():
     """解释器保存目录 / 目录项目发现 (2026-08-12 文件夹式流程)."""
     with tempfile.TemporaryDirectory() as tmp:
-        # interpreter_save_dir: 有解释器 -> <dir>/保存; 无解释器 -> None
+        # interpreter_save_dir: 有解释器 -> <dir>/Projects; 无解释器 -> None
+        # 2026-11-06 契约同步: 2026-10-19 用户拍板 B2 把默认项目目录从
+        # "保存" 改名为 "Projects" (Unity 习惯), 旧目录仅作扫描兼容。
+        # 原断言写死 "保存" 已随契约演化过期。
         interp = {"name": "Loom", "version": "1.0.0", "kind": "py",
                   "dir": os.path.join(tmp, "LoomI")}
-        check("interpreter_save_dir = <dir>/保存",
-              cfg.interpreter_save_dir(interp) == os.path.join(tmp, "LoomI", "保存"))
+        check("interpreter_save_dir = <dir>/Projects",
+              cfg.interpreter_save_dir(interp) == os.path.join(tmp, "LoomI", "Projects"))
+        check("interpreter_legacy_save_dir = <dir>/保存 (兼容旧场景)",
+              cfg.interpreter_legacy_save_dir(interp) == os.path.join(tmp, "LoomI", "保存"))
         old_projects = cfg.PROJECTS_FILE
         cfg.PROJECTS_FILE = os.path.join(tmp, "projects.json")
         try:

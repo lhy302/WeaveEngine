@@ -168,16 +168,29 @@ class LightingMixin:
                         vp = self._dir_light_vp(light)
                     if vp is not None:
                         b['orthos'][i] = np.asarray(vp, dtype='f4').ravel()
-            # 阴影贴图槽位: 平行光 1 张 / 点光 6 面, 平铺进 u_shadow_maps
+            # 阴影贴图槽位 (2026-11-07 P0/P1 修复): 平行光 1 张, 点光/聚光灯各 6 面。
+            # 着色器对 u_light_kind>0.5 (点光/聚光灯) 统一走
+            # point_shadow(u_shadow_slot[i]) 采样 slot..slot+5 共 6 张面图; 旧代码
+            # 只给聚光灯登记 1 槽 -> ①面 1..5 落到后一盏灯刚绑的深度图; ②6 张面图
+            # 连写 sampler_units 时下标越过 16 -> IndexError。槽位按
+            # "灯 guid -> 面图列表" 逐个分配, 每盏灯的 6 面自洽。
             if light.shadow:
                 sm = self._shadow_maps.get(light.guid)
-                need = 6 if light.kind == 'point' else 1
-                if sm is not None and unit + need - 1 <= 15:
+                texs = sm.get('tex', ()) if sm is not None else ()
+                need = 1 if light.kind == 'directional' else 6
+                ok_tex = len(texs) >= need
+                if ok_tex and unit + need - 1 <= 15:
                     b['slots'][i] = unit - 1     # 数组下标 = 物理单元号 - 1
-                    for k, tex in enumerate(sm['tex']):
+                    for k in range(need):
+                        tex = texs[k]
                         tex.use(unit + k)
                         sampler_units[unit - 1 + k] = unit + k
                     unit += need
+                elif ok_tex:
+                    # 16 槽位预算用尽 (非定向阴影光每盏 6 槽 -> 最多 2 盏 + 定向光
+                    # 各 1 槽): 关掉这盏灯的 shadow (降级, 不崩), 只打印一次警告。
+                    light.shadow = False
+                    self._warn_shadow_slot_overflow(light)
         # 组6件3: 8 组灯光 uniform 差分上传 —— 缓冲原地填充后 bytes 比较,
         # 同值跳过 glBufferSubData (GL uniform 状态机语义等价); u_ascontiguousarray
         # 对本缓冲是 no-op (C 连续), 保留与旧路径同形. 消每帧 8×tobytes+8×write.
@@ -210,6 +223,17 @@ class LightingMixin:
             if ul.get(name) != val:
                 self._uniform(name).value = val
                 ul[name] = val
+
+    def _warn_shadow_slot_overflow(self, light):
+        """阴影贴图槽位预算 (u_shadow_maps 16 个采样器) 用尽时的降级告警
+        (2026-11-07 P0 修复): 调用方已把该灯 shadow 置 False, 这里只保证
+        "只喊一次" —— 每帧都喊会把控制台刷爆, 也不影响渲染正确性。"""
+        if getattr(self, '_shadow_slot_warned', False):
+            return
+        self._shadow_slot_warned = True
+        print('[loom_lighting] 阴影贴图槽位上限 16 已用尽: 关闭光源 %r 的阴影 '
+              '(非定向阴影光每盏占 6 槽, 16 槽最多容纳 2 盏 + 定向光各 1 槽)'
+              % (getattr(light, 'name', '?'),), flush=True)
 
     # ================ M29 阴影贴图 (深度 pass) → loom_shadow.ShadowMixin ================
 
@@ -738,7 +762,15 @@ class LightingMixin:
         _lgen, _pairs, _lvps = self._logic_snapshot()
         if with_events and self.is_playing:
             # 派发节流: 同一逻辑帧的 pairs 只派发一次 (多渲染帧同逻辑帧)
-            if _pairs is not None and self._disp_gen != _lgen:
+            if _pairs is None:
+                # P-02 兜底 (2026-11-07): 逻辑帧尚未产出 pairs (进播放首帧/
+                # 异步逻辑线程未起) 时不能静默跳过 —— 走旧串行检测, 与逻辑帧
+                # 内联路径同口径; 同一逻辑帧只跑一次 (_disp_gen 节流).
+                if self._disp_gen != _lgen:
+                    self._profile('dispatch',
+                                  lambda: self._update_collision_events(dt))
+                    self._disp_gen = _lgen
+            elif self._disp_gen != _lgen:
                 self._profile('dispatch',
                               lambda: self._dispatch_collision_events(_pairs))
                 self._disp_gen = _lgen
@@ -786,6 +818,23 @@ class LightingMixin:
                         rows[i, 3] = b.x; rows[i, 4] = b.y; rows[i, 5] = b.z
             else:
                 return False
+        # 2026-11-07 P-17 守卫退役 (裁决 Q3=A): 旧守卫"只要有投影点光就整帧弃用
+        # C 路径 -> 全部光源回 Python 重算"(2001 体/3 平行光 + 1 点光实测
+        # _compute_light_vps 6.47ms -> 0.93ms 级差)。C 侧 one_point_light_vp 的
+        # 远平面确实硬编码为 PIPE_POINT_FAR = 1.0e4 (loom_pipeline.c:163), 与引擎
+        # _shadow_point_far=30.0 不同, 但该 far 只进投影矩阵的 z 行: 阴影深度
+        # 由 _SHADOW_FRAG 显式写 gl_FragDepth = length(p-light)/u_light_far
+        # (u_light_far 仍是引擎的 30.0), 且 x/y 投影与 far 无关 -> 存进面图的
+        # 深度值与面朝向逐位一致。故点光 VP 可安全走 C, 数值不变 (见
+        # tests/_tmp/ab_batch.py ab_point_shadow / ab_c_point_only)。
+        # 2026-11-06 P-11 修复: C 侧 loom_pipeline_light_vps 对 aabb_rows == NULL
+        # 是硬性 LOOM_ERR_PARAM (见 loom_pipeline.c 入口校验), 而这里在"场景里
+        # 只有点光/光束光 (need_bounds=False)"时 rows 仍是 None —— 于是每帧硬抛
+        # "pipeline.dll 调用失败 rc=-2"。编辑器加一个点光源就崩渲染帧即此因。
+        # 这些光源的 VP 根本不需要场景 AABB, 交下面 Python 路径算即可
+        # (_point_light_vp / _dir_light_vp 均已就绪, 且 B2 未删该回退)。
+        if rows is None:
+            return False
         vis_idx = None
         if need_bounds:
             vis_idx = [i for i, m in enumerate(self.models) if m.visible]
@@ -814,6 +863,10 @@ class LightingMixin:
              ((l.position.x, l.position.y, l.position.z)
               if getattr(l, 'position', None) is not None else None),
              (l.direction.x, l.direction.y, l.direction.z),
+             # 2026-11-07 P1 修复: roll (倾斜) 不在 direction 里 —— direction 只由
+             # azimuth/elevation 派生, roll 只改 up_vector()。旧签名漏了它,
+             # 改 roll 后签名不变 -> 复用旧 VP -> 阴影/光束截面不跟着转。
+             float(getattr(l, 'roll', 0.0)),
              (l.color[0], l.color[1], l.color[2]),
              float(l.intensity))
             for l in self.lights[:8])

@@ -4,11 +4,31 @@
       "name": "Loom",
       "version": "1.0.0",
       "kind": "py",
-      "dir": "Loom",
+      "dir": "D:\\my-project - 副本\\Loom(py源代码-工作区)\\Loom",
       "main": "Loom.py",
-      "path": "Loom/Loom.py",
-      "main_py": "Loom/Loom.py",
-      "main_exe": "Loom/Loom.exe"
+      "path": "D:\\my-project - 副本\\Loom(py源代码-工作区)\\Loom\\Loom.py",
+      "main_py": "D:\\my-project - 副本\\Loom(py源代码-工作区)\\Loom\\Loom.py",
+      "main_exe": "D:\\my-project - 副本\\Loom(py源代码-工作区)\\Loom\\Loom.exe"
+    },
+    {
+      "name": "Loom",
+      "version": "0.1.0.beta1",
+      "kind": "py",
+      "dir": "C:\\Program Files\\Loom\\0.1.0.beta1\\Loom",
+      "main": "Loom.py",
+      "path": "C:\\Program Files\\Loom\\0.1.0.beta1\\Loom\\Loom.py",
+      "main_py": "C:\\Program Files\\Loom\\0.1.0.beta1\\Loom\\Loom.py",
+      "main_exe": "C:\\Program Files\\Loom\\0.1.0.beta1\\Loom\\Loom.exe"
+    },
+    {
+      "name": "Loom",
+      "version": "0.1.0.beta2",
+      "kind": "py",
+      "dir": "C:\\Program Files\\Loom\\0.1.0.beta2\\Loom",
+      "main": "Loom.py",
+      "path": "C:\\Program Files\\Loom\\0.1.0.beta2\\Loom\\Loom.py",
+      "main_py": "C:\\Program Files\\Loom\\0.1.0.beta2\\Loom\\Loom.py",
+      "main_exe": "C:\\Program Files\\Loom\\0.1.0.beta2\\Loom\\Loom.exe"
     }
   ]
 }

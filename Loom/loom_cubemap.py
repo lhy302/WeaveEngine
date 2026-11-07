@@ -10,6 +10,7 @@ CPU 侧持 6 面 RGBA (numpy uint8)，GPU 侧延迟创建（同 Texture 纪律�
 """
 import os
 import uuid
+import weakref
 
 import numpy as np
 
@@ -36,6 +37,8 @@ class Cubemap:
         # paths 有值 -> 序列化存 paths；paths 为 None 且 _solid_color 有值 -> 存纯色
         self._solid_color = None                              # (r,g,b,a) 0-255 或 None
         self._gl_tex = None
+        # 2026-11-07 P2: 弱引用识别 context (防 id(ctx) 复用误判)
+        self._gl_ctx_ref = None
         self._gl_ctx_id = None
 
     @classmethod
@@ -118,10 +121,32 @@ class Cubemap:
                              int(rgba[3]))
         return cube
 
+    def _same_ctx(self, ctx):
+        """GPU 纹理是否属于当前 ctx (弱引用优先; 无弱引用时退回 id)."""
+        ref = self._gl_ctx_ref
+        if ref is not None:
+            try:
+                return ref() is ctx
+            except Exception:
+                return False
+        return self._gl_ctx_id is not None and self._gl_ctx_id == id(ctx)
+
+    def _remember_ctx(self, ctx):
+        try:
+            self._gl_ctx_ref = weakref.ref(ctx)
+        except TypeError:
+            self._gl_ctx_ref = None
+        self._gl_ctx_id = id(ctx)
+
     def ensure_gl(self, ctx):
-        """在 ctx 上创建 cubemap GPU 纹理（含 mipmap）。已有则直接返回。"""
-        if self._gl_tex is not None and self._gl_ctx_id == id(ctx):
-            return self._gl_tex
+        """在 ctx 上创建 cubemap GPU 纹理（含 mipmap）。已有则直接返回。
+
+        2026-11-07 P2: 换 ctx 时先 release 旧纹理, 防旧 GPU 资源泄漏.
+        """
+        if self._gl_tex is not None:
+            if self._same_ctx(ctx):
+                return self._gl_tex
+            self.release()                 # 换上下文: 释放旧纹理, 再重建
         faces = self._faces
         if not faces:
             faces = [np.full((1, 1, 4), 255, dtype=np.uint8) for _ in range(6)]
@@ -144,7 +169,7 @@ class Cubemap:
         except Exception:
             pass
         self._gl_tex = tex
-        self._gl_ctx_id = id(ctx)
+        self._remember_ctx(ctx)
         return tex
 
     @property
@@ -162,6 +187,7 @@ class Cubemap:
             except Exception:
                 pass
         self._gl_tex = None
+        self._gl_ctx_ref = None
         self._gl_ctx_id = None
 
     def __repr__(self):

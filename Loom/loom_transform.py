@@ -370,12 +370,13 @@ class TransformMixin:
             wp = self.world_position(child)
             wr = self.world_rotation_matrix(child)
             ws = self.world_scale(child)
-        # 换父 (children 列表重建)
+        # 换父 (children 列表重建; GameObject.parent setter 也维护双向关系,
+        # 这里保留显式登记以兼容非 GameObject 模型桩, 幂等 append 防重复)
         if child.parent is not None:
             if child in child.parent.children:
                 child.parent.children.remove(child)
         child.parent = new_parent
-        if new_parent is not None:
+        if new_parent is not None and child not in new_parent.children:
             new_parent.children.append(child)
         self._bump_struct()                    # 组3: 挂父变更失效 (ancestry+SoA)
         # 按新父空间换算局部变换, 保持世界位置/旋转/缩放

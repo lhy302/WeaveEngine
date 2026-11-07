@@ -48,6 +48,10 @@ def make_lua_script_class(script_id, name, lua_code):
             self._lua = None
 
         def on_start(self):
+            # 2026-11-07 (审计 scan_09 P-09/P-25 修复): 重入播放前先释放上一台
+            # VM —— 旧实现每次 on_start 都 new 一台 lua_State, close() 全仓无
+            # 调用点, 每次"播放→停止"线性泄漏 (C 侧 lua_State + 预载库)。
+            self._close_lua()
             try:
                 import script_glue as _sg
                 self._lua = _sg.LoomLuaScript(lua_code)
@@ -60,6 +64,28 @@ def make_lua_script_class(script_id, name, lua_code):
                 self._lua.call_start()
             except Exception as e:
                 print("[Lua脚本] %s 启动失败: %r" % (name, e))
+                self._close_lua()      # 半初始化失败也要释放 (不留野 VM)
+
+        # ---- 生命周期释放钩子 (scan_09 P-09): 引擎已在这两个点派发 ----
+        # editor.py 停止播放 -> on_disable(); loom_model_gpu.remove_model ->
+        # on_destroy() (remove_subtree/clear_scene/load_scene 均经它)。
+        def on_disable(self):
+            """停止播放: 释放 Lua VM (与 Script.on_disable 契约一致)。"""
+            self._close_lua()
+
+        def on_destroy(self):
+            """物体销毁: 释放 Lua VM (与 Script.on_destroy 契约一致)。"""
+            self._close_lua()
+
+        def _close_lua(self):
+            """关闭并丢弃本实例持有的 VM; 幂等 (重复调用无副作用)。"""
+            lua = self._lua
+            self._lua = None
+            if lua is not None:
+                try:
+                    lua.close()
+                except Exception as e:
+                    print("[Lua脚本] %s 释放 VM 失败: %r" % (name, e))
 
         def update(self, dt):
             if self._lua is not None and not self._lua._broken:

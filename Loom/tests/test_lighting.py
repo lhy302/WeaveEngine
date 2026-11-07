@@ -1,10 +1,61 @@
 # -*- coding: utf-8 -*-
+
 """M20+M21 光照回归: 镜像 engine._FRAG_SRC 的 GLSL 数学, 验证默认视角下立方体
 可见三面(-X/+Y/-Z)亮度互不相同. 旧兰伯特模型下 +Y 与 -Z 面 diffuse 相同(都 0.577)
 亮度相等 -> 分不出边缘; 新 Blinn-Phong 必须让它们可区分.
 
 M21 追加: 无光源时环境光压暗 (提醒用户手动加光), 点光源距离衰减.
 """
+
+# 2026-11-06 P-02 修复: Windows 控制台默认 GBK, 末尾 print 的 ✅/❌/≤ 等字符会抛
+# UnicodeEncodeError, 让"测试通过"被记录成 exit=1 的假失败 (48/51 曾被误判)。
+# 统一把 stdout/stderr 切到 UTF-8(replace), 失败信号重新只由断言决定。
+import sys as _sys_utf8
+try:
+    _sys_utf8.stdout.reconfigure(encoding='utf-8', errors='replace')
+    _sys_utf8.stderr.reconfigure(encoding='utf-8', errors='replace')
+except Exception:
+    pass
+
+# 2026-11-06 失败退出码闸门 (复核 A 指出: 54 个测试里仅 18 个有 sys.exit(1),
+# 其余 FAIL 也 exit 0 -> run_all 假绿, 失败被静默吞掉)。
+# 做法: 包一层 stdout, 出现以 "FAIL" 开头的行就在进程退出时把状态码改成 1。
+# 只在真出现 FAIL 时才改码, 全 PASS 的测试行为完全不变。
+import atexit as _atexit_gate
+import os as _os_gate
+import sys as _sys_gate
+
+
+class _FailGateStream:
+    def __init__(self, stream):
+        self._stream = stream
+        self.failed = False
+
+    def write(self, text):
+        if isinstance(text, str) and (text.startswith("FAIL") or "\nFAIL" in text):
+            self.failed = True
+        return self._stream.write(text)
+
+    def __getattr__(self, name):
+        return getattr(self._stream, name)
+
+
+_fail_gate = _FailGateStream(_sys_gate.stdout)
+_sys_gate.stdout = _fail_gate
+
+
+@_atexit_gate.register
+def _enforce_fail_exit_code():
+    if not _fail_gate.failed:
+        return
+    try:
+        _sys_gate.stdout.flush()
+        _sys_gate.stderr.flush()
+    except Exception:
+        pass
+    _os_gate._exit(1)
+
+
 import math
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

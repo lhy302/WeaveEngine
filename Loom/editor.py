@@ -152,9 +152,18 @@ class EditorApp(GLEngine):
         self.msg_color = (220, 222, 228)
         self._msg_until = 0.0
         self.last_dir = load_last_dir()   # 上次保存/打开的目录 (M19)
+        # Q3=A (2026-11-07): 删除仍有子物体的父对象 = 连整棵子树一起删 (Unity 语义).
+        # UI 层可注入 self._confirm_delete_callback(model, n_children) -> bool,
+        # 在删除前弹确认框显示子物体数量; 无注入 (无头测试/最小视图) 直接删.
+        self._confirm_delete_callback = None
         # 2026-10-19 B2: 旧"保存/"自动迁移为"Projects/"（仅首次，rename 原子操作）
         try:
-            if (os.path.isdir(_LEGACY_SAVE_DIR)
+            # 2026-11-06: 迁移前加显式开关。这是**破坏性**操作 (rename 掉受
+            # 版本控制的目录), 测试/CI/批量工具应设 LOOM_NO_SAVE_MIGRATE=1
+            # 关掉, 而不是各自重定向常量 (复核 A 实测: 未重定向的 EditorApp
+            # 一实例化就会把 保存/ 改名成 Projects/)。
+            if (os.environ.get("LOOM_NO_SAVE_MIGRATE") != "1"
+                    and os.path.isdir(_LEGACY_SAVE_DIR)
                     and not os.path.isdir(DEFAULT_SAVE_DIR)):
                 os.rename(_LEGACY_SAVE_DIR, DEFAULT_SAVE_DIR)
                 print("[编辑器] 项目目录已迁移: 保存/ -> Projects/")
@@ -608,13 +617,33 @@ class EditorApp(GLEngine):
                 self._gizmo_drag_apply()
             return
         # 无拖拽: 只在左键按下帧处理 (Alt 按下时归相机轨道, 不点选)
-        if 1 not in self.pressed or self.view.input_state()['click_captured']:
+        # P-22/F3 (2026-11-07): Qt 宿主 _on_tick 在 _update_camera() 之后清空
+        # pressed, 而 _update_gizmo 在随后的 paintGL/render 里跑 —— 只读
+        # self.pressed 会永远拿不到点击。用 _update_camera 记下的"代际点击"
+        # (gen + 屏幕坐标) 消费一次; 直接调 _update_gizmo 的旧路径仍认 pressed。
+        click_gen = getattr(self, '_gizmo_click_gen', 0)
+        consumed_gen = getattr(self, '_gizmo_consumed_gen', 0)
+        pending = click_gen != consumed_gen
+        if pending:
+            # 无论本次是否命中 (UI 抢走/点面板/Alt) 都只消费一次, 防陈旧点击重放
+            self._gizmo_consumed_gen = click_gen
+            pp = getattr(self, '_gizmo_click_pos', None)
+            if pp is None:
+                pp = self.mouse_press_pos.get(1)
+        else:
+            if 1 not in getattr(self, 'pressed', ()):
+                return
+            pp = self.mouse_press_pos.get(1)
+            # 若本帧 paintGL 先于 _on_tick (旧 pressed 路径已消费), 记下按下的
+            # 坐标对象, 让随后 _update_camera 的代际登记跳过同一次按下 —— 防
+            # 两种事件顺序下同一击被拾取两次。
+            self._gizmo_consumed_press = pp
+        if self.view.input_state()['click_captured']:
             return
         if getattr(self, 'ui_consumed', False):    # 2026-10-18: UI 命中则跳过 3D 拾取
             return
         if self._mods & pygame.KMOD_ALT:
             return
-        pp = self.mouse_press_pos.get(1)
         if pp is None:
             return
         vp = self._layout()[4]
@@ -919,7 +948,9 @@ class EditorApp(GLEngine):
 
     def _apply_camera(self, cam):
         self.camera_target = tuple(cam.get('target', [0, 0, 0]))
-        self.camera_distance = cam.get('distance', 10.0)
+        # 2026-11-06 R-03: 场景恢复同样在入口钳制 (与 Vk 后端一致)
+        from loom_camera import clamp_camera_distance
+        self.camera_distance = clamp_camera_distance(cam.get('distance', 10.0))
         self.camera_yaw = cam.get('yaw', 0.6)
         # 2026-08-18: pitch 恢复时 clamp 到俯视范围 [-1.55, 0] —— 网格是 XZ 平面
         # 线框, 仰视/平视时全部在视锥外 (几何上不可见). 用户上次保存的仰视姿态
@@ -974,14 +1005,31 @@ class EditorApp(GLEngine):
             self.view.reset_interaction()
             if path is None:
                 return
-        self._scene_path = path
-        save_last_dir(STATE_FILE, path)   # 记住这次打开的目录
         try:
             with open(path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
         except Exception as e:
             print("[编辑器] 加载失败:", e)
+            self._notify("加载失败: %s" % e, (235, 90, 90))
             return
+        # 2026-11-07 F7 收口: 父链成环等对象图错误必须在**清空旧场景之前**拒绝。
+        # 旧顺序是先 remove_model 全部 + undo.clear 再 scene_from_dict, 而
+        # scene_from_dict 内部才校验 -> 加载非法场景时用户先丢了当前工作。
+        if not isinstance(data, dict):
+            self._notify("加载失败: 场景文件格式非法 (顶层不是对象)", (235, 90, 90))
+            return
+        _objs = data.get('objects', [])
+        if not isinstance(_objs, list):
+            _objs = []
+        try:
+            sceneio._validate_object_graph(_objs)
+        except sceneio.SceneCycleError as e:
+            print("[编辑器] 场景对象图非法, 保留当前场景:", e)
+            self._notify("加载失败: %s" % e, (235, 90, 90))
+            return
+        # 校验通过后才记录"上次打开" —— 失败加载不得污染 _scene_path/state 文件
+        self._scene_path = path
+        save_last_dir(STATE_FILE, path)   # 记住这次打开的目录
         # 清空现有场景 (不压撤销栈: 加载即整体替换)
         for m in list(self.models):
             self.remove_model(m)
@@ -1362,6 +1410,19 @@ class EditorApp(GLEngine):
         m = self._selected()
         if m is None:
             return
+        # Q3=A (2026-11-07): 删除入口统一走 DeleteObjectCommand (内部 remove_subtree),
+        # 删父 = 连子树删。删除前若 N>0 个子物体, 由 UI 注入的回调弹确认框显示 N;
+        # 无回调 (无头/最小视图) 保持旧行为直接删。
+        n_children = len(self.collect_subtree(m)) - 1
+        if n_children > 0:
+            ask = getattr(self, '_confirm_delete_callback', None)
+            if ask is not None:
+                try:
+                    ok = ask(m, n_children)
+                except TypeError:
+                    ok = ask(n_children)
+                if not ok:
+                    return
         self.undo.push(DeleteObjectCommand("删除", self, m))
         self.selected_index = min(self.selected_index, max(0, len(self.models) - 1))
 
@@ -1877,6 +1938,26 @@ class EditorApp(GLEngine):
             if clk is not None:
                 clk.reset()
 
+    def _refresh_play_matrices(self, it):
+        """播放态渲染帧矩阵刷新 (P-01, 2026-11-07).
+
+        渲染矩阵 (_render_world) 走插值；逻辑矩阵 (_frame_world) **只**由逻辑帧
+        _logic_prep 维护。旧实现在这里写 `if _frame_world is None:
+        _frame_world = _render_world`，一旦进播放 _frame_world 非空就再没人刷新
+        → 逻辑矩阵/SoA 快照/阴影 VP/碰撞 AABB 全部冻结在进播放位姿。
+        首帧 (逻辑帧尚未跑) 才用当前位形补一次，且必须走 compute_world_matrices
+        (它同时刷新 _soa_snap)，绝不拿插值矩阵冒充逻辑位姿。"""
+        if (getattr(self, '_render_world', None) is not None
+                and it.static_frame()):
+            pass
+        else:
+            self._render_world = self._profile(
+                'interp', lambda: self.compute_render_matrices(self.models))
+        if getattr(self, '_frame_world', None) is None:
+            self._frame_world = self._profile(
+                'world_matrices',
+                lambda: self.compute_world_matrices(self.models))
+
     # ================ 渲染 (覆写) ================
     def render(self, delta_time):
         # 防御: 上一帧 GUI 若残留 scissor 裁剪, 会框住本帧的 clear/场景 (残影 bug)
@@ -1914,16 +1995,10 @@ class EditorApp(GLEngine):
         # 核心解耦: 播放态与编辑态渲染数据流水线彻底分流
         it = getattr(self, '_interp', None)
         if getattr(self, 'is_playing', False) and it is not None:
-            # 播放态流水线: 渲染帧只算插值世界矩阵 (C 原生 interp_world 极速路径直出)
-            # 逻辑世界矩阵复用逻辑流水线产物，消除每帧 500 物体的重复双重重算!
-            if (getattr(self, '_render_world', None) is not None
-                    and it.static_frame()):
-                pass
-            else:
-                self._render_world = self._profile(
-                    'interp', lambda: self.compute_render_matrices(self.models))
-            if getattr(self, '_frame_world', None) is None:
-                self._frame_world = self._render_world
+            # 播放态流水线: 渲染帧只算插值世界矩阵 (C 原生 interp_world 极速路径直出);
+            # 逻辑世界矩阵由逻辑帧 _logic_prep 维护 (P-01: 这里只做首帧兜底,
+            # 不再把插值矩阵写进 _frame_world —— 旧写法会让逻辑矩阵永久冻结).
+            self._refresh_play_matrices(it)
         else:
             # 编辑态流水线: 常规世界矩阵计算
             self._frame_world = self._profile(
@@ -2111,11 +2186,20 @@ class EditorApp(GLEngine):
         # 2026-10-18: UI 鼠标事件分发 (在相机/3D 消费之前). 两条路径 (pygame 主循环
         # 与 Qt loom_gui) 都走本方法, 所以这里是唯一的插入点.
         self._dispatch_ui_mouse()
-        if self.preview_camera is not None:
-            return
         # UI 命中并消费鼠标 -> 跳过全部鼠标相机控制 (决策3=B, 键盘 WASD 不受影响)
         # 2026-10-18 D1: UI 命中时只锁鼠标 (滚轮/拖拽), 键盘 WASD 不受影响.
         _ui_lock = bool(getattr(self, 'ui_consumed', False))
+        # P-22/F3 (2026-11-07): 本拍左键按下 → 记代际点击给 paintGL 的
+        # _update_gizmo 消费 (Qt 在 _on_tick 末尾清 pressed)。UI 已消费则不记,
+        # 保证"UI 命中时不进 gizmo"。
+        if not _ui_lock and 1 in getattr(self, 'pressed', ()):
+            _pp = self.mouse_press_pos.get(1)
+            if (_pp is not None
+                    and _pp is not getattr(self, '_gizmo_consumed_press', None)):
+                self._gizmo_click_gen = getattr(self, '_gizmo_click_gen', 0) + 1
+                self._gizmo_click_pos = _pp
+        if self.preview_camera is not None:
+            return
         if _ui_lock:
             self._cam_prev_mouse = self.mouse_pos    # 保持 prev 同步, 防消费结束后突跳
         if delta_time is None:

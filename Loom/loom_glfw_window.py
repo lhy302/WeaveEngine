@@ -195,9 +195,34 @@ class GlfwWindowMixin:
         return getattr(self, '_desktop_size', (self.width, self.height))
 
     def _set_fullscreen(self, fullscreen):
-        """假全屏：无边框 + 铺满桌面 + 置顶（不切显示器分辨率）."""
-        self.fullscreen = bool(fullscreen)
-        win = self._glfw_win
+        """假全屏：无边框 + 铺满桌面 + 置顶（不切显示器分辨率）.
+
+        P-07 修复 (2026-11-06): 外部 GL 上下文模式 (Qt 宿主 QOpenGLWidget /
+        PlayerApp(ctx=...) 远程白屏修复路径) 没有 GLFW 窗口 —— `_glfw_win`
+        只在 _init_glfw_window 里创建。旧实现直接 `win = self._glfw_win`，
+        此时抛 AttributeError，F11 一按即崩 (玩家发布路径默认就是这个模式)。
+        契约 (engine.py:265 "外部模式: 无 pygame 窗口 (Qt 宿主管窗口)") 决定了
+        全屏必须由宿主窗口负责，引擎只维护自身状态位与视口，不做窗口操作。
+        """
+        want = bool(fullscreen)
+        win = getattr(self, '_glfw_win', None)
+        if win is None:
+            # 宿主管窗口: 只同步状态 + 视口, 不碰操作系统窗口
+            self.fullscreen = want
+            try:
+                if want:
+                    w, h = self._desktop_resolution()
+                    self.width = max(320, int(w))
+                    self.height = max(240, int(h))
+                else:
+                    _w, _h = self.window_size
+                    self.width = max(320, int(_w))
+                    self.height = max(240, int(_h))
+                self.ctx.viewport = (0, 0, self.width, self.height)
+            except Exception:
+                pass
+            return
+        self.fullscreen = want
         if fullscreen:
             w, h = self._desktop_resolution()
             self.width = max(320, int(w))

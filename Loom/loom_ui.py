@@ -414,16 +414,43 @@ class UIManager:
             if c.canvas_type == 'screen':
                 c.resize(width, height)
 
-    def hit_test(self, pos):
-        """从最上层 Canvas 往下测, 返回 (canvas, element) 或 (None, None)."""
+    def _hit_screen(self, pos):
+        """多 Canvas 命中 (Q7=C 只吞空白, 2026-11-07 P1-6).
+
+        返回 (canvas, element) 或 (None, None)。
+
+        规则:
+          · 从最上层 Canvas 往下测; 命中**子元素**立刻返回 (上层优先不变);
+          · 只命中 Canvas 的 root (空白区) 时**继续下探低层 Canvas** ——
+            顶层 HUD 铺满全屏, 旧逻辑让它把下层列表/按钮全部吞掉 (下层
+            UI 永远点不到);
+          · 全部都没命中任何元素时, 返回最上层 Canvas 的 root: 空白点击
+            仍算 UI 消费, 不会漏到 3D 拾取/相机 —— 这就是"只吞空白"。
+        """
+        top = None                     # (canvas, root): 最上层 screen Canvas
         for c in reversed(self.canvases):
             if c.canvas_type != 'screen':
-                continue          # world Canvas 命中留到阶段4
-            hit = c.root.hit_test(pos, (0.0, 0.0,
-                                        float(c.width), float(c.height)))
-            if hit is not None:
+                continue               # world Canvas 命中留到阶段4
+            root = c.root
+            if top is None:
+                top = (c, root)
+            hit = root.hit_test(pos, (0.0, 0.0,
+                                 float(c.width), float(c.height)))
+            if hit is None:            # 该 Canvas 整体没命中 -> 继续下探
+                continue
+            if hit is not root:        # 命中子元素 -> 上层优先
                 return c, hit
+            # 只命中 root 空白 -> 记下位置继续下探 (低层子元素仍可能命中)
+        if top is not None:
+            return top                 # 全都没命中子元素: 顶层 root 吞空白
         return None, None
+
+    def hit_test(self, pos):
+        """多 Canvas 命中入口 (Q7=C). 返回 (canvas, root) 表示只吞空白.
+
+        细节见 _hit_screen; 本方法只是稳定入口 (dispatch_mouse /
+        update_hover_only / _hit_scroll_view 共用同一条规则)."""
+        return self._hit_screen(pos)
 
 
     # ---- 焦点管理 (阶段3, 契约 §6.4) ----
@@ -501,15 +528,9 @@ class UIManager:
         # 1) 命中测试 (只测 screen Canvas, 从最上层 Canvas 开始)
         hovered = None
         hit_canvas = None
-        for c in reversed(self.canvases):
-            if c.canvas_type != 'screen':
-                continue
-            hit = c.root.hit_test(pos, (0.0, 0.0,
-                                        float(c.width), float(c.height)))
-            if hit is not None:
-                hovered = hit
-                hit_canvas = c
-                break
+        # 2026-11-07 P1-6: 与 UIManager.hit_test 共用 Q7=C 规则 (只吞空白;
+        # 顶层 Canvas 的空白不再把低层 Canvas 的子元素全吞掉).
+        hit_canvas, hovered = self._hit_screen(pos)
 
         # 2) hover 变化通知
         if hovered is not self._hovered:
@@ -594,7 +615,11 @@ class UIManager:
                 except Exception:
                     pass
                 self._pressed_elem._pressed = False
-                self._dragging_elem._dragging = False                     if self._dragging_elem is not None else None
+                # 2026-11-07 修复: 原写法是 "a.b = X if cond else Y" —— 赋值目标
+                # 会先求值, _dragging_elem 为 None 时抛 AttributeError (GL editor
+                # 在更外层吞掉了异常, 所以一直没被发现; Vk 桥按原语义补清理)。
+                if self._dragging_elem is not None:
+                    self._dragging_elem._dragging = False
                 self._pressed_elem = None
                 self._dragging_elem = None
 
@@ -645,15 +670,8 @@ class UIManager:
 
     def update_hover_only(self, pos):
         """仅更新 hover 状态 (无点击时每帧调, 用于按钮悬停效果)."""
-        hovered = None
-        for c in reversed(self.canvases):
-            if c.canvas_type != 'screen':
-                continue
-            hit = c.root.hit_test(pos, (0.0, 0.0,
-                                        float(c.width), float(c.height)))
-            if hit is not None:
-                hovered = hit
-                break
+        # 2026-11-07 P1-6: 同 hit_test 的 Q7=C 规则 (低层 Canvas 子元素也可 hover)
+        _c, hovered = self._hit_screen(pos)
         if hovered is not self._hovered:
             if self._hovered is not None:
                 try:

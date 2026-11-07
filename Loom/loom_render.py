@@ -367,7 +367,7 @@ class RenderMixin:
         return rows / n
 
     def _spheres_in_frustum(self, centers, radius, planes):
-        """球(中心 centers (k,3), 统一半径 radius)是否与视锥相交 -> (k,) bool。
+        """球(中心 centers (k,3), 半径 radius=标量或 (k,) 数组)是否与视锥相交 -> (k,) bool。
         保守: 球心到每个内侧平面距离 >= -radius 即可能可见 (不误剔)。"""
         vis = np.ones(centers.shape[0], dtype=bool)
         for a, b, c, d in planes:
@@ -377,9 +377,24 @@ class RenderMixin:
 
     def _frustum_keep(self, world_rows, planes, radius):
         """桶实例可见性: world_rows (k,4,4) 行向量约定 (物体中心 = 行[:,3,:3]),
-        半径=网格最大顶点距。返回 (k,) bool (保守, 不误剔)。"""
-        centers = np.asarray(world_rows, dtype=np.float64)[:, 3, :3]
-        return self._spheres_in_frustum(centers, radius, planes)
+        半径=网格最大顶点距 × 该实例的最大轴缩放。返回 (k,) bool (保守, 不误剔)。
+
+        2026-11-07 P1 修复: 旧版半径是**模型空间**最大顶点距, 没乘实例缩放 ——
+        放大过的实例真实包围球远大于剔除球, 贴视锥边缘时被误剔 (整实例消失;
+        阴影 pass 仍全量画, 于是"主 pass 缺物体但阴影还在")。
+        行向量约定下世界矩阵 = S@R@T, 行 0..2 的前三列就是旋转轴 × 各轴缩放,
+        取三轴缩放的最大值即上界 (非等比缩放下仍保守, 不误剔)。"""
+        wr = np.asarray(world_rows, dtype=np.float64)
+        centers = wr[:, 3, :3]
+        if wr.shape[0]:
+            # 每实例三轴缩放 = 旋转轴向量长度 (行向量约定下的尺子);
+            # einsum 一次求出 3 条轴的模平方再取最大 (实测比 **2+sum+max 快 35%)
+            basis = wr[:, :3, :3]
+            s2 = np.einsum('kij,kij->ki', basis, basis).max(axis=1)
+            rad = np.maximum(np.sqrt(s2), 1e-9) * float(radius)
+        else:
+            rad = np.empty(0, dtype=np.float64)
+        return self._spheres_in_frustum(centers, rad, planes)
 
     def _prepare_bucket_frame(self):
         """A2 (2026-08-29) 每帧一次: 当帧世界矩阵 f32 化 + 按 mesh 桶重排 +

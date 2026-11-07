@@ -1,10 +1,61 @@
 # -*- coding: utf-8 -*-
+
 """test_texture.py — M36 贴图体系回归 (2026-10-14)。
 
 覆盖: Texture 资产 (from_rgba/from_file/white/ensure_gl) / mesh UV / Material albedo 槽 /
 桶键含贴图 / 着色器采样 / set_texture 命令 / 材质序列化往返。
 脚本式: 末尾 sys.exit(0 if ok else 1)。
 """
+
+# 2026-11-06 P-02 修复: Windows 控制台默认 GBK, 末尾 print 的 ✅/❌/≤ 等字符会抛
+# UnicodeEncodeError, 让"测试通过"被记录成 exit=1 的假失败 (48/51 曾被误判)。
+# 统一把 stdout/stderr 切到 UTF-8(replace), 失败信号重新只由断言决定。
+import sys as _sys_utf8
+try:
+    _sys_utf8.stdout.reconfigure(encoding='utf-8', errors='replace')
+    _sys_utf8.stderr.reconfigure(encoding='utf-8', errors='replace')
+except Exception:
+    pass
+
+# 2026-11-06 失败退出码闸门 (复核 A 指出: 54 个测试里仅 18 个有 sys.exit(1),
+# 其余 FAIL 也 exit 0 -> run_all 假绿, 失败被静默吞掉)。
+# 做法: 包一层 stdout, 出现以 "FAIL" 开头的行就在进程退出时把状态码改成 1。
+# 只在真出现 FAIL 时才改码, 全 PASS 的测试行为完全不变。
+import atexit as _atexit_gate
+import os as _os_gate
+import sys as _sys_gate
+
+
+class _FailGateStream:
+    def __init__(self, stream):
+        self._stream = stream
+        self.failed = False
+
+    def write(self, text):
+        if isinstance(text, str) and (text.startswith("FAIL") or "\nFAIL" in text):
+            self.failed = True
+        return self._stream.write(text)
+
+    def __getattr__(self, name):
+        return getattr(self._stream, name)
+
+
+_fail_gate = _FailGateStream(_sys_gate.stdout)
+_sys_gate.stdout = _fail_gate
+
+
+@_atexit_gate.register
+def _enforce_fail_exit_code():
+    if not _fail_gate.failed:
+        return
+    try:
+        _sys_gate.stdout.flush()
+        _sys_gate.stderr.flush()
+    except Exception:
+        pass
+    _os_gate._exit(1)
+
+
 import os
 import sys
 import tempfile
@@ -100,6 +151,13 @@ import engine as E
 
 ctx = moderngl.create_standalone_context()
 import editor as editor_mod
+# 2026-11-06: 测试不得改动仓库内的 保存/ 目录 —— EditorApp.__init__ 首次运行会把
+# 保存/ 迁移为 Projects/ (线上正确行为), 但测试跑一次就把受版本控制的数据搬走。
+# 把两个目录常量重定向到临时目录, 迁移逻辑面对空目录 = 零副作用。
+import tempfile as _tf_save
+_SAVE_ROOT = _tf_save.mkdtemp(prefix="loom_test_save_")
+editor_mod.DEFAULT_SAVE_DIR = os.path.join(_SAVE_ROOT, "Projects")
+editor_mod._LEGACY_SAVE_DIR = os.path.join(_SAVE_ROOT, "保存")
 ed = editor_mod.EditorApp(320, 240, ctx=ctx)
 ed._external_fb = ctx.detect_framebuffer()
 try:
@@ -223,8 +281,14 @@ check("set_pbr 命令", _r_pbr.get('ok') is True
       and abs(_pbr_obj.renderer.material.roughness - 0.3) < 1e-6,
       str(_r_pbr.get('result')))
 # 桶键含 PBR
+# 2026-11-06 契约同步: 桶键已从 6 元组扩到 7 元组
+#   base(3) + tex_guid + nrm_guid + pbr(3元组) + env_guid
+# (M36 PBR 参数 / 天空盒 env 先后入键, 见 loom_model_gpu._mesh_key 文档)。
+# 原断言写死 len==6 且 pbr 在末位, 已随契约演化过期。
 _kp = ed._mesh_key(_pbr_obj)
-check("桶键含 PBR", len(_kp) == 6 and isinstance(_kp[-1], tuple), "len=%d" % len(_kp))
+check("桶键含 PBR (metallic/roughness/pbr 三元组)",
+      len(_kp) == 7 and isinstance(_kp[-2], tuple)
+      and _kp[-2] == (0.8, 0.3, 1), "len=%d key=%r" % (len(_kp), _kp))
 # 序列化
 import sceneio as _sio_pbr
 _dp = _sio_pbr._emit_material(_pbr_obj.renderer.material)

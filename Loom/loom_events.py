@@ -16,8 +16,12 @@
   - 极简发布-订阅，无优先级，无异步（全部同步派发）
   - 单线程（主循环）使用；不保证线程安全
   - 订阅句柄：on() 返回一个 handler 对象，可传给 off() 取消
-  - once() 只触发一次，自动取消
+  - once() 只触发一次，自动取消（2026-11-07 审计 scan_09 P-07 收口：
+    首次派发**调用前**即置 alive=False 消费，回调里重入 emit 同名事件也只
+    触发一次；移除动作仍走延迟队列，不破坏正在遍历的快照）
   - emit() 派发期间的订阅/取消进入延迟队列，派发结束后统一应用（避免遍历中途改字典）
+    —— on/once/off/clear **同此语义**（2026-11-07 审计 scan_09 P-06 收口：
+    clear 修复前是立即生效的旁路，会吞掉本轮剩余回调）
   - 异常隔离：单个回调抛异常不影响其他回调（打印后继续）
 """
 import sys
@@ -139,6 +143,18 @@ class EventBus:
             for h in lst:
                 if not h.alive:
                     continue
+                if h.once:
+                    # scan_09 P-07: once 必须在**调用前**消费（先 alive=False）。
+                    # 旧实现把移除推迟到最外层 _apply_pending, 于是 once 回调里
+                    # 重入 emit 同名事件时, 内层快照仍看到 alive=True 的同一个
+                    # handler, 递归重复触发（审计实测 499 次）。这里先消费再调用:
+                    # 内层快照虽仍含本 handler, 但 alive=False 会被跳过; 派发中
+                    # 不改正在遍历的表, 移除动作照旧走延迟队列, 本轮结束统一摘除。
+                    h.alive = False
+                    if self._dispatching:
+                        self._pending_remove.append(h)
+                    else:
+                        self._remove_one(h)
                 try:
                     h.callback(*args, **kwargs)
                     called += 1
@@ -146,13 +162,7 @@ class EventBus:
                     print('[事件] %s 回调异常: %r' % (name, e),
                           file=sys.stderr)
                     # 异常隔离：继续派发
-                # once 自动移除（异常也移除，Unity 语义）
-                if h.once:
-                    if self._dispatching:
-                        self._pending_remove.append(h)
-                    else:
-                        h.alive = False
-                        self._remove_one(h)
+                    # （once 已在调用前消费, 异常也只会触发这一次, Unity 语义）
         finally:
             self._dispatching -= 1
             self._apply_pending()
@@ -182,7 +192,24 @@ class EventBus:
         return len(self._handlers.get(str(name), []))
 
     def clear(self, name=None):
-        """清空订阅。name=None 全部清空，否则只清空该事件。"""
+        """清空订阅。name=None 全部清空，否则只清空该事件。
+
+        2026-11-07 (审计 scan_09 P-06 修复): 派发期调用与 off() 同语义 ——
+        进入延迟移除队列, 本轮快照内的订阅者**仍会收到**本次事件, 本轮结束
+        (emit 的 finally) 才统一摘除。修复前 clear 直接改 _handlers 并置
+        alive=False, 派发中调用会把本轮尚未执行的回调静默丢掉 (emit 的返回
+        计数也少 1), 与文档"派发期间的订阅/取消进入延迟队列"和 off() 的
+        延迟语义分叉。
+        语义边界: 延迟的是"调用 clear 那一刻已存在的订阅"; 本轮内之后新增的
+        订阅走 _pending_add, 在本轮结束后才生效 (因此不会被本次 clear 抹掉)。"""
+        if self._dispatching:
+            if name is None:
+                targets = [h for lst in self._handlers.values() for h in lst]
+            else:
+                targets = list(self._handlers.get(str(name), []))
+            # 只入队, 不动 alive / _handlers —— 当前轮照常派发完整快照
+            self._pending_remove.extend(targets)
+            return
         if name is None:
             for lst in self._handlers.values():
                 for h in lst:

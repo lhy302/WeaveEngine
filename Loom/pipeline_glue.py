@@ -128,6 +128,11 @@ def light_vps(aabb_rows, lights, vis_idx=None):
     if h is None or not lights:
         return None
     import numpy as np
+    # 2026-11-06 P-11 修复: C 入口要求 aabb_rows 非 NULL (否则 LOOM_ERR_PARAM)。
+    # 无行表的调用 (只有点光/光束光, 不需要场景包围盒) 直接返回 None 让调用方
+    # 走 Python 路径, 而不是让官方件硬抛 '契约违约'。
+    if aabb_rows is None:
+        return None
     n = 0
     rows = None
     if aabb_rows is not None:

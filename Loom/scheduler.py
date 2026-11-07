@@ -14,6 +14,8 @@ ctypes C 内核) 按行分块外包给 2-4 个常驻工作线程 — 段可分�
     执行 fn(*args) — 不做任何包装/分发/对象访问。
   - wait_exchange(timeout): 等全部包完成。超时 → 永久降级 (degraded=True,
     调用方此后走串行旧路, 自愈不重试 — 任务书红线: 主线程 wait 恒带超时)。
+    2026-11-07 (scan_09 P-13): 超时后先 drain 在途包再返回 False —— 调用方
+    拿回控制权时 worker 已停写, 串行兜底不会与 worker 并发写同一输出缓冲。
   - 完成交接 = 引用交换: worker 写自己的 out 数组切片 (互斥行段, 单写者),
     完成后主线程 Python 赋值换入引擎字段 (GIL 下天然原子) — 无 mutex。
   - shutdown(): 哨兵 + join, 幂等 (退出清理链调)。
@@ -61,6 +63,7 @@ class NgilPool:
         mask: 线程亲和掩码 (0=不绑, 交 OS 调度; 均质大核机器默认 0).
         timeout: wait_exchange 默认超时秒 (任务书: <=2ms 超时降级)."""
         self._timeout = float(timeout)
+        self._mask = int(mask or 0)       # 线程亲和掩码 (0=不绑; P-11: 必须落属性)
         self._lock = threading.Lock()
         self._go = threading.Event()      # 有活 (pending>0 或停止)
         self._done = threading.Event()    # 批清空信号 (主线程 wait 点)
@@ -69,6 +72,7 @@ class NgilPool:
         self._err = None                  # worker 异常 (转永久降级)
         self._degraded = False
         self._stop = False
+        self._cancelled = False           # shutdown 丢弃过未执行包 (P-14)
         self.n_workers = max(1, int(n_workers))
         # SchedMetrics (任务书): 计数面 (engine_metrics 扩展通道消费)
         self.metrics = {
@@ -87,7 +91,7 @@ class NgilPool:
 
     # ---------------- worker 主循环 ----------------
     def _loop(self):
-        if getattr(self, '_mask', 0):
+        if self._mask:
             try:
                 from parallel import pin_current_thread
                 pin_current_thread(self._mask)
@@ -110,7 +114,13 @@ class NgilPool:
                     self._err = e
                 finally:
                     with self._lock:
-                        self._pending -= 1
+                        # P-14: 防御性下界 —— shutdown 只把"队列中未开始"的包
+                        # 从 _pending 减去, 在途包由这里正常递减; 不允许出现负值。
+                        if self._pending > 0:
+                            self._pending -= 1
+                        # P-12: "消化的任务包总数" = worker 真正执行过的包
+                        # (提交了但被 shutdown 丢弃的队列包不算)。
+                        self.metrics['packages'] += 1
                         empty = (self._pending <= 0)
                     if empty:
                         self._done.set()  # 批清空 -> 唤醒主线程 (happens-before)
@@ -133,15 +143,41 @@ class NgilPool:
             self._go.set()
         return True
 
+    def _wait_drained(self):
+        """等在途包全部结束 (worker 不再写共享输出).
+
+        scan_09 P-13/P-14: wait 返回 False 之前必须保证 worker 已停写 ——
+        否则调用方按契约跑串行兜底时, 会与仍在 fn 内的 worker 并发写同一
+        numpy 切片 (非确定性脏数据)。shutdown 丢弃未执行包后也用它等在途包
+        收尾, 保证 _pending 归零而不是被 worker 减成负数。"""
+        while True:
+            with self._lock:
+                if self._pending <= 0:
+                    return
+                # 只清自己这一代信号; 若 worker 在清之前已置位, 上面的
+                # pending 检查会先看到 0 并返回, 不会丢唤醒。
+                self._done.clear()
+            self._done.wait()
+
     def wait_exchange(self, timeout=None):
         """同步点: 等全部已提交包完成. True=完成 (结果数组此刻起可读 —
-        Event 置位 happens-before); False=超时/worker 异常 -> 池永久降级,
-        调用方必须走串行旧路 (自愈, 不重试)."""
+        Event 置位 happens-before); False=超时/worker 异常/shutdown -> 池
+        永久降级或已取消, 调用方必须走串行旧路 (自愈, 不重试).
+
+        2026-11-07 (审计 scan_09 P-13/P-14):
+          - 超时后**先 drain 在途包再返回 False** —— 保证"调用方拿回控制权时
+            worker 已停止写结果", 串行兜底与 worker 不会并发写同一缓冲;
+          - shutdown 丢弃过未执行包时返回 False (True 的契约是"全部完成")。"""
         t = self._timeout if timeout is None else float(timeout)
         if not self._done.wait(t):
+            self._wait_drained()          # P-13: worker 停写后才允许串行兜底
             self._degraded = True
             self.metrics['timeouts'] += 1
             self.metrics['degraded'] = 1
+            return False
+        if self._cancelled:
+            # P-14: shutdown 丢弃了队列包, 已提交包并未"全部完成"。
+            self._wait_drained()
             return False
         if self._err is not None:
             self._err = None
@@ -170,12 +206,26 @@ class NgilPool:
         return m
 
     def shutdown(self):
-        """停止: 哨兵 -> join. 幂等 (退出清理链调; physics_pipe.stop 同款)."""
+        """停止: 哨兵 -> join. 幂等 (退出清理链调; physics_pipe.stop 同款).
+
+        2026-11-07 (审计 scan_09 P-14): 修复前这里把 _jobs 清空后直接把
+        _pending 归零 —— 已在 fn 里的 worker 收尾时再减 1 就变成 -1, 触发
+        empty 并 _done.set(), 于是 wait_exchange 对"只执行了部分包"的批次
+        返回 True。现在只把**队列中未开始**的包从 _pending 减去 (在途包仍由
+        worker 的 finally 递减), 并置 _cancelled 让之后的 wait 返回 False。
+        """
         with self._lock:
             self._stop = True
-            self._jobs = []
-            self._pending = 0
+            dropped = len(self._jobs)
+            if dropped:
+                self._jobs = []
+                self._pending = max(0, self._pending - dropped)
+            self._cancelled = True
             self._go.set()
+            if self._pending <= 0:
+                # 没有在途包: 叫醒可能正在 wait 的调用方 (随后由 _cancelled
+                # 判定返回 False)。有在途包时不提前置位, 由 worker 收尾置位。
+                self._done.set()
         for t in self._threads:
             t.join(timeout=2.0)
 

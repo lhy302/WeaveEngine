@@ -31,10 +31,47 @@ def handle():
         _STATE['tried'] = True
         _STATE['error'] = None
         return h
+def _check_vec(name, arr, dtype, n=None, cols=None):
+    """修复 P2-⑪ (2026-11-07): ctypes 直传裸指针的前置校验.
+
+    旧实现只取 shape[0] 就传 data 指针: dtype 不符 (float32/object)、长度
+    不一致、非连续切片都会让 C 侧按错误步长越界读, 而 n==0 时直接 rc=0
+    静默成功。这里统一断言 dtype/一维/长度/C 连续, 失败抛 ValueError
+    (绝不静默返回成功)。"""
+    import numpy as np
+    if not isinstance(arr, np.ndarray):
+        raise ValueError('physics_glue: %s 必须是 numpy.ndarray (got %s)'
+                         % (name, type(arr).__name__))
+    if cols is None:
+        if arr.ndim != 1:
+            raise ValueError('physics_glue: %s 必须是一维数组 (got ndim=%d)'
+                             % (name, arr.ndim))
+    elif arr.ndim != 2 or arr.shape[1] != cols:
+        raise ValueError('physics_glue: %s 形状必须是 (n, %d) (got %r)'
+                         % (name, cols, arr.shape))
+    if arr.dtype != np.dtype(dtype):
+        raise ValueError('physics_glue: %s dtype 必须是 %s (got %s)'
+                         % (name, np.dtype(dtype).name, arr.dtype))
+    if not arr.flags.c_contiguous:
+        raise ValueError('physics_glue: %s 必须 C 连续内存 (非连续切片请先 .copy())'
+                         % (name,))
+    if n is not None and arr.shape[0] != n:
+        raise ValueError('physics_glue: %s 长度 %d != %d'
+                         % (name, arr.shape[0], n))
+    return arr
+
+
 def pre_step(lin_vel, ang_vel, is_dynamic, use_gravity, is_active, friction, rolling_fric, gravity_y, dt):
     h = handle()
     import numpy as np
+    _check_vec('lin_vel', lin_vel, np.float64, cols=3)
     n = int(lin_vel.shape[0])
+    _check_vec('ang_vel', ang_vel, np.float64, n, cols=3)
+    _check_vec('is_dynamic', is_dynamic, np.uint8, n)
+    _check_vec('use_gravity', use_gravity, np.uint8, n)
+    _check_vec('is_active', is_active, np.uint8, n)
+    _check_vec('friction', friction, np.float64, n)
+    _check_vec('rolling_fric', rolling_fric, np.float64, n)
     if n == 0:
         return 0
     pd = ctypes.POINTER(ctypes.c_double)
@@ -49,7 +86,10 @@ def pre_step(lin_vel, ang_vel, is_dynamic, use_gravity, is_active, friction, rol
 def post_step(lin_vel, ang_vel, is_active):
     h = handle()
     import numpy as np
+    _check_vec('lin_vel', lin_vel, np.float64, cols=3)
     n = int(lin_vel.shape[0])
+    _check_vec('ang_vel', ang_vel, np.float64, n, cols=3)
+    _check_vec('is_active', is_active, np.uint8, n)
     if n == 0:
         return 0
     pd = ctypes.POINTER(ctypes.c_double)
@@ -64,7 +104,17 @@ def post_step(lin_vel, ang_vel, is_active):
 def substep_loop(lin_vel, ang_vel, is_dynamic, use_gravity, is_active, friction, rolling_fric, gravity_y, sub_dt, num_substeps, step_cb=None, user_ctx=None):
     h = handle()
     import numpy as np
+    _check_vec('lin_vel', lin_vel, np.float64, cols=3)
     n = int(lin_vel.shape[0])
+    _check_vec('ang_vel', ang_vel, np.float64, n, cols=3)
+    _check_vec('is_dynamic', is_dynamic, np.uint8, n)
+    _check_vec('use_gravity', use_gravity, np.uint8, n)
+    _check_vec('is_active', is_active, np.uint8, n)
+    _check_vec('friction', friction, np.float64, n)
+    _check_vec('rolling_fric', rolling_fric, np.float64, n)
+    if not isinstance(num_substeps, (int, np.integer)):
+        raise ValueError('physics_glue: num_substeps 必须是整数 (got %s)'
+                         % type(num_substeps).__name__)
     if n == 0 or num_substeps <= 0:
         return 0
     pd = ctypes.POINTER(ctypes.c_double)

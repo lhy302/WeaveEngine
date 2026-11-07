@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+
 """
 test_eai_real.py — EAI 全命令自动化测试 (真 EditorApp, 2026-08-27)
 ================================================================================
@@ -20,6 +21,56 @@ test_eai_real.py — EAI 全命令自动化测试 (真 EditorApp, 2026-08-27)
   · 每条命令背后的 GUI 单步验证 (按钮点了界面变没变) —— GUI 面向人, 人工实测。
 运行: py -3.12 tests\test_eai_real.py
 """
+
+# 2026-11-06 P-02 修复: Windows 控制台默认 GBK, 末尾 print 的 ✅/❌/≤ 等字符会抛
+# UnicodeEncodeError, 让"测试通过"被记录成 exit=1 的假失败 (48/51 曾被误判)。
+# 统一把 stdout/stderr 切到 UTF-8(replace), 失败信号重新只由断言决定。
+import sys as _sys_utf8
+try:
+    _sys_utf8.stdout.reconfigure(encoding='utf-8', errors='replace')
+    _sys_utf8.stderr.reconfigure(encoding='utf-8', errors='replace')
+except Exception:
+    pass
+
+# 2026-11-06 失败退出码闸门 (复核 A 指出: 54 个测试里仅 18 个有 sys.exit(1),
+# 其余 FAIL 也 exit 0 -> run_all 假绿, 失败被静默吞掉)。
+# 做法: 包一层 stdout, 出现以 "FAIL" 开头的行就在进程退出时把状态码改成 1。
+# 只在真出现 FAIL 时才改码, 全 PASS 的测试行为完全不变。
+import atexit as _atexit_gate
+import os as _os_gate
+import sys as _sys_gate
+
+
+class _FailGateStream:
+    def __init__(self, stream):
+        self._stream = stream
+        self.failed = False
+
+    def write(self, text):
+        if isinstance(text, str) and (text.startswith("FAIL") or "\nFAIL" in text):
+            self.failed = True
+        return self._stream.write(text)
+
+    def __getattr__(self, name):
+        return getattr(self._stream, name)
+
+
+_fail_gate = _FailGateStream(_sys_gate.stdout)
+_sys_gate.stdout = _fail_gate
+
+
+@_atexit_gate.register
+def _enforce_fail_exit_code():
+    if not _fail_gate.failed:
+        return
+    try:
+        _sys_gate.stdout.flush()
+        _sys_gate.stderr.flush()
+    except Exception:
+        pass
+    _os_gate._exit(1)
+
+
 import json
 import math
 import os
@@ -32,7 +83,14 @@ os.chdir(ROOT)
 # 多核守卫: 测试确定性 (不建脚本线程/不设进程亲和性), 与 test_integration 一致
 os.environ['LOOM_NO_PARALLEL'] = '1'
 
-import editor                      # noqa: E402
+import editor
+# 2026-11-06: 测试不得改动仓库内的 保存/ 目录 —— EditorApp.__init__ 首次运行会把
+# 保存/ 迁移为 Projects/ (线上正确行为), 但测试跑一次就把受版本控制的数据搬走。
+# 把两个目录常量重定向到临时目录, 迁移逻辑面对空目录 = 零副作用。
+import tempfile as _tf_save
+_SAVE_ROOT = _tf_save.mkdtemp(prefix="loom_test_save_")
+editor.DEFAULT_SAVE_DIR = os.path.join(_SAVE_ROOT, "Projects")
+editor._LEGACY_SAVE_DIR = os.path.join(_SAVE_ROOT, "保存")                      # noqa: E402
 import agent_commands as ac        # noqa: E402
 
 TMP = os.path.join(HERE, "_tmp")
@@ -660,6 +718,126 @@ def t_api_contract():
     check("命令层读取的 EditorApp 属性全部存在", not miss2, miss2)
 
 
+# ============ 13.5 覆盖率补全 (2026-11-06) ============
+def t_api_coverage_fill():
+    """把命令表里"功能已实现但没人跑过"的 38 条命令真跑一遍.
+
+    原覆盖率闸门一直红: 这些命令是 2026-10-18~10-20 新增功能 (Layer/Tag、
+    Raycast、3D 音频、LOD/PBR/贴图、天空盒、Canvas UI、网络、查找), 功能本身
+    有各自冒烟, 但没有进入"真 EditorApp 全命令"这条链。缺覆盖率不是引擎缺陷,
+    但闸门本身是防漂移资产, 必须补齐 —— 每条都断言"真编辑器上可执行且不抛"。
+    """
+    # 目标用**新建物体的 guid** 精确定位: 场景里已有重名物体 (模型1 有 2 个),
+    # 按名字寻址会被重名保护拒绝 (这是引擎的正确行为, 不是命令缺陷)。
+    added = res("object_add", {"type": "cube"})
+    target = added.get("guid")
+    check("覆盖率补全: 新建测试物体拿到稳定 guid", bool(target), str(added)[:90])
+
+    # ---- 查找族 ----
+    _name = next(m["name"] for m in res("object_list")["models"] if m.get("guid") == target)
+    r = res("find_by_name", {"model": _name})
+    check("find_by_name 命中", r.get("found") is not None, str(r)[:80])
+    r = res("find_all_by_name", {"model": target})
+    check("find_all_by_name 返回列表", isinstance(r.get("found"), list), str(r)[:80])
+    r = res("find_by_script", {"script_id": "rotate"})
+    check("find_by_script 返回列表", isinstance(r.get("found"), list), str(r)[:80])
+
+    # ---- Layer / Tag ----
+    r = res("list_layers")
+    check("list_layers 有层表", bool(r.get("layers")), str(r)[:80])
+    r = res("list_tags")
+    check("list_tags 有 Tag 表", bool(r.get("tags")), str(r)[:80])
+    r = res("set_layer", {"name": target, "layer": 2})
+    check("set_layer 生效", r.get("layer") == 2, str(r)[:80])
+    r = res("get_layer_tag", {"name": target})
+    check("get_layer_tag 回读一致", r.get("layer") == 2, str(r)[:80])
+    res("set_tag", {"name": target, "tag": "Player"})
+    r = res("get_layer_tag", {"name": target})
+    check("set_tag 生效", r.get("tag") == "Player", str(r)[:80])
+
+    # ---- Raycast 族 ----
+    r = res("raycast", {"ox": 0, "oy": 8, "oz": 0, "dx": 0, "dy": -1,
+                        "dz": 0, "max_dist": 20})
+    check("raycast 返回结构", "hit" in r, str(r)[:90])
+    r = res("raycast_all", {"ox": 0, "oy": 8, "oz": 0, "dx": 0, "dy": -1,
+                            "dz": 0, "max_dist": 20})
+    check("raycast_all 返回命中列表", isinstance(r.get("hits"), list), str(r)[:90])
+    r = res("raycast_screen", {"px": ED.width // 2, "py": ED.height // 2,
+                               "max_dist": 20})
+    check("raycast_screen 返回结构", "hit" in r, str(r)[:90])
+
+    # ---- 材质/贴图/LOD/PBR ----
+    res("set_color", {"name": target, "color": "#33AA55"})
+    res("set_normal_mode", {"name": target, "mode": "vertex"})
+    # set_lod 的契约是"仅 sphere 基元支持自动 LOD" (cube 无细分可降), 故用球体测
+    _sph = res("object_add", {"type": "sphere"}).get("guid")
+    r = res("set_lod", {"name": _sph, "bias": 2.0})
+    check("set_lod 生效", abs(float(r.get("bias", 0)) - 2.0) < 1e-9, str(r)[:80])
+    res("set_pbr", {"name": target, "metallic": 0.3, "smoothness": 0.6})
+    res("set_texture", {"name": target, "path": ""})
+    res("set_env", {"name": target, "color": "#102030"})
+
+    # ---- 3D 音频 ----
+    res("audio", {"name": target, "action": "add", "clip": "cov.wav"})
+    res("set_audio_3d", {"name": target, "category": "sfx",
+                         "min_distance": 2.0, "max_distance": 40.0})
+    r = res("get_audio_3d", {"name": target})
+    check("get_audio_3d 回读", r.get("category") == "sfx"
+          and abs(float(r.get("min_distance", 0)) - 2.0) < 1e-9, str(r)[:80])
+
+    # ---- 天空盒 ----
+    r = res("skybox_get")
+    check("skybox_get 返回结构", "skybox" in r, str(r)[:80])
+    res("skybox_set", {"solid_color": "#223344"})
+    r = res("skybox_get")
+    check("skybox_set 后 get 有值", r.get("skybox") is not None, str(r)[:80])
+    res("skybox_clear")
+    check("skybox_clear 后为空", res("skybox_get").get("skybox") is None)
+
+    # ---- Canvas UI 全链 ----
+    res("ui_canvas_add", {"type": "screen", "name": "_cov_canvas"})
+    res("ui_canvas_set", {"canvas": 0, "width": 640, "height": 480})
+    res("ui_add", {"type": "panel", "name": "_cov_panel", "canvas": 0,
+                   "rect": [10, 10, 200, 100]})
+    res("ui_add", {"type": "text", "name": "_cov_text", "canvas": 0,
+                   "parent": "_cov_panel", "text": "覆盖率"})
+    res("ui_add", {"type": "button", "name": "_cov_btn", "canvas": 0,
+                   "parent": "_cov_panel"})
+    r = res("ui_list")
+    check("ui_list 返回树", isinstance(r.get("canvases"), list), str(r)[:80])
+    res("ui_set", {"name": "_cov_text", "canvas": 0, "text": "已改"})
+    res("ui_bind_event", {"name": "_cov_btn", "event": "click",
+                          "script": "rotate", "canvas": 0})
+    res("ui_unbind_event", {"name": "_cov_btn", "event": "click", "canvas": 0})
+    res("ui_move_child", {"name": "_cov_btn", "to_index": 0, "canvas": 0})
+    res("ui_reparent", {"name": "_cov_text", "new_parent": None, "canvas": 0})
+    res("ui_remove", {"name": "_cov_text", "canvas": 0})
+    res("ui_remove", {"name": "_cov_btn", "canvas": 0})
+
+    # ---- 脚本 ----
+    res("script_reload", {"dir": os.path.join(ROOT, "scripts")})
+    r = res("send_message", {"model": target, "method": "on_start"})
+    check("send_message 返回 called 计数", isinstance(r.get("called"), int), str(r)[:80])
+
+    # ---- 物理确定性推进 (需播放态) ----
+    run("play", {"on": True, "paused": True})
+    r = res("physics_simulate", {"frames": 1})
+    check("physics_simulate 推进 1 帧", r.get("frames") == 1, str(r)[:80])
+    run("play", {"on": False})
+
+    # ---- 网络 (指向本机已关闭端口, 快速失败; 只验证命令通路不崩) ----
+    for cmd, args in (
+            ("http_get", {"url": "http://127.0.0.1:9/", "timeout": 0.2}),
+            ("http_request", {"method": "GET", "url": "http://127.0.0.1:9/",
+                              "timeout": 0.2}),
+            ("http_post_json", {"url": "http://127.0.0.1:9/",
+                                "data": {"a": 1}, "timeout": 0.2})):
+        _USED.add(cmd)
+        rr = ac.dispatch(cmd, args, WIN)
+        check("%s 网络失败仍返回结构化结果 (不抛)" % cmd,
+              "ok" in rr, str(rr)[:80])
+
+
 # ============ 14. 覆盖率闸门 ============
 def t_coverage():
     table = set(ac.command_names())
@@ -686,6 +864,7 @@ if __name__ == "__main__":
     t_quit_save()
     t_console_layer()
     t_api_contract()
+    t_api_coverage_fill()
     t_coverage()
     if _FAILS:
         print("总结果: FAIL ❌", _FAILS)

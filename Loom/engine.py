@@ -29,6 +29,7 @@ from matlib import (mat4_translation, mat4_rotation, mat4_scale,
                     mat4_perspective, mat4_view_yaw_pitch,
                     mat4_ortho, mat4_view_forward, decompose_euler,
                     view_basis_to_angles)   # M29: 光源正交投影/任意朝向视图; M41: set_parent 保世界旋转; 2026-08-16: 相机物体化挂父合成反解
+import sys                      # P-06 修复: LOOM_SWITCH_INTERVAL (GIL 切换间隔) 依赖; 原缺失导致配置静默失效
 from fastpath import depths as _fp_depths   # 组3: 深度DP Numba可选加速 (未装numba自动降级纯Python, 数值同源, 见fastpath.py)
 from fastpath import ancestry_dfs as _fp_ancestry   # 组3层2: ancestry DFS Numba可选加速 (未装numba自动降级纯Python, 语义逐位同源, 见fastpath.py)
 import fastpath   # 组3层3: AABB 批量归约 (aabbs_minmax 串行 njit 默认 / _par 逃生门)
@@ -844,11 +845,17 @@ class GLEngine(ShadowMixin, FrameComponentMixin, PhysicsMixin, InputMixin, HudMi
             return
         has_scripts = getattr(self, '_has_scripts_cached', None)
         struct_gen = getattr(self, '_struct_gen', 0)
+        # P-03 (2026-11-07): 缓存键必须含"脚本组件创建代"。add_script 只 append
+        # 组件、不 bump _struct_gen —— 无脚本场景运行期挂脚本后, 旧键会把
+        # has_scripts=False 永久钉住, update_scripts 入口直接早退。
+        # ScriptComponent.__init__ 是全库唯一构造点, 在那里 bump 类级代数
+        # (loom_components); remove/clear 不 bump 只会多扫一帧, 不会漏脚本。
+        script_gen = getattr(ScriptComponent, '_script_gen', 0)
         cache_gen = getattr(self, '_has_scripts_gen', -1)
-        if cache_gen != struct_gen:
+        if cache_gen != (struct_gen, script_gen):
             has_scripts = any(bool(m.scripts) for m in models)
             self._has_scripts_cached = has_scripts
-            self._has_scripts_gen = struct_gen
+            self._has_scripts_gen = (struct_gen, script_gen)
         if not has_scripts:
             return
 
@@ -1032,6 +1039,11 @@ class GLEngine(ShadowMixin, FrameComponentMixin, PhysicsMixin, InputMixin, HudMi
             _t = self._prof_t0()
             self._dispatch_collision_events(self._prep_pairs)
             self._prof_add('mt_dispatch', _t)
+            # P-04 (2026-11-07): 逻辑帧已派发 → 同步渲染侧节流标记。旧实现
+            # _disp_gen 只在 loom_lighting 渲染 split 路径更新, 同一逻辑帧的
+            # 同一份 pairs 被再派发一次 → on_collision_stay/on_trigger_stay
+            # 每逻辑帧触发 2 次/物体。_logic_gen 随后 +1, 故这里预置 +1。
+            self._disp_gen = self._logic_gen + 1
         # 插值层翻页: prev=curr, curr=新快照 (分离批2; 逻辑帧收口同步点)
         it = getattr(self, '_interp', None)
         if it is not None:
@@ -1071,7 +1083,13 @@ class GLEngine(ShadowMixin, FrameComponentMixin, PhysicsMixin, InputMixin, HudMi
             return
         # 逻辑矩阵: 用/建 _frame_world (静止帧 _fw_cache 命中 ~0ms)
         fw = getattr(self, '_frame_world', None)
-        if fw is None or fw.shape[0] != n:
+        # P-01 (2026-11-07): 播放态每个逻辑帧都必须走一次 compute_world_matrices
+        # —— 它内部 _fw_cache 在"变换对象未变"时直接返回缓存对象(静止帧 ~0ms),
+        # 只有动态帧才真算; 同时 _transform_snapshot 会刷新 _soa_snap 供
+        # interp.advance 翻页。旧实现只在 None/行数不符时赋值, 进播放后
+        # _frame_world 与 _soa_snap 永久冻结 (编辑器画面/阴影/碰撞全停在进播放位姿)。
+        if (getattr(self, 'is_playing', False) or fw is None
+                or fw.shape[0] != n):
             fw = self._profile(
                 'world_matrices', lambda: self.compute_world_matrices(models))
             self._frame_world = fw
@@ -1083,9 +1101,12 @@ class GLEngine(ShadowMixin, FrameComponentMixin, PhysicsMixin, InputMixin, HudMi
         self._prep_light_vps = self._profile(
             'shadow_bounds', lambda: self._compute_light_vps(self._prep_aabbs))
         # ③ 碰撞对 (只读检测; 派发在 _logic_frame 尾部主线程)
-        pool = getattr(self, '_frame_pool', None)
-        if (pool is not None and n >= self._COLLISION_PAR_THRESHOLD
-                and getattr(self, 'is_playing', False)):
+        # P-02 (2026-11-07): 小场景 (n<32) 或并行池不可用 (LOOM_NO_PARALLEL /
+        # 建池失败) 时也必须产出碰撞对 —— 旧实现写 [], 渲染 split 路径只派发
+        # 这个列表, 于是 on_collision_*/on_trigger_* 永不触发。
+        # _collision_pairs_parallel 是同一检测器 (名字是历史遗留): 池不可用时
+        # 就在调用线程串行跑, 输出集合与旧内联路径逐位一致。
+        if getattr(self, 'is_playing', False):
             self._prep_pairs = self._profile(
                 'collide_pairs',
                 lambda: self._collision_pairs_parallel(aabbs=self._prep_aabbs))

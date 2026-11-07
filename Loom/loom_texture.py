@@ -14,6 +14,7 @@ GL 资源归属创建时的 context (与桶几何同纪律)；release 由引擎�
 """
 import os
 import uuid
+import weakref
 
 import numpy as np
 
@@ -62,6 +63,9 @@ class Texture:
                             else 'none')     # 显存格式 (对标 Unity Compression)
         # GPU 侧 (延迟创建，归属创建时 context)
         self._gl_tex = None
+        # 2026-11-07 P2: 用弱引用识别 context, 防旧 ctx 被 GC 后 id() 复用
+        # 导致把已失效的 GL 纹理误判成"当前 ctx 已创建".
+        self._gl_ctx_ref = None
         self._gl_ctx_id = None
 
     # ---- 构造 ----
@@ -129,10 +133,33 @@ class Texture:
 
     # ---- GPU ----
 
+    def _same_ctx(self, ctx):
+        """GPU 纹理是否属于当前 ctx (弱引用优先; 无弱引用时退回 id)."""
+        ref = self._gl_ctx_ref
+        if ref is not None:
+            try:
+                return ref() is ctx
+            except Exception:
+                return False
+        return self._gl_ctx_id is not None and self._gl_ctx_id == id(ctx)
+
+    def _remember_ctx(self, ctx):
+        try:
+            self._gl_ctx_ref = weakref.ref(ctx)
+        except TypeError:                  # 不可弱引用对象: 退回 id
+            self._gl_ctx_ref = None
+        self._gl_ctx_id = id(ctx)
+
     def ensure_gl(self, ctx):
-        """在 ctx 上创建/上传 GPU 纹理 (含 mipmap)。已有则直接返回。"""
-        if self._gl_tex is not None and self._gl_ctx_id == id(ctx):
-            return self._gl_tex
+        """在 ctx 上创建/上传 GPU 纹理 (含 mipmap)。已有则直接返回。
+
+        2026-11-07 P2: 换 ctx 时先 release 旧纹理 (旧实现直接覆盖 _gl_tex,
+        旧 GPU 资源泄漏); 并用弱引用判定归属, 防 id(ctx) 复用误判.
+        """
+        if self._gl_tex is not None:
+            if self._same_ctx(ctx):
+                return self._gl_tex
+            self.release()                 # 换上下文: 释放旧纹理, 再重建
         if self._rgba is None:
             # 无数据 -> 1x1 白兜底
             self._rgba = np.full((1, 1, 4), 255, dtype=np.uint8)
@@ -183,7 +210,7 @@ class Texture:
         except Exception:
             pass
         self._gl_tex = tex
-        self._gl_ctx_id = id(ctx)
+        self._remember_ctx(ctx)
         return tex
 
     @property
@@ -202,6 +229,7 @@ class Texture:
             except Exception:
                 pass
         self._gl_tex = None
+        self._gl_ctx_ref = None
         self._gl_ctx_id = None
 
     def bump_appearance(self):

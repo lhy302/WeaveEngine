@@ -21,6 +21,31 @@ from loom_types import Point3D
 from loom_scene_entities import CameraState, wrap_deg
 from matlib import view_basis_to_angles
 
+# ---- 轨道相机距离的**唯一**合法区间 (2026-11-06 R-03 修正) ----------------
+# 为什么放在这里: 双后端 (GL engine / Vk scene_driver) + 场景加载 + 滚轮
+# 都必须用同一组边界, 否则"同一场景切后端行为不同"。
+#   · 滚轮: editor.py 用 0.5..1000 钳制 (GL)
+#   · 场景文件 / Prefab / 脚本写入: 若>far 平面, 观察目标被顶到视锥外,
+#     画面整块裁空 —— 两个后端都必须**在数据入口**钳制, 而不是只钳一处。
+CAM_DIST_MIN = 0.5
+CAM_DIST_MAX = 1000.0
+
+
+def clamp_camera_distance(v, default=10.0):
+    """把相机距离钳进 CAM_DIST_MIN..CAM_DIST_MAX (两后端共用).
+
+    非数值 (None/字符串/nan/inf) 回落到 default, 不抛异常 —— 场景文件是
+    外部输入, 坏数据应降级而不是让加载失败。
+    """
+    import math as _m
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return float(default)
+    if not _m.isfinite(f):
+        return float(default)
+    return max(CAM_DIST_MIN, min(CAM_DIST_MAX, f))
+
 
 class CameraMixin:
 

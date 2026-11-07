@@ -576,6 +576,20 @@ class RemoteViewport(QWidget):
                     depth_attachment=depth_tex)
                 e._external_fb = self._fbo
             self._fbo.use()
+            # 2026-11-07 收尾 (与 GLViewport._on_tick 对齐): 远程模式原来从不调用
+            # _update_camera(), 也从不清理 pressed/released ——
+            #   · 相机与 UI 树收不到任何输入 (点击/HUD 按钮/WASD/滚轮全无效);
+            #   · e.pressed 只增不减, 按下一次就永远处于"按下态"。
+            # 顺序与 _on_tick 逐行一致: 同步鼠标 -> _update_camera (内部先
+            # _dispatch_ui_mouse 分发 UI) -> 清 wheel -> 清 pressed/released。
+            gpos = QCursor.pos()
+            lpos = self.mapFromGlobal(gpos)
+            if self.rect().contains(lpos):
+                e.mouse_pos = (int(lpos.x() * dpr), int(lpos.y() * dpr))
+            e._update_camera()
+            e.mouse_wheel = 0   # 读取后清零 (滚轮缩放, 同 _on_tick)
+            e.pressed.clear()
+            e.released.clear()
             # 2026-10-20 修复：RemoteViewport 漏了 GLViewport.paintGL 的异步逻辑线程启动，
             # 导致 _logic_async=True 时 advance_logic 从不被调用、播放模式 logic_steps 恒 0。
             _t0 = time.perf_counter()
@@ -956,12 +970,30 @@ class LoomGUI(QMainWindow):
         if controller is not None:
             # 未保存询问框用 Qt 原生 (无 pygame 时 tkinter 风格不符)
             controller._confirm_callback = self._ask_save_dirty
+            # Q3=A (2026-11-07, F8 配套): 删除"仍有子物体的父物体"前弹确认框,
+            # 文案显示子物体数量 N —— 删父 = 连整棵子树删, 不可撤销前必须让人看到 N。
+            # 原来 Qt 编辑器没注入这个钩子, editor.delete_object 里 getattr 拿到 None,
+            # 于是 Qt 里删父物体静默连子树删 (无任何提示)。
+            controller._confirm_delete_callback = self._ask_delete_confirm
             # Qt 模式下视口 = 整个 GLViewport, 相机交互天然在视口内
             controller._in_viewport = lambda pos: True
+
+    def _inject_delete_confirm(self, editor):
+        """把 Q3 删除确认钩子挂到 editor 上 (幂等)。
+
+        注意顺序陷阱: editor.py __init__ 里 `view.attach(self)` 在第 140 行,
+        而 `self._confirm_delete_callback = None` 在第 158 行 —— attach 期注入的
+        钩子会被 __init__ 后面的 None 覆盖。所以真正生效的注入点在
+        bind_editor() (__init__ 返回后宿主调用) 与删除入口 _cmd_del() 里。"""
+        if editor is not None:
+            editor._confirm_delete_callback = self._ask_delete_confirm
 
     def bind_editor(self, editor):
         """initializeGL 建好 EditorApp 后调用 (attach 已由 EditorApp 内部完成)."""
         self.attach(editor)
+        # Q3=A (2026-11-07): __init__ 已把 attach 期注入的钩子清成 None,
+        # 这里 (__init__ 返回后) 重新注入才真正生效。
+        self._inject_delete_confirm(editor)
         self._refresh_all()
 
     def input_state(self):
@@ -1304,8 +1336,13 @@ class LoomGUI(QMainWindow):
                 self._tick_target = tgt + tp     # 固定网格推进
                 if self._tick_target < now2:     # 落后 (帧超预算) → 重锚不追
                     self._tick_target = now2 + tp
-        e.pressed.clear()
-        e.released.clear()
+        # 2026-11-07 P1-5: pressed/released 绝不能在这里清 —— 它们是 Qt 事件
+        # 回调 (mousePressEvent/mouseReleaseEvent) 攒下的"本帧新按下/松开",
+        # 真正的消费者是 _update_camera() 开头的 editor._dispatch_ui_mouse()
+        # (UI 树分发) 与相机输入。原来在 _update_camera 之前清空, UI 树每帧
+        # 收到空的 pressed/released -> Qt 编辑器里 HUD 按钮/滑条/输入框全部
+        # 点不动 (pygame 主线自己轮询鼠标, 不受影响, 所以只有 Qt 版本坏)。
+        # 清空动作移到 _update_camera() 之后 (UI + 相机都消费完)。
         # 注意: mouse_wheel 不能在开头清零 —— wheelEvent (事件驱动) 设置的值
         # 会被 _update_camera 读取做相机缩放, 先清零会让滚轮永远失效
         # (2026-08-19 修复). 清零移到 _update_camera 之后 (读取后清零).
@@ -1319,6 +1356,10 @@ class LoomGUI(QMainWindow):
             e.mouse_pos = (int(lpos.x() * dpr), int(lpos.y() * dpr))
         e._update_camera()
         e.mouse_wheel = 0   # 读取后清零 (滚轮缩放 2026-08-19)
+        # 2026-11-07 P1-5: UI 分发与相机都已消费本帧输入, 现在才清 pressed/
+        # released (原位置在 _update_camera 之前, 见上方注释)。
+        e.pressed.clear()
+        e.released.clear()
         self.viewport.update()
         if _t_tick:
             e._prof_add('mt_qt_tick', _t_tick)
@@ -1986,8 +2027,13 @@ class LoomGUI(QMainWindow):
             self._refresh_all()
 
     def _cmd_del(self):
-        if self.editor is not None:
-            self.editor.delete_object()
+        e = self.editor
+        if e is not None:
+            # Q3=A (2026-11-07): 删除入口再挂一次钩子 —— 幂等, 且不依赖
+            # bind_editor 是否跑过 (editor.__init__ 会覆盖 attach 期注入)。
+            # 钩子在 N>0 时弹「该物体有 N 个子物体…」, 返回 False 则 editor 不删。
+            self._inject_delete_confirm(e)
+            e.delete_object()
             self._refresh_all()
 
     def _cmd_add_light(self, kind):
@@ -3361,15 +3407,24 @@ class LoomGUI(QMainWindow):
         ha.setContentsMargins(0, 0, 0, 0)
         ha.addWidget(QLabel("播放器渲染 API（默认）"))
         api_combo = QComboBox()
-        for i, (txt, aid) in enumerate((("Vulkan（新，推荐）", "vulkan"),
-                                        ("OpenGL（保底）", "opengl"))):
+        # 2026-11-06 R-05 (复核 B 指出): 下拉此前只有 vulkan/opengl, 设计文档 P5
+        # 明写的 auto(vk 失败自动回退 gl) 因此无法从 UI 选到; 设置里存成 auto 时
+        # 下拉还会错误地显示成 Vulkan。三项与 run_player.resolve_backend 的合法值
+        # 集合严格一致。
+        for i, (txt, aid) in enumerate((
+                ("自动（Vulkan 失败回退 OpenGL）", "auto"),
+                ("Vulkan（新，推荐）", "vulkan"),
+                ("OpenGL（保底）", "opengl"))):
             api_combo.addItem(txt, aid)
             if aid == s.get('render_api', 'vulkan'):
                 api_combo.setCurrentIndex(i)
+        api_combo.setToolTip(
+            "仅对播放器/发布游戏生效；编辑器固定 OpenGL（Qt 内嵌 Vk 会被回读拖慢，"
+            " P6 决策）。修改后需重新启动才生效。")
         api_combo.currentIndexChanged.connect(
             lambda i: (s.__setitem__('render_api', api_combo.itemData(i)),
                        guiloader.save_settings('loom', s),
-                       e._notify("默认渲染 API 已保存（播放器/发布游戏生效）",
+                       e._notify("默认渲染 API 已保存：仅播放器/发布游戏生效（编辑器固定 OpenGL），重启后生效",
                                  (240, 200, 90))))
         ha.addWidget(api_combo)
         lay.addWidget(api_row)
@@ -3754,6 +3809,33 @@ class LoomGUI(QMainWindow):
         if clicked is b_discard:
             return 'discard'
         return 'cancel'
+
+    def _ask_delete_confirm(self, model, n_children):
+        """Q3=A 删除确认框 (2026-11-07, editor._confirm_delete_callback 的 Qt 实现)。
+
+        editor.delete_object() 在"要连子树一起删"时回调本方法, 返回 False = 取消删除。
+        文案按 F8 裁决: N>0 明说会一并删除 N 个子物体; N=0 是普通删除确认。
+        默认按钮 = 否 (误按 Enter 不会删掉整棵子树), 关窗/取消都按"否"处理。
+        """
+        try:
+            n = int(n_children)
+        except (TypeError, ValueError):
+            n = 0
+        if n > 0:
+            text = '该物体有 %d 个子物体，删除将一并删除，是否继续？' % n
+        else:
+            text = '确定删除该物体？'
+        name = getattr(model, 'name', None)
+        title = ('删除 %s' % name) if name else '删除确认'
+        try:
+            ans = QMessageBox.question(
+                self, title, text,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No)
+        except Exception:
+            # 弹框本身失败 (无 GUI 的异常环境): 保持旧行为 = 直接删, 不阻断操作
+            return True
+        return ans == QMessageBox.StandardButton.Yes
 
     def closeEvent(self, ev):
         e = self.editor

@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
-"""
+
+r"""
 test_hub_eai.py — LoomHub Agent 接口 (HUB-EAI) 测试 (2026-08-27, 全无头).
 覆盖: 引擎/项目列表输出 / 导入·默认·移除 / 项目创建(空场景文件)·导入·移除 /
 未知命令 / HTTP 端到端 (鉴权 401/清单/日志) / launch_engine 命令构造
@@ -7,6 +8,56 @@ test_hub_eai.py — LoomHub Agent 接口 (HUB-EAI) 测试 (2026-08-27, 全无头
 ⚠ 开篇即重定向 cfg 配置文件指针到本进程临时目录 —— 2026-08-27 污染事故
 根治 (历史测试曾把 %TEMP% 引擎写入真实 LoomHub\interpreters.json).
 """
+
+# 2026-11-06 P-02 修复: Windows 控制台默认 GBK, 末尾 print 的 ✅/❌/≤ 等字符会抛
+# UnicodeEncodeError, 让"测试通过"被记录成 exit=1 的假失败 (48/51 曾被误判)。
+# 统一把 stdout/stderr 切到 UTF-8(replace), 失败信号重新只由断言决定。
+import sys as _sys_utf8
+try:
+    _sys_utf8.stdout.reconfigure(encoding='utf-8', errors='replace')
+    _sys_utf8.stderr.reconfigure(encoding='utf-8', errors='replace')
+except Exception:
+    pass
+
+# 2026-11-06 失败退出码闸门 (复核 A 指出: 54 个测试里仅 18 个有 sys.exit(1),
+# 其余 FAIL 也 exit 0 -> run_all 假绿, 失败被静默吞掉)。
+# 做法: 包一层 stdout, 出现以 "FAIL" 开头的行就在进程退出时把状态码改成 1。
+# 只在真出现 FAIL 时才改码, 全 PASS 的测试行为完全不变。
+import atexit as _atexit_gate
+import os as _os_gate
+import sys as _sys_gate
+
+
+class _FailGateStream:
+    def __init__(self, stream):
+        self._stream = stream
+        self.failed = False
+
+    def write(self, text):
+        if isinstance(text, str) and (text.startswith("FAIL") or "\nFAIL" in text):
+            self.failed = True
+        return self._stream.write(text)
+
+    def __getattr__(self, name):
+        return getattr(self._stream, name)
+
+
+_fail_gate = _FailGateStream(_sys_gate.stdout)
+_sys_gate.stdout = _fail_gate
+
+
+@_atexit_gate.register
+def _enforce_fail_exit_code():
+    if not _fail_gate.failed:
+        return
+    try:
+        _sys_gate.stdout.flush()
+        _sys_gate.stderr.flush()
+    except Exception:
+        pass
+    _os_gate._exit(1)
+
+
 import json
 import os
 import sys
@@ -307,8 +358,11 @@ def t_hub_write_whitelist():
             r = _r('interpreter_install_zip',
                    {'zip': z, 'version': '1.0.0',
                     'root': r'C:\Windows\Temp'})
+            # 2026-11-06 契约同步: 拒绝理由已细化为白名单措辞
+            # ("自定义安装根不在白名单内（限默认根/LocalAppData/用户目录）"),
+            # 原断言写死 '已禁用' 已过期。这里只断言"明确拒绝 + 给出原因"。
             check("root=自定义目录 -> 拒绝 (安装根已固定)", not r['ok']
-                  and '已禁用' in r['error'], r)
+                  and ('安装根' in r['error'] or '白名单' in r['error']), r)
     finally:
         os.remove(z)
 
@@ -325,8 +379,10 @@ def t_launch_spec_gui_align():
         'prefer 读 open_py 设置': 'load_settings' in ctrl_src
         and "open_py" in ctrl_src,
         'build_launch_command': 'build_launch_command' in ctrl_src,
-        'cwd=解释器目录': "cwd = interp.get('dir')" in ctrl_src
-        or "cwd=interp" in ctrl_src,
+        # 2026-11-06 契约同步: cwd 已从原始 interp['dir'] 改为解析后的绝对路径
+        # (cfg.resolve_runtime_path(interp.get('dir'))), 仍以解释器目录为基准;
+        # 原断言比对字面量 'cwd = interp.get(\'dir\')' 已过期。
+        'cwd=解释器目录': "resolve_runtime_path(interp.get('dir'))" in ctrl_src,
         'env=环境副本': 'dict(os.environ)' in ctrl_src,
     }
     for label, cond in gui_has.items():
@@ -403,6 +459,37 @@ def t_port_freshness():
         check("启动命令含 --agent 参数", '--agent' in r['result']['command'], r)
 
 
+# ============ 9.5 GitHub 在线安装/列表 (2026-11-06 补覆盖率) ============
+def t_github_commands():
+    """GitHub 在线安装链路的命令层契约 (网络 mock, 不打真实 GitHub).
+
+    覆盖率闸门此前一直红: interpreter_github_list / interpreter_github_install
+    是 2026-10-19 新增功能, 有独立实现但没进这条全命令链。这里用 mock 覆盖
+    三条分支: 列表透传 / 缺 version 拒绝 / 版本不存在明确报错。
+    """
+    import hub_github as _gh
+    from unittest import mock
+
+    fake = {"ok": True, "releases": [
+        {"version": "0.1.0.beta1", "download_url": "", "asset_name": ""}]}
+    with mock.patch.object(_gh, "list_engine_releases",
+                           lambda token=None, max_count=50: fake):
+        r = _r("interpreter_github_list", {})
+        check("github_list 透传 releases",
+              r["ok"] and r["result"].get("releases") == fake["releases"], r)
+
+    r = _r("interpreter_github_install", {})
+    check("github_install 缺 version -> 明确拒绝",
+          not r["ok"] and "version" in r["error"], r)
+
+    other = {"ok": True, "releases": [{"version": "9.9.9", "download_url": "u"}]}
+    with mock.patch.object(_gh, "list_engine_releases",
+                           lambda token=None, max_count=50: other):
+        r = _r("interpreter_github_install", {"version": "1.2.3"})
+        check("github_install 版本不存在 -> 列出可用版本",
+              not r["ok"] and "找不到版本" in r["error"], r)
+
+
 # ============ 10. 覆盖率闸门 ============
 def t_coverage():
     table = set(hc.command_names())
@@ -426,6 +513,7 @@ if __name__ == "__main__":
     t_hub_write_whitelist()
     t_launch_spec_gui_align()
     t_port_freshness()
+    t_github_commands()
     t_coverage()
     if _FAILS:
         print("总结果: FAIL ❌", _FAILS)

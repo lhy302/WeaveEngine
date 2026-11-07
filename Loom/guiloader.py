@@ -142,20 +142,36 @@ def _suffix_ok(program, fname):
 
 
 def _parse_header(path):
-    """读文件前 8 行, 文本解析出 (归一化标识, name, desc). 不 import."""
+    """读文件前 8 行, 文本解析出 (归一化标识, name, desc). 不 import.
+
+    2026-11-07 P3: 旧实现 strip() 不去 BOM 字符, 且只去掉空格 -> 带 BOM
+    或 tab 的合法头 (# gui: <tab> loom) 被误判为无标识. 这里先剥 BOM,
+    再按 "# key: value" 解析, key 内允许空格/tab.
+    """
     marker = name = desc = None
     try:
         with open(path, 'r', encoding='utf-8', errors='replace') as f:
             for i, line in enumerate(f):
                 if i >= 8:
                     break
-                low = line.strip().lower()
-                if low.startswith('# gui-name:'):
-                    name = line.split(':', 1)[1].strip()
-                elif low.startswith('# gui-desc:'):
-                    desc = line.split(':', 1)[1].strip()
-                elif low.startswith('# gui:'):
-                    marker = low.replace(' ', '')   # 归一化: #gui:loom
+                # 2026-11-07 P3: strip() 不去 BOM; 先剥 BOM, 再按 "# key: value"
+                # 解析, key 内允许空格/tab. 标识值取第一个空白分隔 token,
+                # 兼容 "# gui:	loom" / "# gui: loom  # 注释".
+                raw = line.lstrip('\ufeff').strip()
+                if not raw.startswith('#'):
+                    continue
+                body = raw[1:].strip()
+                key, sep, _ = body.lower().partition(':')
+                if not sep:
+                    continue
+                key = ''.join(key.split())
+                val = body.split(':', 1)[1].strip()   # 保留 name/desc 原大小写
+                if key == 'gui-name':
+                    name = val
+                elif key == 'gui-desc':
+                    desc = val
+                elif key == 'gui' and val:
+                    marker = '#gui:' + val.lower().split()[0]   # 归一化: #gui:loom
     except Exception:
         return None, None, None
     return marker, name, desc

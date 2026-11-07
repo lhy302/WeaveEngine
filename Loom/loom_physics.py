@@ -429,12 +429,17 @@ class PhysicsMixin:
         惰性建桥 (仅完整 __init__ 实例: getattr(_phys_bridge_auto)); 测试桩
         (__new__ 不跑 __init__) 无该属性 -> 永走 legacy (现契约测试零受影响)。"""
         br = getattr(self, '_phys_bridge', None)
-        if br is not None:
+        # 修复 P1-⑥ (2026-11-07): 本场已裁决禁用 -> 永不使用/重建桥 (legacy).
+        if getattr(self, '_phys_bridge_disabled', False):
+            br = None
+        elif br is not None:
             if getattr(br, 'enabled', False):
                 self._update_physics_bridge(delta_time, events)
                 return
             self._phys_bridge = None            # 僵死桥 (库异常) -> 释放走 legacy
-        elif getattr(self, '_phys_bridge_auto', False):
+            self._update_physics_legacy(delta_time, events)
+            return
+        if getattr(self, '_phys_bridge_auto', False):
             self._ensure_phys_bridge()
             br = getattr(self, '_phys_bridge', None)
             if br is not None and getattr(br, 'enabled', False):
@@ -499,9 +504,16 @@ class PhysicsMixin:
             self._profile('phys_bridge_step', lambda: br.step(dt))
             self._profile('phys_bridge_post', lambda: br.post_step())
         except Exception as e:
-            # 桥异常: 本帧回退 legacy 并释放桥 (静默降级, 游戏不崩; 控制台留痕)
-            print("[物理] 桥步进异常 (%r) -> 释放桥并回退 legacy" % (e,))
-            self._destroy_phys_bridge()
+            # 修复 P1-⑥ (2026-11-07): 裁决 A —— 桥异常 = **本场一次性禁用**,
+            # 回退 legacy 后不再重建 (旧行为每帧 destroy+ensure 重建, 确定性
+            # 异常会每帧刷屏并反复付建体成本). 日志每场只打一次 (节流).
+            self._phys_bridge_disabled = True
+            self._log_phys_bridge_failure(e)
+            try:
+                self._destroy_phys_bridge(keep_disabled=True)
+            except Exception as ee:
+                print("[物理] 桥销毁被拒绝 (%r): 本场已禁用桥, 线程引用保留待收尾"
+                      % (ee,))
             self._update_physics_legacy(dt, events)
             return
         if events:
@@ -539,10 +551,19 @@ class PhysicsMixin:
             self._phys_bridge_disabled = True
             return None
         self._phys_bridge = br
+        self._phys_bridge_exc_logged = False     # 修复 P1-⑥: 新桥 = 新会话日志额度
         print("[物理] Jolt (Culverin) 物理桥已建立: %d 体" % br.body_count)
         # 分离批4: 桥建好后启动常驻物理线程 (LOOM_NO_PIPE=1 逃生门 = 不建)
         self._ensure_phys_pipe(br)
         return br
+
+    def _log_phys_bridge_failure(self, e):
+        """修复 P1-⑥: 桥异常日志节流 (每场只打一次, 避免逐帧刷屏)."""
+        if getattr(self, '_phys_bridge_exc_logged', False):
+            return
+        self._phys_bridge_exc_logged = True
+        print("[物理] 桥步进异常 (%r) -> 本场禁用 Culverin 桥, 回退 legacy "
+              "(本场不再重建)" % (e,))
 
     def _ensure_phys_pipe(self, br):
         """分离批4: 建常驻物理线程 (桥存在且未禁用时). 幂等。
@@ -582,11 +603,18 @@ class PhysicsMixin:
             self._phys_pipe = None
             return None
 
-    def _destroy_phys_bridge(self):
+    def _destroy_phys_bridge(self, keep_disabled=False):
         """销毁桥 (播放结束/退出清理). 幂等. 快照还原在 destroy 之前完成
-        (toggle_play 退出分支先 apply_snapshot 再 destroy, 见 editor.py)."""
+        (toggle_play 退出分支先 apply_snapshot 再 destroy, 见 editor.py).
+
+        修复 P1-⑤ (2026-11-07): 先停线程并**确认退出**, 未退出则拒绝销毁桥
+        (物理线程仍持有 Jolt 世界) 并抛 RuntimeError 给上层。
+        keep_disabled=True: 桥异常路径调用 —— 保留"本场禁用"裁决;
+        默认 False: 播放结束/退出, 清掉本场禁用标志 (下一场可重试建桥)."""
         # 分离批4: 先停物理线程再销毁桥 (线程持有 _w 引用, 顺序不可反!)
-        self._stop_phys_pipe()
+        if not self._stop_phys_pipe():
+            raise RuntimeError(
+                "物理线程未确认退出, 拒绝销毁物理桥 (线程仍持有 Jolt 世界)")
         br = getattr(self, '_phys_bridge', None)
         if br is not None:
             try:
@@ -594,18 +622,31 @@ class PhysicsMixin:
             except Exception:
                 pass
         self._phys_bridge = None
-        # 不置 disabled: 下次进入播放可重建 (播放-停止循环)
+        if not keep_disabled:
+            # 不置 disabled: 下次进入播放可重建 (播放-停止循环)
+            self._phys_bridge_disabled = False
+            self._phys_bridge_exc_logged = False
 
-    def _stop_phys_pipe(self):
+    def _stop_phys_pipe(self, timeout=2.0):
         """分离批4: 停物理线程 (幂等; 退出链三处调: _destroy_phys_bridge /
-        _stop_parallel / 管线异常降级)."""
+        _stop_parallel / 管线异常降级).
+
+        返回 True = 无线程/线程已确认退出; False = join 超时仍存活.
+        修复 P1-⑤: 超时不再静默吞掉 —— 保留 _phys_pipe 引用 (供后续重试
+        join), 置 _pipe_disabled 让调度切串行, 并拒绝销毁桥."""
         pipe = getattr(self, '_phys_pipe', None)
-        if pipe is not None:
-            try:
-                pipe.stop()
-            except Exception:
-                pass
-            self._phys_pipe = None
+        if pipe is None:
+            return True
+        try:
+            pipe.stop(timeout)
+        except Exception as e:
+            self._phys_pipe_stop_failed = True
+            self._pipe_disabled = True            # 调度侧切串行 (engine pipe_ok)
+            print("[物理] 物理线程停止失败 (%r): 线程仍存活, 拒绝销毁桥" % (e,))
+            return False
+        self._phys_pipe_stop_failed = False
+        self._phys_pipe = None
+        return True
 
     # 碰撞事件并行阈值: 模型数 >= 此值才启用线程池 (小场景走内联零线程开销)
     _COLLISION_PAR_THRESHOLD = 32

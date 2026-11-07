@@ -68,9 +68,12 @@ class PhysicsPipeThread:
                     br.pre_step(dt, g)
                     br.step(dt)           # C 层释放 GIL: 主线程跑 D 段真并行
                     br.post_step()
-                    self._err = None
+                    # 修复 P1-④ (2026-11-07): 成功路径**不得**清空 _err ——
+                    # 旧实现在同一批多子步里, 前一子步异常被后一子步成功覆盖,
+                    # wait_pending 永远看不到错误 (静默吞异常).
                 except BaseException as e:
-                    self._err = e
+                    if self._err is None:      # 首个未消费错误保持到 wait_pending
+                        self._err = e
                 finally:
                     self._batch_first = False
                     with self._lock:
@@ -89,7 +92,8 @@ class PhysicsPipeThread:
             self._go.set()
 
     def wait_pending(self):
-        """同步点 S1: 等全部已提交子步完成. 超时 = 报错+永久降级."""
+        """同步点 S1: 等全部已提交子步完成. 超时 = 报错+永久降级.
+        子步异常: 首个未消费错误在此抛出并消费 (成功路径不清空, 见 _loop)."""
         if not self._done.wait(self._timeout):
             self._degraded = True
             raise RuntimeError("物理线程同步超时 (%.1fs) -> 降级主线程直跑"
@@ -106,11 +110,21 @@ class PhysicsPipeThread:
         with self._lock:
             return self._pending
 
-    def stop(self):
-        """停止: 哨兵 -> join. 幂等 (v1 同款)."""
+    def stop(self, timeout=2.0):
+        """停止: 哨兵 -> join -> 复查 is_alive. 幂等 (v1 同款).
+
+        修复 P1-⑤ (2026-11-07): join 超时不再静默返回 —— 线程若仍存活
+        (可能卡在 C 步进/死锁), 调用方必须拒绝销毁桥/切串行, 否则
+        destroy() 会在物理线程仍持有 Jolt 世界时释放它 (use-after-free).
+        超时抛 RuntimeError 给上层; 线程随后仍可能自行退出, 可再次 stop()."""
         with self._lock:
             self._stop = True
             self._jobs = []
             self._pending = 0
             self._go.set()
-        self._t.join(timeout=2.0)
+        self._t.join(timeout=timeout)
+        if self._t.is_alive():
+            self._degraded = True
+            raise RuntimeError(
+                "物理线程停止超时 (%.2fs): 线程仍存活, 拒绝销毁桥/切换串行"
+                % timeout)

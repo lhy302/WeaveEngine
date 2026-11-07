@@ -1,5 +1,56 @@
 # -*- coding: utf-8 -*-
+
 """M14-M18 集成测试: 真实窗口 + GPU 渲染路径."""
+
+# 2026-11-06 P-02 修复: Windows 控制台默认 GBK, 末尾 print 的 ✅/❌/≤ 等字符会抛
+# UnicodeEncodeError, 让"测试通过"被记录成 exit=1 的假失败 (48/51 曾被误判)。
+# 统一把 stdout/stderr 切到 UTF-8(replace), 失败信号重新只由断言决定。
+import sys as _sys_utf8
+try:
+    _sys_utf8.stdout.reconfigure(encoding='utf-8', errors='replace')
+    _sys_utf8.stderr.reconfigure(encoding='utf-8', errors='replace')
+except Exception:
+    pass
+
+# 2026-11-06 失败退出码闸门 (复核 A 指出: 54 个测试里仅 18 个有 sys.exit(1),
+# 其余 FAIL 也 exit 0 -> run_all 假绿, 失败被静默吞掉)。
+# 做法: 包一层 stdout, 出现以 "FAIL" 开头的行就在进程退出时把状态码改成 1。
+# 只在真出现 FAIL 时才改码, 全 PASS 的测试行为完全不变。
+import atexit as _atexit_gate
+import os as _os_gate
+import sys as _sys_gate
+
+
+class _FailGateStream:
+    def __init__(self, stream):
+        self._stream = stream
+        self.failed = False
+
+    def write(self, text):
+        if isinstance(text, str) and (text.startswith("FAIL") or "\nFAIL" in text):
+            self.failed = True
+        return self._stream.write(text)
+
+    def __getattr__(self, name):
+        return getattr(self._stream, name)
+
+
+_fail_gate = _FailGateStream(_sys_gate.stdout)
+_sys_gate.stdout = _fail_gate
+
+
+@_atexit_gate.register
+def _enforce_fail_exit_code():
+    if not _fail_gate.failed:
+        return
+    try:
+        _sys_gate.stdout.flush()
+        _sys_gate.stderr.flush()
+    except Exception:
+        pass
+    _os_gate._exit(1)
+
+
 import sys, os, math, json
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -9,6 +60,13 @@ import numpy as np
 # 多核优化守卫: 测试确定性, 不建脚本线程/不设进程亲和性 (2026-08-14)
 os.environ['LOOM_NO_PARALLEL'] = '1'
 import editor
+# 2026-11-06: 测试不得改动仓库内的 保存/ 目录 —— EditorApp.__init__ 首次运行会把
+# 保存/ 迁移为 Projects/ (线上正确行为), 但测试跑一次就把受版本控制的数据搬走。
+# 把两个目录常量重定向到临时目录, 迁移逻辑面对空目录 = 零副作用。
+import tempfile as _tf_save
+_SAVE_ROOT = _tf_save.mkdtemp(prefix="loom_test_save_")
+editor.DEFAULT_SAVE_DIR = os.path.join(_SAVE_ROOT, "Projects")
+editor._LEGACY_SAVE_DIR = os.path.join(_SAVE_ROOT, "保存")
 import sceneio
 import undo as U
 from mesh import create_cube, create_plane
@@ -21,10 +79,12 @@ os.makedirs(TMP, exist_ok=True)
 #  带到 _tmp, 用户实测 A01 时默认目录错乱. 改为直接替换 STATE_FILE 根治.)
 editor.STATE_FILE = os.path.join(TMP, "editor_state_test.json")
 ok = True
+_FAILS = []   # 2026-11-06: 失败清单 (原文件无失败退出码, FAIL 也 exit 0 = 假绿)
+
 def check(label, cond, detail=""):
     global ok
     print(("PASS " if cond else "FAIL ") + label + ("  " + detail if detail else ""))
-    if not cond: ok = False
+    if not cond: ok = False; _FAILS.append(label)
 
 def frames(eng, n=8):
     for _ in range(n):
@@ -162,10 +222,19 @@ def capture(eng):
     return np.flipud(np.frombuffer(data, dtype='u1').reshape(
         eng.height, eng.width, 4)[:, :, :3].astype(float) / 255.0)
 
-cc = np.array([1.2, 0.75, 0.3]); half = 0.75
-FACES = (('-X', [cc[0]-half, cc[1], cc[2]]),
-         ('+Y', [cc[0], cc[1]+half, cc[2]]),
-         ('-Z', [cc[0], cc[1], cc[2]-half]))
+# 2026-11-06 修复 (测试过期, 非引擎缺陷): 原断言写死立方体中心 (1.2, 0.75, 0.3)、
+# 半边长 0.75。默认场景的立方体实际是 pos.y=0.5 (半径 0.5 落地), 于是 +Y 面的
+# 采样点被抬到立方体**上方 0.5** 落到背景(天空), 亮度必然偏低 -> '亮度序' 与
+# '饱和度' 两组像素回归整体误判。改为按物体真实包围盒现算采样点 (面中心内缩),
+# 断言从此只依赖几何事实, 不再依赖某个具体种子坐标。
+_cube_seed = next(m for m in eng2.models if getattr(m, 'primitive', None) == 'cube')
+_bmn, _bmx = eng2.get_bounding_box(_cube_seed)
+cc = np.array([(_bmn.x + _bmx.x) * 0.5, (_bmn.y + _bmx.y) * 0.5,
+               (_bmn.z + _bmx.z) * 0.5])
+_eps = 0.02   # 从面中心往内缩一点, 避开棱边/接缝
+FACES = (('-X', [_bmn.x + _eps, cc[1], cc[2]]),
+         ('+Y', [cc[0], _bmx.y - _eps, cc[2]]),
+         ('-Z', [cc[0], cc[1], _bmn.z + _eps]))
 
 def face_lum(arr, fc):
     sx, sy = project2(eng2, fc)
@@ -200,7 +269,7 @@ def face_rgb(arr, fc):
     patch = arr[max(0, sy-4):sy+5, max(0, sx-4):sx+5]      # 5x5 邻域
     return patch.max(axis=(0, 1))                          # 每通道取 max
 ch = lambda rgb: float(np.max(rgb) - np.min(rgb))          # 彩色度 (RGB 极差)
-cube = next(m for m in eng2.models if m.primitive == 'cube')   # 种子场景 [平面,立方体,球体]
+cube = _cube_seed   # 同一物体 (7.6 的包围盒采样基准)
 rgb1 = face_rgb(lit, FACES[1][1])                          # sat=1 (lit 是默认饱和度抓的帧)
 cube.saturation = 0.0
 frames(eng2, 3)
@@ -425,19 +494,40 @@ check("M29 关阴影光束: 截面内受光 > 截面外 (遮罩不随阴影开�
       "in=%s out=%s" % (np.round(in2, 3), np.round(out2, 3)))
 
 # 点光源 (离轴): 光在 (+X,+Y,+Z) 侧 -> 影子落 (-X,-Z) 侧地面
+# 2026-11-06 P-17 结论: 点光阴影本身是正确的 (同引擎切 shadow 实测全图
+# 4431 像素变亮、本影深处 Δ=+0.031)，此前 FAIL 是**采样点落在半影边缘**：
+#   光 (3,4,3) / 立方体中心 (0,1,0) -> 本影沿 (-X,-Z) 从 (-0.41,-0.41)
+#   (底面投影) 延伸到 (-1.79,-1.79) (顶面投影)；原采样 (-1.6,-1.6) 已在
+#   远边缘 (Δ 只剩 0.008)，而该光源满分贡献本身就 ~0.047。
+# 改为取本影轴上 3 点取最大 Δ (解析投影得到, 不依赖具体调参)，阈值 0.02。
 shp, shp_samp = _sh_scene(kind='point', diag=True)
-p_sh_pt = (-1.6, 0.02, -1.6)        # 影子区 (应暗)
+_L = (3.0, 4.0, 3.0)                # _sh_scene(kind='point') 的点光位置
+_C = (0.0, 1.0, 0.0)                # 立方体中心
+_GY = 0.02                          # 地面采样高度
+
+
+def _shadow_on_ground(y_cube):
+    """立方体上高度 y_cube 的点沿光线投到地面 (y=_GY) 的交点 (x=z, 对角光)."""
+    _t = (_GY - _L[1]) / (y_cube - _L[1])
+    _x = _L[0] + _t * (_C[0] - _L[0])
+    return (_x, _GY, _x)
+
+
+_umbra_pts = [_shadow_on_ground(0.5), _shadow_on_ground(1.0),
+              _shadow_on_ground(1.5)]   # 底面/中心/顶面投影 = 本影轴
 p_lit_pt = (1.6, 0.02, 1.6)         # 非影区 (开阴影不应变暗)
-p_on = shp_samp(p_sh_pt)
+p_on = [shp_samp(pt) for pt in _umbra_pts]
 p_on_lit = shp_samp(p_lit_pt)
 for lt in shp.lights:
     lt.shadow = False
 frames(shp, 2)
-p_off = shp_samp(p_sh_pt)
+p_off = [shp_samp(pt) for pt in _umbra_pts]
 p_off_lit = shp_samp(p_lit_pt)
-check("M29 点光源阴影: 被挡区暗于关阴影后",
-      p_on.max() < p_off.max() - 0.02,
-      "on=%s off=%s" % (np.round(p_on, 3), np.round(p_off, 3)))
+_deltas = [float(b.max() - a.max()) for a, b in zip(p_on, p_off)]
+check("M29 点光源阴影: 本影内被挡区暗于关阴影后 (取本影轴最大 Δ)",
+      max(_deltas) > 0.02,
+      "deltas=%s on=%s" % (np.round(_deltas, 3),
+                           [np.round(x, 3) for x in p_on]))
 check("M29 点光源: 非影区不被压暗 (修复大片黑区)",
       p_off_lit.max() - p_on_lit.max() < 0.05,
       "on=%s off=%s" % (np.round(p_on_lit, 3), np.round(p_off_lit, 3)))
@@ -605,3 +695,8 @@ check("Player 脚本旋转生效", abs(pc.rotation.y - ry0) > 1e-3,
 pygame.quit()
 
 # ---------- 7.21 同批次退役 (层级右键菜单/相机行单击, 见上注释)
+print()
+if _FAILS:
+    print("有 FAIL: %s" % _FAILS)
+    sys.exit(1)
+print("ALL PASS")

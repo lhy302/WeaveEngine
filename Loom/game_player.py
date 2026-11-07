@@ -80,7 +80,60 @@ def _pick_backend(overridden=None):
     return run_player.resolve_backend(overridden)
 
 
-def _start_pack(backend):
+def _run_backend_safe(backend, scene=None, explicit=False, **kw):
+    """发布链最后防线: 渲染后端启动失败时醒目告警并回退 OpenGL.
+
+    2026-11-06 R-06 (复核 B 指出): 发布链原来直接 run_backend(), 没有任何兜底;
+    打包版是 --windows-disable-console, Vulkan 初始化失败 (无 Vk 驱动/虚拟机/
+    远程桌面) 时用户只看到"双击没反应"。
+
+    2026-11-07 (P-10 + Q6): 分工改成 ——
+      · Vulkan **初始化**失败: 由 run_player 统一处理 (非显式时把设置回退成
+        opengl 并以非零码退出, 下次启动即 OpenGL; 显式 --backend vulkan 只报错),
+        这里**不**吞掉那个 SystemExit (崩一次, 不伪装成功);
+      · Vulkan **渲染循环内**失败 (VkRunError): 同样不回退 —— 已初始化的后端
+        半路改道只会把问题藏起来;
+      · 其余意外异常: 仍兜底回退 OpenGL (发布链最后一道网)。
+
+    返回**实际生效**的后端名 ('vulkan'/'opengl'), 供 _start_pack 打印日志
+    (scan_05 P-11: 原来只回传 run_backend 的结果, 回退后日志仍写入参)。
+    """
+    import run_player
+    # 2026-11-07 R5 (P-11): run_backend 的 'auto' 分支会在内部把 Vulkan
+    # 失败改走 OpenGL, 外层拿不到这个事实。启动期临时包一层两个后端入口,
+    # 只观测实际调用 (不改行为), 结束后恢复; 最后被调用的就是实际后端。
+    used = []
+    orig_vk = run_player._run_vulkan
+    orig_gl = run_player._run_opengl
+
+    def _track_vk(*a, **k):
+        ret = orig_vk(*a, **k)      # 只有真正跑完的后端才算"实际生效"
+        used.append('vulkan')
+        return ret
+
+    def _track_gl(*a, **k):
+        ret = orig_gl(*a, **k)
+        used.append('opengl')
+        return ret
+
+    run_player._run_vulkan = _track_vk
+    run_player._run_opengl = _track_gl
+    try:
+        try:
+            run_player.run_backend(backend, scene, explicit=explicit, **kw)
+        except (SystemExit, run_player.VkRunError):
+            raise
+        except Exception as e:      # noqa: BLE001 - 发布链必须兜住一切初始化失败
+            print("[game_player] 渲染后端启动失败: %s (%r)" % (backend, e))
+            print("[game_player] 已自动回退 OpenGL；若仍失败请把上面这行发给开发者")
+            run_player.run_backend("opengl", scene, **kw)
+    finally:
+        run_player._run_vulkan = orig_vk
+        run_player._run_opengl = orig_gl
+    return used[-1] if used else backend
+
+
+def _start_pack(backend, explicit=False):
     """游戏包启动: 解包+插件/脚本注册后按渲染 API 进入播放器 (Vk/GL)."""
     import game_pack
     gm = None
@@ -94,11 +147,10 @@ def _start_pack(backend):
     from scripts import register_sources
     n = register_sources(gm.get('scripts') or [])
     cf = gm.get('config') or {}
-    import run_player
-    run_player.run_backend(backend, scene_data=gm.get('scene'),
-                           title=cf.get('title'))
+    actual = _run_backend_safe(backend, scene_data=gm.get('scene'),
+                               title=cf.get('title'), explicit=explicit)
     print("游戏已启动: %s (%d 个游戏脚本, %d 个插件, 渲染API=%s)" %
-          (cf.get('name', '未命名游戏'), n, n_plug, backend))
+          (cf.get('name', '未命名游戏'), n, n_plug, actual))
     return True
 
 
@@ -108,13 +160,14 @@ def main():
     for i, a in enumerate(args):
         if a == "--backend" and i + 1 < len(args):
             backend = args[i + 1]
+    explicit = backend is not None      # 命令行 --backend = 显式选择 (不改写设置)
     if "--run" in args:
         i = args.index("--run")
         if i + 1 < len(args):
             import run_player
-            run_player.run_backend(_pick_backend(backend), args[i + 1])
+            _run_backend_safe(_pick_backend(backend), args[i + 1], explicit=explicit)
             return
-    if _start_pack(_pick_backend(backend)) is not None:
+    if _start_pack(_pick_backend(backend), explicit=explicit) is not None:
         return
     # 兼容旧发布: exe 旁 游戏配置.json
     try:
@@ -123,7 +176,7 @@ def main():
             scene = json.load(f).get('scene')
         if scene:
             import run_player
-            run_player.run_backend(_pick_backend(backend), scene)
+            _run_backend_safe(_pick_backend(backend), scene, explicit=explicit)
             return
     except Exception:
         pass

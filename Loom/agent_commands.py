@@ -116,17 +116,41 @@ def _write_roots(win=None):
     return out
 
 
-def _safe_write_path(path, purpose='写文件', win=None):
+def _realpath(p):
+    """os.path.realpath 容错包装 (Windows 上坏链接/怪字符不抛, 回落 abspath).
+
+    2026-11-07 安全加固用: 白名单判定不能只比字符串前缀 —— 在 scripts/ 里放一个
+    junction (指向系统目录) 后 "scripts/evil/x.py" 的字符串前缀完全合法,
+    但它真实落在系统目录。realpath 会解析 junction/符号链接。"""
+    try:
+        return os.path.realpath(p)
+    except (OSError, ValueError):
+        return os.path.abspath(p)
+
+
+def _safe_write_path(path, purpose='写文件', win=None, extra_roots=None):
     """校验写路径在白名单内; 返回 (True, 规范化路径) 或 (False, 错误串).
     判定: 绝对路径化 + 无 .. 逃逸; 必须以某个白名单根为前缀, 且不是根
-    本身 (根=目录, 防止把目录当文件写废)."""
+    本身 (根=目录, 防止把目录当文件写废).
+
+    2026-11-07 P1-4: 前缀比较改用 realpath (挡 junction/符号链接逃逸),
+    返回的路径仍是 abspath (调用方与既有验收依赖这个字形, 不返回 realpath).
+    extra_roots: 额外允许根 (MCP 服务传入它自己的工程目录 —— 工程不在
+    程序目录/用户目录/临时目录时, 脚本写入不应被误杀)."""
     if not path or not isinstance(path, str):
         return False, '需要非空 path'
     full = os.path.abspath(os.path.normpath(path))
-    for r in _write_roots(win):
-        if full == r:
+    real = _realpath(full)
+    roots = list(_write_roots(win))
+    if extra_roots:
+        for r in extra_roots:
+            if r:
+                roots.append(os.path.abspath(os.path.normpath(str(r))))
+    for r in roots:
+        rr = _realpath(r)
+        if real == rr:
             return False, '路径是目录, 不是文件: %s' % full
-        if full.startswith(r + os.sep) or full.startswith(r + '/'):
+        if real.startswith(rr + os.sep) or real.startswith(rr + '/'):
             return True, full
     return False, ('%s 越域: %s (白名单: 程序目录/场景目录/用户目录; '
                    '请改用白名单内路径)' % (purpose, full))
@@ -157,11 +181,17 @@ def as_float(v, default=0.0):
 
 
 # 2026-10-20 提到模块级（原在 cmd_ui_set 局部，cmd_ui_add 也要用）
+# 2026-11-07 P0: 补齐此前漏掉的颜色字段 —— 漏掉的字段会落到 tuple()/setattr
+# 默认转换上, 传 '#rrggbb' 字符串就变成 ('#','r','r',...) 坏元组, 渲染帧
+# TypeError 直接把播放器打崩。凡是 UIElement 的颜色属性都必须在表内。
 _COLOR_FIELDS = {
     'bg_color', 'color', 'tint', 'text_color', 'normal_color',
     'hover_color', 'pressed_color', 'track_color', 'fill_color',
     'handle_color', 'box_color', 'check_color', 'label_color',
     'stroke_color',
+    # input_field / dropdown / scroll_view 的颜色字段 (2026-11-07 补齐)
+    'focus_bg_color', 'placeholder_color', 'cursor_color',
+    'list_bg', 'list_hover', 'bar_color',
 }
 
 
@@ -188,11 +218,76 @@ def parse_color(v):
     if isinstance(v, (list, tuple)):
         r = tuple(int(x) for x in v)
         if len(r) == 3:
-            return r + (255,)
-        if len(r) == 4:
-            return r
-        raise ValueError('颜色数组需 3 或 4 项: %r' % (v,))
+            r = r + (255,)
+        elif len(r) != 4:
+            raise ValueError('颜色数组需 3 或 4 项: %r' % (v,))
+        # 2026-11-07: 分量必须是 0-255 —— 越界元组同样会在渲染帧算出非法
+        # u_color (color/255.0 > 1), 属于坏元组, 一律拒绝。
+        for _c in r:
+            if not 0 <= _c <= 255:
+                raise ValueError('颜色分量越界 (需 0-255): %r' % (v,))
+        return r
     raise ValueError('颜色类型不支持: %r' % (v,))
+
+
+def _coerce_color_args(args, cmd='ui'):
+    """颜色参数预解析 (2026-11-07 P0): 把 args 里所有颜色字段统一过 parse_color,
+    变成 (r,g,b,a) 4 元组。非法值抛 ValueError —— 调用方转成
+    {'error': ...} 返回, 绝不让坏元组流进渲染帧。
+
+    ui_add 原来对颜色字段用裸 tuple(): tuple('#ff0000') -> ('#','f','f',...) 7 项,
+    渲染帧 color[0]/255.0 抛 TypeError -> 播放器整帧异常退出 (P0)。
+    这里是 ui_add / ui_set 共用的单一入口, 后续新字段只要进 _COLOR_FIELDS 即自动覆盖。
+    返回新 dict, 不改调用方传进来的对象 (dispatch 日志仍按原参数打印)。"""
+    out = dict(args)
+    for k in _COLOR_FIELDS:
+        if k in out:
+            try:
+                out[k] = parse_color(out[k])
+            except ValueError as e:
+                raise ValueError('%s 字段 %s 非法: %s' % (cmd, k, e))
+    return out
+
+
+# 几何字段: 名字 -> 需要的分量数 (rect 4 项, anchor/pivot 各 2 项)
+_VEC_FIELDS = {'rect': 4, 'anchor': 2, 'pivot': 2}
+
+
+def _as_vec(v, n, field, cmd='ui'):
+    """rect/anchor/pivot 规整成长度 n 的浮点元组 (2026-11-07 收尾)。
+
+    与颜色字段同一类坏输入: 原代码 `kw['rect'] = tuple(args['rect'])`,
+    控制台/HTTP 传字符串时 tuple('0,0,100,20') 得到字符元组, loom_ui 的
+    rect/anchor/pivot setter 有 try/except 会**静默丢弃** —— 命令回 ok=True
+    但元素尺寸/锚点根本没变 (最难查的那种'没反应')。
+    这里: 字符串按逗号/空白切分 (方便控制台 `rect=0,0,100,20`), 数组原样;
+    项数/数值/NaN 任一不合法都抛 ValueError, 由调用方转成 {'error': ...}。"""
+    if isinstance(v, str):
+        parts = [p for p in v.replace(',', ' ').split() if p]
+    elif isinstance(v, (list, tuple)):
+        parts = list(v)
+    else:
+        raise ValueError('%s 字段 %s 需要数组或逗号分隔数字: %r' % (cmd, field, v))
+    if len(parts) != n:
+        raise ValueError('%s 字段 %s 需要 %d 个数 (收到 %d 项): %r'
+                         % (cmd, field, n, len(parts), v))
+    try:
+        out = tuple(float(x) for x in parts)
+    except (TypeError, ValueError):
+        raise ValueError('%s 字段 %s 含非数值项: %r' % (cmd, field, v))
+    for c in out:
+        if c != c or c in (float('inf'), float('-inf')):
+            raise ValueError('%s 字段 %s 含 NaN/Inf: %r' % (cmd, field, v))
+    return out
+
+
+def _coerce_vec_args(args, cmd='ui'):
+    """rect/anchor/pivot 预解析 (与 _coerce_color_args 同款, 返回新 dict)。"""
+    out = dict(args)
+    for k, n in _VEC_FIELDS.items():
+        if k in out:
+            out[k] = _as_vec(out[k], n, k, cmd)
+    return out
 
 
 def vec_set(obj, field, axis, v):
@@ -507,9 +602,22 @@ def cmd_object_select(win, args):
     hits = _find_all(ed, name)
     if not hits:
         return {'error': '找不到: %s (先 object_list 看全部)' % name}
-    if len(hits) > 1 and args.get('index') is not None:
-        want = int(as_float(args['index'], -1))
-        hits = [h for h in hits if h[2] == want] or hits
+    # 2026-11-07 P1: 重名/越界 index 一律拒绝, 不再静默取第一个。
+    # 原写法 `hits = [...] or hits` 有三处坑: (1) 没有 index 时直接选 hits[0];
+    # (2) index 越界时 or 兜底回全量 hits, 仍然选 hits[0]; (3) 只按序号过滤,
+    # 序号跨类型共用时可能同时命中 model#1 与 light#1。MCP 的
+    # unity_gameobject_delete / _duplicate 就是先 object_select 再动手 ——
+    # 选错对象等于删错/复制错, 代价不可逆。歧义消息复用 _Ambiguous
+    # (列出全部候选的种类#序号, 与 prefab_unlink 等同一条契约)。
+    if len(hits) > 1:
+        idx = args.get('index')
+        if idx is None:
+            raise _Ambiguous(name, hits)
+        want = int(as_float(idx, -1))
+        picked = [h for h in hits if h[2] == want]
+        if len(picked) != 1:
+            raise _Ambiguous(name, hits)
+        hits = picked
     kind, obj, i = hits[0]
     if kind == 'model':
         ed._select_model(i)
@@ -1410,12 +1518,6 @@ def cmd_animator(win, args):
                                                  'current': an.current}}
 
 
-@command('scripts', '可用脚本清单 (script_add 的 sid 取这里)')
-def cmd_scripts(win, args):
-    from scripts import script_options
-    return {'scripts': [{'id': sid, 'name': nm} for sid, nm in script_options()
-                        if sid is not None]}
-
 
 @command('script_remove', '移除脚本: {name?, index} (检查器脚本行 × 按钮)')
 def cmd_script_remove(win, args):
@@ -2039,6 +2141,14 @@ def cmd_ui_add(win, args):
     if typ not in _UI_TYPE_NAMES:
         return {'error': 'type 必须是以下之一: %s, 收到 %r'
                          % (', '.join(_UI_TYPE_NAMES), typ)}
+    # 2026-11-07 P0: 颜色字段先统一解析 (#RRGGBB / #RRGGBBAA / (r,g,b[,a]))。
+    # 必须在建元素前做: 非法颜色直接拒绝, 不产生半成品元素 / 坏元组。
+    try:
+        args = _coerce_color_args(args, 'ui_add')
+        # 2026-11-07 收尾: rect/anchor/pivot 同样不能裸 tuple() 收字符串
+        args = _coerce_vec_args(args, 'ui_add')
+    except ValueError as e:
+        return {'error': str(e)}
     c, parent = _ui_parent(win, args)
     if c is None:
         return {'error': '找不到 Canvas（传 canvas= 序号, 先 ui_list 查看）'}
@@ -2054,10 +2164,12 @@ def cmd_ui_add(win, args):
         kw['anchor'] = tuple(args['anchor'])
     if 'pivot' in args:
         kw['pivot'] = tuple(args['pivot'])
+    # 2026-11-07 P1: 布尔一律走 as_bool —— 控制台/HTTP 传的是字符串,
+    # 裸 bool('false') == True, 会让 ui_add visible=false 反而显示出来。
     if 'visible' in args:
-        kw['visible'] = bool(args['visible'])
+        kw['visible'] = as_bool(args['visible'], True)
     if 'enabled' in args:
-        kw['enabled'] = bool(args['enabled'])
+        kw['enabled'] = as_bool(args['enabled'], True)
     if 'z_order' in args:
         kw['z_order'] = int(as_float(args['z_order'], 0))
 
@@ -2098,7 +2210,7 @@ def cmd_ui_add(win, args):
         take('handle_color', tuple)
         elem = loom_ui.Slider(**kw)
     elif typ == 'toggle':
-        take('is_on', bool)
+        take('is_on', as_bool)
         take('label', str)
         take('label_size', lambda v: int(as_float(v, 16)))
         take('box_color', tuple)
@@ -2116,7 +2228,7 @@ def cmd_ui_add(win, args):
         take('bg_color', tuple)
         take('bar_color', tuple)
         take('bar_width', lambda v: int(as_float(v, 8)))
-        take('show_bar', bool)
+        take('show_bar', as_bool)
         take('scroll_step', lambda v: int(as_float(v, 30)))
         elem = loom_ui.ScrollView(**kw)
     elif typ == 'input_field':
@@ -2156,7 +2268,7 @@ def cmd_ui_add(win, args):
         take('stroke_width', lambda v: max(1, int(as_float(v, 2))))
         take('fill_color', parse_color)
         take('segments', lambda v: max(8, int(as_float(v, 32))))
-        take('close', bool)
+        take('close', as_bool)
         elem = loom_ui.Shape(**kw)
     else:
         return {'error': '内部错误: type %r 未实现' % typ}
@@ -2185,6 +2297,14 @@ def cmd_ui_set(win, args):
     if elem is c.root:
         return {'error': '不能修改 Canvas root（用 ui_add / ui_set 改具体元素）'}
 
+    # 2026-11-07 P0: 颜色字段与 ui_add 共用同一个解析入口。放在这里: 元素不存在
+    # 之类的错误优先报出来, 且非法颜色在**任何字段被改动之前**就返回。
+    try:
+        args = _coerce_color_args(args, 'ui_set')
+        args = _coerce_vec_args(args, 'ui_set')
+    except ValueError as e:
+        return {'error': str(e)}
+
     # 2026-10-18 阶段5: 改前快照（撤销用）
     import undo as _undo_mod
     before = _undo_mod.ui_elem_snapshot(elem)
@@ -2199,11 +2319,12 @@ def cmd_ui_set(win, args):
     if 'pivot' in args:
         elem.pivot = tuple(args['pivot'])
         done['pivot'] = list(elem.pivot)
+    # 2026-11-07 P1: as_bool (裸 bool('false') == True 会让 visible=false 变显示)
     if 'visible' in args:
-        elem.visible = bool(args['visible'])
+        elem.visible = as_bool(args['visible'], elem.visible)
         done['visible'] = elem.visible
     if 'enabled' in args:
-        elem.enabled = bool(args['enabled'])
+        elem.enabled = as_bool(args['enabled'], elem.enabled)
         done['enabled'] = elem.enabled
     if 'z_order' in args:
         elem.z_order = int(as_float(args['z_order'], 0))
@@ -2249,7 +2370,7 @@ def cmd_ui_set(win, args):
         take('fill_color', tuple)
         take('handle_color', tuple)
     elif typ == 'toggle':
-        take('is_on', bool)
+        take('is_on', as_bool)
         take('label', str)
         take('label_size', lambda v: int(as_float(v, 16)))
         take('box_color', tuple)
@@ -2265,7 +2386,7 @@ def cmd_ui_set(win, args):
         take('bg_color', tuple)
         take('bar_color', tuple)
         take('bar_width', lambda v: int(as_float(v, 8)))
-        take('show_bar', bool)
+        take('show_bar', as_bool)
         take('scroll_step', lambda v: int(as_float(v, 30)))
     elif typ == 'input_field':
         take('text', str)
@@ -2306,7 +2427,7 @@ def cmd_ui_set(win, args):
         take('stroke_width', lambda v: max(1, int(as_float(v, 2))))
         take('fill_color', parse_color)
         take('segments', lambda v: max(8, int(as_float(v, 32))))
-        take('close', bool)
+        take('close', as_bool)
 
     if not done:
         return {'error': '没有可改的字段（检查参数名）', 'type': typ}

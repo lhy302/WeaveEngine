@@ -1,0 +1,45 @@
+
+# 2026-11-06: 输入法(Sogou)在 CWD 下按字面量创建 %SystemDrive%/ProgramData/... 的环境产物
+%SystemDrive%/
+
+# 2026-11-06: tests/_tmp 下这些文件是**测试产物**（每次跑 test_eai_real / test_integration 都会重写）。
+# 之前被误跟踪，导致"跑完测试 git 就脏"。已 git rm --cached 退出索引。
+tests/_tmp/eai_prefab.prefab
+tests/_tmp/eai_quit_save.json
+tests/_tmp/eai_save.material
+tests/_tmp/eai_save.mesh
+tests/_tmp/eai_scene.json
+tests/_tmp/editor_state_eai.json
+tests/_tmp/editor_state_test.json
+tests/_tmp/integration_lights.json
+tests/_tmp/integration_scene.json
+tests/_tmp/itest.prefab
+tests/_tmp/play_rotate.json
+
+# 2026-11-07: tests/_tmp 历史探针/夹具不纳入版本库（只保留当前 A/B 工具与场景）
+tests/_tmp/*
+!tests/_tmp/ab_gl_vk.py
+!tests/_tmp/ab_batch.py
+!tests/_tmp/ab_gl_vk_ui.py
+!tests/_tmp/cam_align_probe.py
+!tests/_tmp/ab_active_gl_vk.py
+!tests/_tmp/probe_vk_smoke.py
+!tests/_tmp/probe_vk_ui_smoke.py
+!tests/_tmp/verify_world_ui_depth.py
+!tests/_tmp/probe_bucket_reorder.py
+!tests/_tmp/ab_scene.json
+!tests/_tmp/ab_ui_scene.json
+!tests/_tmp/ui_world_scene.json
+!tests/_tmp/ui_lines_scene.json
+!tests/_tmp/ui_lines_alpha_scene.json
+!tests/_tmp/ui_tex_rgba.png
+!tests/_tmp/checker.png
+!tests/_tmp/normalmap.png
+!tests/_tmp/env_*.png
+# 测试/运行生成的工程存档
+/Projects/
+# 构建产物
+tools/dist/
+tools/dist_exe/
+tools/build_hub/
+tools/build_assets/

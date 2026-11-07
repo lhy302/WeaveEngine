@@ -18,6 +18,27 @@ from loom_types import Point3D
 from loom_material import Material
 
 
+def _normalize_scale(v):
+    """缩放归一化: 1~3 个数值 -> 3 元组, 缺省分量补 1.0 (None -> (1,1,1)).
+
+    P-05 (2026-11-07): mat4_scale / SoA 快照按 s[0]/s[1]/s[2] 取分量, 长度
+    小于 3 的序列 (如 (1, 2)) 会在渲染/物理帧内抛 IndexError. TransformComponent
+    的构造器与 setter 都过这里, 保证矩阵路径永远拿到 3 分量; 长度 0 或 >3 /
+    非数值序列显式 ValueError (与 loom_game_object._normalize_scale 同语义).
+    """
+    if v is None:
+        return (1.0, 1.0, 1.0)
+    try:
+        vals = tuple(float(x) for x in v)
+    except (TypeError, ValueError):
+        raise ValueError('scale 必须是 1~3 个数值的序列, 收到 %r' % (v,))
+    if not 1 <= len(vals) <= 3:
+        raise ValueError('scale 必须是 1~3 个数值的序列, 收到 %r' % (v,))
+    if len(vals) < 3:
+        vals = vals + (1.0,) * (3 - len(vals))
+    return vals
+
+
 # ================ 组件化 (M25): 组合优于继承 ================
 # Unity 哲学: GameObject 是最空的容器, 行为全来自挂上去的组件.
 # 这里 GameObject = 容器, 组件列表决定它"能干嘛". 一个物体可挂多个脚本.
@@ -46,7 +67,7 @@ class TransformComponent(Component):
         super().__init__()
         self._position = Point3D(*position)
         self._rotation = Point3D(*rotation)
-        self._scale = tuple(scale if scale is not None else (1.0, 1.0, 1.0))
+        self._scale = _normalize_scale(scale)
         self.parent = None
         self.children = []
 
@@ -70,7 +91,9 @@ class TransformComponent(Component):
         return self._scale
     @scale.setter
     def scale(self, v):
-        self._scale = tuple(v)
+        # P-05: 统一归一化 (短序列补 1.0 / 非法长度拒绝), 矩阵与 SoA 路径
+        # 恒拿到 3 分量; 旧实现 tuple(v) 接受 (1,2) 后在热路径 IndexError.
+        self._scale = _normalize_scale(v)
         TransformComponent._xform_gen += 1
 
 
@@ -78,6 +101,13 @@ class MeshRendererComponent(Component):
     """网格渲染组件: 网格 + 材质引用 + 法线模式 + 可见性 (M23 材质资产化).
     颜色/饱和度移到共享 Material 上 —— 多个物体引用同一材质, 改一处全变."""
     ctype = 'mesh_renderer'
+
+    # 2026-11-07 (_fix_summary §5 遗留: _update_lod 无 LOD 仍每帧全量扫描):
+    # LOD 配置代 —— lod_levels / lod_screen_levels 每次写入都 bump.
+    # SceneDriver 只比较本代, 变了才重建"配了 LOD 的模型"集合 (O(N) 一次);
+    # 集合为空时每帧 O(1) 早退. 运行期脚本/撤销/EAI 直接写 renderer.lod_*
+    # 也能被感知 (不需要调用方显式登记), 无 LOD 的默认路径零扫描.
+    _lod_gen = 0
 
     def __init__(self, mesh, color=None, normal_mode='flat', primitive=None,
                  params=None, saturation=1.0, visible=True, material=None):
@@ -93,13 +123,33 @@ class MeshRendererComponent(Component):
         self.visible = visible
         # M36 LOD (2026-10-14): 距离分级网格 [(max_dist, mesh), ...] 升序;
         # None=无 LOD (零开销). 引擎 _update_lod 按相机距离切换 renderer.mesh。
-        self.lod_levels = None
+        # 存 _lod_levels / _lod_screen_levels, 由 property 写入并 bump _lod_gen.
+        self._lod_levels = None
         # M36 LOD 屏幕占比模式 (对标 Unity LODGroup.screenRelativeTransitionHeight):
         # [(屏幕占比阈值, mesh), ...] 降序 (高精度阈值大); 更准确 (大物体远处仍高精度)。
-        self.lod_screen_levels = None
+        self._lod_screen_levels = None
         self.lod_bias = 1.0                      # LOD 偏移 (对标 Unity lodBias; >1 更早降级)
         self._lod_cur = None                     # 上次 LOD 选中的 mesh (防每帧重复切换)
         self._lod_radius = None                  # 缓存包围球半径 (屏幕占比用)
+
+    # ---- LOD 配置 property (写入 bump _lod_gen, 供 SceneDriver 增量登记) ----
+    @property
+    def lod_levels(self):
+        return self._lod_levels
+
+    @lod_levels.setter
+    def lod_levels(self, v):
+        self._lod_levels = v
+        MeshRendererComponent._lod_gen += 1
+
+    @property
+    def lod_screen_levels(self):
+        return self._lod_screen_levels
+
+    @lod_screen_levels.setter
+    def lod_screen_levels(self, v):
+        self._lod_screen_levels = v
+        MeshRendererComponent._lod_gen += 1
 
 
 class ScriptComponent(Component):
@@ -108,8 +158,16 @@ class ScriptComponent(Component):
     _script/_script_broken 是播放期运行态 (编辑/非播放期不实例化)."""
     ctype = 'script'
 
+    # P-03 (2026-11-07): 脚本组件创建代。GameObject.add_script 只 append 组件,
+    # 不 bump 引擎结构代 —— engine.update_scripts 的 has_scripts 缓存若只看
+    # 结构代, 无脚本场景运行期挂脚本后会永久早退。构造函数是全库唯一构造点,
+    # 在这里 bump; engine 缓存键 = (结构代, 本代), remove/clear 不 bump 只会
+    # 多扫一帧 (多算不错算)。
+    _script_gen = 0
+
     def __init__(self, script_id=None, script_vars=None):
         super().__init__()
+        ScriptComponent._script_gen += 1
         self.script_id = script_id
         self.script_vars = dict(script_vars or {})
         self._script = None

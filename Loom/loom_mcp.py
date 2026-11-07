@@ -309,6 +309,45 @@ PROMPTS_DEF = [
     {'name': 'diagnose_engine_issue', 'description': '自动排查引擎运行时的帧率异常、物理穿模或脚本崩溃问题', 'arguments': []},
     {'name': 'create_player_character', 'description': '在场景中自动生成并配置一个支持 WASD 移动与第三人称相机跟随的玩家角色', 'arguments': []}
 ]
+
+
+def _safe_script_path(base_dir, fname, purpose='MCP 写脚本'):
+    """脚本写入路径校验 (2026-11-07 P1-4)。返回 (True, abspath) 或 (False, 错误串)。
+
+    背景: unity_script_write_file 原来直接 os.path.join(base_dir, 'scripts', fname)
+    就写 —— filename 传 '../../x.py' 会写到工程外, 传绝对路径 (C:/Windows/x.py)
+    os.path.join 会整体丢弃 scripts 前缀, 直接落盘到任意位置。MCP 是给大模型
+    用的接口, 参数来自模型输出 (可被提示词注入), 必须当成不可信输入校验。
+
+    两层闸门:
+      1) realpath 归属: 解析 junction/符号链接后必须真落在 <工程>/scripts/ 内
+         (挡 ../、脚本目录外的绝对路径、scripts 里放 junction 指向别处);
+      2) 复用 EAI 的写路径白名单 agent_commands._safe_write_path
+         (程序目录/场景目录/用户目录/临时目录 + 本工程目录), 与 GUI 侧
+         scene_save/asset_save/prefab_save 同一条策略, 不再两套事实。
+    """
+    if not fname or not isinstance(fname, str):
+        return False, '需要非空 filename'
+    try:
+        import agent_commands as _ac
+    except Exception as e:                     # 白名单模块不可用 -> 一律拒绝 (失败关闭)
+        return False, '写路径白名单校验不可用, 拒绝写入: %r' % (e,)
+    scripts_dir = os.path.join(base_dir, 'scripts')
+    os.makedirs(scripts_dir, exist_ok=True)
+    full = os.path.join(scripts_dir, fname)
+    real_dir = _ac._realpath(scripts_dir)
+    real_full = _ac._realpath(full)
+    if not (real_full.startswith(real_dir + os.sep)
+            or real_full.startswith(real_dir + '/')):
+        return False, ('脚本路径越域: %s (必须落在 %s 之内; 不接受 ../ '
+                       '或脚本目录之外的绝对路径)' % (full, scripts_dir))
+    ok, why = _ac._safe_write_path(full, purpose, None,
+                                   extra_roots=[base_dir])
+    if not ok:
+        return False, why
+    return True, why                             # why = 规范化后的 abspath
+
+
 class LoomMCPServer:
     def __init__(self, client=None):
         self.client = client or LoomEngineClient()
@@ -580,9 +619,10 @@ class LoomMCPServer:
             code_str = args.get('code', '')
             if not (fname.endswith('.lua') or fname.endswith('.py')):
                 return self._err('文件名必须以 .lua 或 .py 结尾')
-            scripts_dir = os.path.join(c.base_dir, 'scripts')
-            os.makedirs(scripts_dir, exist_ok=True)
-            full_path = os.path.join(scripts_dir, fname)
+            # 2026-11-07 P1-4: 写路径必须过白名单 (原来 ../../x.py 与绝对路径都放行)
+            ok, full_path = _safe_script_path(c.base_dir, fname)
+            if not ok:
+                return self._err(full_path)
             with open(full_path, 'w', encoding='utf-8') as f:
                 f.write(code_str)
             return self._mk('脚本写入成功: %s (%d bytes)' % (full_path, len(code_str)))
@@ -913,7 +953,21 @@ def run_stdio_server():
             req = json.loads(line)
         except Exception:
             continue
-        res = server.handle_request(req)
+        # 2026-11-07 P1: 单个工具异常不能打死整个 MCP 服务进程。stdio 服务一退出,
+        # 客户端整条链路掉线 (只能重启), 而异常往往只是某条命令的参数问题
+        # (例: unity_script_write_file 写不存在的子目录 -> FileNotFoundError)。
+        # 这里兜住 -> 回一条 JSON-RPC error (id 对齐请求), 循环继续。
+        try:
+            res = server.handle_request(req)
+        except Exception as _e:
+            try:
+                print('[loom-mcp] tool error: %r' % (_e,), file=sys.stderr)
+            except Exception:
+                pass
+            res = {'jsonrpc': '2.0',
+                   'id': req.get('id') if isinstance(req, dict) else None,
+                   'error': {'code': -32603,
+                             'message': 'tool error: %r' % (_e,)}}
         if res is not None:
             # 2026-10-19 P1-5: 最终 write 兜底（防极端字符绕过 reconfigure）
             try:

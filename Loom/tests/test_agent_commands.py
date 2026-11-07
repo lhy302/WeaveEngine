@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+
 """
 test_agent_commands.py — Engine Agent 接口 EAI 测试 (2026-08-27, 全无头).
 覆盖: 命令注册/派发 (未知命令/异常隔离) / 高频命令语义 (对象增删改查/播放/
@@ -6,6 +7,56 @@ test_agent_commands.py — Engine Agent 接口 EAI 测试 (2026-08-27, 全无头
 drain 往返 / HTTP 端到端 (POST /cmd 鉴权 401/200, GET /logs/).
 无头 (免 Qt/pygame 窗口); 用 FakeWin/FakeEditor 桩验证命令契约.
 """
+
+# 2026-11-06 P-02 修复: Windows 控制台默认 GBK, 末尾 print 的 ✅/❌/≤ 等字符会抛
+# UnicodeEncodeError, 让"测试通过"被记录成 exit=1 的假失败 (48/51 曾被误判)。
+# 统一把 stdout/stderr 切到 UTF-8(replace), 失败信号重新只由断言决定。
+import sys as _sys_utf8
+try:
+    _sys_utf8.stdout.reconfigure(encoding='utf-8', errors='replace')
+    _sys_utf8.stderr.reconfigure(encoding='utf-8', errors='replace')
+except Exception:
+    pass
+
+# 2026-11-06 失败退出码闸门 (复核 A 指出: 54 个测试里仅 18 个有 sys.exit(1),
+# 其余 FAIL 也 exit 0 -> run_all 假绿, 失败被静默吞掉)。
+# 做法: 包一层 stdout, 出现以 "FAIL" 开头的行就在进程退出时把状态码改成 1。
+# 只在真出现 FAIL 时才改码, 全 PASS 的测试行为完全不变。
+import atexit as _atexit_gate
+import os as _os_gate
+import sys as _sys_gate
+
+
+class _FailGateStream:
+    def __init__(self, stream):
+        self._stream = stream
+        self.failed = False
+
+    def write(self, text):
+        if isinstance(text, str) and (text.startswith("FAIL") or "\nFAIL" in text):
+            self.failed = True
+        return self._stream.write(text)
+
+    def __getattr__(self, name):
+        return getattr(self._stream, name)
+
+
+_fail_gate = _FailGateStream(_sys_gate.stdout)
+_sys_gate.stdout = _fail_gate
+
+
+@_atexit_gate.register
+def _enforce_fail_exit_code():
+    if not _fail_gate.failed:
+        return
+    try:
+        _sys_gate.stdout.flush()
+        _sys_gate.stderr.flush()
+    except Exception:
+        pass
+    _os_gate._exit(1)
+
+
 import json
 import os
 import sys
@@ -98,7 +149,9 @@ class FakeEditor:
     def duplicate_object(self):
         self.calls.append(('dup',))
 
-    def add_script(self, obj, sid):
+    def add_script(self, obj, sid, extra_vars=None):
+        # P-08b 修复 (2026-11-06): 引擎 cmd_script_add 已透传 extra_vars
+        # (P1-1 script_vars 一路带到引擎), 桩签名停旧 -> TypeError 被误报成失败
         self.calls.append(('script', obj.name, sid))
 
     def _undo_action(self):

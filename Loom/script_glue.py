@@ -186,12 +186,32 @@ class LoomLuaScript:
         return res.decode('utf-8', errors='ignore') if res else ""
 
     def close(self):
-        if self.vm:
-            h = handle()      # ★B3: 失败硬 raise
+        """释放 C 侧 lua_State (2026-11-07 审计 scan_09 P-09/P-25 修复).
+
+        幂等语义: 先把 vm 置 None 再 free —— 重复调用/并发调用都不会二次
+        free (C 侧 double free = 堆破坏)。释放动作本身**不抛**: 该函数由
+        on_disable/on_destroy/__del__ 三条生命周期路径调用, 那里抛异常只会
+        把"停止播放/删物体"变成新的崩溃源 (官方件缺失时 handle() 仍会硬
+        raise, 这里吞掉并打日志)。
+        """
+        vm = self.vm
+        self.vm = None
+        if not vm:
+            return
+        try:
+            h = handle()
             fn_free = h.get_fn('loom_script_lua_free', None,
                                [ctypes.c_void_p])
-            fn_free(self.vm)
-            self.vm = None
+            fn_free(vm)
+        except Exception as e:
+            print('[Lua] 释放 VM 失败: %r' % e)
+
+    def __del__(self):
+        """兜底释放: 未走 on_disable/on_destroy 的孤儿包装 (GC 时回收 VM)。"""
+        try:
+            self.close()
+        except Exception:
+            pass
 
 
 def status():

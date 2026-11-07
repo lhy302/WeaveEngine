@@ -50,7 +50,10 @@ class PlayerApp(GLEngine):
         sceneio.scene_from_dict(self, data, camera_out=cam_out)
         if cam_out:
             self.camera_target = cam_out['target']
-            self.camera_distance = cam_out['distance']
+            # 2026-11-06 R-03: 与 Vk 后端同语义 —— 场景距离在入口钳制
+            # (0.5..1000), 否则 distance=5000 会把观察目标顶到 far 之外、整屏裁空。
+            from loom_camera import clamp_camera_distance
+            self.camera_distance = clamp_camera_distance(cam_out['distance'])
             self.camera_yaw = cam_out['yaw']
             self.camera_pitch = cam_out['pitch']
         # 玩家视角: 场景 active_camera (Unity Camera) 优先, 否则默认轨道相机

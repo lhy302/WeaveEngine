@@ -1,0 +1,519 @@
+{
+  "version": 21,
+  "camera": {
+    "target": [
+      0,
+      1,
+      0
+    ],
+    "distance": 9,
+    "yaw": 0.6,
+    "pitch": -0.35
+  },
+  "gravity": -9.8,
+  "materials": [],
+  "cameras": [],
+  "active_camera": null,
+  "skybox": null,
+  "lights": [
+    {
+      "id": "l1",
+      "name": "太阳",
+      "kind": "directional",
+      "position": [
+        0,
+        12,
+        0
+      ],
+      "azimuth": 30,
+      "elevation": -55,
+      "roll": 0,
+      "color": [
+        1,
+        1,
+        1
+      ],
+      "intensity": 1.1,
+      "mode": "full",
+      "shape": "circle",
+      "size": 8,
+      "shadow": true
+    }
+  ],
+  "ui": {
+    "canvases": [
+      {
+        "canvas_type": "screen",
+        "width": 480,
+        "height": 320,
+        "z_order": 0,
+        "elements": [
+          {
+            "type": "element",
+            "name": "root",
+            "rect": [
+              0,
+              0,
+              480,
+              320
+            ],
+            "children": [
+              {
+                "type": "panel",
+                "name": "bg",
+                "rect": [
+                  0,
+                  0,
+                  480,
+                  320
+                ],
+                "bg_color": [
+                  20,
+                  24,
+                  34,
+                  200
+                ]
+              },
+              {
+                "type": "text",
+                "name": "title",
+                "rect": [
+                  12,
+                  8,
+                  300,
+                  24
+                ],
+                "text": "Loom Canvas UI · GL/VK 对齐",
+                "font_size": 20,
+                "color": [
+                  255,
+                  220,
+                  120
+                ]
+              },
+              {
+                "type": "button",
+                "name": "btn",
+                "rect": [
+                  12,
+                  40,
+                  120,
+                  32
+                ],
+                "text": "开始游戏",
+                "font_size": 16
+              },
+              {
+                "type": "slider",
+                "name": "vol",
+                "rect": [
+                  150,
+                  44,
+                  170,
+                  20
+                ],
+                "min_value": 0,
+                "max_value": 1,
+                "value": 0.35,
+                "direction": "h"
+              },
+              {
+                "type": "toggle",
+                "name": "shadow",
+                "rect": [
+                  150,
+                  72,
+                  200,
+                  22
+                ],
+                "is_on": true,
+                "label": "开启阴影",
+                "label_size": 16
+              },
+              {
+                "type": "progress_bar",
+                "name": "hp",
+                "rect": [
+                  12,
+                  80,
+                  120,
+                  14
+                ],
+                "value": 0.62
+              },
+              {
+                "type": "input_field",
+                "name": "nick",
+                "rect": [
+                  12,
+                  104,
+                  200,
+                  30
+                ],
+                "text": "Player_1",
+                "font_size": 16
+              },
+              {
+                "type": "dropdown",
+                "name": "quality",
+                "rect": [
+                  230,
+                  104,
+                  130,
+                  30
+                ],
+                "options": [
+                  "低",
+                  "中",
+                  "高"
+                ],
+                "selected_index": 1,
+                "font_size": 14,
+                "item_height": 24
+              },
+              {
+                "type": "grid_layout",
+                "name": "grid",
+                "rect": [
+                  12,
+                  146,
+                  220,
+                  104
+                ],
+                "cell_size": [
+                  100,
+                  44
+                ],
+                "spacing": [
+                  8,
+                  8
+                ],
+                "columns": 2,
+                "bg_color": [
+                  40,
+                  44,
+                  56,
+                  255
+                ],
+                "children": [
+                  {
+                    "type": "button",
+                    "name": "g1",
+                    "rect": [
+                      0,
+                      0,
+                      100,
+                      44
+                    ],
+                    "text": "背包"
+                  },
+                  {
+                    "type": "button",
+                    "name": "g2",
+                    "rect": [
+                      0,
+                      0,
+                      100,
+                      44
+                    ],
+                    "text": "技能"
+                  },
+                  {
+                    "type": "button",
+                    "name": "g3",
+                    "rect": [
+                      0,
+                      0,
+                      100,
+                      44
+                    ],
+                    "text": "地图"
+                  },
+                  {
+                    "type": "button",
+                    "name": "g4",
+                    "rect": [
+                      0,
+                      0,
+                      100,
+                      44
+                    ],
+                    "text": "退出"
+                  }
+                ]
+              },
+              {
+                "type": "scroll_view",
+                "name": "log",
+                "rect": [
+                  250,
+                  146,
+                  210,
+                  150
+                ],
+                "content_size": [
+                  210,
+                  620
+                ],
+                "bg_color": [
+                  30,
+                  34,
+                  44,
+                  255
+                ],
+                "bar_color": [
+                  120,
+                  130,
+                  150,
+                  255
+                ],
+                "bar_width": 8,
+                "show_bar": true,
+                "scroll_step": 30,
+                "children": [
+                  {
+                    "type": "panel",
+                    "name": "r1",
+                    "rect": [
+                      0,
+                      0,
+                      200,
+                      50
+                    ],
+                    "bg_color": [
+                      70,
+                      90,
+                      120,
+                      255
+                    ],
+                    "children": [
+                      {
+                        "type": "text",
+                        "name": "t1",
+                        "rect": [
+                          8,
+                          8,
+                          190,
+                          20
+                        ],
+                        "text": "第 1 行日志",
+                        "font_size": 14
+                      }
+                    ]
+                  },
+                  {
+                    "type": "panel",
+                    "name": "r2",
+                    "rect": [
+                      0,
+                      60,
+                      200,
+                      50
+                    ],
+                    "bg_color": [
+                      90,
+                      70,
+                      120,
+                      255
+                    ],
+                    "children": [
+                      {
+                        "type": "text",
+                        "name": "t2",
+                        "rect": [
+                          8,
+                          8,
+                          190,
+                          20
+                        ],
+                        "text": "第 2 行日志",
+                        "font_size": 14
+                      }
+                    ]
+                  },
+                  {
+                    "type": "panel",
+                    "name": "r3",
+                    "rect": [
+                      0,
+                      120,
+                      200,
+                      50
+                    ],
+                    "bg_color": [
+                      70,
+                      120,
+                      90,
+                      255
+                    ],
+                    "children": [
+                      {
+                        "type": "text",
+                        "name": "t3",
+                        "rect": [
+                          8,
+                          8,
+                          190,
+                          20
+                        ],
+                        "text": "第 3 行日志 (应被裁剪)",
+                        "font_size": 14
+                      }
+                    ]
+                  },
+                  {
+                    "type": "panel",
+                    "name": "r4",
+                    "rect": [
+                      0,
+                      180,
+                      200,
+                      50
+                    ],
+                    "bg_color": [
+                      120,
+                      90,
+                      70,
+                      255
+                    ],
+                    "children": [
+                      {
+                        "type": "text",
+                        "name": "t4",
+                        "rect": [
+                          8,
+                          8,
+                          190,
+                          20
+                        ],
+                        "text": "第 4 行日志 (应被裁剪)",
+                        "font_size": 14
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "image",
+                "name": "logo",
+                "rect": [
+                  12,
+                  262,
+                  220,
+                  46
+                ],
+                "texture_path": "tests/_tmp/ui_tex_rgba.png",
+                "tint": [
+                  255,
+                  255,
+                  255,
+                  255
+                ],
+                "fit": "contain"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "objects": [
+    {
+      "id": "o1",
+      "name": "地面",
+      "type": "plane",
+      "params": {
+        "size": 12
+      },
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "color": "#5a6a7a",
+      "normal_mode": "flat",
+      "saturation": 1,
+      "visible": true,
+      "scripts": [],
+      "collider": null,
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "o2",
+      "name": "立方体",
+      "type": "cube",
+      "params": {
+        "size": 1.4
+      },
+      "position": [
+        -1.6,
+        0.7,
+        0.4
+      ],
+      "rotation": [
+        0.3,
+        0.6,
+        0
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "color": "#e0804a",
+      "normal_mode": "flat",
+      "saturation": 1,
+      "visible": true,
+      "scripts": [],
+      "collider": null,
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "o3",
+      "name": "球",
+      "type": "sphere",
+      "params": {
+        "radius": 0.8,
+        "segments": 24
+      },
+      "position": [
+        1.6,
+        0.8,
+        -0.4
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "color": "#4a90e0",
+      "normal_mode": "flat",
+      "saturation": 1,
+      "visible": true,
+      "scripts": [],
+      "collider": null,
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    }
+  ]
+}

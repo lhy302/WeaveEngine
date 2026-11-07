@@ -16,6 +16,45 @@ from loom_components import (
 )
 
 
+class _ChildList(list):
+    """Transform.children 专用列表: append/insert 幂等 (同一子节点不重复登记).
+
+    2026-11-07 P-09 修复配套: `GameObject.parent` setter 现在自动维护双向关系
+    (直写 parent 也登记进新父 children). 历史调用点 (sceneio._link_by_map 等)
+    在写 parent 之后仍会再 append 一次 —— 幂等 append 让"setter 维护"与"旧调用
+    点手工登记"共存, 不会产生重复子节点 (重复会让 collect_subtree/remove_subtree
+    对同一物体重复处理, 也会让 children 表与树结构不一致).
+    """
+
+    def append(self, obj):
+        if obj not in self:
+            super().append(obj)
+
+    def insert(self, index, obj):
+        if obj not in self:
+            super().insert(index, obj)
+
+
+def _normalize_scale(v):
+    """缩放归一化: 1~3 个数值 -> 3 元组, 缺省分量补 1.0 (None -> (1,1,1)).
+
+    2026-11-07 P-05 修复: mat4_scale / SoA 快照按 s[0]/s[1]/s[2] 取分量, 长度
+    小于 3 的元组 (如 (1, 2)) 会在渲染/物理帧内抛 IndexError. 在 setter 层统一
+    补齐, 保证矩阵路径始终拿到 3 分量; 长度 >3 或非数值序列显式报错.
+    """
+    if v is None:
+        return (1.0, 1.0, 1.0)
+    try:
+        vals = tuple(float(x) for x in v)
+    except (TypeError, ValueError):
+        raise ValueError('scale 必须是 1~3 个数值的序列, 收到 %r' % (v,))
+    if not 1 <= len(vals) <= 3:
+        raise ValueError('scale 必须是 1~3 个数值的序列, 收到 %r' % (v,))
+    if len(vals) < 3:
+        vals = vals + (1.0,) * (3 - len(vals))
+    return vals
+
+
 # ================ 模型状态 (场景物体) ================
 class GameObject:
     """场景物体 (M25 组件化): 容器 + 组件列表.
@@ -41,8 +80,10 @@ class GameObject:
         self._tag = 'Untagged'
         # —— 组件 (M25) ——
         self.components = []
-        self.transform = TransformComponent(position, rotation, scale)
+        self.transform = TransformComponent(position, rotation, _normalize_scale(scale))
         self.transform.owner = self
+        # P-09: children 用幂等列表 (parent 直写 + 旧调用点手工登记共存不重复)
+        self.transform.children = _ChildList(self.transform.children)
         self.renderer = MeshRendererComponent(mesh, color, normal_mode, primitive,
                                               params, saturation, visible)
         self.renderer.owner = self
@@ -118,13 +159,40 @@ class GameObject:
         return self.transform.scale
     @scale.setter
     def scale(self, v):
-        self.transform.scale = tuple(v)
+        # P-05: 统一补齐成 3 元组, 防矩阵/SoA 路径 IndexError
+        self.transform.scale = _normalize_scale(v)
     @property
     def parent(self):
         return self.transform.parent
     @parent.setter
     def parent(self, v):
-        self.transform.parent = v
+        # 2026-11-07 (_fix_summary §5 遗留): 直写 parent 的成环保护 —— 沿 v 的
+        # 父链上溯, 遇到自己就拒绝并抛 ValueError。否则 collect_subtree 会无限
+        # 递归 (引擎 set_parent 早已拒绝, 但直写属性绕过了它)。
+        if v is not None:
+            cur = v
+            depth = 0
+            while cur is not None and depth < 10000:
+                if cur is self:
+                    raise ValueError(
+                        'parent 不能成环: %r 的父链上已包含 %r'
+                        % (getattr(v, 'name', v), getattr(self, 'name', self)))
+                cur = getattr(cur, 'parent', None)
+                depth += 1
+            if depth >= 10000:
+                raise ValueError('parent 链过长或已损坏 (>=10000 层), 拒绝挂父')
+        # P-09: 直写 parent 也维护双向关系 (children 是 collect_subtree/
+        # remove_subtree 的唯一结构来源, 只改指针会让旧父继续"认领"该子树).
+        old = self.transform.parent
+        if old is not v:
+            if old is not None:
+                try:
+                    old.children.remove(self)
+                except ValueError:
+                    pass
+            self.transform.parent = v
+        if v is not None and self not in v.children:
+            v.children.append(self)
         # 组2/组3: 旁路挂父 (脚本/编辑器直写) 也失效引擎侧 ancestry+SoA 缓存.
         # GameObject 无引擎引用 -> 类级弱实例表 (GLEngine.__init__ 注册);
         # 只脏不净 (多算不 错算), 无活实例时静默 (引擎未建则无缓存可脏).

@@ -5,6 +5,15 @@
 对话框已 mock 取消; 但会打开 GPU 窗口渲染数帧."""
 import os, sys, subprocess, glob
 
+# 2026-11-06: Windows 控制台/管道默认 GBK, 末尾 "全部测试完成 ✅" 会抛
+# UnicodeEncodeError -> 明明全绿却 exit=1 (与各 test_*.py 的 P-02 修复同款).
+# 统一 UTF-8(replace): 失败信号重新只由子进程退出码决定。
+try:
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+except Exception:
+    pass
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 files = [f for f in sorted(glob.glob(os.path.join(HERE, "test_*.py")))
          if os.path.basename(f) != "test_integration.py"]

@@ -258,7 +258,21 @@ class ModelGpuMixin:
         self._render_buckets = []
 
     def remove_model(self, model):
-        """删除单个模型: 释放 GPU 资源、解除父链引用并从列表移除.
+        """删除模型 (Q3=A, 2026-11-07: 仍有子物体 = 连整棵子树一起删, Unity 语义).
+
+        无子物体走 _remove_one_model; 有子物体委托 remove_subtree。旧实现只删
+        父节点、把子物体留在 models 里且 parent 悬空 → 批量矩阵(缺失父=根)与
+        递归矩阵(沿悬空父合成)两套语义分叉 (P-10)。
+        2026-08-16 相机物体化: 先脱掉挂在本物体下的摄像机 (世界不跳)."""
+        if model is None:
+            return
+        if getattr(model, 'children', None):
+            self.remove_subtree(model)
+            return
+        self._remove_one_model(model)
+
+    def _remove_one_model(self, model):
+        """删除单个节点 (内部; remove_subtree 逐节点调用).
         2026-08-16 相机物体化: 先脱掉挂在本物体下的摄像机 (世界不跳)."""
         for cam in list(getattr(model, 'camera_children', [])):
             self.set_camera_parent(cam, None, preserve_world=True)
@@ -298,19 +312,32 @@ class ModelGpuMixin:
             if model in model.parent.children:
                 model.parent.children.remove(model)
             model.parent = None
+        # P-10 兜底: 若仍挂着子物体 (父链即将悬空), 提升为根 —— 批量矩阵与
+        # model_world_matrix 对"父不在 models"的语义必须一致。remove_model
+        # 正常路径已委托 remove_subtree, 这里只服务 remove_subtree 的逐节点
+        # 删除 (父先删时子还挂在它下面) 与外部直调 _remove_one_model 的场景。
+        for ch in list(getattr(model, 'children', ())):
+            if ch is not model and ch in self.models:
+                try:
+                    self.set_parent(ch, None, preserve_world=False)
+                except Exception:
+                    ch.transform.parent = None
         if self.current_model_index >= len(self.models):
             self.current_model_index = max(0, len(self.models) - 1)
 
     def remove_subtree(self, root):
         """删除 root 及其全部子孙 (M14: 删除物体/撤销 redo 用).
         2026-08-16 相机物体化: 先脱掉整棵子树上挂的摄像机 (父链完整, 世界不跳),
-        再逐个删节点."""
+        再逐个删节点.
+        2026-11-07 P-10: 逐节点走 _remove_one_model (不是 remove_model) ——
+        避免"父节点再触发一次子树删除"的递归/重复; _remove_one_model 在删父时
+        把剩余子物体提升为根, 保证批量/递归矩阵语义一致。"""
         sub = list(self.collect_subtree(root))
         for m in sub:
             for cam in list(getattr(m, 'camera_children', [])):
                 self.set_camera_parent(cam, None, preserve_world=True)
         for m in sub:
-            self.remove_model(m)
+            self._remove_one_model(m)
 
     def clear_scene(self):
         """清空全部模型 (M16: 新建/加载场景用)"""

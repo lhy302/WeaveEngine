@@ -533,15 +533,29 @@ def engine_mat3_from_quat(quat_xyzw):
 
 
 def quat_to_euler_batch(quat_xyzw):
-    """(n,4) [x,y,z,w] -> 引擎弧度欧拉 (n,3) (matlib.decompose_euler 反解;
-    万向锁 |cos beta|<1e-9: gamma=0)."""
+    """(n,4) [x,y,z,w] -> 引擎弧度欧拉 (n,3) (matlib.decompose_euler 反解).
+
+    万向锁 (|cos beta|<1e-9, beta=±90°): 令 gamma=0, 只剩 alpha∓gamma 可辨.
+    ★2026-11-07 P-13/P-14 同款修复: beta 的**符号**决定 alpha 的 atan2 取法 ——
+    旧实现对 beta=-90° 也取 atan2(R[1,0], R[1,1]), 重建矩阵误差 1.68 rad;
+    正确取法 (与 matlib.decompose_euler 逐位一致):
+      beta=+90°: R[1,0]= sin(alpha-gamma) -> alpha=atan2( R[1,0], R[1,1])
+      beta=-90°: R[1,0]=-sin(alpha+gamma) -> alpha=atan2(-R[1,0], R[1,1])
+    重建 (alpha,beta,0) 仍与原旋转矩阵一致 (<1e-6), 故奇点回读不跳变."""
     M = engine_mat3_from_quat(quat_xyzw)
-    beta = np.arcsin(np.clip(-M[:, 0, 2], -1.0, 1.0))
+    raw = np.clip(-M[:, 0, 2], -1.0, 1.0)
+    beta = np.arcsin(raw)
+    # quat -> matrix 往返在奇点附近会把 asin 参数压到 1-1.1e-16 (beta 偏
+    # 1.5e-8 rad, cos(beta)=1.5e-8 > 1e-9 锁阈值 -> 万向锁分支不命中, 回读
+    # 出的 alpha/gamma 仍是错解). 参数饱和到 1-1e-12 内 = 真奇点, 吸附 ±90°.
+    at_pole = np.abs(raw) >= 1.0 - 1e-12
+    beta = np.where(at_pole, np.copysign(np.pi / 2.0, raw), beta)
     cb = np.cos(beta)
-    alpha = np.where(np.abs(cb) < 1e-9,
-                     np.arctan2(M[:, 1, 0], M[:, 1, 1]),
-                     np.arctan2(M[:, 1, 2], M[:, 2, 2]))
-    gamma = np.where(np.abs(cb) < 1e-9, 0.0, np.arctan2(M[:, 0, 1], M[:, 0, 0]))
+    lock = np.abs(cb) < 1e-9
+    s = np.where(beta > 0.0, 1.0, -1.0)
+    alpha_lock = np.arctan2(s * M[:, 1, 0], M[:, 1, 1])
+    alpha = np.where(lock, alpha_lock, np.arctan2(M[:, 1, 2], M[:, 2, 2]))
+    gamma = np.where(lock, 0.0, np.arctan2(M[:, 0, 1], M[:, 0, 0]))
     return np.stack([alpha, beta, gamma], axis=-1)
 
 
@@ -579,7 +593,9 @@ class PhysicsWorldBridge:
         self._w = None
         self._entries = []            # [{'model','handle','id','cat','mask','motion','signature'}]
         self._next_id = 0             # 单调 body 登记号 (user_data; 移除后不复用)
-        self._tree_bit = {}           # id(root) -> bit
+        self._tree_bit = {}           # id(root) -> bit (移除体时回收, 见 _release_tree)
+        self._tree_ref = {}           # id(root) -> 引用计数 (该树当前存活体数)
+        self._tree_overflow = 0       # >32 棵存活树时的轮转计数 (仅警告用)
         self._warned_tree_rot = 0
         self._last_sync = {}          # id(m) -> [pos3, rot3, vel3] (float 元组)
         self._dmb_cache = None        # 2026-09-07: 跨子步脏检测缓存 (见 _dirty_mask_batch)
@@ -634,6 +650,8 @@ class PhysicsWorldBridge:
         self._last_sync.clear()
         self._dmb_cache = None           # 结构重建: 脏检测缓存一并失效
         self._tree_bit.clear()
+        self._tree_ref.clear()
+        self._tree_overflow = 0
 
     def destroy(self):
         """销毁世界 (播放结束/退出清理). 幂等. ensure_models 在 destroy 后禁用."""
@@ -641,6 +659,9 @@ class PhysicsWorldBridge:
         self._entries = []
         self._last_sync.clear()
         self._dmb_cache = None
+        self._tree_bit.clear()
+        self._tree_ref.clear()
+        self._tree_overflow = 0
 
     # ---------- 树位分配 ----------
     def _root_of(self, m):
@@ -652,22 +673,44 @@ class PhysicsWorldBridge:
         return r
 
     def _tree_bit_for(self, m):
-        """每根根树 1 位 category; >31 轮转位+每场警告 (设计 §1.1 #9)."""
+        """每根根树 1 位 category (设计 §1.1 #9). 返回 (tree_key, bit).
+
+        修复 P2-⑨ (2026-11-07): 位不再只增不减 —— 树内最后一个体销毁时由
+        _release_tree 回收 id(root) 键, 新树按"当前空闲位"分配 (旧实现用
+        len(dict) 取位, 回收后会和存活树撞位)。>32 棵存活树才轮转位+警告。"""
         root = self._root_of(m)
         key = id(root)
         bit = self._tree_bit.get(key)
         if bit is None:
-            t = len(self._tree_bit)
-            if t > 31:
+            used = set(self._tree_bit.values())
+            bit = 0
+            for i in range(32):
+                cand = 1 << i
+                if cand not in used:
+                    bit = cand
+                    break
+            if not bit:                                  # 32 位全占用: 轮转共用位
+                t = self._tree_overflow
+                self._tree_overflow += 1
                 bit = 1 << (t % 32)
                 if self._warned_tree_rot < 3:
-                    print("  [物理] WARN 树数>31: 第 %d 根树轮转位=%s"
+                    print("  [物理] WARN 存活树>32: 第 %d 棵轮转位=%s"
                           " (与其它树共用位 -> 其间不互撞)" % (t + 1, bin(bit)))
                     self._warned_tree_rot += 1
-            else:
-                bit = 1 << t
             self._tree_bit[key] = bit
-        return bit
+        return key, bit
+
+    def _release_tree(self, ent):
+        """修复 P2-⑨: 体销毁时释放树位引用; 树内最后一个体销毁则回收该位."""
+        key = ent.get('tree')
+        if key is None:
+            return
+        n = self._tree_ref.get(key, 0) - 1
+        if n > 0:
+            self._tree_ref[key] = n
+        else:
+            self._tree_ref.pop(key, None)
+            self._tree_bit.pop(key, None)
 
     # ---------- 形态签名 (ensure_models 差量) ----------
     def _entry_signature(self, m):
@@ -678,6 +721,10 @@ class PhysicsWorldBridge:
         # B1-P1 rolling_friction 字段 (摩擦/弹性/滚动摩擦三件套)。
         return (
             getattr(col, 'shape', 'box'),
+            # 修复 P2-⑦ (2026-11-07): is_trigger 必须进签名 —— 旧签名只含
+            # shape/enabled/材质, 播放中勾/取消 Trigger 不会重建体, 传感器
+            # 状态与模型不一致 (碰撞事件走几何层, 但 Jolt 侧仍按旧 is_sensor 挡人).
+            bool(getattr(col, 'is_trigger', False)),
             getattr(col, 'enabled', True), float(getattr(col, 'friction', 0.5)),
             float(getattr(col, 'restitution', 0.0)),
             float(getattr(col, 'rolling_friction', 0.1)),
@@ -704,7 +751,39 @@ class PhysicsWorldBridge:
             return True
         return False
 
-    def _build_one(self, m, motion_override=None):
+    @staticmethod
+    def _box_half_extents_local(m, Mw, Rw, cache):
+        """盒体半长 (体局部坐标系): 网格顶点经世界矩阵后相对体原点、再旋回
+        体坐标系取 AABB 半长. 修复 P1-② 后体旋转 = 模型世界旋转, 若仍用
+        世界 AABB 半长会把"已含旋转的 AABB"再转一次 (45° 立方体膨胀 √2),
+        故取体局部极值 (对无旋转/均匀缩放与旧世界 AABB 半长逐位一致)."""
+        vh = model_vertices(m, cache)
+        if len(vh) == 0:                       # 无网格: 与 collider_bounds 兜底同构
+            s = _t3(m.scale)
+            vh = (np.array([(sx, sy, sz) for sx in (-1, 1) for sy in (-1, 1)
+                            for sz in (-1, 1)]) * np.array(s))
+        wp = np.concatenate([vh, np.ones((len(vh), 1))], axis=1) @ Mw
+        lv = (wp[:, :3] - Mw[3, :3]) @ Rw.T
+        mn, mx = lv.min(axis=0), lv.max(axis=0)
+        return (float((mx[0] - mn[0]) * 0.5), float((mx[1] - mn[1]) * 0.5),
+                float((mx[2] - mn[2]) * 0.5))
+
+    def _capture_runtime(self, ent):
+        """修复 P2-⑩: 重建前抓旧体的角速度/激活态, 供新体继承
+        (旧实现重建只搬线速度 -> 旋转中的体瞬间停转/睡眠态丢失)."""
+        st = {'ang': None, 'active': False}
+        try:
+            ang = self._w.get_angular_velocity(ent['handle'])
+            st['ang'] = (float(ang[0]), float(ang[1]), float(ang[2]))
+        except Exception:
+            st['ang'] = None
+        try:
+            st['active'] = bool(self._w.is_active(ent['handle']))
+        except Exception:
+            st['active'] = False
+        return st
+
+    def _build_one(self, m, motion_override=None, carry=None):
         if not (self.enabled and cv is not None):
             return
         col = getattr(m, 'collider', None)
@@ -717,6 +796,13 @@ class PhysicsWorldBridge:
         cache = self._tmp_cache
         cache.clear()
         shape, data = collider_bounds(m, cache)
+        # ★修复 P1-①/② (2026-11-07): 建体即用模型世界位姿 —— 旧实现用
+        # AABB 中心 + identity 旋转, 首帧 dirty=False -> post_step 把 identity
+        # 写回模型 (初始旋转被清零), 偏心网格还会被 AABB 中心拽走 (瞬移).
+        Mw = model_world_matrix(m, cache)
+        wpos = (float(Mw[3, 0]), float(Mw[3, 1]), float(Mw[3, 2]))
+        Rw = world_rotation_3x3(m, cache)
+        q = quat_from_mat3(Rw[np.newaxis, :, :])[0]
         rb = getattr(m, 'rigidbody', None)
         if rb is None:
             motion, mass = cv.MOTION_STATIC, 1.0
@@ -726,12 +812,10 @@ class PhysicsWorldBridge:
             motion, mass = cv.MOTION_DYNAMIC, float(rb.mass) if float(rb.mass) > 0 else 1.0
         if motion_override is not None:                # 静态体升级 KINEMATIC 用
             motion = motion_override
-        bit = self._tree_bit_for(m)
+        tree_key, bit = self._tree_bit_for(m)
         cat, mask = bit, ALL_MASK & ~bit
         if shape == 'box':
-            mn, mx = data
-            size = ((mx[0] - mn[0]) * 0.5, (mx[1] - mn[1]) * 0.5, (mx[2] - mn[2]) * 0.5)
-            c = ((mn[0] + mx[0]) * 0.5, (mn[1] + mx[1]) * 0.5, (mn[2] + mx[2]) * 0.5)
+            size = self._box_half_extents_local(m, Mw, Rw, cache)
             shp = cv.SHAPE_BOX
         else:
             c, r = data
@@ -753,11 +837,19 @@ class PhysicsWorldBridge:
         # （Culverin is_sensor: 不产生接触力, 可重叠穿过; 事件派发由几何判定走
         # loom_physics._collision_events_inline 分流, 不依赖 Culverin 接触事件）
         is_sensor = bool(getattr(col, 'is_trigger', False))
-        h = w.create_body(pos=(float(c[0]), float(c[1]), float(c[2])),
-                          rot=(0.0, 0.0, 0.0, 1.0), size=size, shape=shp,
-                          motion=motion, mass=mass, category=cat, mask=mask,
-                          user_data=bid, friction=fric, restitution=rest,
-                          is_sensor=is_sensor)
+        try:
+            h = w.create_body(pos=wpos,
+                              rot=(float(q[0]), float(q[1]), float(q[2]), float(q[3])),
+                              size=size, shape=shp,
+                              motion=motion, mass=mass, category=cat, mask=mask,
+                              user_data=bid, friction=fric, restitution=rest,
+                              is_sensor=is_sensor)
+        except BaseException:
+            # 建体失败: 若该树尚无其它存活体, 释放刚分配的树位 (防位泄漏)
+            if self._tree_ref.get(tree_key, 0) <= 0:
+                self._tree_bit.pop(tree_key, None)
+            raise
+        self._tree_ref[tree_key] = self._tree_ref.get(tree_key, 0) + 1
         if motion == cv.MOTION_DYNAMIC:
             # 关键: 模型当前速度在创建时就要进 Jolt —— 若建模前脚本已设
             # velocity (脚本先写速再被 ensure_models 建体), 只靠 pre_step 的
@@ -765,25 +857,52 @@ class PhysicsWorldBridge:
             v0 = _t3(getattr(rb, 'velocity', (0.0, 0.0, 0.0)))
             if v0 != (0.0, 0.0, 0.0):
                 w.set_linear_velocity(h, v0[0], v0[1], v0[2])
+        # 修复 P2-⑩: 重建继承角速度/激活态 (carry=None 才是首次建体)
+        if carry is not None:
+            ang = carry.get('ang')
+            if ang is not None and (ang[0] or ang[1] or ang[2]):
+                try:
+                    w.set_angular_velocity(h, ang[0], ang[1], ang[2])
+                except (RuntimeError, ValueError):
+                    pass
+            try:
+                if carry.get('active'):
+                    w.activate(h)
+                else:
+                    w.deactivate(h)
+            except Exception:
+                pass
+        elif motion == cv.MOTION_DYNAMIC and getattr(rb, 'use_gravity', False):
             # P2 浮空修复 (2026-08-30 用户实测): immediate activate —— culverin
             # 文档写明对 PENDING_CREATE 兼容 (排队到下次 step 生效), 保证新体
             # 第一帧就参与模拟; 否则世界重力=0 + 建时速度=0 的新体若以睡眠态
             # 入世, 策略 R (仅清醒才累加重力) 永不写重力 -> 物体永悬空.
             # 仅对 use_gravity 体激活 (use_gravity=False 的悬浮体由脚本/碰撞接管,
             # 没必要醒着耗 CPU; 其零速自然入眠不受此次改动影响).
-            if getattr(rb, 'use_gravity', False):
-                try:
-                    w.activate(h)
-                except Exception:
-                    pass
+            try:
+                w.activate(h)
+            except Exception:
+                pass
         ent = {'model': m, 'handle': h, 'id': bid, 'cat': cat, 'mask': mask,
                'motion': motion, 'signature': self._entry_signature(m),
-               'roll': roll, 'mu': fric, 'guard_left': 0}
+               'roll': roll, 'mu': fric, 'guard_left': 0, 'tree': tree_key}
         if motion == cv.MOTION_DYNAMIC:
-            ent['guard_left'] = GRAVITY_GUARD_FRAMES     # P2 激活保底帧数上限
+            # 重建且旧体在睡眠: 保底帧数清零, 不把"继承来的睡眠"再次唤醒
+            if carry is not None and not carry.get('active'):
+                ent['guard_left'] = 0
+            else:
+                ent['guard_left'] = GRAVITY_GUARD_FRAMES  # P2 激活保底帧数上限
         self._entries.append(ent)
         p, r, v = _t3(m.position), _t3(m.rotation), _t3(getattr(rb, 'velocity', (0, 0, 0)))
         self._last_sync[id(m)] = [p, r, v]
+        # ★修复 P1-③: 祖先链同步基线 —— 父无碰撞体时不建体, 但其位姿变化
+        # 必须可被脏检测发现 (见 _dirty_mask_batch 的"模型森林"节点集).
+        anc = getattr(m, 'parent', None)
+        guard = 0
+        while anc is not None and guard < 1024:
+            self._sync_of(anc)
+            anc = getattr(anc, 'parent', None)
+            guard += 1
 
     def build(self, models):
         """从模型列表建体 (播放开始). 结束后 step(0) 冲刷查询缓冲
@@ -811,6 +930,10 @@ class PhysicsWorldBridge:
         for ent in self._entries:
             if id(ent['model']) not in keep:
                 self._w.destroy_body(ent['handle'])
+                # 修复 P2-⑧: 移除体同步清理 _last_sync (与重建分支对称;
+                # 旧实现残留 id 键, id 复用后会让新体被误判"未动").
+                self._last_sync.pop(id(ent['model']), None)
+                self._release_tree(ent)            # 修复 P2-⑨: 回收树位引用
                 destroyed += 1
             else:
                 alive.append(ent)
@@ -830,14 +953,22 @@ class PhysicsWorldBridge:
             else:
                 sig = self._entry_signature(m)
                 if sig != ent['signature']:
+                    carry = self._capture_runtime(ent)   # 修复 P2-⑩: 搬角速度/睡眠态
                     self._w.destroy_body(ent['handle'])
                     self._entries.remove(ent)
                     self._last_sync.pop(id(m), None)
+                    self._release_tree(ent)              # 修复 P2-⑨: 回收树位引用
                     by_model.pop(id(m), None)
-                    self._build_one(m)
+                    self._build_one(m, carry=carry)
                     rebuilt += 1
         if created or rebuilt:
             self._w.step(0.0)
+        # 修复 P2-⑧: 清掉已不在场景中的模型同步基线 (含无碰撞体祖先) ——
+        # id() 复用后陈旧 sync 会让新体被误判"未动"而漏掉首帧回读.
+        if self._last_sync:
+            stale = [k for k in self._last_sync if k not in keep]
+            for k in stale:
+                self._last_sync.pop(k, None)
         return created, destroyed, rebuilt
 
     # ---------- 每帧三段 (顺序 per 设计 §3.1) ----------
@@ -872,12 +1003,33 @@ class PhysicsWorldBridge:
         变化必须 miss, 防陈旧传播闭包)。
         返回缓存 dict 的拷贝 (调用方可写, 缓存本体不可变)。
         实测 TPS20 混合500: 子步 3 命中, 每逻辑帧省 ~2.6ms 抓取+比较+传播。"""
+        if not entries:
+            return {}
+        n_ent = len(entries)
+        # ★修复 P1-③ (2026-11-07): 节点集 = 有体模型 + 其完整祖先链.
+        # 旧实现 id2idx 只含 _entries: 父无碰撞体时 pidx=-1, 父移动不传播,
+        # 子体停在旧世界位姿, post_step 反算局部位置被写成 -4.0 (瞬移).
+        # 祖先链全进节点集后, 父(含自由积分体)的位姿变化经 C 传播到子体.
+        node_models = [e['model'] for e in entries]
+        node_ids = {id(m) for m in node_models}
+        ancestors = []
+        for e in entries:
+            anc = getattr(e['model'], 'parent', None)
+            guard = 0
+            while anc is not None and guard < 1024:
+                aid = id(anc)
+                if aid in node_ids:
+                    break
+                node_ids.add(aid)
+                ancestors.append(anc)
+                anc = getattr(anc, 'parent', None)
+                guard += 1
+        nodes = node_models + ancestors
         ids = []
         rows = []
         syncs = []
         parents = []
-        for e in entries:
-            m = e['model']
+        for m in nodes:
             sync = self._sync_of(m)
             ids.append(id(m))
             p = m.position
@@ -886,8 +1038,6 @@ class PhysicsWorldBridge:
             syncs.append(sync)
             parents.append(id(getattr(m, 'parent', None)))
         n = len(ids)
-        if n == 0:
-            return {}
         ids_t = tuple(ids)
         cur = np.array(rows, dtype=np.float64).reshape(n, 2, 3)
         old = np.array([(s[0][0], s[0][1], s[0][2],
@@ -910,7 +1060,13 @@ class PhysicsWorldBridge:
         old_flat = old.reshape(n, 6)
         pidx_arr = np.array(pidx, dtype=np.int64)
         _pg.dirty_mask(cur_flat, old_flat, pidx_arr, out_mask)  # rc != 0 硬 raise
-        dirty = {ids[i]: bool(out_mask[i]) for i in range(n)}
+        dirty = {ids[i]: bool(out_mask[i]) for i in range(n_ent)}
+        # 祖先节点 (无体) 的同步基线推进到本帧位姿: 只在"相对上一帧移动"时
+        # 传播脏, 不会每帧把整棵子树标脏; 有体条目由 pre_step/post_step 对齐.
+        for i in range(n_ent, n):
+            s = syncs[i]
+            s[0] = (rows[i][0], rows[i][1], rows[i][2])
+            s[1] = (rows[i][3], rows[i][4], rows[i][5])
         self._dmb_cache = (n, ids_t, cur, old, dirty, tuple(parents))
         return dict(dirty)
 
@@ -960,13 +1116,16 @@ class PhysicsWorldBridge:
                 # (让其能唤醒压着的动态体 + 被物理感知). ★culverin 0.14.0 的
                 # set_motion_type(STATIC->KINEMATIC) 在下次 step() 直接原生崩溃
                 # (0xC0000005, 实测复现/交叉验证), 改用 **销毁重建** 为 KINEMATIC.
+                carry = self._capture_runtime(ent)   # 修复 P2-⑩: 搬角速度/睡眠态
                 try:
                     w.destroy_body(ent['handle'])
                 except Exception:
                     pass
                 self._entries.remove(ent)
                 self._last_sync.pop(id(m), None)
-                self._build_one(m, motion_override=cv.MOTION_KINEMATIC)
+                self._release_tree(ent)              # 修复 P2-⑨: 回收树位引用
+                self._build_one(m, motion_override=cv.MOTION_KINEMATIC,
+                                carry=carry)
                 if not self._entries or self._entries[-1]['model'] is not m:
                     continue                     # 防御: 重建未发生 -> 跳过本帧
                 ent = self._entries[-1]

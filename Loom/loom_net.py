@@ -66,6 +66,47 @@ def _make_ssl_context(verify=True):
     return _ssl.create_default_context()
 
 
+def _header_charset(headers):
+    """从响应头 Content-Type 取 charset (大小写不敏感); 无则返回 None."""
+    if not headers:
+        return None
+    ctype = None
+    try:
+        items = headers.items()
+    except Exception:
+        return None
+    for k, v in items:
+        if str(k).lower() == 'content-type':
+            ctype = str(v)
+            break
+    if not ctype:
+        return None
+    for part in ctype.split(';')[1:]:
+        part = part.strip()
+        if part.lower().startswith('charset='):
+            cs = part.split('=', 1)[1].strip().strip('"\'')
+            return cs or None
+    return None
+
+
+def _decode_body(body_bytes, headers=None):
+    """按 Content-Type charset 解码响应体; 缺省 UTF-8, 失败回退 latin-1.
+
+    裁决 A (2026-11-07): 旧实现一律 UTF-8, 非 UTF-8 接口 (GBK 等) 会乱码.
+    charset 非法/解码失败时继续走 UTF-8 -> latin-1, 不让坏头导致请求失败.
+    """
+    cs = _header_charset(headers)
+    if cs:
+        try:
+            return body_bytes.decode(cs)
+        except (LookupError, UnicodeDecodeError):
+            pass
+    try:
+        return body_bytes.decode('utf-8')
+    except UnicodeDecodeError:
+        return body_bytes.decode('latin-1', 'replace')
+
+
 def http_request(method, url, headers=None, body=None,
                  timeout=DEFAULT_TIMEOUT, verify=True,
                  max_bytes=DEFAULT_MAX_BYTES):
@@ -116,11 +157,8 @@ def http_request(method, url, headers=None, body=None,
                             'error': '响应体超过 %d 字节上限' % max_bytes}
                 chunks.append(chunk)
             body_bytes = b''.join(chunks)
-            # 尝试按 UTF-8 解码（失败则用 latin-1 保底）
-            try:
-                body_text = body_bytes.decode('utf-8')
-            except UnicodeDecodeError:
-                body_text = body_bytes.decode('latin-1', 'replace')
+            # 裁决 A (2026-11-07): 按 Content-Type charset 解码, 缺省 UTF-8
+            body_text = _decode_body(body_bytes, resp_headers)
             return {'ok': True, 'status': status,
                     'headers': resp_headers,
                     'body': body_text, 'bytes': total}
@@ -128,7 +166,7 @@ def http_request(method, url, headers=None, body=None,
         # HTTP 4xx/5xx：读 body 也返回
         try:
             body_bytes = e.read(max_bytes)
-            body_text = body_bytes.decode('utf-8', 'replace')
+            body_text = _decode_body(body_bytes, getattr(e, 'headers', None))
         except Exception:
             body_text = ''
         return {'ok': False, 'status': e.code,
@@ -173,6 +211,10 @@ class HttpRequestAsync:
                  timeout=DEFAULT_TIMEOUT, verify=True):
         self._result = None
         self._done = _threading.Event()
+        # 裁决 A (2026-11-07): cancel 后结果永久丢弃. 旧实现后台线程完成后
+        # 直接覆写 _result, 取消态会被成功/失败结果覆盖.
+        self._cancelled = False
+        self._lock = _threading.Lock()
         self._thread = _threading.Thread(
             target=self._run,
             args=(method, url, headers, body, timeout, verify),
@@ -181,11 +223,14 @@ class HttpRequestAsync:
 
     def _run(self, method, url, headers, body, timeout, verify):
         try:
-            self._result = http_request(method, url, headers=headers, body=body,
-                                        timeout=timeout, verify=verify)
+            result = http_request(method, url, headers=headers, body=body,
+                                  timeout=timeout, verify=verify)
         except Exception as e:
-            self._result = {'ok': False, 'error': '%r' % (e,)}
-        finally:
+            result = {'ok': False, 'error': '%r' % (e,)}
+        with self._lock:
+            if self._cancelled:
+                return                 # 取消后结果永久丢弃, 不覆写取消态
+            self._result = result
             self._done.set()
 
     def is_done(self):
@@ -199,9 +244,18 @@ class HttpRequestAsync:
         return self._result if self._done.is_set() else None
 
     def cancel(self):
-        """尝试取消（只能让结果被丢弃，不能中断已发的网络请求）。"""
-        self._result = {'ok': False, 'error': '已取消'}
-        self._done.set()
+        """取消（结果永久丢弃；不能中断已发的网络请求）。
+
+        裁决 A (2026-11-07): 取消态是终态 —— 后台线程之后即使完成也不得
+        覆写结果; 已完成后再 cancel 同样把结果作废 (调用方明确表示不要了).
+        """
+        with self._lock:
+            self._cancelled = True
+            self._result = {'ok': False, 'error': '已取消'}
+            self._done.set()
+
+    def is_cancelled(self):
+        return self._cancelled
 
 
 def http_async(method, url, headers=None, body=None,

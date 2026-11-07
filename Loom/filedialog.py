@@ -65,6 +65,14 @@ _comdlg32.GetSaveFileNameW.argtypes = [ctypes.POINTER(OPENFILENAMEW)]
 _comdlg32.GetOpenFileNameW.restype = wintypes.BOOL
 _comdlg32.GetOpenFileNameW.argtypes = [ctypes.POINTER(OPENFILENAMEW)]
 
+# 2026-11-07 P1 (64 位安全): shell32 指针返回值必须在模块级声明, 否则 ctypes
+# 默认按 c_int 截断高 32 位. 目录选择路径即使走现代对话框, 回退经典对话框
+# 也必须拿到完整 PIDL.
+_shell32 = ctypes.windll.shell32
+_shell32.SHBrowseForFolderW.restype = ctypes.c_void_p
+_shell32.SHGetPathFromIDListW.restype = wintypes.BOOL
+_shell32.SHGetPathFromIDListW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p]
+
 
 def _parent_hwnd():
     """返回玩家运行时 GLFW 窗口句柄 (对话框模态置顶用), 失败返回 0 (则对话框独立).
@@ -226,9 +234,18 @@ def _choose_directory_classic(title="选择目录", initial_dir=None):
             ("iImage", ctypes.c_int),
         ]
 
-    shell32 = ctypes.windll.shell32
+    shell32 = _shell32
     ole32 = ctypes.windll.ole32
+    # 2026-11-07 P1 (64 位安全): SHBrowseForFolderW 返回 PIDL 指针, 未设 restype
+    # 时 ctypes 默认按 c_int 截断高 32 位 -> 非法指针/崩溃 (restype 在模块级
+    # 已声明; 这里补 BROWSEINFO 指针参数类型).
+    shell32.SHBrowseForFolderW.argtypes = [ctypes.POINTER(BROWSEINFO)]
+    # PIDL 由 shell 分配: CoTaskMemFree 也必须显式 c_void_p, 否则 64 位下
+    # Python int 会按 c_int 截断 -> 非法释放.
+    ole32.CoTaskMemFree.restype = None
+    ole32.CoTaskMemFree.argtypes = [ctypes.c_void_p]
     ole32.CoInitialize(None)
+    pidl = None
     try:
         buf = ctypes.create_unicode_buffer(260)
         init = ctypes.c_wchar_p(initial_dir or "")
@@ -241,19 +258,37 @@ def _choose_directory_classic(title="选择目录", initial_dir=None):
         bi.ulFlags = _BIF_RETURNONLYFSDIRS | _BIF_NEWDIALOGSTYLE
         bi.lpfn = ctypes.cast(cb, ctypes.c_void_p)
         bi.lParam = ctypes.cast(init, ctypes.c_void_p)
-        pidl = shell32.SHBrowseForFolderW(ctypes.byref(bi))
-        if pidl:
-            path = ctypes.create_unicode_buffer(260)
-            if shell32.SHGetPathFromIDListW(pidl, path):
-                return os.path.normpath(path.value)
-        return None
+        try:
+            pidl = shell32.SHBrowseForFolderW(ctypes.byref(bi))
+        except Exception as e:      # 原生调用异常不得让编辑器崩溃
+            print("[filedialog] SHBrowseForFolderW 调用失败: %r" % (e,))
+            return None
+        if not pidl:
+            return None
+        path = ctypes.create_unicode_buffer(260)
+        try:
+            ok = shell32.SHGetPathFromIDListW(pidl, path)
+        except Exception as e:
+            print("[filedialog] SHGetPathFromIDListW 调用失败: %r" % (e,))
+            return None
+        finally:
+            try:
+                ole32.CoTaskMemFree(pidl)    # PIDL 由 shell 分配, 必须释放
+            except Exception:
+                pass
+        return os.path.normpath(path.value) if ok else None
     finally:
         ole32.CoUninitialize()
 
 
 def choose_directory(title="选择目录", initial_dir=None):
-    """选择目录 (系统文件管理器风格): 现代 IFileOpenDialog 优先, 失败回退经典对话框."""
+    """选择目录 (系统文件管理器风格): 现代 IFileOpenDialog 优先, 失败回退经典对话框.
+    两条路径都捕获异常: 原生对话框失败只返回 None, 不崩编辑器."""
     try:
         return _choose_directory_modern(title, initial_dir)
     except Exception:
-        return _choose_directory_classic(title, initial_dir)
+        try:
+            return _choose_directory_classic(title, initial_dir)
+        except Exception as e:
+            print("[filedialog] 目录选择对话框失败: %r" % (e,))
+            return None

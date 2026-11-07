@@ -1,0 +1,424 @@
+{
+ "version": 21,
+ "camera": {
+  "target": [
+   0,
+   1,
+   0
+  ],
+  "distance": 9,
+  "yaw": 0.6,
+  "pitch": -0.35
+ },
+ "gravity": -9.8,
+ "materials": [],
+ "cameras": [],
+ "active_camera": null,
+ "lights": [
+  {
+   "id": "l1",
+   "name": "太阳",
+   "kind": "directional",
+   "position": [
+    0,
+    12,
+    0
+   ],
+   "azimuth": 30,
+   "elevation": -55,
+   "roll": 0,
+   "color": [
+    1,
+    1,
+    1
+   ],
+   "intensity": 1.1,
+   "mode": "full",
+   "shape": "circle",
+   "size": 8,
+   "shadow": true
+  }
+ ],
+ "ui": {
+  "canvases": [
+   {
+    "canvas_type": "screen",
+    "width": 480,
+    "height": 320,
+    "z_order": 0,
+    "elements": [
+     {
+      "type": "element",
+      "name": "root",
+      "rect": [
+       0,
+       0,
+       480,
+       320
+      ],
+      "children": [
+       {
+        "type": "panel",
+        "name": "bg",
+        "rect": [
+         0,
+         0,
+         480,
+         320
+        ],
+        "bg_color": [
+         18,
+         20,
+         28,
+         255
+        ]
+       },
+       {
+        "type": "text",
+        "name": "title",
+        "rect": [
+         12,
+         8,
+         440,
+         26
+        ],
+        "text": "Shape stroke A/B (line / polyline / close / polygon / circle)",
+        "font_size": 18,
+        "color": [
+         255,
+         220,
+         120
+        ]
+       },
+       {
+        "type": "shape",
+        "name": "line1",
+        "rect": [
+         10,
+         50,
+         200,
+         40
+        ],
+        "shape_type": "line",
+        "points": [
+         [
+          0,
+          0
+         ],
+         [
+          180,
+          30
+         ]
+        ],
+        "stroke_color": [
+         255,
+         80,
+         80,
+         255
+        ],
+        "stroke_width": 1
+       },
+       {
+        "type": "shape",
+        "name": "line2",
+        "rect": [
+         230,
+         50,
+         200,
+         40
+        ],
+        "shape_type": "line",
+        "points": [
+         [
+          0,
+          30
+         ],
+         [
+          180,
+          0
+         ]
+        ],
+        "stroke_color": [
+         80,
+         255,
+         80,
+         255
+        ],
+        "stroke_width": 2
+       },
+       {
+        "type": "shape",
+        "name": "poly1",
+        "rect": [
+         10,
+         110,
+         200,
+         90
+        ],
+        "shape_type": "polyline",
+        "points": [
+         [
+          0,
+          80
+         ],
+         [
+          40,
+          0
+         ],
+         [
+          90,
+          70
+         ],
+         [
+          140,
+          10
+         ],
+         [
+          180,
+          80
+         ]
+        ],
+        "stroke_color": [
+         80,
+         160,
+         255,
+         255
+        ],
+        "stroke_width": 2
+       },
+       {
+        "type": "shape",
+        "name": "poly2c",
+        "rect": [
+         230,
+         110,
+         200,
+         90
+        ],
+        "shape_type": "polyline",
+        "close": true,
+        "points": [
+         [
+          10,
+          70
+         ],
+         [
+          50,
+          5
+         ],
+         [
+          110,
+          40
+         ],
+         [
+          170,
+          5
+         ],
+         [
+          190,
+          75
+         ]
+        ],
+        "stroke_color": [
+         255,
+         200,
+         60,
+         255
+        ],
+        "stroke_width": 2
+       },
+       {
+        "type": "shape",
+        "name": "poly3",
+        "rect": [
+         10,
+         220,
+         200,
+         90
+        ],
+        "shape_type": "polygon",
+        "points": [
+         [
+          0,
+          80
+         ],
+         [
+          60,
+          0
+         ],
+         [
+          140,
+          20
+         ],
+         [
+          190,
+          80
+         ]
+        ],
+        "stroke_color": [
+         240,
+         120,
+         240,
+         255
+        ],
+        "stroke_width": 2,
+        "fill_color": [
+         60,
+         20,
+         80,
+         255
+        ]
+       },
+       {
+        "type": "shape",
+        "name": "circ",
+        "rect": [
+         250,
+         220,
+         160,
+         90
+        ],
+        "shape_type": "circle",
+        "radius": 40,
+        "stroke_color": [
+         120,
+         255,
+         240,
+         255
+        ],
+        "stroke_width": 2
+       },
+       {
+        "type": "shape",
+        "name": "line4",
+        "rect": [
+         20,
+         20,
+         400,
+         260
+        ],
+        "shape_type": "line",
+        "points": [
+         [
+          0,
+          240
+         ],
+         [
+          380,
+          0
+         ]
+        ],
+        "stroke_color": [
+         255,
+         255,
+         255,
+         255
+        ],
+        "stroke_width": 2
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ "objects": [
+  {
+   "id": "o1",
+   "name": "地面",
+   "type": "plane",
+   "params": {
+    "size": 12
+   },
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "rotation": [
+    0,
+    0,
+    0
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "color": "#5a6a7a",
+   "normal_mode": "flat",
+   "saturation": 1,
+   "visible": true,
+   "scripts": [],
+   "collider": null,
+   "rigidbody": null,
+   "audio_source": null,
+   "animator": null
+  },
+  {
+   "id": "o2",
+   "name": "立方体",
+   "type": "cube",
+   "params": {
+    "size": 1.4
+   },
+   "position": [
+    -1.6,
+    0.7,
+    0.4
+   ],
+   "rotation": [
+    0.3,
+    0.6,
+    0
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "color": "#e0804a",
+   "normal_mode": "flat",
+   "saturation": 1,
+   "visible": true,
+   "scripts": [],
+   "collider": null,
+   "rigidbody": null,
+   "audio_source": null,
+   "animator": null
+  },
+  {
+   "id": "o3",
+   "name": "球",
+   "type": "sphere",
+   "params": {
+    "radius": 0.8,
+    "segments": 24
+   },
+   "position": [
+    1.6,
+    0.8,
+    -0.4
+   ],
+   "rotation": [
+    0,
+    0,
+    0
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "color": "#4a90e0",
+   "normal_mode": "flat",
+   "saturation": 1,
+   "visible": true,
+   "scripts": [],
+   "collider": null,
+   "rigidbody": null,
+   "audio_source": null,
+   "animator": null
+  }
+ ]
+}

@@ -62,6 +62,86 @@ def generate_guid():
     return uuid.uuid4().hex
 
 
+class SceneCycleError(ValueError):
+    """场景/Prefab 父链成环或对象图不可达.
+
+    加载/保存遇到时直接拒绝 (不静默丢对象). 继承 ValueError, 调用方可按
+    普通数据错误处理.
+    """
+
+
+def _validate_object_graph(objects):
+    """检测场景/Prefab dict 列表的 parent_id 成环 (不修改数据).
+
+    返回 {对象 id: dict}. 成环抛 SceneCycleError. 非 dict/缺 id 的条目跳过
+    (由后续加载容错路径处理), 避免坏文件在检测阶段崩溃.
+    """
+    id_map = {}
+    for obj in objects:
+        if not isinstance(obj, dict):
+            continue
+        oid = obj.get('id') or obj.get('guid')
+        if isinstance(oid, str) and oid:
+            id_map[oid] = obj
+    state = {}          # 1=当前路径, 2=已完成
+    for start in id_map:
+        if state.get(start) == 2:
+            continue
+        chain = []
+        cur = start
+        while cur is not None and cur in id_map:
+            st = state.get(cur)
+            if st == 1:
+                try:
+                    i = chain.index(cur)
+                except ValueError:
+                    i = 0
+                cyc = chain[i:] + [cur]
+                raise SceneCycleError(
+                    "场景父链成环 (parent_id): %s" % " -> ".join(cyc))
+            if st == 2:
+                break
+            state[cur] = 1
+            chain.append(cur)
+            pid = id_map[cur].get('parent_id')
+            cur = pid if isinstance(pid, str) and pid in id_map else None
+        for oid in chain:
+            state[oid] = 2
+    return id_map
+
+
+def _validate_model_graph(models):
+    """检测运行时模型父链成环/不可达 (保存前防御).
+
+    场景保存只从根 DFS; 若父链成环或父指针悬空, 部分对象会被静默丢弃.
+    本函数在序列化前显式拒绝, 抛 SceneCycleError.
+    """
+    model_ids = {id(m) for m in models}
+    for m in models:
+        path = set()
+        cur = m
+        while cur is not None:
+            k = id(cur)
+            if k in path:
+                raise SceneCycleError(
+                    "场景父链成环 (模型): %r" % (getattr(cur, 'name', cur),))
+            path.add(k)
+            cur = getattr(cur, 'parent', None)
+    reachable = set()
+    stack = [m for m in models if getattr(m, 'parent', None) is None]
+    while stack:
+        m = stack.pop()
+        k = id(m)
+        if k in reachable or k not in model_ids:
+            continue
+        reachable.add(k)
+        stack.extend(getattr(m, 'children', ()) or ())
+    if len(reachable) != len(model_ids):
+        raise SceneCycleError(
+            "场景对象图存在不可达对象 (%d 个): 父链可能成环"
+            % (len(model_ids) - len(reachable)))
+
+
 # ---------------- 对象 <-> dict ----------------
 
 def _f3(v, default):
@@ -141,10 +221,18 @@ def _emit_object(m):
     }
 
 
-def _emit_subtree(m, out):
+def _emit_subtree(m, out, seen=None):
+    """DFS 前序输出子树. seen 共享集合用于检测重复/成环 (防无限递归)."""
+    if seen is None:
+        seen = set()
+    key = id(m)
+    if key in seen:
+        raise SceneCycleError(
+            "序列化父链成环/对象重复: %r" % (getattr(m, 'name', m),))
+    seen.add(key)
     out.append(_emit_object(m))
     for c in m.children:
-        _emit_subtree(c, out)
+        _emit_subtree(c, out, seen)
 
 
 def _make_mesh(obj):
@@ -485,8 +573,15 @@ def _emit_material(mat):
                            "mipmaps": nrm.mipmaps, "compression": nrm.compression}
     env = getattr(mat, 'env_map', None)
     if env is not None:
-        d["env_map"] = {"guid": env.guid, "name": env.name,
-                        "paths": list(env.paths) if env.paths else None}
+        d["env_map"] = {"guid": env.guid, "name": env.name}
+        paths = getattr(env, 'paths', None)
+        if paths:
+            d["env_map"]["paths"] = list(paths)
+        else:
+            # 2026-11-07: 纯色 Cubemap (from_solid) 无 paths, 旧实现保存即丢.
+            solid = getattr(env, '_solid_color', None)
+            if solid:
+                d["env_map"]["solid_color"] = list(solid)
     return d
 
 
@@ -525,16 +620,80 @@ def _apply_materials(engine, mat_dicts):
                     setattr(mat, slot, tex)
                 except Exception:
                     pass                # 贴图文件缺失 -> 保持无贴图 (容错)
-        # M36 环境反射: 6 面路径重建 cubemap
+        # M36 环境反射: 6 面路径或纯色重建 cubemap
         eref = d.get('env_map')
-        if eref and eref.get('paths'):
+        if eref:
             try:
                 from loom_cubemap import Cubemap
-                mat.env_map = Cubemap.from_files(eref['paths'],
-                                                 name=eref.get('name'),
-                                                 guid=eref.get('guid'))
+                if eref.get('paths'):
+                    mat.env_map = Cubemap.from_files(eref['paths'],
+                                                     name=eref.get('name'),
+                                                     guid=eref.get('guid'))
+                elif eref.get('solid_color'):
+                    # 2026-11-07: 纯色 env (from_solid) 往返还原
+                    mat.env_map = Cubemap.from_solid(
+                        tuple(eref['solid_color']), name=eref.get('name'),
+                        guid=eref.get('guid'))
             except Exception:
                 pass                    # 文件缺失 -> 保持无 env (容错)
+
+
+def _is_default_material(mat):
+    """材质是否是 add_model 自建的默认材质 (无颜色/贴图/PBR 参数, 名字=材质).
+
+    用于加载期孤儿判定: 只有"默认材质"可以安全丢弃; 用户显式创建的彩色/贴图
+    材质即使暂未引用也保留 (资产库语义).
+    """
+    if mat is None:
+        return False
+    if getattr(mat, 'color', None) is not None:
+        return False
+    if getattr(mat, 'pbr', False):
+        return False
+    if (getattr(mat, 'albedo', None) is not None
+            or getattr(mat, 'normal_map', None) is not None
+            or getattr(mat, 'env_map', None) is not None):
+        return False
+    if getattr(mat, 'name', None) not in (None, '材质'):
+        return False
+    try:
+        if abs(float(getattr(mat, 'saturation', 1.0)) - 1.0) > 1e-9:
+            return False
+        if abs(float(getattr(mat, 'metallic', 0.0))) > 1e-9:
+            return False
+        if abs(float(getattr(mat, 'roughness', 0.5)) - 0.5) > 1e-9:
+            return False
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
+def _drop_orphan_default_materials(engine, keep_ids, models):
+    """D2=A (2026-11-07): 加载时丢弃无物体引用的默认材质.
+
+    每次 load 时每个物体都会先建默认材质再换成文件引用材质, 旧实现把这些
+    默认材质留在 engine.materials 并随下次 save 落盘 -> 每次 load->save 材质
+    数线性膨胀. 规则:
+      - 本次加载新建且无引用 (不在文件材质库 keep_ids 里) -> 丢弃;
+      - 文件里显式登记但无引用的"默认形态"材质 -> 丢弃并告警;
+      - 文件里显式登记且非默认形态 (有颜色/贴图/PBR/自定义名) -> 保留,
+        即使暂未引用 (资产库语义; 保存端不动).
+    """
+    refs = set()
+    for m in models:
+        mat = getattr(getattr(m, 'renderer', None), 'material', None)
+        if mat is not None:
+            refs.add(id(mat))
+    dropped = 0
+    for mat in list(engine.materials):
+        if id(mat) in refs:
+            continue
+        if id(mat) not in keep_ids or _is_default_material(mat):
+            engine.materials.remove(mat)
+            dropped += 1
+    if dropped:
+        print("[sceneio] 警告: 丢弃 %d 个无引用的加载默认材质 (防孤儿膨胀)"
+              % dropped)
 
 
 # ---------------- 场景 ----------------
@@ -868,11 +1027,15 @@ def _link_ui_targets(engine, id_map=None):
 
 
 def scene_to_dict(engine, camera=None):
-    """引擎场景 -> v7 dict. camera: {'target','distance','yaw','pitch'} 或 None"""
+    """引擎场景 -> v7 dict. camera: {'target','distance','yaw','pitch'} 或 None
+
+    保存前校验父链: 成环/不可达抛 SceneCycleError, 绝不静默丢对象."""
+    _validate_model_graph(engine.models)
     objs = []
+    seen = set()
     for m in engine.models:                    # 只从根开始, DFS 前序
         if m.parent is None:
-            _emit_subtree(m, objs)
+            _emit_subtree(m, objs, seen)
     # M36 修复 (2026-10-14 小游戏实测): 收集"模型实际引用的材质"—— 未注册进
     # engine.materials 的材质 (脚本/程序化直接赋 Material()) 也一并序列化, 防丢失
     # (原实现只存 engine.materials, 未注册材质的 PBR/贴图/环境全丢 -> 重载变默认材质)。
@@ -899,6 +1062,12 @@ def scene_from_dict(engine, data, camera_out=None):
     """dict -> 引擎场景 (容错加载). 返回创建的模型列表.
     camera_out: dict 则把相机字段写进去 (编辑器/运行时自行应用)."""
     data = migrate(data)
+    # 2026-11-07: 父链成环 -> 拒绝加载 (成环对象无根, DFS 会静默丢整棵).
+    # 必须在清空/重建引擎状态之前校验, 保证失败时旧场景不被破坏.
+    _objects_in = data.get('objects', [])
+    if not isinstance(_objects_in, list):
+        _objects_in = []
+    _validate_object_graph(_objects_in)
     # 2026-08-30: 场景级重力加速度 (缺失=保留引擎当前值)
     engine.gravity = float(data.get('gravity', getattr(engine, 'gravity', -9.8)))
     # 2026-10-19 第1档序13 天空盒 (C3): 场景级默认天空盒（旧文件无此键 -> None）
@@ -911,13 +1080,17 @@ def scene_from_dict(engine, data, camera_out=None):
     cam_links = _apply_cameras(engine, data.get('cameras', []))  # 场景摄像机 (清空重建)
     engine.active_camera = data.get('active_camera')  # 玩家视角摄像机
     _apply_materials(engine, data.get('materials', []))  # M23: 材质库 (先于物体, 供引用)
-    objects = data.get('objects', [])
+    # 2026-11-07 D2=A: 文件显式登记的材质 (keep_ids) 与 add_model 自建材质区分
+    _lib_keep = {id(x) for x in engine.materials}
+    objects = _objects_in
     models = []
     for obj in objects:
         m, _ = _apply_object(engine, obj)
         models.append(m)
     _link_parents(objects, models)          # 物体先建父链
     _link_camera_parents(engine, cam_links)  # 2026-08-16 相机物体化: 相机挂父引用物体, 必须在物体之后
+    # 2026-11-07 D2=A: 加载时丢弃无引用默认材质 (防 load->save 材质孤儿线性膨胀)
+    _drop_orphan_default_materials(engine, _lib_keep, models)
     # 2026-10-19 第1档序3阶段4: world Canvas target 二次绑定（物体已建好）
     try:
         _link_ui_targets(engine)
@@ -1153,6 +1326,9 @@ def instantiate_prefab(engine, data, offset=(0, 0, 0)):
     """场景中实例化 prefab: 全部对象重新生成 GUID, 挂 prefab_ref, 根整体平移.
     返回创建的模型列表 (空 prefab 返回 [])."""
     objects = data.get('objects', [])
+    if not isinstance(objects, list):
+        objects = []
+    _validate_object_graph(objects)     # 2026-11-07: Prefab 父链成环拒绝实例化
     pguid = data.get('prefab', {}).get('guid')
     models = []
     old_id_map = {}                       # 模板旧 id -> 新模型
