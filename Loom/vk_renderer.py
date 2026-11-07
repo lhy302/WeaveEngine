@@ -1026,7 +1026,7 @@ class VkRenderer:
         self._ui_pipe.set_screen(w, h)
         return self._ui_engine
 
-    def draw_ui(self, view, w, h, ui=None, hud_lines=None, hud=None):
+    def draw_ui(self, view, w, h, ui=None, hud_lines=None, hud=None, engine=None):
         """在已存在颜色附件 view 上叠加 HUD + Canvas UI (独立 pass, load_op=load).
 
         ui        : loom_ui.UIManager (driver.ui) —— 画所有 screen Canvas 元素树
@@ -1046,7 +1046,12 @@ class VkRenderer:
                                    line_h=st.get('line_h', 24),
                                    color=st.get('color', (255, 255, 255)))
             if ui is not None:
-                eng.draw_all(ui)
+                # 2026-11-07 修复(P0): 必须传**引擎/驱动**, 不是 UIManager 本体。
+                # loom_ui.UIManager.draw_all(engine) 会把 engine 记进 _ACTIVE_ENGINE,
+                # 事件派发 (_fire_binding) 靠它找脚本实例。旧代码传的是 ui 自己 ->
+                # _ACTIVE_ENGINE 变成 UIManager -> "找不到脚本实例: sid=..." ->
+                # 打包版(VK) 里所有 UI 按钮点击**全部无效**(通关面板按钮点不动)。
+                eng.draw_all(ui, script_host=engine)
         except Exception as e:
             print('[vk] UI 记录失败 (跳过本帧 UI):', repr(e))
             return 0
@@ -1743,7 +1748,7 @@ class VkRenderer:
 
     # ---------------- 帧提交 ----------------
     def draw_frame(self, ctx, models, lights, vp, camera_pos, interp=None, sky=None,
-                   ui=None, hud_lines=None, hud=None, cam_basis=None):
+                   ui=None, hud_lines=None, hud=None, cam_basis=None, engine=None):
         d = self.device
         w, h = ctx.physical_size
         vis = [m for m in models if getattr(m, 'visible', True) and m.mesh is not None]
@@ -1988,4 +1993,7 @@ class VkRenderer:
         # ---- 2026-11-06 Canvas UI / HUD 叠加 pass (load_op=load, 无深度) ----
         # 顺序与 GL 一致: HUD 文本先, UI 元素树后 (loom_render.render 的
         # _draw_hud() -> ui.draw_all() 次序); 独立 pass/管线, 不与 3D 组混绑。
-        self.draw_ui(view, w, h, ui=ui, hud_lines=hud_lines, hud=hud)
+        # 2026-11-07 修复(P0): engine(脚本宿主) 必须透传 —— 否则 UI 事件派发
+        # 拿不到 driver, 打包版(VK) 所有按钮点击无效。
+        self.draw_ui(view, w, h, ui=ui, hud_lines=hud_lines, hud=hud,
+                     engine=engine)

@@ -318,12 +318,16 @@ class VkUIEngine:
         for i, text in enumerate(lines or ()):
             self.draw_text_quad(text, x, y + i * line_h, color)
 
-    def draw_all(self, ui_manager):
-        """渲染 UIManager 的所有 screen Canvas (直接复用保留模式绘制逻辑)."""
+    def draw_all(self, ui_manager, script_host=None):
+        """渲染 UIManager 的所有 screen Canvas (直接复用保留模式绘制逻辑).
+
+        script_host: 脚本宿主 (SceneDriver), 供 UI 事件派发查找脚本实例;
+                     缺省退回 self (仅绘制, 事件派发会找不到实例)。
+        """
         if ui_manager is None:
             return
         try:
-            ui_manager.draw_all(self)
+            ui_manager.draw_all(self, script_host=script_host)
         except Exception as e:      # UI 异常不得拖垮 3D 帧
             print('[vk] Canvas UI 绘制异常 (跳过):', repr(e))
 

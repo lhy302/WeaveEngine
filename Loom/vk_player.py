@@ -446,6 +446,7 @@ def run_vk(scene=None, frames_n=None, keep=False, mini=False, no_shadow=False,
                 except Exception:
                     _hud = None
             renderer.draw_frame(ctx, driver.models, driver.lights, vp, cam_pos,
+                                engine=driver,
                                 interp=getattr(driver, '_interp', None),
                                 sky=getattr(driver, 'skybox', None),
                                 ui=getattr(driver, 'ui', None),

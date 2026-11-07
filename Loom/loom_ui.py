@@ -691,11 +691,19 @@ class UIManager:
                 hovered._emit_pointer('enter')
             self._hovered = hovered
 
-    def draw_all(self, engine):
-        """渲染所有 screen Canvas 的元素树 (渲染层末尾调用). 父先于子."""
+    def draw_all(self, engine, script_host=None):
+        """渲染所有 screen Canvas 的元素树 (渲染层末尾调用). 父先于子.
+
+        engine      : 绘制目标 (要有 draw_screen_rect 等; GL 是 GLEngine,
+                      VK 是 VkUIEngine 门面)。
+        script_host : **脚本宿主** (要有 .models/.scripts; 通常是 GLEngine 或
+                      SceneDriver)。事件派发 (_fire_binding) 靠它找脚本实例。
+        2026-11-07 修复(P0): VK 之前把 VkUIEngine 当成脚本宿主 ->
+        _ACTIVE_ENGINE 没有 .models -> 打包版所有 UI 按钮点击无效。
+        """
         # 2026-10-19 P0-5: 每帧刷新 _ACTIVE_ENGINE（供 _fire_binding 查脚本实例）
         global _ACTIVE_ENGINE
-        _ACTIVE_ENGINE = engine
+        _ACTIVE_ENGINE = script_host if script_host is not None else engine
         # 1) 主树渲染 (Dropdown 展开时其列表暂不画, 留到第 2 轮)
         expanded_dd = self._find_expanded_dropdown()
         for c in self.canvases:
