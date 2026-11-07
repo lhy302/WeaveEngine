@@ -8,7 +8,9 @@
     ],
     "distance": 9.0,
     "yaw": 0.0,
-    "pitch": -1.55
+    "pitch": -1.55,
+    "ortho": true,
+    "ortho_size": 13.0
   },
   "gravity": -9.8,
   "materials": [
@@ -6814,7 +6816,7 @@
         {
           "id": "pacman_ghost",
           "vars": {
-            "speed": 2.2,
+            "speed": 4.0,
             "turn_bias": 0.25
           }
         }
@@ -6868,7 +6870,7 @@
         {
           "id": "pacman_ghost",
           "vars": {
-            "speed": 2.2,
+            "speed": 4.0,
             "turn_bias": 0.25
           }
         }
@@ -6922,7 +6924,7 @@
         {
           "id": "pacman_ghost",
           "vars": {
-            "speed": 2.2,
+            "speed": 4.0,
             "turn_bias": 0.25
           }
         }

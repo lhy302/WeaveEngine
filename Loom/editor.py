@@ -22,7 +22,7 @@ import moderngl
 
 from engine import (GLEngine, Point3D, LightState, CameraState, wrap_deg,
                     gc_play_enter, gc_play_exit)
-from matlib import (mat4_perspective, mat4_rotation, mat4_scale,
+from matlib import (mat4_perspective, mat4_ortho, mat4_rotation, mat4_scale,
                     mat4_translation, mat4_view_yaw_pitch, decompose_euler)
 from mesh import create_cube, create_plane, create_sphere, spec_to_mesh
 # 2026-10-18 选项1: from gui import GUI 已删（EditorApp 零依赖 MinimalEditorView 兜底路径
@@ -227,6 +227,9 @@ class EditorApp(GLEngine):
         self.camera_distance = 10.0
         self.camera_yaw = 0.6
         self.camera_pitch = -0.35
+        # 2026-11-07 2D: 主相机正交投影 (ortho=True 时用 ortho_size 作为可见高度)
+        self.ortho = False
+        self.ortho_size = 12.0
         # 2026-11-07 C: Agent 自动聚焦/相机聚焦插值状态 (None = 无动画)
         self._focus_anim = None
         self.apply_orbit_camera()
@@ -950,6 +953,9 @@ class EditorApp(GLEngine):
 
     def _apply_camera(self, cam):
         self.camera_target = tuple(cam.get('target', [0, 0, 0]))
+        # 2026-11-07 2D: 场景相机投影模式 (ortho=True 为正交, size=可见高度)
+        self.ortho = bool(cam.get('ortho', False))
+        self.ortho_size = float(cam.get('ortho_size', 12.0))
         # 2026-11-06 R-03: 场景恢复同样在入口钳制 (与 Vk 后端一致)
         from loom_camera import clamp_camera_distance
         self.camera_distance = clamp_camera_distance(cam.get('distance', 10.0))
@@ -2053,7 +2059,15 @@ class EditorApp(GLEngine):
             self.apply_orbit_camera()
         V = mat4_view_yaw_pitch(np, (self.camera.x, self.camera.y, self.camera.z),
                                 self.camera_yaw, self.camera_pitch, self.camera_roll)
-        P = mat4_perspective(np, self._fov, self.width / self.height, self.near, self.far)
+        if getattr(self, 'ortho', False):
+            # 2026-11-07 2D: 正交投影 (可见高度 = ortho_size 世界单位)
+            _h = float(getattr(self, 'ortho_size', 12.0))
+            _asp = self.width / max(1, self.height)
+            P = mat4_ortho(np, -_h * _asp * 0.5, _h * _asp * 0.5,
+                           -_h * 0.5, _h * 0.5, self.near, self.far)
+        else:
+            P = mat4_perspective(np, self._fov, self.width / self.height,
+                                 self.near, self.far)
         self._vp = V @ P
         self._prof_add('mt_mp_camera', _t)
         _t = self._prof_t0()
@@ -2298,6 +2312,12 @@ class EditorApp(GLEngine):
         # 2026-10-18: UI 鼠标事件分发 (在相机/3D 消费之前). 两条路径 (pygame 主循环
         # 与 Qt loom_gui) 都走本方法, 所以这里是唯一的插入点.
         self._dispatch_ui_mouse()
+        # 2026-11-07 2D 视角锁定: 播放态下相机朝向/缩放/平移全部冻结
+        # (右键转视角、Alt+左键轨道、中键平移、滚轮缩放都不再生效)，
+        # 只保留 UI 分发（HUD 按钮仍可点）。玩家 WASD 走脚本，不动相机。
+        if getattr(self, 'is_playing', False):
+            self._cam_prev_mouse = self.mouse_pos
+            return
         # UI 命中并消费鼠标 -> 跳过全部鼠标相机控制 (决策3=B, 键盘 WASD 不受影响)
         # 2026-10-18 D1: UI 命中时只锁鼠标 (滚轮/拖拽), 键盘 WASD 不受影响.
         _ui_lock = bool(getattr(self, 'ui_consumed', False))

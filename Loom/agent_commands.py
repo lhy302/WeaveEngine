@@ -986,6 +986,18 @@ def cmd_camera_move(win, args):
     return {'target': list(ed.camera_target), 'distance': ed.camera_distance}
 
 
+@command('camera_proj', '投影模式: {ortho?:bool, size?} (正交时 size = 可见高度世界单位)')
+def cmd_camera_proj(win, args):
+    """2026-11-07 2D: 切换主相机透视/正交。ortho=True 时用正交投影 (Unity 2D 同款)。"""
+    ed = win.editor
+    if 'ortho' in args:
+        ed.ortho = as_bool(args.get('ortho'), False)
+    if 'size' in args:
+        ed.ortho_size = max(1.0, as_float(args.get('size'), 12.0))
+    return {'ortho': bool(getattr(ed, 'ortho', False)),
+            'size': float(getattr(ed, 'ortho_size', 12.0))}
+
+
 @command('camera_look', '开发者相机视角: {yaw,pitch}(度) 绝对 或 {dyaw,dpitch}(度) 增量')
 def cmd_camera_look(win, args):
     import math

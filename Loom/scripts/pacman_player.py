@@ -14,7 +14,7 @@ from scripts import Script, register
 class PacmanPlayerScript(Script):
     script_id = "pacman_player"
     name = "吃豆人玩家"
-    params = (("speed", "速度", 5.0, 0.5, 15.0, "%.1f"),
+    params = (("speed", "速度", 4.0, 0.5, 15.0, "%.1f"),
               ("eat_r", "吃豆半径", 0.55, 0.1, 2.0, "%.2f"))
 
     def on_start(self):
@@ -35,6 +35,8 @@ class PacmanPlayerScript(Script):
         self._cx, self._cz = int(round(p.x)), int(round(p.z))
         self._tx, self._tz = self._cx, self._cz
         self._y = p.y
+        self._spawn = (float(self._cx), float(self._cz))
+        self.caught = 0
         print("[吃豆人] 开始: 共 %d 颗豆子" % self.total)
 
     def _open(self, x, z):
@@ -70,6 +72,19 @@ class PacmanPlayerScript(Script):
             else:
                 self.obj.position = Point3D(p.x + ddx / dist * step, self._y,
                                             p.z + ddz / dist * step)
+        # 被幽灵抓住: 回到出生点 (经典吃豆人: 碰到敌人回起点)
+        p = e.world_position(self.obj)
+        for g in list(e.models):
+            if not (getattr(g, "name", "") or "").startswith("幽灵"):
+                continue
+            gp = e.world_position(g)
+            if (p.x - gp.x) ** 2 + (p.z - gp.z) ** 2 <= 0.55 ** 2:
+                self.caught += 1
+                self.obj.position = Point3D(self._spawn[0], self._y, self._spawn[1])
+                self._cx, self._cz = int(self._spawn[0]), int(self._spawn[1])
+                self._tx, self._tz = self._cx, self._cz
+                print("[吃豆人] 被幽灵抓住! 回到出生点 (第 %d 次)" % self.caught)
+                break
         # 吃豆
         p = e.world_position(self.obj)
         r2 = float(self.vals["eat_r"]) ** 2

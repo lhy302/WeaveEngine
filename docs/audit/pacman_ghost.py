@@ -15,7 +15,7 @@ from scripts import Script, register
 class PacmanGhostScript(Script):
     script_id = "pacman_ghost"
     name = "吃豆人幽灵"
-    params = (("speed", "速度", 2.2, 0.5, 8.0, "%.1f"),
+    params = (("speed", "速度", 4.0, 0.5, 8.0, "%.1f"),
               ("turn_bias", "转向概率", 0.25, 0.0, 1.0, "%.2f"))
 
     def on_start(self):

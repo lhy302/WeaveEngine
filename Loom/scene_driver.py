@@ -15,7 +15,7 @@ import math
 
 import numpy as np
 
-from matlib import (mat4_view_yaw_pitch, mat4_perspective, mat4_scale,
+from matlib import (mat4_view_yaw_pitch, mat4_perspective, mat4_ortho, mat4_scale,
                     mat4_rotation, mat4_translation, view_basis_to_angles)
 from mesh import spec_to_mesh
 from engine import GameObject, Point3D, LightState, DEFAULT_ACTIONS
@@ -529,6 +529,9 @@ class SceneDriver:
         if not _has_cam:
             cam = {}
         _def_yaw, _def_pitch = (0.6, -0.35) if _has_cam else (0.0, 0.0)
+        # 2026-11-07 2D: 场景相机投影模式 (与 GL 编辑器同源)
+        self.ortho = bool(cam.get('ortho', False))
+        self.ortho_size = float(cam.get('ortho_size', 12.0))
         self.target = _f3(cam.get('target'), (0, 0, 0))
         # 2026-11-06 R-03: 场景是外部输入, 距离在**入口**钳制 (与 GL 加载路径同语义).
         # 只钳 setter 会留下"加载路径绕过"的洞 (复核 B 实测 distance=5000 原样进场景).
@@ -754,7 +757,13 @@ class SceneDriver:
             pitch = self.camera_pitch
             roll = self.camera_roll
         V = mat4_view_yaw_pitch(np, cam_pos, yaw, pitch, roll)
-        P = mat4_perspective(np, self.fov, aspect or 1.6, self.near, self.far)
+        if getattr(self, 'ortho', False):
+            _h = float(getattr(self, 'ortho_size', 12.0))
+            _asp = aspect or 1.6
+            P = mat4_ortho(np, -_h * _asp * 0.5, _h * _asp * 0.5,
+                           -_h * 0.5, _h * 0.5, self.near, self.far)
+        else:
+            P = mat4_perspective(np, self.fov, aspect or 1.6, self.near, self.far)
         return V @ P, cam_pos
 
     def step(self, dt, aspect=None):

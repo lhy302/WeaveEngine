@@ -1046,6 +1046,10 @@ def scene_to_dict(engine, camera=None):
         if mat is not None and id(mat) not in _seen:
             _seen.add(id(mat))
             mats.append(mat)
+    # 2026-11-07 2D: 相机投影模式随场景保存 (ortho=True 为正交)
+    if isinstance(camera, dict):
+        camera.setdefault("ortho", bool(getattr(engine, "ortho", False)))
+        camera.setdefault("ortho_size", float(getattr(engine, "ortho_size", 12.0)))
     return {"version": SCENE_VERSION, "camera": camera,
             "gravity": getattr(engine, 'gravity', -9.8),   # 2026-08-30: 场景重力加速度
             "materials": [_emit_material(m) for m in mats],
@@ -1103,6 +1107,9 @@ def scene_from_dict(engine, data, camera_out=None):
             'distance': _f1(cam.get('distance'), 10.0),
             'yaw': _f1(cam.get('yaw'), 0.6),
             'pitch': _f1(cam.get('pitch'), -0.35),
+            # 2026-11-07 2D: 投影模式随场景传递 (editor._apply_camera 消费)
+            'ortho': bool(cam.get('ortho', False)),
+            'ortho_size': _f1(cam.get('ortho_size'), 12.0),
         })
     return models
 
