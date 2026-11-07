@@ -14,8 +14,22 @@ REPO_NAME = 'WeaveEngine'
 API_BASE = 'https://api.github.com'
 USER_AGENT = 'LoomHub-Release/0.1.0'
 
-ENGINE_ZIP = os.path.join(ROOT, 'tools', 'dist', 'Loom-0.1.0.beta1.zip')
-HUB_SETUP = os.path.join(ROOT, 'tools', 'dist', 'LoomHub-0.1.0-Setup.exe')
+ENGINE_VERSION = os.environ.get('LOOM_ENGINE_VERSION', '0.1.0.beta3')
+HUB_VERSION = os.environ.get('LOOM_HUB_VERSION', '0.1.1')
+
+
+def engine_zip():
+    return os.path.join(ROOT, 'tools', 'dist',
+                        'Loom-%s.zip' % ENGINE_VERSION)
+
+
+def hub_setup():
+    return os.path.join(ROOT, 'tools', 'dist',
+                        'LoomHub-%s-Setup.exe' % HUB_VERSION)
+
+
+ENGINE_ZIP = engine_zip()
+HUB_SETUP = hub_setup()
 
 
 def get_token():
@@ -37,7 +51,7 @@ def get_token():
     return ''
 
 
-def _req(url, token, method='GET', data=None, headers=None):
+def _req(url, token, method='GET', data=None, headers=None, timeout=120):
     req = urllib.request.Request(url, method=method)
     req.add_header('User-Agent', USER_AGENT)
     req.add_header('Accept', 'application/vnd.github+json')
@@ -49,7 +63,7 @@ def _req(url, token, method='GET', data=None, headers=None):
     if data is not None:
         req.data = data
     try:
-        with urllib.request.urlopen(req, timeout=120) as resp:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             return resp.status, resp.read()
     except urllib.error.HTTPError as e:
         return e.code, e.read()
@@ -139,7 +153,8 @@ def upload_asset(release, file_path, token):
     with open(file_path, 'rb') as f:
         data = f.read()
     s, b = _req(upload_url, token, method='POST', data=data,
-                headers={'Content-Type': 'application/zip'})
+                headers={'Content-Type': 'application/zip'},
+                timeout=7200)          # 大包(数百 MB)按慢速网络留足时间
     if s not in (200, 201):
         print('[错误] 上传失败 (HTTP %d)' % s)
         print(b[:500].decode('utf-8', 'ignore'))
@@ -205,12 +220,13 @@ Windows 10 64-bit 或更高
 def publish_engine(token):
     print()
     print('=' * 60)
-    print('发布引擎 0.1.0.beta1')
+    print('发布引擎 %s' % ENGINE_VERSION)
     print('=' * 60)
-    tag = 'engine-v0.1.0.beta1'
-    create_local_tag(tag, 'Loom 引擎 0.1.0.beta1')
-    rel = create_release(tag, 'Loom 引擎 0.1.0.beta1',
-                         ENGINE_BODY, token, prerelease=True)
+    tag = 'engine-v%s' % ENGINE_VERSION
+    title = 'Loom 引擎 %s' % ENGINE_VERSION
+    body = ENGINE_BODY.replace('0.1.0.beta1', ENGINE_VERSION)
+    create_local_tag(tag, title)
+    rel = create_release(tag, title, body, token, prerelease=True)
     upload_asset(rel, ENGINE_ZIP, token)
     push_tag(tag)
 
@@ -218,12 +234,13 @@ def publish_engine(token):
 def publish_hub(token):
     print()
     print('=' * 60)
-    print('发布 LoomHub 0.1.0')
+    print('发布 LoomHub %s' % HUB_VERSION)
     print('=' * 60)
-    tag = 'hub-v0.1.0'
-    create_local_tag(tag, 'LoomHub 项目管理器 0.1.0')
-    rel = create_release(tag, 'LoomHub 项目管理器 0.1.0',
-                         HUB_BODY, token, prerelease=False)
+    tag = 'hub-v%s' % HUB_VERSION
+    title = 'LoomHub 项目管理器 %s' % HUB_VERSION
+    body = HUB_BODY.replace('0.1.0', HUB_VERSION)
+    create_local_tag(tag, title)
+    rel = create_release(tag, title, body, token, prerelease=False)
     upload_asset(rel, HUB_SETUP, token)
     push_tag(tag)
 
