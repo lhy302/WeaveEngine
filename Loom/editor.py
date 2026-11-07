@@ -2394,7 +2394,10 @@ class EditorApp(GLEngine):
         # 从 (target, yaw, pitch, distance) 合成位姿。旧"播放态自由相机移
         # camera 本体"双轨制与玩家脚本相机写回互冲 (双驱动源) = 开发者相机
         # 移动 BUG 总根, 已随脚本相机接管一并删除。
-        if self.view.input_state()['focus_id'] is None:
+        # 2026-11-07 视角锁定: 播放态下 WASD/方向键归玩家脚本，
+        # 不再平移/旋转编辑器轨道相机（否则按 W 玩家和相机一起动 = "视角没锁"）。
+        if (not getattr(self, 'is_playing', False)
+                and self.view.input_state()['focus_id'] is None):
             ks = self._key_pressed()    # 嵌入式模式 (Qt) 由宿主提供按键快照
             yaw, pitch = self.camera_yaw, self.camera_pitch
             # 2026-08-19 修复: 水平移动方向只由 yaw 决定 —— 之前乘 cos(pitch),

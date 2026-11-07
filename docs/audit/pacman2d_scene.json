@@ -1,0 +1,6943 @@
+{
+  "version": 10,
+  "camera": {
+    "target": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "distance": 9.0,
+    "yaw": 0.0,
+    "pitch": -1.55
+  },
+  "gravity": -9.8,
+  "materials": [
+    {
+      "id": "2cc760a7de024221b307576a76cb5886",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "bc094e8f2c0143e0a53e17652ffdd3a2",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "9a45db8ee9414f0687ca2773ea6b8e86",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "f5f85f2447354a468ddfe5054e8c0116",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "a6284520fbb34cc8921e14d6e14ecc8d",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "c6bbd2a6721940dab4e249832ef5c870",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "634026f7b37243bf9cba0170cdea5bc3",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "1d03cae96905415ab2dd91dee55a9482",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "9a4009ce342c4e0a8feb2fe09b6f6ab6",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "b969490aaa4a4e2e97faf02bc84ba45e",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "a20db6f0e64b452d8028e389377dcd41",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "eb856325271f47c6bc7413c34612ce0b",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "78eaeafdeee841a1a34b59ef7ffe1e95",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "627ec6f46bc743c2ad02a8a439b64770",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "7767e4a377284d2c83539a8184960ebd",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "8198ac3a47fa4b39b0de5e293a412e45",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "0d4c50980f7c4e53b49abd29919f448a",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "a5502492647d40cb9bfdd8fe8a19d5a1",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "2177adee5d40411aa8d4e55beda45ef3",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "f94e682a4c6c40638787db0a64ab6dea",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "f02a74ed3eb3473db68ea1be650476e8",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "683a052a44254f9aa37eb006c8826c5b",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "bfeb6b8fad144dcfaa5611bf0a8ab8b5",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "3344e57db4c444628eb1cb320da540a0",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "3a43d896c1a5462e86dac47860040779",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "c4d799b8b6144e0b92e7b6caf685eb28",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "b935ac1eee0a4287a9e4c6d55a659dda",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "6a1f16f645054f698e82b210d57563b4",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "aae85b1639ec4316acbad01334a3eb35",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "45891731d5bd4d09917d95daf661494e",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "e89e4b96026d4713971f0846f24e4d61",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "bb3d4478043f4c52904c7fab7465ab51",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "546ba02b79db47d0920bcbf16a4026ad",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "871710a8de0243eea55d4f55716e0834",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "e0863ba16ce7470a9ff9dcf36f3168b4",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "333ad898f183460ab9ed6207a6eff919",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "f387bfc0c4594a7e934251276872adca",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "baa16c6168314ee09c05f7623e6ed6a4",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "77adc6279e39451db462cdfc8ef3e428",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "e3874d04f1f447f0ba13ba3bcd25900e",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "6369eaf778194d87977adaf92a842f94",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "9fb5ec24c1e540fe9ea8437bbabd4943",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "dacc6be0c6e34ac0b57ddf07087f7881",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "cacf77fb4522406aa23dd01d2b286dba",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "61f5beb5bea94f71bd9ba20d9fd6e4cf",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "bf456fed70a84d96aa389679fc3af23c",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "e2d8208dfcfb4e149f69d8e0fed7a619",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "d2ac1fc8aa304e87a0e61bee409a6110",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "2de2e6ee034745729fe373ecd8bca66a",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "5fbca5572c6c42cfb152f8011b0b6bcc",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "410e5a2a0a4849b0af52bbe9d495582e",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "414fa903a9254f87ae1b0a9745303b17",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "fe3acc5d08534f8bb2fa01da84c7c435",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "869e5103da9547679ae74857c548469a",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "e4a2194942504fe69c879f4fb216e810",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "5cfc9a4e5e8e4fb58097110eeb6f2808",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "f3238d4041ae4d158bd8ca8a8039b367",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "5481da10c74645fe8d2cdee67086b514",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "5de9c4a6df9645fab886a0b0cce783fe",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "11aadce965bf4ee4abb550569d28e066",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "224d921b8639412db0bc5807c6ceb4fd",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "62bf05652c944d0fb0ae10b246b9ebe4",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "45db81b11e3740c18f2c465059e0b2ac",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "06ac2995fbf84848b8bc031d5f2bddb9",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "26c7cb206a4946d398d6f6edfd9fd0f8",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "6708d41327224082a6897b9612feb423",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "08b7527b186d44f0865d0d40dc022b5c",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "cc001b28dd424997a11a9d08a497c9f1",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "c34ccf24a08241b192754952e0eed777",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "bc3dfd0eb07c4bd6ae4aeea50c35cf1a",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "339154c0f56641e58eb86271667bcced",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "8ee073844411417ea8318c0d01191349",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "da0b5cf737d84ee4b5e9f7ffdad53f83",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "c5d517fffa9e4003aeaeb054c86ac9d8",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "c71a8a3d24bf479bbd8929597909ce3d",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "a4b7a7e46d5547abb6d8c3f4e6ee0582",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "9270314cd66d4643b63701c3b3a92392",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "2324c8fa8fa14914a9d8fe08ae5b5d24",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "f560a10879e84ca4987437dec4b94a97",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "1c11989856b340aab09b09e524cb3366",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "b8f70940a6d445ca81efe7adf41bef02",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "7de9c13ca7474fb4935124ef3e1d3c0c",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "bd559db57531445fbb9f8937a012f337",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "a99aad0be4be4e689e362218de571db0",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "7c0fc35237464580baf82d228a43b825",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "4085ed0343c74718b68c9a9b7f8b246a",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "05eabeb6cf0848adb77006f9bfbf142b",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "3a158f4e621342aabb4f43f41afdab91",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "04188f0a717a48eb9a06119d0f6f01fd",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "08a1fb0ba56e444aaf127e94355b72f2",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "873735669a924e13ab0035dfe1f945a5",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "03b622f04de7413b9afa0df0635b6d30",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "159f9c96f7a6469b8cf7cc92088c781e",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "541927d4c3e548a28ece3afcbc5bb694",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "f242ff530e9849ba98645a4b83176372",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "b06f365515864fc7a00c4b8fa677bb8c",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "9ce9c02a8731489fa1aee722b77935e8",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "b637565f08294876983e491067b82a44",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "4ea750ed3cd04ee29d1075a6d5ea8a81",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "02654fe2ddda4f6fa9cc506ef455bc3e",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "064b06381bf34d79a920f92a93871dc3",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "e6b1f16675f04d76951f4b8c36b66613",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "222b06f95a4a44638fbb405acf7c7514",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "0759bc9fc30c4d3ab71f0de91a055814",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "5d549fae88d44767b64ebb2a7ba362b9",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "19cd2d8f324243128354af4acf8b3a7f",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "fd27fec09f4c4da59f24775e45dcd124",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "0e2513c6ba4e47ddbd5243a24edbc39e",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "e498654fd8d3487d975d18408e433040",
+      "name": "材质",
+      "color": null,
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "af04070e86c640f2bd2e11bfd5f200a7",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "bfb916dc1bd944c6840b0222e205ade5",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "d055a966f0ff4d0bb92047480988461e",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "0d79173e3e3247c6b1a0f89c67f97e1e",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "56da8bede72c4867b661a68c643820e1",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "9f6ee35d1d914ce69d2177813f77be99",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "08cbeab0a6ad4a49a8453b6d18ba2869",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "1d916c0abbc64c6493dd7617a6dfc0eb",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "50ef0fa210ff4b62a81b416a965d5966",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "75b78d5320a0490284df09c08bc3a170",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "cb19cfc41e5e442fbbc6b77198f02992",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "7d614be6a29b4ac59c0f8edcded438e1",
+      "name": "材质",
+      "color": "#1B2A6B",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "6312cae0e06d40629c96b27541a4e821",
+      "name": "材质",
+      "color": "#101822",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "d697f0165efc410c9cf277f53d77e74f",
+      "name": "材质",
+      "color": "#FFD24A",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "c1142490d68544a6b038ee74f340e8d8",
+      "name": "材质",
+      "color": "#FF4444",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "101a85a5b5904be69f906e0ab827ec2c",
+      "name": "材质",
+      "color": "#FF4444",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    },
+    {
+      "id": "f49dc693327b468f8ff3a7083ab88a52",
+      "name": "材质",
+      "color": "#FF4444",
+      "saturation": 1.0,
+      "metallic": 0.0,
+      "roughness": 0.5,
+      "pbr": false
+    }
+  ],
+  "lights": [
+    {
+      "id": "961df5a46fa14a30a7dbbd15867d4769",
+      "name": "平行光",
+      "kind": "directional",
+      "position": [
+        0.0,
+        5.0,
+        0.0
+      ],
+      "direction": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "azimuth": 0.0,
+      "elevation": 0.0,
+      "roll": 0.0,
+      "color": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "intensity": 1.0,
+      "mode": "full",
+      "shape": "circle",
+      "size": 5.0,
+      "shadow": true,
+      "range": 10.0,
+      "spot_inner_angle": 30.0,
+      "spot_outer_angle": 60.0
+    }
+  ],
+  "cameras": [
+    {
+      "id": "30e692056a0648fe9e1976a4cd7427d7",
+      "name": "摄像机3",
+      "position": [
+        0.0,
+        1.0,
+        -10.0
+      ],
+      "yaw": 0.0,
+      "pitch": 0.0,
+      "roll": 0.0,
+      "fov": 60.0,
+      "fov_locked": true,
+      "pitch_lock": false,
+      "pitch_min": -85.0,
+      "pitch_max": 85.0,
+      "parent_id": null,
+      "skybox": null
+    }
+  ],
+  "active_camera": null,
+  "skybox": null,
+  "ui": {
+    "canvases": [
+      {
+        "canvas_type": "screen",
+        "z_order": 0,
+        "width": 1008,
+        "height": 935,
+        "elements": [
+          {
+            "type": "element",
+            "name": "root",
+            "rect": [
+              0.0,
+              0.0,
+              1008.0,
+              935.0
+            ],
+            "anchor": [
+              0.0,
+              0.0
+            ],
+            "pivot": [
+              0.0,
+              0.0
+            ],
+            "visible": true,
+            "enabled": true,
+            "z_order": 0,
+            "children": []
+          }
+        ]
+      }
+    ]
+  },
+  "objects": [
+    {
+      "id": "d487a88167ae4501b5e5c17971610630",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_-5_-5",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        -5.0,
+        0.3,
+        -5.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "2cc760a7de024221b307576a76cb5886",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "09137ca225ce46e0ab51eef725c9917d",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_-4_-5",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        -4.0,
+        0.3,
+        -5.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "bc094e8f2c0143e0a53e17652ffdd3a2",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "78330564b07144199724e1a80d39245b",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_-3_-5",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        -3.0,
+        0.3,
+        -5.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "9a45db8ee9414f0687ca2773ea6b8e86",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "06932164494446c78a87b91fad2b23d5",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_-2_-5",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        -2.0,
+        0.3,
+        -5.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "f5f85f2447354a468ddfe5054e8c0116",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "50b0b19ffd9340729457e9350b6c170b",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_-1_-5",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        -1.0,
+        0.3,
+        -5.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "a6284520fbb34cc8921e14d6e14ecc8d",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "282a5dc692dc48868e1c06f48e280669",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_0_-5",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        0.0,
+        0.3,
+        -5.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "c6bbd2a6721940dab4e249832ef5c870",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "d31745ee637b48478c51cebb74e5d0c4",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_1_-5",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        1.0,
+        0.3,
+        -5.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "634026f7b37243bf9cba0170cdea5bc3",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "c92f5b8ca934453da9600e94ba05f140",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_2_-5",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        2.0,
+        0.3,
+        -5.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "1d03cae96905415ab2dd91dee55a9482",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "b0e545dc24bc419ea555a4c720eb0f7a",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_3_-5",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        3.0,
+        0.3,
+        -5.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "9a4009ce342c4e0a8feb2fe09b6f6ab6",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "cad2ea4c57474f9ebf68564f23726fc4",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_4_-5",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        4.0,
+        0.3,
+        -5.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "b969490aaa4a4e2e97faf02bc84ba45e",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "65e452569eca4af38fc639e338bcc483",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_5_-5",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        5.0,
+        0.3,
+        -5.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "a20db6f0e64b452d8028e389377dcd41",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "06b67ba84b704b09b76177d0163e68c7",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_-5_-4",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        -5.0,
+        0.3,
+        -4.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "eb856325271f47c6bc7413c34612ce0b",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "b5dd5dec29814eb28977cdc14e54e73b",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "豆子_-4_-4",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        -4.0,
+        0.3,
+        -4.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.16,
+        0.16,
+        0.16
+      ],
+      "color": null,
+      "material_id": "78eaeafdeee841a1a34b59ef7ffe1e95",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "3869e0df090a4a06b256b7c1fbfa7276",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "豆子_-3_-4",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        -3.0,
+        0.3,
+        -4.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.16,
+        0.16,
+        0.16
+      ],
+      "color": null,
+      "material_id": "627ec6f46bc743c2ad02a8a439b64770",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "75ad305162a848188e1c6de138a3492b",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "豆子_-2_-4",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        -2.0,
+        0.3,
+        -4.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.16,
+        0.16,
+        0.16
+      ],
+      "color": null,
+      "material_id": "7767e4a377284d2c83539a8184960ebd",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "505724b82b9d45909aed270556f31692",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "豆子_-1_-4",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        -1.0,
+        0.3,
+        -4.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.16,
+        0.16,
+        0.16
+      ],
+      "color": null,
+      "material_id": "8198ac3a47fa4b39b0de5e293a412e45",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "35fc7c67d64f4497955aea5f4a4f6e23",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "豆子_0_-4",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        0.0,
+        0.3,
+        -4.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.16,
+        0.16,
+        0.16
+      ],
+      "color": null,
+      "material_id": "0d4c50980f7c4e53b49abd29919f448a",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "79f852940a964d849c99228d481c261e",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "豆子_1_-4",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        1.0,
+        0.3,
+        -4.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.16,
+        0.16,
+        0.16
+      ],
+      "color": null,
+      "material_id": "a5502492647d40cb9bfdd8fe8a19d5a1",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "69731f32fe6743fa9beeffa99859a4fd",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "豆子_2_-4",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        2.0,
+        0.3,
+        -4.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.16,
+        0.16,
+        0.16
+      ],
+      "color": null,
+      "material_id": "2177adee5d40411aa8d4e55beda45ef3",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "dee7a68f1b01415fac037f81cde51202",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "豆子_3_-4",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        3.0,
+        0.3,
+        -4.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.16,
+        0.16,
+        0.16
+      ],
+      "color": null,
+      "material_id": "f94e682a4c6c40638787db0a64ab6dea",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "34064698010f4fa6921c0509cd92a561",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "豆子_4_-4",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        4.0,
+        0.3,
+        -4.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.16,
+        0.16,
+        0.16
+      ],
+      "color": null,
+      "material_id": "f02a74ed3eb3473db68ea1be650476e8",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "77333bc5cf6947578834bd3e49b4616c",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_5_-4",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        5.0,
+        0.3,
+        -4.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "683a052a44254f9aa37eb006c8826c5b",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "ad2f6f89e4fc470797a8699447a3763d",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_-5_-3",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        -5.0,
+        0.3,
+        -3.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "bfeb6b8fad144dcfaa5611bf0a8ab8b5",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "308e4bfb97c5433cb83ba546655f8317",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "豆子_-4_-3",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        -4.0,
+        0.3,
+        -3.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.16,
+        0.16,
+        0.16
+      ],
+      "color": null,
+      "material_id": "3344e57db4c444628eb1cb320da540a0",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "0c4352f0479840c0981ff3b69ed0d597",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_-3_-3",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        -3.0,
+        0.3,
+        -3.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "3a43d896c1a5462e86dac47860040779",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "4201f8adcd304bf9bf2091e3c2bd6aa8",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_-2_-3",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        -2.0,
+        0.3,
+        -3.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "c4d799b8b6144e0b92e7b6caf685eb28",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "c2a721ae9d92418ba58ebd1627c28e52",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_-1_-3",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        -1.0,
+        0.3,
+        -3.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "b935ac1eee0a4287a9e4c6d55a659dda",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "a7cd7ca194814fa69f459bc56955fabe",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "豆子_0_-3",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        0.0,
+        0.3,
+        -3.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.16,
+        0.16,
+        0.16
+      ],
+      "color": null,
+      "material_id": "6a1f16f645054f698e82b210d57563b4",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "a9dc9c658f2a49f7bce24fa9a051bacc",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_1_-3",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        1.0,
+        0.3,
+        -3.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "aae85b1639ec4316acbad01334a3eb35",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "fe569c0efe66423389482a9f2eb37e7e",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_2_-3",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        2.0,
+        0.3,
+        -3.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "45891731d5bd4d09917d95daf661494e",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "6001db887dae467c982ae388a2cd970e",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_3_-3",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        3.0,
+        0.3,
+        -3.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "e89e4b96026d4713971f0846f24e4d61",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "ee4e0c4122a64e9694b04e962324a1ae",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "豆子_4_-3",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        4.0,
+        0.3,
+        -3.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.16,
+        0.16,
+        0.16
+      ],
+      "color": null,
+      "material_id": "bb3d4478043f4c52904c7fab7465ab51",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "58e8411959334622ab85a9d487815e72",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_5_-3",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        5.0,
+        0.3,
+        -3.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "546ba02b79db47d0920bcbf16a4026ad",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "4a4f04e506ca4ba7897b375f76c294aa",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_-5_-2",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        -5.0,
+        0.3,
+        -2.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "871710a8de0243eea55d4f55716e0834",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "eace9e67d6ad48a1a50c420d889c26e6",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "豆子_-4_-2",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        -4.0,
+        0.3,
+        -2.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.16,
+        0.16,
+        0.16
+      ],
+      "color": null,
+      "material_id": "e0863ba16ce7470a9ff9dcf36f3168b4",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "4fc437f8c33e4d03bd385c4a7dedf28c",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "豆子_-3_-2",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        -3.0,
+        0.3,
+        -2.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.16,
+        0.16,
+        0.16
+      ],
+      "color": null,
+      "material_id": "333ad898f183460ab9ed6207a6eff919",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "ea93a2bb4c8546eb80287950353f878c",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "豆子_-2_-2",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        -2.0,
+        0.3,
+        -2.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.16,
+        0.16,
+        0.16
+      ],
+      "color": null,
+      "material_id": "f387bfc0c4594a7e934251276872adca",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "cb277b10951244b3b62e628f90ce3b7f",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "豆子_-1_-2",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        -1.0,
+        0.3,
+        -2.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.16,
+        0.16,
+        0.16
+      ],
+      "color": null,
+      "material_id": "baa16c6168314ee09c05f7623e6ed6a4",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "d335fc1936c647929382e18e79ae34bf",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "豆子_0_-2",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        0.0,
+        0.3,
+        -2.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.16,
+        0.16,
+        0.16
+      ],
+      "color": null,
+      "material_id": "77adc6279e39451db462cdfc8ef3e428",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "dafcce08e084435aa1a31603d75b2225",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "豆子_1_-2",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        1.0,
+        0.3,
+        -2.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.16,
+        0.16,
+        0.16
+      ],
+      "color": null,
+      "material_id": "e3874d04f1f447f0ba13ba3bcd25900e",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "3a58ea3c2a604b92b34f2fba9e923f83",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "豆子_2_-2",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        2.0,
+        0.3,
+        -2.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.16,
+        0.16,
+        0.16
+      ],
+      "color": null,
+      "material_id": "6369eaf778194d87977adaf92a842f94",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "60471dc349404af795626c8573947de3",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "豆子_3_-2",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        3.0,
+        0.3,
+        -2.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.16,
+        0.16,
+        0.16
+      ],
+      "color": null,
+      "material_id": "9fb5ec24c1e540fe9ea8437bbabd4943",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "0e33013b484a4163beaab9462a939eba",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "豆子_4_-2",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        4.0,
+        0.3,
+        -2.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.16,
+        0.16,
+        0.16
+      ],
+      "color": null,
+      "material_id": "dacc6be0c6e34ac0b57ddf07087f7881",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "551b831c373c4370882baf2d54360f02",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_5_-2",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        5.0,
+        0.3,
+        -2.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "cacf77fb4522406aa23dd01d2b286dba",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "2c2a493772784efcb5ee0213b014318a",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_-5_-1",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        -5.0,
+        0.3,
+        -1.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "61f5beb5bea94f71bd9ba20d9fd6e4cf",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "7a973ce2fae844a889c7f00f737319f9",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "豆子_-4_-1",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        -4.0,
+        0.3,
+        -1.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.16,
+        0.16,
+        0.16
+      ],
+      "color": null,
+      "material_id": "bf456fed70a84d96aa389679fc3af23c",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "23a8e41904ca4e40978d8cbec5dfe697",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_-3_-1",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        -3.0,
+        0.3,
+        -1.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "e2d8208dfcfb4e149f69d8e0fed7a619",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "170853d848db422d9402ef827ef344a1",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_-2_-1",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        -2.0,
+        0.3,
+        -1.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "d2ac1fc8aa304e87a0e61bee409a6110",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "d68dc4294c454f338df79ca0eba9a66b",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "豆子_-1_-1",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        -1.0,
+        0.3,
+        -1.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.16,
+        0.16,
+        0.16
+      ],
+      "color": null,
+      "material_id": "2de2e6ee034745729fe373ecd8bca66a",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "22efc50d86d349d6ae92a6a52e2deea4",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_0_-1",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        0.0,
+        0.3,
+        -1.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "5fbca5572c6c42cfb152f8011b0b6bcc",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "1b74056453ce478e9074e1c94a746852",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "豆子_1_-1",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        1.0,
+        0.3,
+        -1.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.16,
+        0.16,
+        0.16
+      ],
+      "color": null,
+      "material_id": "410e5a2a0a4849b0af52bbe9d495582e",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "d929a8675b594a38a8a828a18913cb37",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_2_-1",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        2.0,
+        0.3,
+        -1.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "414fa903a9254f87ae1b0a9745303b17",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "9b86524fb2454ca599daa27380f9c95a",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_3_-1",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        3.0,
+        0.3,
+        -1.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "fe3acc5d08534f8bb2fa01da84c7c435",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "da027aebb19b4b0f906fcc52e4326825",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "豆子_4_-1",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        4.0,
+        0.3,
+        -1.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.16,
+        0.16,
+        0.16
+      ],
+      "color": null,
+      "material_id": "869e5103da9547679ae74857c548469a",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "6512a7e0503c4e7e9a0d79876eb70e69",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_5_-1",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        5.0,
+        0.3,
+        -1.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "e4a2194942504fe69c879f4fb216e810",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "9ea2ec72d07443e9919182402793893f",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_-5_0",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        -5.0,
+        0.3,
+        0.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "5cfc9a4e5e8e4fb58097110eeb6f2808",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "3b15d8e9ab0c49858e037e4dd29bb8ab",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "豆子_-4_0",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        -4.0,
+        0.3,
+        0.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.16,
+        0.16,
+        0.16
+      ],
+      "color": null,
+      "material_id": "f3238d4041ae4d158bd8ca8a8039b367",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "c99409b35dcc4c45854b847e0924aa55",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "豆子_-3_0",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        -3.0,
+        0.3,
+        0.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.16,
+        0.16,
+        0.16
+      ],
+      "color": null,
+      "material_id": "5481da10c74645fe8d2cdee67086b514",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "41b00c2ff3cf455a9dbdb78cdcd621ff",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "豆子_-2_0",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        -2.0,
+        0.3,
+        0.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.16,
+        0.16,
+        0.16
+      ],
+      "color": null,
+      "material_id": "5de9c4a6df9645fab886a0b0cce783fe",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "92b11fd2bba14fe5b65edb403fa26de9",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "豆子_-1_0",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        -1.0,
+        0.3,
+        0.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.16,
+        0.16,
+        0.16
+      ],
+      "color": null,
+      "material_id": "11aadce965bf4ee4abb550569d28e066",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "67667d8fc7c44d94acdce88e1ffcb76d",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_0_0",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        0.0,
+        0.3,
+        0.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "224d921b8639412db0bc5807c6ceb4fd",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "98cdb4002f344ff786a5780139a57d52",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "豆子_1_0",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        1.0,
+        0.3,
+        0.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.16,
+        0.16,
+        0.16
+      ],
+      "color": null,
+      "material_id": "62bf05652c944d0fb0ae10b246b9ebe4",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "04ccc6c650cc4f419d8dc57edcf7d2cf",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "豆子_2_0",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        2.0,
+        0.3,
+        0.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.16,
+        0.16,
+        0.16
+      ],
+      "color": null,
+      "material_id": "45db81b11e3740c18f2c465059e0b2ac",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "c60e13e19bd3479d84243dd6e1316a9a",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "豆子_3_0",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        3.0,
+        0.3,
+        0.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.16,
+        0.16,
+        0.16
+      ],
+      "color": null,
+      "material_id": "06ac2995fbf84848b8bc031d5f2bddb9",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "fa6250fa825d4297b70d423b366c4a4f",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "豆子_4_0",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        4.0,
+        0.3,
+        0.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.16,
+        0.16,
+        0.16
+      ],
+      "color": null,
+      "material_id": "26c7cb206a4946d398d6f6edfd9fd0f8",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "f443f4c3a5234135bff89159c6a9c86c",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_5_0",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        5.0,
+        0.3,
+        0.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "6708d41327224082a6897b9612feb423",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "4db6b3f6416d40f1b2519eae75f0366a",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_-5_1",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        -5.0,
+        0.3,
+        1.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "08b7527b186d44f0865d0d40dc022b5c",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "18d5c26628cc4c519f66a8fafb4809e7",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "豆子_-4_1",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        -4.0,
+        0.3,
+        1.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.16,
+        0.16,
+        0.16
+      ],
+      "color": null,
+      "material_id": "cc001b28dd424997a11a9d08a497c9f1",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "548796c11a904c278f250b12a685bdd3",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_-3_1",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        -3.0,
+        0.3,
+        1.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "c34ccf24a08241b192754952e0eed777",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "f2d58613aee4433094f754e2299e8bd2",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_-2_1",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        -2.0,
+        0.3,
+        1.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "bc3dfd0eb07c4bd6ae4aeea50c35cf1a",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "d8c101046fcc42338c5f845e2749bc8a",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "豆子_-1_1",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        -1.0,
+        0.3,
+        1.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.16,
+        0.16,
+        0.16
+      ],
+      "color": null,
+      "material_id": "339154c0f56641e58eb86271667bcced",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "4a38424fa95a41b69290a8cffba07f34",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_0_1",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        0.0,
+        0.3,
+        1.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "8ee073844411417ea8318c0d01191349",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "93b10d2ff1bf49539da1fb9e91048356",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "豆子_1_1",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        1.0,
+        0.3,
+        1.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.16,
+        0.16,
+        0.16
+      ],
+      "color": null,
+      "material_id": "da0b5cf737d84ee4b5e9f7ffdad53f83",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "3c0f4a8ccd704ed486608e54bdbf9498",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_2_1",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        2.0,
+        0.3,
+        1.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "c5d517fffa9e4003aeaeb054c86ac9d8",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "da3b4b17e2134d68b289437b49d68c2e",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_3_1",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        3.0,
+        0.3,
+        1.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "c71a8a3d24bf479bbd8929597909ce3d",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "ca33db370b5344fcaf220416b80958b2",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "豆子_4_1",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        4.0,
+        0.3,
+        1.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.16,
+        0.16,
+        0.16
+      ],
+      "color": null,
+      "material_id": "a4b7a7e46d5547abb6d8c3f4e6ee0582",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "a528950022f4416b9b43e23c3fc8197b",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_5_1",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        5.0,
+        0.3,
+        1.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "9270314cd66d4643b63701c3b3a92392",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "07914cd5ff5f4792b4f720c54998eed2",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_-5_2",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        -5.0,
+        0.3,
+        2.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "2324c8fa8fa14914a9d8fe08ae5b5d24",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "f221e1e00a644241bbd37bd025b469b5",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "豆子_-4_2",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        -4.0,
+        0.3,
+        2.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.16,
+        0.16,
+        0.16
+      ],
+      "color": null,
+      "material_id": "f560a10879e84ca4987437dec4b94a97",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "03cc9950919341679d1176536d6a0953",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "豆子_-3_2",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        -3.0,
+        0.3,
+        2.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.16,
+        0.16,
+        0.16
+      ],
+      "color": null,
+      "material_id": "1c11989856b340aab09b09e524cb3366",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "cc093c56c5c343a2839079182a36b61b",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "豆子_-2_2",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        -2.0,
+        0.3,
+        2.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.16,
+        0.16,
+        0.16
+      ],
+      "color": null,
+      "material_id": "b8f70940a6d445ca81efe7adf41bef02",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "297c89b5a4974a7b8e832ea8ac59ceb2",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "豆子_-1_2",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        -1.0,
+        0.3,
+        2.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.16,
+        0.16,
+        0.16
+      ],
+      "color": null,
+      "material_id": "7de9c13ca7474fb4935124ef3e1d3c0c",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "45697f6844f84abaaf5147d163fd6406",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "豆子_0_2",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        0.0,
+        0.3,
+        2.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.16,
+        0.16,
+        0.16
+      ],
+      "color": null,
+      "material_id": "bd559db57531445fbb9f8937a012f337",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "5712fae326c34ee1bfd413a074d48f0f",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "豆子_1_2",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        1.0,
+        0.3,
+        2.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.16,
+        0.16,
+        0.16
+      ],
+      "color": null,
+      "material_id": "a99aad0be4be4e689e362218de571db0",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "ca27142cc725446781b3af586224476e",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "豆子_2_2",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        2.0,
+        0.3,
+        2.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.16,
+        0.16,
+        0.16
+      ],
+      "color": null,
+      "material_id": "7c0fc35237464580baf82d228a43b825",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "527ade48a9354695a26afbd57c29c868",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "豆子_3_2",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        3.0,
+        0.3,
+        2.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.16,
+        0.16,
+        0.16
+      ],
+      "color": null,
+      "material_id": "4085ed0343c74718b68c9a9b7f8b246a",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "ef5113d6180e480489b125eba281d7df",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "豆子_4_2",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        4.0,
+        0.3,
+        2.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.16,
+        0.16,
+        0.16
+      ],
+      "color": null,
+      "material_id": "05eabeb6cf0848adb77006f9bfbf142b",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "208e195134094254a0d7f0879aa4810c",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_5_2",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        5.0,
+        0.3,
+        2.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "3a158f4e621342aabb4f43f41afdab91",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "7ea52a48d414456da0a19eaa5dc6b72f",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_-5_3",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        -5.0,
+        0.3,
+        3.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "04188f0a717a48eb9a06119d0f6f01fd",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "d89bf90be24b441f89b772c80d7e8f83",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "豆子_-4_3",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        -4.0,
+        0.3,
+        3.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.16,
+        0.16,
+        0.16
+      ],
+      "color": null,
+      "material_id": "08a1fb0ba56e444aaf127e94355b72f2",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "87fc851209404c8385bae1a5f3eb806d",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_-3_3",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        -3.0,
+        0.3,
+        3.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "873735669a924e13ab0035dfe1f945a5",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "523c8fd13ed144678b752b6084911e66",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_-2_3",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        -2.0,
+        0.3,
+        3.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "03b622f04de7413b9afa0df0635b6d30",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "c69bb4046b554bc199c10e4ead61054f",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_-1_3",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        -1.0,
+        0.3,
+        3.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "159f9c96f7a6469b8cf7cc92088c781e",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "ae1ca54db1a84329be0e65ab5f07c120",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "豆子_0_3",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        0.0,
+        0.3,
+        3.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.16,
+        0.16,
+        0.16
+      ],
+      "color": null,
+      "material_id": "541927d4c3e548a28ece3afcbc5bb694",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "7ba8be1b6f884c49823a9e2dbf9767a0",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_1_3",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        1.0,
+        0.3,
+        3.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "f242ff530e9849ba98645a4b83176372",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "d7fcf66d10f14148800ef840684fe69f",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_2_3",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        2.0,
+        0.3,
+        3.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "b06f365515864fc7a00c4b8fa677bb8c",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "56473cf918d04198affa6a9b63192428",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_3_3",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        3.0,
+        0.3,
+        3.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "9ce9c02a8731489fa1aee722b77935e8",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "27875558a43347a98d4161ff67640e13",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "豆子_4_3",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        4.0,
+        0.3,
+        3.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.16,
+        0.16,
+        0.16
+      ],
+      "color": null,
+      "material_id": "b637565f08294876983e491067b82a44",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "a9cf4259b19c4a1385659aa94290de97",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_5_3",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        5.0,
+        0.3,
+        3.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "4ea750ed3cd04ee29d1075a6d5ea8a81",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "f052be0f96504d9e87b6baa109e899d9",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_-5_4",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        -5.0,
+        0.3,
+        4.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "02654fe2ddda4f6fa9cc506ef455bc3e",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "5cc91528bbd24ebbab9c4441c5efb989",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "豆子_-4_4",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        -4.0,
+        0.3,
+        4.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.16,
+        0.16,
+        0.16
+      ],
+      "color": null,
+      "material_id": "064b06381bf34d79a920f92a93871dc3",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "e6337b3a02484ec0ae9655ab1ce2c1b9",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "豆子_-3_4",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        -3.0,
+        0.3,
+        4.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.16,
+        0.16,
+        0.16
+      ],
+      "color": null,
+      "material_id": "e6b1f16675f04d76951f4b8c36b66613",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "1387612b96f24c4aa2c066aa087cf117",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "豆子_-2_4",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        -2.0,
+        0.3,
+        4.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.16,
+        0.16,
+        0.16
+      ],
+      "color": null,
+      "material_id": "222b06f95a4a44638fbb405acf7c7514",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "1d59918adbfe4b3faa02e43780c8b8e8",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "豆子_-1_4",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        -1.0,
+        0.3,
+        4.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.16,
+        0.16,
+        0.16
+      ],
+      "color": null,
+      "material_id": "0759bc9fc30c4d3ab71f0de91a055814",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "88acac19dfce47de81ba81604f45fd06",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "豆子_0_4",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        0.0,
+        0.3,
+        4.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.16,
+        0.16,
+        0.16
+      ],
+      "color": null,
+      "material_id": "5d549fae88d44767b64ebb2a7ba362b9",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "8a74b19b850b4707ac2786b762c3263a",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "豆子_1_4",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        1.0,
+        0.3,
+        4.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.16,
+        0.16,
+        0.16
+      ],
+      "color": null,
+      "material_id": "19cd2d8f324243128354af4acf8b3a7f",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "015a4c1dda094d5680b763d2fa76fd81",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "豆子_2_4",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        2.0,
+        0.3,
+        4.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.16,
+        0.16,
+        0.16
+      ],
+      "color": null,
+      "material_id": "fd27fec09f4c4da59f24775e45dcd124",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "42e6e89e54e94f4997db15e3856b053d",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "豆子_3_4",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        3.0,
+        0.3,
+        4.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.16,
+        0.16,
+        0.16
+      ],
+      "color": null,
+      "material_id": "0e2513c6ba4e47ddbd5243a24edbc39e",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "acf2cf6535bb435bba203804e829c7ca",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "豆子_4_4",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        4.0,
+        0.3,
+        4.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.16,
+        0.16,
+        0.16
+      ],
+      "color": null,
+      "material_id": "e498654fd8d3487d975d18408e433040",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "b3f8809e3fa74f008039cb7fd23dffcb",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_5_4",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        5.0,
+        0.3,
+        4.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "af04070e86c640f2bd2e11bfd5f200a7",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "0309667b6ec140a892d0ac98d1b7c5dc",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_-5_5",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        -5.0,
+        0.3,
+        5.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "bfb916dc1bd944c6840b0222e205ade5",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "0a6b637dfe034a9696e23fa33940c99f",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_-4_5",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        -4.0,
+        0.3,
+        5.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "d055a966f0ff4d0bb92047480988461e",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "04bdf50143604226b852daf3ad544391",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_-3_5",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        -3.0,
+        0.3,
+        5.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "0d79173e3e3247c6b1a0f89c67f97e1e",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "0ae78c15db5546769aa089d0e229ea0c",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_-2_5",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        -2.0,
+        0.3,
+        5.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "56da8bede72c4867b661a68c643820e1",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "fd83eb259b0f4a189170a525df78a1ca",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_-1_5",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        -1.0,
+        0.3,
+        5.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "9f6ee35d1d914ce69d2177813f77be99",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "6f772fe3e1a44ec598a4e85ce1fb0108",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_0_5",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        0.0,
+        0.3,
+        5.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "08cbeab0a6ad4a49a8453b6d18ba2869",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "79a92efd6da341bf82829d4af1099f87",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_1_5",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        1.0,
+        0.3,
+        5.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "1d916c0abbc64c6493dd7617a6dfc0eb",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "d2e19f5a72dd4ea788827e1b296054c6",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_2_5",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        2.0,
+        0.3,
+        5.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "50ef0fa210ff4b62a81b416a965d5966",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "bfaee8e14b344f549cd5da98a6f70cbc",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_3_5",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        3.0,
+        0.3,
+        5.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "75b78d5320a0490284df09c08bc3a170",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "3b6e76270fdb49adb5d2f52fd9b39558",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_4_5",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        4.0,
+        0.3,
+        5.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "cb19cfc41e5e442fbbc6b77198f02992",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "a8c1a01748044a9c9e02e48667d780f4",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "墙_5_5",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "cube",
+      "params": {
+        "size": 1.0
+      },
+      "position": [
+        5.0,
+        0.3,
+        5.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.92,
+        0.6,
+        0.92
+      ],
+      "color": "#1B2A6B",
+      "material_id": "7d614be6a29b4ac59c0f8edcded438e1",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "2f8bf471c9f842ffaa353e3af86600cf",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "地板",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "plane",
+      "params": {
+        "width": 10.0,
+        "depth": 10.0
+      },
+      "position": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        3.0,
+        1.0,
+        3.0
+      ],
+      "color": "#101822",
+      "material_id": "6312cae0e06d40629c96b27541a4e821",
+      "normal_mode": "flat",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [],
+      "collider": {
+        "shape": "box",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "264d6c3cf7fe4ebdb309fc4706b039d1",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "玩家",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        1.0,
+        0.3,
+        0.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.5,
+        0.5,
+        0.5
+      ],
+      "color": "#FFD24A",
+      "material_id": "d697f0165efc410c9cf277f53d77e74f",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [
+        {
+          "id": "pacman_player",
+          "vars": {
+            "speed": 4.0,
+            "eat_r": 0.5
+          }
+        }
+      ],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "0298bf36aa9f4446bb0f378c864eb5ab",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "幽灵0",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        -4.0,
+        0.3,
+        -4.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.5,
+        0.5,
+        0.5
+      ],
+      "color": "#FF4444",
+      "material_id": "c1142490d68544a6b038ee74f340e8d8",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [
+        {
+          "id": "pacman_ghost",
+          "vars": {
+            "speed": 2.2,
+            "turn_bias": 0.25
+          }
+        }
+      ],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "b93f2c274cea4f898be486f0057e0e85",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "幽灵1",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        4.0,
+        0.3,
+        -4.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.5,
+        0.5,
+        0.5
+      ],
+      "color": "#FF4444",
+      "material_id": "101a85a5b5904be69f906e0ab827ec2c",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [
+        {
+          "id": "pacman_ghost",
+          "vars": {
+            "speed": 2.2,
+            "turn_bias": 0.25
+          }
+        }
+      ],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    },
+    {
+      "id": "6a20f7d778044aa2ae07691b951fbc57",
+      "parent_id": null,
+      "prefab_ref": null,
+      "name": "幽灵2",
+      "layer": 0,
+      "tag": "Untagged",
+      "type": "sphere",
+      "params": {
+        "radius": 0.5,
+        "stacks": 14,
+        "slices": 28
+      },
+      "position": [
+        -4.0,
+        0.3,
+        4.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        0.5,
+        0.5,
+        0.5
+      ],
+      "color": "#FF4444",
+      "material_id": "f49dc693327b468f8ff3a7083ab88a52",
+      "normal_mode": "vertex",
+      "saturation": 1.0,
+      "visible": true,
+      "scripts": [
+        {
+          "id": "pacman_ghost",
+          "vars": {
+            "speed": 2.2,
+            "turn_bias": 0.25
+          }
+        }
+      ],
+      "collider": {
+        "shape": "sphere",
+        "enabled": true,
+        "friction": 0.5,
+        "restitution": 0.0,
+        "rolling_friction": 0.1,
+        "is_trigger": false
+      },
+      "rigidbody": null,
+      "audio_source": null,
+      "animator": null
+    }
+  ]
+}
