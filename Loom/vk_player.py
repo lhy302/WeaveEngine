@@ -504,10 +504,28 @@ def run_vk(scene=None, frames_n=None, keep=False, mini=False, no_shadow=False,
                 os._exit(9)
     threading.Thread(target=_heartbeat, daemon=True).start()
 
+    def _release_cursor():
+        """2026-11-07: 退出/异常时必须释放鼠标捕获 (否则玩家光标留在锁定态)。"""
+        try:
+            driver.set_mouse_locked(False)
+        except Exception:
+            pass
+        # 兜底: 进程级释放 (不依赖窗口句柄是否还活着)
+        try:
+            import ctypes
+            u = ctypes.windll.user32
+            u.ClipCursor(None)
+            for _ in range(3):
+                u.ShowCursor(True)
+        except Exception:
+            pass
+
     try:
         rendercanvas.glfw.loop.run()
     except KeyboardInterrupt:
         pass
+    finally:
+        _release_cursor()
     # 2026-11-07 P-10: 循环内失败 -> 非零退出并说明 (不回退, 也不假装成功)
     if _loop_error[0] is not None:
         _le = _loop_error[0]

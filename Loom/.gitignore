@@ -44,3 +44,7 @@ tools/dist/
 tools/dist_exe/
 tools/build_hub/
 tools/build_assets/
+
+# 预编译播放器运行时 (随引擎包分发, 不入库; 由 package_engine.py 打入 zip)
+Loom/player_runtime/
+player_runtime/

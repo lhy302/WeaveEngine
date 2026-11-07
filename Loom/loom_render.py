@@ -856,6 +856,11 @@ class RenderMixin:
             _elapsed = time.perf_counter() - _frame_start
             if _elapsed < _frame_dur:
                 time.sleep(_frame_dur - _elapsed)
+        # 2026-11-07: 退出前强制释放鼠标捕获 (防异常退出把玩家光标留在锁定态)
+        try:
+            self.set_mouse_locked(False)
+        except Exception:
+            pass
         # 2026-10-19 第1档序7 应用级钩子：退出前派发 on_application_quit
         # （脚本存档/清理）。必须在 _stop_parallel 前 —— 脚本线程还在, 引擎可用。
         try:
