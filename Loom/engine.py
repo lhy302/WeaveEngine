@@ -892,14 +892,44 @@ class GLEngine(ShadowMixin, FrameComponentMixin, PhysicsMixin, InputMixin, HudMi
                     self.set_mouse_locked(False)
                 self._unlock_key_prev = False
                 return
-            k = bool(self.is_key('Tab'))
+            # 2026-11-07: 解锁键不再是硬编码 Tab, 而是动作 '解锁鼠标'
+            # (默认 Tab, 可在 游戏设置.json 的 key_bindings 改键; 游戏开发者可做改键 UI)
+            k = bool(self.get_action('解锁鼠标'))
             if k and not getattr(self, '_unlock_key_prev', False):
                 self.toggle_mouse_locked()
-                print('[输入] Tab 切换鼠标锁定 -> %s'
-                      % ('锁定' if getattr(self, 'mouse_locked', False) else '已解锁'))
+                try:
+                    _keys = ','.join(self.actions.get('解锁鼠标') or [])
+                except Exception:
+                    _keys = '?'
+                print('[输入] 按键 [%s] 切换鼠标锁定 -> %s'
+                      % (_keys, '锁定' if getattr(self, 'mouse_locked', False) else '已解锁'))
             self._unlock_key_prev = k
         except Exception:
             pass
+
+
+    # ---- 键位 API (2026-11-07, 游戏开发者做"改键 UI"用) ----
+    def get_action_bindings(self):
+        """全部动作 -> 键名列表 (供 UI 展示当前键位)。"""
+        try:
+            return {a: list(ks) for a, ks in self.actions.items()}
+        except Exception:
+            return {}
+
+    def set_action_binding(self, action, keys):
+        """改某个动作的按键并**写入本游戏配置** (立即生效)。
+
+        keys: 'f' 或 ['f','F10']。返回 {'ok', 'action', 'keys', 'saved'}。
+        """
+        try:
+            if isinstance(keys, str):
+                keys = [keys]
+            keys = [str(k) for k in (keys or []) if str(k)]
+            self.rebind_action(str(action), keys)
+            return {'ok': True, 'action': str(action), 'keys': keys,
+                    'saved': True}
+        except Exception as e:
+            return {'ok': False, 'action': str(action), 'error': repr(e)}
 
     def update_scripts(self, delta_time):
         self._poll_mouse_unlock_key()

@@ -66,6 +66,10 @@ def set_value(key, value):
 #   "mouse_lock_allowed": false   # 本游戏是否允许锁定鼠标 (默认 true)
 #   "mouse_locked": false         # 启动时是否锁定 (仅 allowed=true 时生效, 默认 true)
 # 运行时永远提供解锁键 Tab (强制, 不依赖游戏脚本)。
+# ---- 键位绑定 (2026-11-07) ----
+# 游戏设置.json:  "key_bindings": {"解锁鼠标": ["F10"], "向前": ["w", "Up"]}
+# 优先级: 本游戏 key_bindings > 引擎 输入配置.json > DEFAULT_ACTIONS
+UNLOCK_ACTION = "解锁鼠标"      # 引擎保留动作名 (可在 key_bindings 里改键)
 MOUSE_LOCK_ALLOWED_DEFAULT = True
 MOUSE_LOCK_INITIAL_DEFAULT = True
 
@@ -79,6 +83,43 @@ def read_bool(key, default=False):
     if isinstance(v, (int, float)):
         return bool(v)
     return bool(default)
+
+
+def read_key_bindings():
+    """读本游戏的键位覆盖 {动作: [键...]}; 无/坏 -> {}。"""
+    d = load().get("key_bindings")
+    if not isinstance(d, dict):
+        return {}
+    out = {}
+    for a, ks in d.items():
+        if isinstance(ks, str):
+            out[str(a)] = [ks]
+        elif isinstance(ks, (list, tuple)):
+            out[str(a)] = [str(k) for k in ks if str(k)]
+    return out
+
+
+def write_key_binding(action, keys):
+    """把单个动作的键位写进本游戏配置 (其它动作保留)。"""
+    action = str(action)
+    if isinstance(keys, str):
+        keys = [keys]
+    keys = [str(k) for k in (keys or []) if str(k)]
+    d = load()
+    kb = d.get("key_bindings")
+    if not isinstance(kb, dict):
+        kb = {}
+    if keys:
+        kb[action] = keys
+    else:
+        kb.pop(action, None)
+    d["key_bindings"] = kb
+    p = path()
+    tmp = p + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(d, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, p)
+    return kb
 
 
 def mouse_lock_allowed():

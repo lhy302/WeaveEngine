@@ -29,6 +29,9 @@ _KEYMAP = {
 # 脚本/游戏逻辑用 engine.get_action('动作') 而非 is_key('键') —— 改键不动脚本,
 # 像 Unity Input System 的动作层 (Action -> Binding). 键位可在 输入配置.json 重映射.
 DEFAULT_ACTIONS = {
+    # 2026-11-07: 强制存在的"解锁鼠标"动作 (默认 Tab, 可在
+    # 游戏设置.json 的 key_bindings 里改键, 游戏开发者可做改键 UI)
+    '解锁鼠标': ['Tab'],
     '向前': ['w', 'Up'],
     '向后': ['s', 'Down'],
     '向左': ['a', 'Left'],
@@ -184,6 +187,8 @@ class InputMixin:
                     self.actions.setdefault(a, list(ks))
         except Exception:
             self.actions = dict(DEFAULT_ACTIONS)
+        # 2026-11-07: 叠加本游戏键位覆盖 (游戏设置.json key_bindings 优先)
+        self.apply_game_bindings()
 
     def save_action_bindings(self, path=None):
         """保存当前动作绑定到 输入配置.json (供改键 UI 调用)."""
@@ -195,10 +200,28 @@ class InputMixin:
         os.replace(tmp, p)
 
     def rebind_action(self, name, keys):
-        """重映射动作到一组键名 (如 {'跳跃': ['space','j']}), 并保存配置."""
-        self.actions[name] = list(keys)
-        self.save_action_bindings()
+        """重映射动作到一组键名 (如 {'跳跃': ['space','j']})。
+
+        2026-11-07: **同时写进本游戏的 游戏设置.json key_bindings** ——
+        打包游戏的玩家改键只影响这个游戏, 不污染引擎 输入配置.json;
+        开发环境另存一份到引擎配置便于复用。
+        """
+        keys = list(keys)
+        self.actions[name] = keys
+        try:
+            import game_settings
+            game_settings.write_key_binding(name, keys)
+        except Exception as e:
+            print('[输入] 写游戏键位失败 (忽略): %r' % (e,))
+        try:
+            self.save_action_bindings()
+        except Exception:
+            pass
         return self.actions[name]
+
+    def get_action_bindings(self):
+        """当前全部动作绑定 (供改键 UI 展示)。"""
+        return {a: list(ks) for a, ks in self.actions.items()}
 # ================ 按键绑定配置 (可在此处修改) ================
 KEY_BINDINGS = {
     # 相机移动控制

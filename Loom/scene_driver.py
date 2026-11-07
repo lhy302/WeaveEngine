@@ -442,8 +442,36 @@ class SceneDriver:
         # 直接写 key_state / actions)
         self.key_state = {}                      # 键名 -> bool (同 engine.script_keys)
         self.actions = dict(DEFAULT_ACTIONS)     # 动作 -> 键名列表 (同 engine.actions)
+        # 2026-11-07: VK 播放器此前**不读任何键位配置** -> 玩家改键在打包版无效。
+        # 顺序: 引擎 输入配置.json -> 本游戏 游戏设置.json 的 key_bindings 覆盖
+        try:
+            import json as _json
+            _p = os.path.join(os.path.dirname(os.path.abspath(__file__)), '输入配置.json')
+            with open(_p, 'r', encoding='utf-8') as _f:
+                _d = _json.load(_f)
+            if isinstance(_d.get('actions'), dict):
+                self.actions = {a: list(ks) for a, ks in _d['actions'].items()}
+                for _a, _ks in DEFAULT_ACTIONS.items():
+                    self.actions.setdefault(_a, list(_ks))
+        except Exception:
+            pass
+        try:
+            import game_settings as _gs
+            for _a, _ks in (_gs.read_key_bindings() or {}).items():
+                if _ks:
+                    self.actions[_a] = list(_ks)
+        except Exception:
+            pass
         self.mouse_rel = (0, 0)                  # 本帧鼠标增量 (像素, 同 engine.mouse_rel)
-        self.mouse_locked = False                # 鼠标锁定 (同 engine.mouse_locked)
+        # 2026-11-07: 初始锁定状态由游戏配置决定 (vk_player 也会设一次; 这里兜底,
+        # 保证任何入口 (含测试/工具) 都遵守 mouse_lock_allowed / mouse_locked)
+        try:
+            import game_settings as _gs
+            self.mouse_lock_allowed = bool(_gs.mouse_lock_allowed())
+            self.mouse_locked = bool(_gs.mouse_lock_initial())
+        except Exception:
+            self.mouse_lock_allowed = True
+            self.mouse_locked = False
         self.mouse_unlock_requested = False      # 玩家解锁意图 (同 engine.mouse_unlock_requested)
         self._ui_capture_mouse = False           # 特殊场景 (UI 菜单) 强制解锁 (同 engine)
         self.mouse_buttons = (False, False, False)   # (左, 中, 右) 同 pygame 顺序
@@ -889,14 +917,55 @@ class SceneDriver:
                     self.set_mouse_locked(False)
                 self._unlock_key_prev = False
                 return
-            k = bool(self.is_key('Tab'))
+            # 2026-11-07: 解锁键不再是硬编码 Tab, 而是动作 '解锁鼠标'
+            # (默认 Tab, 可在 游戏设置.json 的 key_bindings 改键; 游戏开发者可做改键 UI)
+            k = bool(self.get_action('解锁鼠标'))
             if k and not getattr(self, '_unlock_key_prev', False):
                 self.toggle_mouse_locked()
-                print('[输入] Tab 切换鼠标锁定 -> %s'
-                      % ('锁定' if getattr(self, 'mouse_locked', False) else '已解锁'))
+                try:
+                    _keys = ','.join(self.actions.get('解锁鼠标') or [])
+                except Exception:
+                    _keys = '?'
+                print('[输入] 按键 [%s] 切换鼠标锁定 -> %s'
+                      % (_keys, '锁定' if getattr(self, 'mouse_locked', False) else '已解锁'))
             self._unlock_key_prev = k
         except Exception:
             pass
+
+
+    # ---- 键位 API (2026-11-07, 游戏开发者做"改键 UI"用) ----
+    def rebind_action(self, name, keys):
+        """改键 (VK 播放器): 立即生效 + 写入本游戏 游戏设置.json。"""
+        keys = list(keys)
+        self.actions[name] = keys
+        try:
+            import game_settings
+            game_settings.write_key_binding(name, keys)
+        except Exception as e:
+            print('[输入] 写游戏键位失败 (忽略): %r' % (e,))
+        return keys
+
+    def get_action_bindings(self):
+        """全部动作 -> 键名列表 (供 UI 展示当前键位)。"""
+        try:
+            return {a: list(ks) for a, ks in self.actions.items()}
+        except Exception:
+            return {}
+
+    def set_action_binding(self, action, keys):
+        """改某个动作的按键并**写入本游戏配置** (立即生效)。
+
+        keys: 'f' 或 ['f','F10']。返回 {'ok', 'action', 'keys', 'saved'}。
+        """
+        try:
+            if isinstance(keys, str):
+                keys = [keys]
+            keys = [str(k) for k in (keys or []) if str(k)]
+            self.rebind_action(str(action), keys)
+            return {'ok': True, 'action': str(action), 'keys': keys,
+                    'saved': True}
+        except Exception as e:
+            return {'ok': False, 'action': str(action), 'error': repr(e)}
 
     def _update_scripts(self, dt):
         self._poll_mouse_unlock_key()

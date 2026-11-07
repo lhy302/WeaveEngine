@@ -986,6 +986,22 @@ def cmd_camera_move(win, args):
     return {'target': list(ed.camera_target), 'distance': ed.camera_distance}
 
 
+@command('key_binding', '键位: 查询 {action?} / 改键 {action, keys="f"|"f,F10"}'
+                          ' (写入游戏配置, 立即生效)')
+def cmd_key_binding(win, args):
+    ed = win.editor
+    action = args.get('action')
+    if not action:
+        return {'bindings': ed.get_action_bindings() if hasattr(ed, 'get_action_bindings') else {}}
+    keys = args.get('keys')
+    if keys is None:
+        return {'action': action,
+                'keys': (ed.get_action_bindings() or {}).get(action)}
+    if isinstance(keys, str):
+        keys = [k.strip() for k in keys.split(',') if k.strip()]
+    return ed.set_action_binding(action, keys)
+
+
 @command('render_api', '渲染后端: 查询 {api?缺省=查} 或 写入配置 {api=vulkan|opengl|auto}'
                           ' (写入后需重启游戏生效)')
 def cmd_render_api(win, args):
