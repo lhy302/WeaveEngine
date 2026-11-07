@@ -36,6 +36,7 @@ tests/_tmp/*
 !tests/_tmp/checker.png
 !tests/_tmp/normalmap.png
 !tests/_tmp/env_*.png
+!tests/_tmp/e2e_mcp_full.py
 # 测试/运行生成的工程存档
 /Projects/
 # 构建产物

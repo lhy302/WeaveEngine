@@ -1,0 +1,286 @@
+{
+ "total": 40,
+ "passed": 40,
+ "steps": [
+  {
+   "label": "initialize 握手",
+   "tool": "initialize",
+   "ok": true,
+   "ms": 0,
+   "text": "2024-11-05"
+  },
+  {
+   "label": "tools/list",
+   "tool": "tools/list",
+   "ok": true,
+   "ms": 0,
+   "text": "tools=72"
+  },
+  {
+   "label": "resources/list",
+   "tool": "resources/list",
+   "ok": true,
+   "ms": 0,
+   "text": "{\"resources\": [{\"uri\": \"loom://scene/active\", \"name\": \"Active Scene Hierarchy\", \"description\": \"\\u5f53\\u524d\\u6fc0\\u6d3b"
+  },
+  {
+   "label": "prompts/list",
+   "tool": "prompts/list",
+   "ok": true,
+   "ms": 0,
+   "text": "{\"prompts\": [{\"name\": \"diagnose_engine_issue\", \"description\": \"\\u81ea\\u52a8\\u6392\\u67e5\\u5f15\\u64ce\\u8fd0\\u884c\\u65f6\\u7"
+  },
+  {
+   "label": "新建空场景",
+   "tool": "unity_scene_new",
+   "ok": true,
+   "ms": 208,
+   "text": "{\n  \"ok\": true,\n  \"result\": {\n    \"ok\": true,\n    \"scene\": \"场景\",\n    \"models\": []\n  }\n}"
+  },
+  {
+   "label": "创建立方体",
+   "tool": "unity_gameobject_create",
+   "ok": true,
+   "ms": 368,
+   "text": "{\"ok\": true, \"result\": {\"type\": \"cube\", \"guid\": \"4b09f3b7c75f4e85b42dfb23f02a05fd\", \"name\": \"立方体1\"}}\n{\"ok\": true, \"result\": {\"renamed\": [\"立方体1\", \"AI_Cube\"], \"actual\": \"AI_Cube\", \"guid\": \"4b09f3b7c75f4e85b42dfb23f02a05fd\"}}\n{\"ok\": true, \"result\": {\"name\": \"AI_Cube\", \"position\": [0.0, 0.5, 0.0], \"rotation_deg\": [0.0, 0.0, 0.0], \"scale\": [1.0, 1.0, 1.0]}}"
+  },
+  {
+   "label": "创建球体",
+   "tool": "unity_gameobject_create",
+   "ok": true,
+   "ms": 395,
+   "text": "{\"ok\": true, \"result\": {\"type\": \"sphere\", \"guid\": \"171139e999924d0b8782a5d34bd50599\", \"name\": \"球体2\"}}\n{\"ok\": true, \"result\": {\"renamed\": [\"球体2\", \"AI_Sphere\"], \"actual\": \"AI_Sphere\", \"guid\": \"171139e999924d0b8782a5d34bd50599\"}}\n{\"ok\": true, \"result\": {\"name\": \"AI_Sphere\", \"position\": [2.0, 0.5, 0.0], \"rotation_deg\": [0.0, 0.0, 0.0], \"scale\": [1.0, 1.0, 1.0]}}"
+  },
+  {
+   "label": "创建平面",
+   "tool": "unity_gameobject_create",
+   "ok": true,
+   "ms": 416,
+   "text": "{\"ok\": true, \"result\": {\"type\": \"plane\", \"guid\": \"02d893cd667d49c188b4507df917fa4c\", \"name\": \"平面3\"}}\n{\"ok\": true, \"result\": {\"renamed\": [\"平面3\", \"AI_Plane\"], \"actual\": \"AI_Plane\", \"guid\": \"02d893cd667d49c188b4507df917fa4c\"}}\n{\"ok\": true, \"result\": {\"name\": \"AI_Plane\", \"position\": [0.0, 0.0, 0.0], \"rotation_deg\": [0.0, 0.0, 0.0], \"scale\": [1.0, 1.0, 1.0]}}"
+  },
+  {
+   "label": "列出物体",
+   "tool": "unity_gameobject_list",
+   "ok": true,
+   "ms": 123,
+   "text": "{\n  \"ok\": true,\n  \"result\": {\n    \"models\": [\n      {\n        \"index\": 0,\n        \"name\": \"AI_Cube\",\n        \"guid\": \"4b09f3b7c75f4e85b42dfb23f02a05fd\",\n        \"parent\": null\n      },\n      {\n        \"index\": 1,\n        \"name\": \"AI_Sphere\",\n        \"guid\": \"171139e999924d0b8782a5d34bd50599\",\n        \"parent\": null\n      },\n      {\n        \"index\": 2,\n        \"name\": \"AI_Plane\",\n        \"guid\": \"0"
+  },
+  {
+   "label": "选中立方体",
+   "tool": "unity_gameobject_select",
+   "ok": true,
+   "ms": 16,
+   "text": "{\n  \"ok\": true,\n  \"result\": {\n    \"selected\": \"AI_Cube\",\n    \"kind\": \"model\",\n    \"index\": 0,\n    \"ambiguous\": false\n  }\n}"
+  },
+  {
+   "label": "改位置",
+   "tool": "unity_transform_set",
+   "ok": true,
+   "ms": 136,
+   "text": "{\n  \"ok\": true,\n  \"result\": {\n    \"name\": \"AI_Cube\",\n    \"position\": [\n      1.5,\n      1.0,\n      0.5\n    ],\n    \"rotation_deg\": [\n      0.0,\n      0.0,\n      0.0\n    ],\n    \"scale\": [\n      1.0,\n      1.0,\n      1.0\n    ]\n  }\n}"
+  },
+  {
+   "label": "改颜色",
+   "tool": "unity_material_set",
+   "ok": true,
+   "ms": 121,
+   "text": "{\"ok\": true, \"result\": {\"name\": \"AI_Cube\", \"color\": \"#FF8800\"}}"
+  },
+  {
+   "label": "隐藏",
+   "tool": "unity_object_set_visible",
+   "ok": true,
+   "ms": 150,
+   "text": "{\n  \"ok\": true,\n  \"result\": {\n    \"name\": \"AI_Cube\",\n    \"visible\": false\n  }\n}"
+  },
+  {
+   "label": "显示",
+   "tool": "unity_object_set_visible",
+   "ok": true,
+   "ms": 111,
+   "text": "{\n  \"ok\": true,\n  \"result\": {\n    \"name\": \"AI_Cube\",\n    \"visible\": true\n  }\n}"
+  },
+  {
+   "label": "加平行光",
+   "tool": "unity_light_add",
+   "ok": true,
+   "ms": 10,
+   "text": "{\n  \"ok\": true,\n  \"result\": {\n    \"kind\": \"dir\"\n  }\n}"
+  },
+  {
+   "label": "加相机",
+   "tool": "unity_camera_add",
+   "ok": true,
+   "ms": 122,
+   "text": "{\n  \"ok\": true,\n  \"result\": {\n    \"ok\": true\n  }\n}"
+  },
+  {
+   "label": "射线检测",
+   "tool": "loom_raycast",
+   "ok": true,
+   "ms": 120,
+   "text": "{\n  \"ok\": true,\n  \"result\": {\n    \"hit\": {\n      \"name\": \"AI_Plane\",\n      \"distance\": 5.0,\n      \"point\": [\n        0.0,\n        0.0,\n        0.0\n      ]\n    }\n  }\n}"
+  },
+  {
+   "label": "按名查找",
+   "tool": "loom_find_by_name",
+   "ok": true,
+   "ms": 124,
+   "text": "{\n  \"ok\": true,\n  \"result\": {\n    \"found\": {\n      \"name\": \"AI_Cube\",\n      \"index\": 0\n    }\n  }\n}"
+  },
+  {
+   "label": "UI 文本",
+   "tool": "loom_ui_add",
+   "ok": true,
+   "ms": 144,
+   "text": "{\n  \"ok\": true,\n  \"result\": {\n    \"name\": \"AI_Title\",\n    \"type\": \"text\",\n    \"parent\": \"root\",\n    \"canvas\": \"screen\",\n    \"total\": 1\n  }\n}"
+  },
+  {
+   "label": "批次开始",
+   "tool": "loom_eai_call",
+   "ok": true,
+   "ms": 122,
+   "text": "{\n  \"ok\": true,\n  \"result\": {\n    \"batch\": true,\n    \"label\": \"Agent 批次\",\n    \"cancelled_stale\": false\n  }\n}"
+  },
+  {
+   "label": "批次内创建 0",
+   "tool": "unity_gameobject_create",
+   "ok": true,
+   "ms": 371,
+   "text": "{\"ok\": true, \"result\": {\"type\": \"cube\", \"guid\": \"0150d17376b54706911b3c133dc2c540\", \"name\": \"立方体4\"}}\n{\"ok\": true, \"result\": {\"renamed\": [\"立方体4\", \"BATCH_0\"], \"actual\": \"BATCH_0\", \"guid\": \"0150d17376b54706911b3c133dc2c540\"}}\n{\"ok\": true, \"result\": {\"name\": \"BATCH_0\", \"position\": [0.0, 0.5, 3.0], \"rotation_deg\": [0.0, 0.0, 0.0], \"scale\": [1.0, 1.0, 1.0]}}"
+  },
+  {
+   "label": "批次内创建 1",
+   "tool": "unity_gameobject_create",
+   "ok": true,
+   "ms": 427,
+   "text": "{\"ok\": true, \"result\": {\"type\": \"cube\", \"guid\": \"aefdaa122a8a489a8186ea13db66049c\", \"name\": \"立方体5\"}}\n{\"ok\": true, \"result\": {\"renamed\": [\"立方体5\", \"BATCH_1\"], \"actual\": \"BATCH_1\", \"guid\": \"aefdaa122a8a489a8186ea13db66049c\"}}\n{\"ok\": true, \"result\": {\"name\": \"BATCH_1\", \"position\": [1.5, 0.5, 3.0], \"rotation_deg\": [0.0, 0.0, 0.0], \"scale\": [1.0, 1.0, 1.0]}}"
+  },
+  {
+   "label": "批次内创建 2",
+   "tool": "unity_gameobject_create",
+   "ok": true,
+   "ms": 373,
+   "text": "{\"ok\": true, \"result\": {\"type\": \"cube\", \"guid\": \"fccbbe178848418d85bc67af1087484d\", \"name\": \"立方体6\"}}\n{\"ok\": true, \"result\": {\"renamed\": [\"立方体6\", \"BATCH_2\"], \"actual\": \"BATCH_2\", \"guid\": \"fccbbe178848418d85bc67af1087484d\"}}\n{\"ok\": true, \"result\": {\"name\": \"BATCH_2\", \"position\": [3.0, 0.5, 3.0], \"rotation_deg\": [0.0, 0.0, 0.0], \"scale\": [1.0, 1.0, 1.0]}}"
+  },
+  {
+   "label": "批次结束",
+   "tool": "loom_eai_call",
+   "ok": true,
+   "ms": 121,
+   "text": "{\n  \"ok\": true,\n  \"result\": {\n    \"batch\": false,\n    \"commands\": 9,\n    \"label\": \"Agent 批次\",\n    \"undoable\": true\n  }\n}"
+  },
+  {
+   "label": "一步撤销批次",
+   "tool": "unity_undo",
+   "ok": true,
+   "ms": 7,
+   "text": "{\n  \"ok\": true,\n  \"result\": {\n    \"ok\": true\n  }\n}"
+  },
+  {
+   "label": "批次撤销后 3 个物体消失",
+   "tool": "unity_gameobject_list",
+   "ok": true,
+   "ms": 0,
+   "text": "{\n  \"ok\": true,\n  \"result\": {\n    \"models\": [\n      {\n        \"index\": 0,\n        \"name\": \"AI_Cube\",\n        \"guid\": \"4b09f3b7c75f4e85b42dfb23f02a05fd\",\n        \"parent\": null\n      },\n      {\n       "
+  },
+  {
+   "label": "一步重做批次",
+   "tool": "unity_redo",
+   "ok": true,
+   "ms": 124,
+   "text": "{\n  \"ok\": true,\n  \"result\": {\n    \"ok\": true\n  }\n}"
+  },
+  {
+   "label": "重做后 3 个物体恢复",
+   "tool": "unity_gameobject_list",
+   "ok": true,
+   "ms": 0,
+   "text": "{\n  \"ok\": true,\n  \"result\": {\n    \"models\": [\n      {\n        \"index\": 0,\n        \"name\": \"AI_Cube\",\n        \"guid\": \"4b09f3b7c75f4e85b42dfb23f02a05fd\",\n        \"parent\": null\n      },\n      {\n       "
+  },
+  {
+   "label": "进入播放",
+   "tool": "unity_playmode_toggle",
+   "ok": true,
+   "ms": 252,
+   "text": "{\n  \"ok\": true,\n  \"result\": {\n    \"playing\": true,\n    \"paused\": false\n  }\n}"
+  },
+  {
+   "label": "物理推进 10 帧",
+   "tool": "unity_physics_simulate",
+   "ok": true,
+   "ms": 19,
+   "text": "{\n  \"ok\": true,\n  \"result\": {\n    \"frames\": 10,\n    \"fixed_dt\": 0.03333333333333333,\n    \"sub_steps\": 2,\n    \"sub_dt\": 0.016666666666666666\n  }\n}"
+  },
+  {
+   "label": "退出播放",
+   "tool": "unity_playmode_toggle",
+   "ok": true,
+   "ms": 153,
+   "text": "{\n  \"ok\": true,\n  \"result\": {\n    \"playing\": false,\n    \"paused\": false\n  }\n}"
+  },
+  {
+   "label": "视口截图",
+   "tool": "unity_capture_viewport",
+   "ok": true,
+   "ms": 181,
+   "text": "{\n  \"ok\": true,\n  \"result\": {\n    \"file\": \"D:\\\\my-project - 副本\\\\Loom(py源代码-工作区)\\\\Loom\\\\tests\\\\_tmp\\\\e2e_full\\\\05_viewport.png\",\n    \"size\": [\n      909,\n      445\n    ]\n  }\n}"
+  },
+  {
+   "label": "保存场景",
+   "tool": "unity_scene_save",
+   "ok": true,
+   "ms": 159,
+   "text": "{\n  \"ok\": true,\n  \"result\": {\n    \"saved\": \"D:\\\\my-project - 副本\\\\Loom(py源代码-工作区)\\\\Loom\\\\tests\\\\_tmp\\\\e2e_full\\\\AI_E2E.json\"\n  }\n}"
+  },
+  {
+   "label": "新建空场景",
+   "tool": "unity_scene_new",
+   "ok": true,
+   "ms": 113,
+   "text": "{\n  \"ok\": true,\n  \"result\": {\n    \"ok\": true,\n    \"scene\": \"场景\",\n    \"models\": []\n  }\n}"
+  },
+  {
+   "label": "加载场景",
+   "tool": "unity_scene_load",
+   "ok": true,
+   "ms": 129,
+   "text": "{\n  \"ok\": true,\n  \"result\": {\n    \"loaded\": \"D:\\\\\\\\my-project - 副本\\\\\\\\Loom(py源代码-工作区)\\\\\\\\Loom\\\\tests\\\\_tmp\\\\e2e_full\\\\AI_E2E.json\"\n  }\n}"
+  },
+  {
+   "label": "存档往返后物体恢复",
+   "tool": "unity_gameobject_list",
+   "ok": true,
+   "ms": 0,
+   "text": "{\n  \"ok\": true,\n  \"result\": {\n    \"models\": [\n      {\n        \"index\": 0,\n        \"name\": \"AI_Cube\",\n        \"guid\": \"4b09f3b7c75f4e85b42dfb23f02a05fd\",\n        \"parent\": null\n      },\n      {\n       "
+  },
+  {
+   "label": "引擎指标",
+   "tool": "diag_get_engine_metrics",
+   "ok": true,
+   "ms": 173,
+   "text": "{\n  \"ok\": true,\n  \"result\": {\n    \"fps\": 234,\n    \"is_playing\": false,\n    \"logic_paused\": false,\n    \"logic_steps\": 0,\n    \"interp_mode\": \"interpolate\",\n    \"gravity\": -9.8,\n    \"get_tps\": 19.685600341144067,\n    \"get_frame_jitter\": [\n      7.034661386704906,\n      75.60610002838075,\n      120\n    ],\n    \"clock\": {\n      \"logic_fps\": 30.0,\n      \"alpha\": 0.0,\n      \"steps\": 0,\n      \"phys_steps\":"
+  },
+  {
+   "label": "控制台日志",
+   "tool": "diag_get_console_logs",
+   "ok": true,
+   "ms": 3,
+   "text": "{\n  \"ok\": true,\n  \"seq\": 46,\n  \"lines\": [\n    [\n      1,\n      \"11:57:04\",\n      \"[agent] EAI 启动: http://127.0.0.1:64563\"\n    ],\n    [\n      2,\n      \"11:57:08\",\n      \"[命令] scene_new  -> ok (0.2ms)\"\n    ],\n    [\n      3,\n      \"11:57:08\",\n      \"[命令] object_add {'type': 'cube'} -> ok (2.4ms)\"\n    ],\n    [\n      4,\n      \"11:57:08\",\n      \"[命令] object_rename {'name': '4b09f3b7c75f4e85b42dfb23f02a0"
+  },
+  {
+   "label": "检查物体",
+   "tool": "diag_inspect_gameobject",
+   "ok": true,
+   "ms": 115,
+   "text": "{\n  \"ok\": true,\n  \"result\": {\n    \"kind\": \"model\",\n    \"name\": \"AI_Cube\",\n    \"position\": [\n      1.5,\n      1.0,\n      0.5\n    ],\n    \"rotation\": [\n      0.0,\n      0.0,\n      0.0\n    ],\n    \"scale\": [\n      1.0,\n      1.0,\n      1.0\n    ],\n    \"visible\": true,\n    \"saturation\": 1.0,\n    \"parent\": null,\n    \"prefab_ref\": null,\n    \"material\": \"材质\",\n    \"material_color\": \"#FF8800\",\n    \"collider\":"
+  },
+  {
+   "label": "退出编辑器(丢弃)",
+   "tool": "loom_eai_call",
+   "ok": true,
+   "ms": 143,
+   "text": "{\n  \"ok\": true,\n  \"result\": {\n    \"quitting\": true,\n    \"after\": 0.15,\n    \"dirty\": false,\n    \"resolved\": \"none\"\n  }\n}"
+  }
+ ]
+}
