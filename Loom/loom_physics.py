@@ -353,13 +353,22 @@ class PhysicsMixin:
         dx, dy, dz = sc.x - nx, sc.y - ny, sc.z - nz
         dist = math.sqrt(dx * dx + dy * dy + dz * dz)
         if dist < 1e-9:
-            # 球心在盒内: 沿盒中心指向球心方向推出 (球半径距离)
-            cc = Point3D((bmn.x + bmx.x) / 2, (bmn.y + bmx.y) / 2,
-                         (bmn.z + bmx.z) / 2)
-            vx, vy, vz = sc.x - cc.x, sc.y - cc.y, sc.z - cc.z
-            vl = math.sqrt(vx * vx + vy * vy + vz * vz) or 1e-6
-            u = (vx / vl, vy / vl, vz / vl)
-            need = r + 1e-4
+            # 2026-11-07 修复"贴墙推穿": 球心在盒内时, 旧实现沿"盒中心->球心"
+            # 方向推 —— 球心一旦越过盒中心, 推出方向就继续指向**另一侧**,
+            # 反复推挤会把物体挤到墙的另一边 (实测 x 0.71 -> 1.238 并继续).
+            # 改为沿**最近面**推出 (与盒-盒最小穿透轴一致): 永远走最短路径出去.
+            best = None
+            for i in (0, 1, 2):
+                lo = (sc.__getitem__(i) - bmn[i]) + r    # 推向 -面
+                hi = (bmx[i] - sc.__getitem__(i)) + r    # 推向 +面
+                if best is None or lo < best[0]:
+                    best = (lo, i, -1.0)
+                if hi < best[0]:
+                    best = (hi, i, +1.0)
+            need = best[0] + 1e-4
+            u = [0.0, 0.0, 0.0]
+            u[best[1]] = best[2]
+            u = (u[0], u[1], u[2])
         else:
             need = r - dist + 1e-4
             u = (dx / dist, dy / dist, dz / dist)      # 盒最近点 -> 球心
