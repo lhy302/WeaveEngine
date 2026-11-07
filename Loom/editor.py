@@ -1799,6 +1799,15 @@ class EditorApp(GLEngine):
                                    self.camera_yaw, self.camera_pitch,
                                    self.camera_roll, self.orbit_mode)   # 编辑器轨道视角, 退出恢复
             self.is_playing = True
+            # 2026-11-07 可玩性修复: 点"播放"按钮后键盘焦点在工具栏按钮上，
+            # 视口收不到 WASD（key_state 为空）-> 脚本 is_key/get_action 恒 False，
+            # 表现为"播放了但角色不动"。进播放即把焦点交还视口。
+            try:
+                _vp = getattr(getattr(self, 'view', None), 'viewport', None)
+                if _vp is not None:
+                    _vp.setFocus()
+            except Exception:
+                pass
             # B1: 进入播放建 Culverin (Jolt) 物理桥 (库缺失/建体失败 -> 返回 None,
             # update_physics 回退 legacy; 测试桩 __new__ 无 _phys_bridge_auto -> 不建桥,
             # 契约测试路径保持不变). 退出时 _destroy_phys_bridge (见下方退出分支).

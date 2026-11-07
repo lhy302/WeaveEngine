@@ -6,9 +6,9 @@
       0.0,
       0.0
     ],
-    "distance": 13.0,
+    "distance": 15.0,
     "yaw": 0.0,
-    "pitch": -1.2566370614359172
+    "pitch": -1.0122909661567112
   },
   "gravity": -9.8,
   "materials": [
@@ -4511,9 +4511,9 @@
         0
       ],
       "scale": [
-        0.7,
-        0.7,
-        0.7
+        1.2,
+        1.2,
+        1.2
       ],
       "color": "#FFD24A",
       "material_id": "61e4f2a0b4814beb90e2cd6c2facb7a8",
@@ -4526,12 +4526,6 @@
           "vars": {
             "speed": 4.0,
             "eat_r": 0.5
-          }
-        },
-        {
-          "id": "camera_follow",
-          "vars": {
-            "oy": 7.0
           }
         }
       ],
