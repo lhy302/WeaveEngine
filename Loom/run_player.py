@@ -36,6 +36,18 @@ def _read_setting(key, default):
         return default
 
 
+_LAST_SOURCE = 'default'      # 本次后端来自哪: cli / game / engine / default
+
+
+def _game_api():
+    """读游戏文件夹的 游戏设置.json render_api (缺失/非法 -> None)。"""
+    try:
+        import game_settings
+        return game_settings.read_render_api()
+    except Exception:
+        return None
+
+
 def resolve_backend(requested=None):
     """解析渲染 API: 参数 > 设置 > 默认 vulkan. 返回 'vulkan'|'opengl'|'auto'.
 
@@ -46,13 +58,39 @@ def resolve_backend(requested=None):
       render_api=auto、设置面板取值全部失效, 无 Vulkan 的机器必崩)。
       现在 'auto' 原样透传; 仅**未知**取值才归一为默认 vulkan。
     """
-    api = (requested or _read_setting('render_api', 'vulkan') or 'vulkan')
+    global _LAST_SOURCE
+    api = requested
+    if api:
+        _LAST_SOURCE = 'cli'
+    else:
+        # 2026-11-07: 每游戏配置优先 (游戏文件夹的 游戏设置.json, 玩家可在游戏内 UI 改,
+        # 下次启动生效) -> 再退到引擎 设置.json -> 默认 vulkan
+        api = _game_api()
+        if api:
+            _LAST_SOURCE = 'game'
+        else:
+            api = _read_setting('render_api', 'vulkan')
+            _LAST_SOURCE = 'engine'
     api = str(api).strip().lower()
     return api if api in ('vulkan', 'opengl', 'auto') else 'vulkan'
 
 
 def _persist_backend(api):
-    """把 render_api 写进 设置.json (下次启动生效). 返回 True = 写成功."""
+    """把 render_api 写进配置 (下次启动生效). 返回 True = 写到游戏配置成功.
+
+    2026-11-07: 优先写**游戏自己的** 游戏设置.json (打包游戏的玩家配置),
+    再尽力同步引擎 设置.json (编辑器/开发环境)。Vulkan 不兼容时由
+    _handle_vk_init_failure 调本函数把后端写回 opengl -> 下次启动走 GL。
+    """
+    ok_game = False
+    try:
+        import game_settings
+        _ok, _a, _err = game_settings.write_render_api(api)
+        ok_game = bool(_ok)
+        if not _ok:
+            print("[run_player] 写游戏配置失败: %s" % (_err,))
+    except Exception as e:
+        print("[run_player] 写游戏配置异常 (忽略): %r" % (e,))
     try:
         import guiloader
         s = guiloader.load_settings('loom', base=_SETTINGS_BASE)
@@ -60,7 +98,7 @@ def _persist_backend(api):
         if 'backend' in s:        # 少数旧配置用 backend 作键名, 一并同步免得分叉
             s['backend'] = api
         guiloader.save_settings('loom', s, base=_SETTINGS_BASE)
-        return True
+        return ok_game or True
     except Exception as e:
         print("[run_player] 写入设置失败 (%r) —— 请手动把 设置.json 的 "
               "render_api 改成 %s" % (e, api))

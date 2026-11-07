@@ -843,6 +843,41 @@ class GLEngine(ShadowMixin, FrameComponentMixin, PhysicsMixin, InputMixin, HudMi
         else:
             self._running = False
 
+    # ---- 渲染后端切换 API (2026-11-07, 游戏开发者做 UI 用) ----
+    render_api_current = 'opengl'
+
+    def get_render_api(self):
+        """当前**正在使用**的渲染后端 ('opengl' / 'vulkan')。"""
+        return getattr(self, 'render_api_current', 'opengl')
+
+    def get_saved_render_api(self):
+        """配置里保存的（下次启动生效的）后端；没配过返回 None。"""
+        try:
+            import game_settings
+            return game_settings.read_render_api()
+        except Exception:
+            return None
+
+    def set_render_api(self, api):
+        """写游戏配置的渲染后端（需重启游戏生效）。
+
+        游戏开发者可在 UI 里给玩家选：set_render_api('vulkan'/'opengl'/'auto')。
+        返回 {'ok':bool, 'saved':api|None, 'current':当前, 'restart_required':True, 'error':?}"""
+        try:
+            import game_settings
+            ok, val, err = game_settings.write_render_api(api)
+        except Exception as e:
+            ok, val, err = False, None, '写入失败: %r' % (e,)
+        res = {'ok': bool(ok), 'saved': val,
+               'current': self.get_render_api(),
+               'restart_required': True,
+               'path': (game_settings.path() if ok else None)}
+        if err:
+            res['error'] = err
+        print('[渲染后端] %s -> 配置已保存 %r (重启游戏后生效; 当前 %s)'
+              % ('写入成功' if ok else '写入失败', val, res['current']))
+        return res
+
     def update_scripts(self, delta_time):
         """播放期每帧调用: 遍历物体上所有脚本组件 (M25: 可多个), 惰性实例化并 update.
         优化 (2026-10-01): 快速早退与活跃脚本过滤 —— 场景无脚本时 0 迭代直接退出，

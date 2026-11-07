@@ -986,6 +986,18 @@ def cmd_camera_move(win, args):
     return {'target': list(ed.camera_target), 'distance': ed.camera_distance}
 
 
+@command('render_api', '渲染后端: 查询 {api?缺省=查} 或 写入配置 {api=vulkan|opengl|auto}'
+                          ' (写入后需重启游戏生效)')
+def cmd_render_api(win, args):
+    ed = win.editor
+    api = args.get('api')
+    if api:
+        return ed.set_render_api(api)
+    cur = ed.get_render_api() if hasattr(ed, 'get_render_api') else None
+    saved = ed.get_saved_render_api() if hasattr(ed, 'get_saved_render_api') else None
+    return {'current': cur, 'saved': saved, 'restart_required': bool(saved and saved != cur)}
+
+
 @command('camera_proj', '投影模式: {ortho?:bool, size?} (正交时 size = 可见高度世界单位)')
 def cmd_camera_proj(win, args):
     """2026-11-07 2D: 切换主相机透视/正交。ortho=True 时用正交投影 (Unity 2D 同款)。"""

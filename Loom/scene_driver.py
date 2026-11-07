@@ -621,6 +621,34 @@ class SceneDriver:
         """2026-11-07: 统一退出接口 (VK 播放器 -> 关窗退出)."""
         self.request_quit = True
 
+    # ---- 渲染后端切换 API (VK 播放器, 与 GLEngine 同签名) ----
+    render_api_current = 'vulkan'
+
+    def get_render_api(self):
+        return getattr(self, 'render_api_current', 'vulkan')
+
+    def get_saved_render_api(self):
+        try:
+            import game_settings
+            return game_settings.read_render_api()
+        except Exception:
+            return None
+
+    def set_render_api(self, api):
+        try:
+            import game_settings
+            ok, val, err = game_settings.write_render_api(api)
+        except Exception as e:
+            ok, val, err = False, None, '写入失败: %r' % (e,)
+        res = {'ok': bool(ok), 'saved': val, 'current': self.get_render_api(),
+               'restart_required': True,
+               'path': (game_settings.path() if ok else None)}
+        if err:
+            res['error'] = err
+        print('[渲染后端] %s -> 配置已保存 %r (重启游戏后生效; 当前 %s)'
+              % ('写入成功' if ok else '写入失败', val, res['current']))
+        return res
+
     def _physics_frame(self, phys_dt):
         """分离批1: 60Hz 物理步 (R1: 只改调用时机, 桥三段一行不动)."""
         self._step_physics(phys_dt)
