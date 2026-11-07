@@ -461,4 +461,9 @@ def build_launch_command(info, scene_path=None, mode='open', prefer=None):
         cmd = [py_exe, main_path]
     if scene_path:
         cmd += ['--open' if mode == 'open' else '--run', scene_path]
+    # 2026-11-07 修复: 编辑器模式追加 --agent —— 否则 LoomHub 打开的编辑器没有
+    # EAI 命令桥 (无 .agent_port.json), 外部 Agent/MCP 无法连接, 与"打开引擎后
+    # Agent 接上"的设计目标不符。玩家运行 (--run) 不加, 避免玩家进程开端口。
+    if mode == 'open' and '--agent' not in cmd:
+        cmd.append('--agent')
     return cmd
