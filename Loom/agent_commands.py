@@ -3163,7 +3163,6 @@ class AgentService:
       · drain() 每拍**最多执行 1 条**; 距上次执行不足 pace_ms 直接返回
         (QTimer 4ms 会持续触发, 节奏由时间戳判, 不靠定时器精度);
       · LOOM_AGENT_PACE_MS=0 -> 一次排空 (旧行为, 批量脚本用);
-      · LOOM_AGENT_STEP=1 -> 每执行完 1 条 paused=True, resume_step() 继续;
       · GUI 钩子 (getattr 缺失即跳过, 绝不因 UI 未实现而崩命令链):
           win._agent_progress(cmd, args, done, total)
           win._agent_busy(active)
@@ -3181,8 +3180,6 @@ class AgentService:
         self.port = 0
         # ---- 节奏/步进/进度 (契约见 docs/audit/fix_agent_visual_*.md) ----
         self.pace_ms = _env_float('LOOM_AGENT_PACE_MS', 120.0)
-        self.step_mode = os.environ.get('LOOM_AGENT_STEP', '').strip() == '1'
-        self.paused = False
         self._last_run = None       # 上次执行完成的 perf_counter (None=从未执行)
         self._busy = False          # GUI 忙态 (队列空转非空 -> True; 空闲 0.8s -> False)
         self._run_done = 0          # 本轮已执行条数
@@ -3219,22 +3216,8 @@ class AgentService:
         """HTTP 线程调用: 入队 + 等主线程执行结果 (超时 30s)."""
         ev = threading.Event()
         self.queue.put((cmd, args, ev))
-        # 2026-11-07 步进模式: 命令要等人点"下一步"才执行, 30s 超时会让 Agent
-        # 误判失败并重试同一条命令 -> 重复提交。步进模式放宽到
-        # LOOM_AGENT_STEP_TIMEOUT (默认 600s); 超时仍应视为"未知",
-        # 调用方应查 status 后再决定是否重发。
-        _timeout = 30.0
-        if getattr(self, "step_mode", False):
-            try:
-                _timeout = float(os.environ.get("LOOM_AGENT_STEP_TIMEOUT", "600"))
-            except (TypeError, ValueError):
-                _timeout = 600.0
-        if not ev.wait(_timeout):
-            return {"ok": False,
-                    "error": "命令超时 (%.0fs): %s%s" % (
-                        _timeout, cmd,
-                        "；步进模式需人工点下一步" if getattr(self, "step_mode", False) else ""),
-                    "timeout": True, "retry_risk": "duplicate"}
+        if not ev.wait(30.0):
+            return {'ok': False, 'error': '命令超时 (30s): %s' % cmd}
         return ev.result
 
     # ---- GUI 钩子 (缺失/异常一律跳过: UI 未实现时命令链必须照常跑) ----
@@ -3300,7 +3283,6 @@ class AgentService:
         """Qt 主线程轮询 (QTimer 4ms): 按节奏执行命令, 回填结果.
 
         返回本拍实际执行的条数 (观测/测试用).
-          · paused (步进模式等人点下一步) -> 直接返回;
           · 队列空 -> 只做忙态释放, 返回;
           · 距上次执行不足 pace_ms -> 直接返回 (等下一次 4ms 触发);
           · pace_ms > 0: 每拍最多 1 条; pace_ms == 0: 一次排空 (旧行为).
@@ -3308,24 +3290,21 @@ class AgentService:
         now = time.perf_counter()
         self._update_busy(now, (not self.queue.empty())
                           or (self._inflight is not None))
-        if self.paused or self.queue.empty():
+        if self.queue.empty():
             return 0
-        if self._draining:              # resume_step 在钩子里重入的兜底
+        if self._draining:              # GUI 钩子里重入的兜底
             return 0
         self._draining = True
         n = 0
         try:
             while True:
-                if self.paused or self.queue.empty():
+                if self.queue.empty():
                     break
                 if (self.pace_ms > 0 and self._last_run is not None
                         and (time.perf_counter() - self._last_run) * 1000.0
                         < self.pace_ms):
                     break
                 n += self._run_one()
-                if self.step_mode:
-                    self.paused = True      # 步进模式: 一条一停, 等人点"下一步"
-                    break
                 if self.pace_ms > 0:
                     break                   # 有节奏: 本拍只放一条
                 # pace_ms == 0: 继续排空 (向后兼容批量脚本)
@@ -3336,15 +3315,6 @@ class AgentService:
                           (not self.queue.empty())
                           or (self._inflight is not None))
         return n
-
-    def resume_step(self):
-        """步进模式: 人点"下一步" -> 解除暂停并立即执行下一条."""
-        self.paused = False
-        if self._draining:
-            return True
-        if not self.queue.empty():
-            self.drain()
-        return True
 
     def progress(self):
         """(done, total): total = 本轮已执行 + 队列剩余 (+ 在途 1 条).

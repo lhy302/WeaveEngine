@@ -1601,9 +1601,7 @@ class LoomGUI(QMainWindow):
         tb.addSeparator()
         self._add_tb_menu(tb, "插件", self._rebuild_plugin_menu)
 
-        # 2026-11-07 EAI 可视化 (B/E): AI 操作中红点 + 步进模式"下一步".
-        # 红点常驻工具栏右侧, 只有 _agent_busy(True) 时可见;
-        # "下一步"仅 step_mode (LOOM_AGENT_STEP=1) 时可见.
+        # 2026-11-07 EAI 可视化 (B): AI 操作中红点, 只有 _agent_busy(True) 时可见.
         tb.addSeparator()
         self._lbl_agent_busy = QLabel("● AI 操作中")
         self._lbl_agent_busy.setStyleSheet(
@@ -1613,15 +1611,6 @@ class LoomGUI(QMainWindow):
         # (直接 widget.setVisible(False) 会把控件置灰, 且 show 后又被工具栏藏回去).
         self._act_agent_busy = tb.addWidget(self._lbl_agent_busy)
         self._act_agent_busy.setVisible(False)
-
-        self._btn_agent_step = QToolButton()
-        self._btn_agent_step.setText("下一步")
-        self._btn_agent_step.setToolTip(
-            "AI 步进模式: 执行下一条命令 (LOOM_AGENT_STEP=1 启动时启用)")
-        self._btn_agent_step.setAutoRaise(True)
-        self._btn_agent_step.clicked.connect(self._on_agent_step_clicked)
-        self._act_agent_step = tb.addWidget(self._btn_agent_step)
-        self._act_agent_step.setVisible(False)
 
     def _add_tb_menu(self, tb, text, build_fn):
         """工具栏下拉菜单按钮 (插件按钮注入区): aboutToShow 时重建菜单内容."""
@@ -1757,16 +1746,7 @@ class LoomGUI(QMainWindow):
         sb.setAutoRaise(True)
         sb.clicked.connect(self._cmd_settings)
         self.statusBar().addPermanentWidget(sb)
-        # 2026-11-07 EAI 可视化 (E): 步进模式下"AI 等待下一步"提示.
-        self._lbl_agent_step_hint = QLabel("AI 等待下一步")
-        self._lbl_agent_step_hint.setStyleSheet(
-            "color:#e5c07b;font-weight:bold;padding:0 6px;")
-        self._lbl_agent_step_hint.setToolTip(
-            "Agent 已执行完一条命令, 点工具栏[下一步]继续")
-        self._lbl_agent_step_hint.setVisible(False)
-        self.statusBar().addPermanentWidget(self._lbl_agent_step_hint)
-
-    # ---------------- EAI 可视化 (B/E, 2026-11-07) ----------------
+    # ---------------- EAI 可视化 (B, 2026-11-07) ----------------
     # AgentService 每执行一条命令回调下列钩子 (getattr 存在才调用, 本类全实现):
     #   _agent_progress(cmd, args, done, total) -> 状态栏进度
     #   _agent_busy(active)                     -> 工具栏红点 + 状态栏变色
@@ -1813,7 +1793,6 @@ class LoomGUI(QMainWindow):
         self._agent_idle_token += 1
         tok = self._agent_idle_token
         QTimer.singleShot(1500, lambda: self._agent_idle(tok))
-        self._update_agent_step_ui()
 
     def _agent_idle(self, token):
         """1.5s 无新命令: 释放状态栏, 回落 _refresh_status 的默认文本."""
@@ -1869,54 +1848,11 @@ class LoomGUI(QMainWindow):
                 vp.update()
             finally:
                 vp.repaint()
-        self._update_agent_step_ui()
 
     def _bind_agent_service(self, agent):
-        """--agent 分支 / 测试: 绑定 AgentService 并同步步进模式 UI.
-
-        步进模式下 paused 由命令执行线程/主线程末尾置位, 与钩子调用顺序无
-        强契约; 这里加 200ms 轻量轮询兜底, 保证"AI 等待下一步"提示不滞后."""
+        """--agent 分支 / 测试: 绑定 AgentService (可视化钩子由服务侧 getattr 调用)."""
         self._agent_service = agent
-        step = bool(getattr(agent, 'step_mode', False)) if agent is not None else False
-        timer = getattr(self, '_agent_step_timer', None)
-        if step:
-            if timer is None:
-                timer = QTimer(self)
-                timer.setInterval(200)
-                timer.timeout.connect(self._update_agent_step_ui)
-                self._agent_step_timer = timer
-            timer.start()
-        elif timer is not None:
-            timer.stop()
-        self._update_agent_step_ui()
-        # 启动顺序 = 构造 -> 绑定 -> win.show(); show 时工具栏会把"当时不可见"
-        # 的 QWidgetAction 控件重新藏起 (实测), 事件循环首拍再同步一次.
-        QTimer.singleShot(0, self._update_agent_step_ui)
         return agent
-
-    def _update_agent_step_ui(self):
-        """按 service.step_mode / paused 同步 [下一步] 按钮与等待提示."""
-        svc = getattr(self, '_agent_service', None)
-        step = bool(getattr(svc, 'step_mode', False)) if svc is not None else False
-        self._agent_tb_visible(getattr(self, '_act_agent_step', None),
-                               getattr(self, '_btn_agent_step', None), step)
-        hint = getattr(self, '_lbl_agent_step_hint', None)
-        if hint is not None:
-            paused = bool(step and getattr(svc, 'paused', False))
-            hint.setVisible(paused)
-            if paused:
-                hint.setText("AI 等待下一步")
-
-    def _on_agent_step_clicked(self):
-        """[下一步]: 解除 paused, 立刻执行下一条队列命令."""
-        svc = getattr(self, '_agent_service', None)
-        if svc is None:
-            return
-        try:
-            svc.resume_step()
-        except Exception as ex:
-            print("[agent] resume_step 失败: %r" % ex)
-        self._update_agent_step_ui()
 
     # ---------------- 命令行坞 (EAI P2①, 2026-08-27) ----------------
     def _build_console(self):
@@ -4153,8 +4089,7 @@ def run_loom_gui(scene_path=None, width=1280, height=800):
     if '--agent' in sys.argv:
         import agent_commands
         agent = agent_commands.AgentService(win)
-        # 2026-11-07 EAI 可视化: 先绑定 (--agent 时立刻按 step_mode 显示[下一步]),
-        # 再启动 HTTP 服务; 钩子由 AgentService 侧 getattr 调用.
+        # 2026-11-07 EAI 可视化: 先绑定服务, 再启动 HTTP; 钩子由 AgentService 侧 getattr 调用.
         win._bind_agent_service(agent)
         try:
             agent.start()

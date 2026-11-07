@@ -276,3 +276,18 @@
 证据图：`docs/audit/agent_visual_step05.png`。
 
 **步进模式超时修复（主 Agent 追加）**：步进模式下命令要等人点「下一步」，原 30s 超时会让 Agent 误判失败并**重试同一条命令** → 重复提交。已改为 `LOOM_AGENT_STEP_TIMEOUT`（默认 600s），超时返回 `timeout: true, retry_risk: "duplicate"` 提示调用方先查 status。
+
+## 2026-11-07 变更：移除步进模式（E）
+
+**用户裁决**：步进模式与 MCP 同步工具调用模型天然冲突——工具调用必须等结果，
+而步进模式要"人点下一步"才继续，必然触发 MCP 侧工具调用超时（放宽超时也只是把
+问题推后：Agent 重试仍会重复提交命令）。故**完整移除 E**，保留 A~D。
+
+已删除：
+- `AgentService.step_mode / paused / resume_step()` 与 drain 里的暂停分支；
+- `LOOM_AGENT_STEP` / `LOOM_AGENT_STEP_TIMEOUT` 环境变量与步进超时放宽逻辑（submit 恢复 30s）；
+- GUI 工具栏「下一步」按钮、状态栏「AI 等待下一步」提示、`_update_agent_step_ui` / `_on_agent_step_clicked`；
+- 两个测试文件里的步进用例（`test_agent_pacing.py` / `test_agent_ui_indicator.py`）。
+
+保留：A 逐条 120ms 节奏、B 状态栏进度 + 红点、C 自动聚焦、D 批次撤销。
+验收：`run_all` exit=0、`ab_batch` 22/22、`test_agent_pacing` / `test_agent_ui_indicator` ALL PASS。

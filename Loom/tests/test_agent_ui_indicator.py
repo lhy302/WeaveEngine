@@ -1,11 +1,10 @@
 # -*- coding: utf-8 -*-
-"""EAI 可视化 GUI 侧 (B/E, 2026-11-07).
+"""EAI 可视化 GUI 侧 (B, 2026-11-07).
 
-锁住 ui/loom_gui.py 对 AgentService 的四个钩子与步进模式 UI:
+锁住 ui/loom_gui.py 对 AgentService 的三个钩子:
   1) _agent_progress(cmd,args,done,total) -> 状态栏 'AI: ... (3/10)';
   2) _agent_busy(True) -> 工具栏红点可见 + 状态栏文字变色;
   3) _agent_after_command() -> viewport.update() + repaint() 各一次;
-  4) [下一步] 按钮仅 step_mode 可见, 点击调用 service.resume_step().
 
 Qt 走 offscreen; LoomGUI 用 __new__ + QMainWindow.__init__ 跳过真实 GL 视口,
 只构建工具栏/状态栏 (不初始化 GLViewport)。
@@ -93,17 +92,10 @@ class _FakeViewport:
 
 
 class _StubService:
-    """AgentService 契约最小桩: step_mode / paused / resume_step()."""
+    """AgentService 契约最小桩: progress / last_info."""
 
-    def __init__(self, step_mode=False):
-        self.step_mode = bool(step_mode)
-        self.paused = False
-        self.resume_calls = 0
+    def __init__(self):
         self.pace_ms = 120.0
-
-    def resume_step(self):
-        self.resume_calls += 1
-        self.paused = False
 
     def progress(self):
         return (0, 0)
@@ -112,7 +104,7 @@ class _StubService:
         return ('', True, 0.0)
 
 
-def _make_win(step_mode=False):
+def _make_win():
     """真实 QMainWindow 骨架 + 真实工具栏/状态栏, 无 GL 视口/无 editor."""
     win = loom_gui.LoomGUI.__new__(loom_gui.LoomGUI)
     QMainWindow.__init__(win)
@@ -125,7 +117,7 @@ def _make_win(step_mode=False):
     win._build_toolbar()
     win._build_statusbar()
     # 复刻真机顺序: 构造 -> 绑定 -> show() (--agent 分支在 win.show() 之前绑定)
-    win._bind_agent_service(_StubService(step_mode=step_mode))
+    win._bind_agent_service(_StubService())
     win.show()                       # offscreen 窗口, 只用于可见性断言
     _APP.processEvents()             # 处理 _bind 的 singleShot(0) 首拍重同步
     return win
@@ -171,36 +163,12 @@ check('_agent_after_command 调用了 viewport.update',
 check('_agent_after_command 调用了 viewport.repaint',
       win.viewport.repaints == r0 + 1, win.viewport.repaints)
 
-# ---------------- 4) 步进模式按钮 ----------------
-win_norm = _make_win(step_mode=False)
-_APP.processEvents()
-check('非步进模式 [下一步] 按钮隐藏', not win_norm._act_agent_step.isVisible())
-check('非步进模式 等待提示隐藏', not win_norm._lbl_agent_step_hint.isVisible())
-
-win_step = _make_win(step_mode=True)
-_APP.processEvents()
-check('step_mode=True [下一步] 按钮可见',
-      win_step._act_agent_step.isVisible()
-      and win_step._btn_agent_step.isVisible(), win_step._btn_agent_step.text())
-win_step._agent_service.paused = True
-win_step._update_agent_step_ui()
-_APP.processEvents()
-check('步进模式 paused 时显示 AI 等待下一步',
-      win_step._lbl_agent_step_hint.isVisible()
-      and '等待下一步' in win_step._lbl_agent_step_hint.text(),
-      win_step._lbl_agent_step_hint.text())
-win_step._btn_agent_step.click()
-_APP.processEvents()
-check('点击 [下一步] 调用 resume_step', win_step._agent_service.resume_calls == 1,
-      win_step._agent_service.resume_calls)
-check('resume_step 后等待提示隐藏', not win_step._lbl_agent_step_hint.isVisible())
-
-# ---------------- 5) 契约属性齐全 ----------------
+# ---------------- 4) 契约属性齐全 ----------------
 check('LoomGUI 实现 _agent_progress/_agent_busy/_agent_after_command',
       all(hasattr(loom_gui.LoomGUI, n) for n in
           ('_agent_progress', '_agent_busy', '_agent_after_command')))
 
-for w in (win, win_norm, win_step):
+for w in (win,):
     w.hide()
     w.deleteLater()
 _APP.processEvents()

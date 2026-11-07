@@ -1,13 +1,12 @@
 # -*- coding: utf-8 -*-
 
-"""test_agent_pacing.py — AgentService 逐条执行/节奏/步进 测试 (2026-11-07 A+E, 全无头).
+"""test_agent_pacing.py — AgentService 逐条执行/节奏 测试 (2026-11-07 A, 全无头).
 
 覆盖 (契约见 docs/audit/fix_agent_visual_*.md):
   ① LOOM_AGENT_PACE_MS=120 (缺省): 每次 drain 最多执行 1 条, 距上次不足 pace 直接返回;
   ② LOOM_AGENT_PACE_MS=0: 等价旧"一次排空" (批量脚本用);
-  ③ LOOM_AGENT_STEP=1: 执行 1 条即 paused=True, drain 不再推进, resume_step() 继续;
-  ④ GUI 钩子: _agent_progress/_agent_busy/_agent_after_command (缺失时静默跳过);
-  ⑤ progress()/last_info() 契约 (队列空且无在途时归零).
+  ③ GUI 钩子: _agent_progress/_agent_busy/_agent_after_command (缺失时静默跳过);
+  ④ progress()/last_info() 契约 (队列空且无在途时归零).
 用假 win 桩 + 测试专用命令, 不建 Qt/pygame 窗口.
 """
 
@@ -104,23 +103,18 @@ class _NoHookWin:
     """完全没有任何钩子的 win: 契约要求 getattr 缺失即跳过 (不能崩 drain)."""
 
 
-def _service(pace=None, step=None):
+def _service(pace=None):
     """按环境变量构造 AgentService (构造时读 env, 与真机一致). 返回 (svc, win)."""
     old_p = os.environ.get('LOOM_AGENT_PACE_MS')
-    old_s = os.environ.get('LOOM_AGENT_STEP')
     try:
         if pace is None:
             os.environ.pop('LOOM_AGENT_PACE_MS', None)
         else:
             os.environ['LOOM_AGENT_PACE_MS'] = str(pace)
-        if step is None:
-            os.environ.pop('LOOM_AGENT_STEP', None)
-        else:
-            os.environ['LOOM_AGENT_STEP'] = str(step)
         win = FakeWin()
         svc = ac.AgentService(win)
     finally:
-        for k, v in (('LOOM_AGENT_PACE_MS', old_p), ('LOOM_AGENT_STEP', old_s)):
+        for k, v in (('LOOM_AGENT_PACE_MS', old_p),):
             if v is None:
                 os.environ.pop(k, None)
             else:
@@ -139,8 +133,6 @@ def t_pace_120():
     _CALLS.clear()
     svc, win = _service()
     check("缺省 pace_ms=120.0", abs(svc.pace_ms - 120.0) < 1e-9, svc.pace_ms)
-    check("缺省 step_mode=False 且未暂停",
-          svc.step_mode is False and svc.paused is False)
     evs = [_enqueue(svc, i) for i in range(5)]
 
     t0 = time.perf_counter()
@@ -195,30 +187,6 @@ def t_pace_zero():
           (_CALLS, n))
 
 
-# ============ ③ step 模式: 1 条即暂停, resume_step 继续 ============
-def t_step_mode():
-    _CALLS.clear()
-    svc, _win = _service(pace=0, step=1)
-    check("LOOM_AGENT_STEP=1 -> step_mode=True", svc.step_mode is True)
-    for i in range(3):
-        _enqueue(svc, i)
-    n1 = svc.drain()
-    check("step: 执行 1 条即 paused",
-          n1 == 1 and _CALLS == [0] and svc.paused is True, (_CALLS, svc.paused))
-    n2 = svc.drain()
-    check("step: paused 时 drain 不推进", n2 == 0 and _CALLS == [0])
-    svc.resume_step()
-    check("resume_step: 解除暂停并立即执行下一条",
-          svc.paused is True and _CALLS == [0, 1], (_CALLS, svc.paused))
-    svc.drain()
-    check("step: 又停在第 2 条", _CALLS == [0, 1])
-    svc.resume_step()
-    check("resume_step: 执行第 3 条", _CALLS == [0, 1, 2], _CALLS)
-    check("step: 队列空后仍 paused (等人)", svc.paused is True)
-    svc.resume_step()
-    check("resume_step: 空队列不崩", True)
-
-
 # ============ ④ 钩子缺失: getattr 跳过, drain 不崩 ============
 def t_no_hooks():
     _CALLS.clear()
@@ -237,10 +205,9 @@ def t_no_hooks():
 
 
 if __name__ == "__main__":
-    print("========== AgentService 节奏/步进 测试 ==========")
+    print("========== AgentService 节奏测试 ==========")
     t_pace_120()
     t_pace_zero()
-    t_step_mode()
     t_no_hooks()
     if _FAILS:
         print("总结果: FAIL", _FAILS)
