@@ -74,7 +74,10 @@ def _resolve_runtime(runtime_arg):
         if os.path.isfile(os.path.join(_dist, 'MyGame.exe')):
             return _dist
         return DEFAULT_RUNTIME_DIR
-    raise SystemExit("缺少玩家运行时: 先 --build-runtime 打包, 或 --runtime 指定")
+    raise SystemExit("缺少玩家运行时 (player_runtime/game_player.dist)。\n"
+                     "  · 正式引擎包已预置该运行时, 无需编译器;\n"
+                     "  · 源码工作区首次使用: 在**引擎开发机**跑 --build-runtime \n"
+                     "    (需要 Nuitka + MSVC), 或用 --runtime 指定已有 dist 目录。")
 
 
 def _build_runtime():

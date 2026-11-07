@@ -18,7 +18,9 @@ ENGINE_DIR = os.path.join(ROOT, 'Loom')
 DIST_DIR = os.path.join(ROOT, 'tools', 'dist')
 META_PATH = os.path.join(ENGINE_DIR, '解释器.json')
 
-EXCLUDE_DIRS = {'tests', '保存', 'Projects', '__pycache__', '.pytest_cache', 'assets'}
+# player_runtime 由 make_zip 显式预置 (只拷 game_player.dist, 排除 .build 中间产物)
+EXCLUDE_DIRS = {'tests', '保存', 'Projects', '__pycache__', '.pytest_cache',
+                'assets', 'player_runtime', '发布'}
 EXCLUDE_EXTS = {'.pyc', '.pyo', '.log', '.tmp'}
 EXCLUDE_FILES = {'解释器.json.bak'}
 
@@ -122,6 +124,17 @@ def write_meta_readme(out_dir, version):
 
 
 
+def _dir_size(path):
+    total = 0
+    for dirpath, _dirs, fnames in os.walk(path):
+        for fn in fnames:
+            try:
+                total += os.path.getsize(os.path.join(dirpath, fn))
+            except OSError:
+                pass
+    return total
+
+
 def make_zip(version):
     os.makedirs(DIST_DIR, exist_ok=True)
     tmp_dir = os.path.join(DIST_DIR, '_Loom_%s_tmp' % version)
@@ -135,6 +148,30 @@ def make_zip(version):
         dst = os.path.join(tmp_dir, 'Loom', rel_p)
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         shutil.copy2(abs_p, dst)
+    # 2026-11-07 Unity 对齐: 预置"编译好的播放器运行时"随引擎分发。
+    # Unity 的 UnityPlayer.dll 是随编辑器出厂的; Loom 之前是游戏开发机现场用
+    # Nuitka+MSVC 编 (无编译器的机器直接失败)。这里打包时把开发机上已编好的
+    # player_runtime/game_player.dist 一起塞进引擎包的 Loom/player_runtime/，
+    # 之后 build_game.py 直接复用 -> 游戏开发机零编译器。
+    _pr_src = os.path.join(ENGINE_DIR, 'player_runtime', 'game_player.dist')
+    _pr_dst = os.path.join(tmp_dir, 'Loom', 'player_runtime', 'game_player.dist')
+    if os.path.isdir(_pr_src) and os.path.isfile(os.path.join(_pr_src, 'MyGame.exe')):
+        _t = time.time()
+        shutil.copytree(_pr_src, _pr_dst, dirs_exist_ok=True)
+        print('[打包] 预置播放器运行时: %.1f MB (%.1fs)'
+              % (_dir_size(_pr_src) / 1048576.0, time.time() - _t))
+        try:
+            with open(os.path.join(tmp_dir, 'Loom', 'player_runtime', '运行时.json'),
+                      'w', encoding='utf-8') as _f:
+                json.dump({'version': version, 'built_at': time.strftime('%Y-%m-%d %H:%M:%S'),
+                           'note': '预编译播放器运行时 (Unity UnityPlayer 同角色); '
+                                   'build_game.py 直接复用, 游戏开发机无需编译器'}, _f,
+                          ensure_ascii=False, indent=1)
+        except Exception:
+            pass
+    else:
+        print('[打包] 警告: 未找到预置播放器运行时 (player_runtime/game_player.dist)，'
+              '游戏开发机将需要 --build-runtime (需 Nuitka+MSVC)')
     print('[打包] 复制嵌入式 Python...')
     tmp_py = build_embed_pyzip(version, tmp_dir)
     target_py = os.path.join(tmp_dir, 'python')
