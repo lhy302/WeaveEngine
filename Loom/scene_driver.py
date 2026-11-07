@@ -875,7 +875,31 @@ class SceneDriver:
                 print("[驱动] 物理桥步进异常 (%r) -> 本帧跳过; 本场后续同类异常"
                       "只计数不打印" % (e,))
 
+
+    def _poll_mouse_unlock_key(self):
+        """2026-11-07: **强制解锁键 Tab** —— 任何游戏都能解/锁鼠标, 不依赖脚本。
+
+        背景: 吃豆人这类不需要鼠标的游戏, 打包版启动即被无条件锁死且无解锁手段。
+        现在: ① mouse_lock_allowed=False 的游戏**永远不锁**;
+              ② 其余游戏始终可按 Tab 切换 (Tab 是引擎保留键)。
+        """
+        try:
+            if not getattr(self, 'mouse_lock_allowed', True):
+                if getattr(self, 'mouse_locked', False):
+                    self.set_mouse_locked(False)
+                self._unlock_key_prev = False
+                return
+            k = bool(self.is_key('Tab'))
+            if k and not getattr(self, '_unlock_key_prev', False):
+                self.toggle_mouse_locked()
+                print('[输入] Tab 切换鼠标锁定 -> %s'
+                      % ('锁定' if getattr(self, 'mouse_locked', False) else '已解锁'))
+            self._unlock_key_prev = k
+        except Exception:
+            pass
+
     def _update_scripts(self, dt):
+        self._poll_mouse_unlock_key()
         """复刻 engine.GLEngine.update_scripts: 惰性实例化 + update (坏脚本标记跳过).
         组2: 引用迭代 (与 engine 同改; 契约: update 不增删本物体脚本组件).
         2026-10-18 阶段1档序12 执行顺序：按 Script.order 稳定排序后再 update。"""

@@ -354,7 +354,14 @@ def run_vk(scene=None, frames_n=None, keep=False, mini=False, no_shadow=False,
             driver.on_mouse_lock_changed = _apply_cursor_mode
             # 与 runtime.PlayerApp 一致: 播放期默认锁定鼠标 (玩家按 Tab 释放/回锁,
             # Tab 的切换由 first_person/third_person 脚本走 driver.toggle_mouse_locked)。
-            driver.set_mouse_locked(True)
+            # 2026-11-07: 同 GL 播放器 —— 锁定与否由游戏配置决定 (默认沿用旧行为)
+            try:
+                import game_settings as _gs
+                driver.mouse_lock_allowed = bool(_gs.mouse_lock_allowed())
+                _lock0 = bool(_gs.mouse_lock_initial())
+            except Exception:
+                driver.mouse_lock_allowed, _lock0 = True, True
+            driver.set_mouse_locked(_lock0)
             _keys_registered[0] = True
         except Exception as e:
             # 失败原因交给重试预算 (限次 + 限打印), 不再每帧一行

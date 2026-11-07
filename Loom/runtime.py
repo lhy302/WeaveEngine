@@ -72,9 +72,16 @@ class PlayerApp(GLEngine):
         else:
             self.orbit_mode = True
             self.apply_orbit_camera()
-        # M39: 播放器默认锁定鼠标 (隐藏+捕获, 第一/第三人称玩家控制器转视角用);
-        # 玩家按 Tab 释放/回锁 (释放后鼠标滑动不转视角), 退出用窗口关闭.
-        self.set_mouse_locked(True)
+        # 2026-11-07: 鼠标锁定改为**游戏配置驱动** (吃豆人这类不需要锁的游戏不能被锁死)。
+        #   游戏设置.json: mouse_lock_allowed (是否允许锁) / mouse_locked (启动是否锁)
+        #   运行时永远提供 Tab 解锁键 (见 GLEngine._poll_mouse_unlock_key), 不依赖脚本。
+        try:
+            import game_settings as _gs
+            self.mouse_lock_allowed = bool(_gs.mouse_lock_allowed())
+            _lock0 = bool(_gs.mouse_lock_initial())
+        except Exception:
+            self.mouse_lock_allowed, _lock0 = True, True
+        self.set_mouse_locked(_lock0)
         # 分离批2: 首帧快照对齐 (加载位姿=curr, 首渲染帧不插值)
         if getattr(self, '_interp', None) is not None:
             self._interp.advance()

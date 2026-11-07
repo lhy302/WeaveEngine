@@ -878,7 +878,31 @@ class GLEngine(ShadowMixin, FrameComponentMixin, PhysicsMixin, InputMixin, HudMi
               % ('写入成功' if ok else '写入失败', val, res['current']))
         return res
 
+
+    def _poll_mouse_unlock_key(self):
+        """2026-11-07: **强制解锁键 Tab** —— 任何游戏都能解/锁鼠标, 不依赖脚本。
+
+        背景: 吃豆人这类不需要鼠标的游戏, 打包版启动即被无条件锁死且无解锁手段。
+        现在: ① mouse_lock_allowed=False 的游戏**永远不锁**;
+              ② 其余游戏始终可按 Tab 切换 (Tab 是引擎保留键)。
+        """
+        try:
+            if not getattr(self, 'mouse_lock_allowed', True):
+                if getattr(self, 'mouse_locked', False):
+                    self.set_mouse_locked(False)
+                self._unlock_key_prev = False
+                return
+            k = bool(self.is_key('Tab'))
+            if k and not getattr(self, '_unlock_key_prev', False):
+                self.toggle_mouse_locked()
+                print('[输入] Tab 切换鼠标锁定 -> %s'
+                      % ('锁定' if getattr(self, 'mouse_locked', False) else '已解锁'))
+            self._unlock_key_prev = k
+        except Exception:
+            pass
+
     def update_scripts(self, delta_time):
+        self._poll_mouse_unlock_key()
         """播放期每帧调用: 遍历物体上所有脚本组件 (M25: 可多个), 惰性实例化并 update.
         优化 (2026-10-01): 快速早退与活跃脚本过滤 —— 场景无脚本时 0 迭代直接退出，
         消灭 500+ 物体每帧在解释器内的 O(N) 线性盲目轮询与属性查找。

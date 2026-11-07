@@ -61,6 +61,37 @@ def set_value(key, value):
     return d
 
 
+# ---- 鼠标锁定配置 (2026-11-07) ----
+# 游戏设置.json 里可用:
+#   "mouse_lock_allowed": false   # 本游戏是否允许锁定鼠标 (默认 true)
+#   "mouse_locked": false         # 启动时是否锁定 (仅 allowed=true 时生效, 默认 true)
+# 运行时永远提供解锁键 Tab (强制, 不依赖游戏脚本)。
+MOUSE_LOCK_ALLOWED_DEFAULT = True
+MOUSE_LOCK_INITIAL_DEFAULT = True
+
+
+def read_bool(key, default=False):
+    v = read(key, default)
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, str):
+        return v.strip().lower() in ("1", "true", "yes", "on")
+    if isinstance(v, (int, float)):
+        return bool(v)
+    return bool(default)
+
+
+def mouse_lock_allowed():
+    return read_bool("mouse_lock_allowed", MOUSE_LOCK_ALLOWED_DEFAULT)
+
+
+def mouse_lock_initial():
+    """启动时是否锁鼠标 (不允许锁定 -> 恒 False)。"""
+    if not mouse_lock_allowed():
+        return False
+    return read_bool("mouse_locked", MOUSE_LOCK_INITIAL_DEFAULT)
+
+
 BACKENDS = ("vulkan", "opengl", "auto")
 
 
