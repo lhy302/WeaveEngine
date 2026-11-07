@@ -923,6 +923,14 @@ class LoomGUI(QMainWindow):
         else:
             self.viewport = GLViewport(self, scene_path, width, height)
 
+        # 2026-11-07 EAI 可视化 (B/E): Agent 逐条执行 -> 状态栏进度/红点/步进.
+        # 这些属性必须在 _build_toolbar/_build_statusbar 之前就位: 构建期若
+        # 有钩子被提前调用也能安全读到默认值.
+        self._agent_service = None
+        self._agent_status_active = False   # 状态栏当前被 AI 进度占用
+        self._agent_busy_active = False     # Agent 正在执行 (红点)
+        self._agent_idle_token = 0          # 1.5s 空闲恢复的重入令牌
+
         self._build_toolbar()
         self._build_central()          # 层级/资源 | 视口 | 检查器
         self._build_statusbar()
@@ -1593,6 +1601,28 @@ class LoomGUI(QMainWindow):
         tb.addSeparator()
         self._add_tb_menu(tb, "插件", self._rebuild_plugin_menu)
 
+        # 2026-11-07 EAI 可视化 (B/E): AI 操作中红点 + 步进模式"下一步".
+        # 红点常驻工具栏右侧, 只有 _agent_busy(True) 时可见;
+        # "下一步"仅 step_mode (LOOM_AGENT_STEP=1) 时可见.
+        tb.addSeparator()
+        self._lbl_agent_busy = QLabel("● AI 操作中")
+        self._lbl_agent_busy.setStyleSheet(
+            "color:#e06c75;font-weight:bold;padding:0 6px;")
+        self._lbl_agent_busy.setToolTip("Agent 正在执行命令")
+        # 注意: QToolBar.addWidget 返回 QWidgetAction, 显隐必须切 action
+        # (直接 widget.setVisible(False) 会把控件置灰, 且 show 后又被工具栏藏回去).
+        self._act_agent_busy = tb.addWidget(self._lbl_agent_busy)
+        self._act_agent_busy.setVisible(False)
+
+        self._btn_agent_step = QToolButton()
+        self._btn_agent_step.setText("下一步")
+        self._btn_agent_step.setToolTip(
+            "AI 步进模式: 执行下一条命令 (LOOM_AGENT_STEP=1 启动时启用)")
+        self._btn_agent_step.setAutoRaise(True)
+        self._btn_agent_step.clicked.connect(self._on_agent_step_clicked)
+        self._act_agent_step = tb.addWidget(self._btn_agent_step)
+        self._act_agent_step.setVisible(False)
+
     def _add_tb_menu(self, tb, text, build_fn):
         """工具栏下拉菜单按钮 (插件按钮注入区): aboutToShow 时重建菜单内容."""
         tb_btn = QToolButton()
@@ -1727,6 +1757,166 @@ class LoomGUI(QMainWindow):
         sb.setAutoRaise(True)
         sb.clicked.connect(self._cmd_settings)
         self.statusBar().addPermanentWidget(sb)
+        # 2026-11-07 EAI 可视化 (E): 步进模式下"AI 等待下一步"提示.
+        self._lbl_agent_step_hint = QLabel("AI 等待下一步")
+        self._lbl_agent_step_hint.setStyleSheet(
+            "color:#e5c07b;font-weight:bold;padding:0 6px;")
+        self._lbl_agent_step_hint.setToolTip(
+            "Agent 已执行完一条命令, 点工具栏[下一步]继续")
+        self._lbl_agent_step_hint.setVisible(False)
+        self.statusBar().addPermanentWidget(self._lbl_agent_step_hint)
+
+    # ---------------- EAI 可视化 (B/E, 2026-11-07) ----------------
+    # AgentService 每执行一条命令回调下列钩子 (getattr 存在才调用, 本类全实现):
+    #   _agent_progress(cmd, args, done, total) -> 状态栏进度
+    #   _agent_busy(active)                     -> 工具栏红点 + 状态栏变色
+    #   _agent_after_command()                  -> 视口立即重绘
+    @staticmethod
+    def _agent_args_summary(args, limit=40):
+        """命令参数 -> 'k=v k=v' 摘要, 超过 limit 字符截断 (末尾省略号)."""
+        if not args:
+            return ''
+        if not isinstance(args, dict):
+            txt = str(args)
+        else:
+            parts = []
+            for k, v in args.items():
+                if isinstance(v, (dict, list, tuple)):
+                    try:
+                        v = json.dumps(v, ensure_ascii=False,
+                                       separators=(',', ':'))
+                    except Exception:
+                        v = str(v)
+                else:
+                    v = str(v)
+                parts.append('%s=%s' % (k, v))
+            txt = ' '.join(parts)
+        txt = txt.replace('\n', ' ').replace('\r', ' ')
+        if limit and len(txt) > limit:
+            txt = txt[:max(0, limit - 1)] + '…'
+        return txt
+
+    def _agent_progress(self, cmd, args, done, total):
+        """状态栏: 'AI: <cmd> <参数摘要≤40> (done/total)'."""
+        try:
+            done_i, total_i = int(done), int(total)
+        except Exception:
+            done_i, total_i = 0, 0
+        summ = self._agent_args_summary(args)
+        txt = "AI: %s%s (%d/%d)" % (
+            cmd, (" " + summ) if summ else "", done_i, total_i)
+        self._agent_status_active = True
+        self.statusBar().showMessage(txt)
+        if self._agent_busy_active:
+            self.statusBar().setStyleSheet("color:#e06c75;")
+        # 空闲 1.5s 恢复默认文本; token 防重入: 新命令让旧定时器自动作废.
+        self._agent_idle_token += 1
+        tok = self._agent_idle_token
+        QTimer.singleShot(1500, lambda: self._agent_idle(tok))
+        self._update_agent_step_ui()
+
+    def _agent_idle(self, token):
+        """1.5s 无新命令: 释放状态栏, 回落 _refresh_status 的默认文本."""
+        if token != getattr(self, '_agent_idle_token', -1):
+            return                      # 期间又来了新命令, 旧定时器作废
+        self._agent_status_active = False
+        if not self._agent_busy_active:
+            try:
+                self.statusBar().setStyleSheet("")
+            except Exception:
+                pass
+        try:
+            self.statusBar().clearMessage()
+        except Exception:
+            pass
+        self._refresh_status()
+
+    @staticmethod
+    def _agent_tb_visible(act, widget, visible):
+        """QToolBar 内控件的可靠显隐: 先切 QWidgetAction, 再切控件本身.
+
+        只切 action 时, 若窗口 show 时 action 恰好不可见, 工具栏会给控件打上
+        显式 hide 标记, 之后再 action.setVisible(True) 控件仍不出现 (实测)."""
+        visible = bool(visible)
+        if act is not None:
+            act.setVisible(visible)
+        if widget is not None:
+            widget.setVisible(visible)
+
+    def _agent_busy(self, active):
+        """工具栏红点显隐 + 状态栏文字颜色 (#e06c75 表示 Agent 执行中)."""
+        self._agent_busy_active = bool(active)
+        self._agent_tb_visible(getattr(self, '_act_agent_busy', None),
+                               getattr(self, '_lbl_agent_busy', None),
+                               self._agent_busy_active)
+        try:
+            if self._agent_busy_active:
+                self.statusBar().setStyleSheet("color:#e06c75;")
+                if not self._agent_status_active:
+                    self.statusBar().showMessage("AI: 操作中…")
+            else:
+                self.statusBar().setStyleSheet("")
+                if not self._agent_status_active:
+                    self.statusBar().clearMessage()
+        except Exception:
+            pass
+
+    def _agent_after_command(self):
+        """每条命令执行完强制重绘视口, 保证人眼立刻看到结果."""
+        vp = getattr(self, 'viewport', None)
+        if vp is not None:
+            try:
+                vp.update()
+            finally:
+                vp.repaint()
+        self._update_agent_step_ui()
+
+    def _bind_agent_service(self, agent):
+        """--agent 分支 / 测试: 绑定 AgentService 并同步步进模式 UI.
+
+        步进模式下 paused 由命令执行线程/主线程末尾置位, 与钩子调用顺序无
+        强契约; 这里加 200ms 轻量轮询兜底, 保证"AI 等待下一步"提示不滞后."""
+        self._agent_service = agent
+        step = bool(getattr(agent, 'step_mode', False)) if agent is not None else False
+        timer = getattr(self, '_agent_step_timer', None)
+        if step:
+            if timer is None:
+                timer = QTimer(self)
+                timer.setInterval(200)
+                timer.timeout.connect(self._update_agent_step_ui)
+                self._agent_step_timer = timer
+            timer.start()
+        elif timer is not None:
+            timer.stop()
+        self._update_agent_step_ui()
+        # 启动顺序 = 构造 -> 绑定 -> win.show(); show 时工具栏会把"当时不可见"
+        # 的 QWidgetAction 控件重新藏起 (实测), 事件循环首拍再同步一次.
+        QTimer.singleShot(0, self._update_agent_step_ui)
+        return agent
+
+    def _update_agent_step_ui(self):
+        """按 service.step_mode / paused 同步 [下一步] 按钮与等待提示."""
+        svc = getattr(self, '_agent_service', None)
+        step = bool(getattr(svc, 'step_mode', False)) if svc is not None else False
+        self._agent_tb_visible(getattr(self, '_act_agent_step', None),
+                               getattr(self, '_btn_agent_step', None), step)
+        hint = getattr(self, '_lbl_agent_step_hint', None)
+        if hint is not None:
+            paused = bool(step and getattr(svc, 'paused', False))
+            hint.setVisible(paused)
+            if paused:
+                hint.setText("AI 等待下一步")
+
+    def _on_agent_step_clicked(self):
+        """[下一步]: 解除 paused, 立刻执行下一条队列命令."""
+        svc = getattr(self, '_agent_service', None)
+        if svc is None:
+            return
+        try:
+            svc.resume_step()
+        except Exception as ex:
+            print("[agent] resume_step 失败: %r" % ex)
+        self._update_agent_step_ui()
 
     # ---------------- 命令行坞 (EAI P2①, 2026-08-27) ----------------
     def _build_console(self):
@@ -3346,6 +3536,10 @@ class LoomGUI(QMainWindow):
                     "Physics thread failed (OS thread/memory exhausted?).\n"
                     "Degraded to main-thread physics. SAVE & CLOSE NOW.")
             return
+        # 2026-11-07 EAI 可视化 (B): Agent 进度正占用状态栏时, 300ms 轮询
+        # 不得覆盖; 空闲 1.5s 后 _agent_idle 会主动回调本函数恢复默认文本.
+        if getattr(self, '_agent_status_active', False):
+            return
         self.statusBar().showMessage(txt)
 
     # ---------------- 设置对话框 ----------------
@@ -3959,13 +4153,15 @@ def run_loom_gui(scene_path=None, width=1280, height=800):
     if '--agent' in sys.argv:
         import agent_commands
         agent = agent_commands.AgentService(win)
+        # 2026-11-07 EAI 可视化: 先绑定 (--agent 时立刻按 step_mode 显示[下一步]),
+        # 再启动 HTTP 服务; 钩子由 AgentService 侧 getattr 调用.
+        win._bind_agent_service(agent)
         try:
             agent.start()
             _t = QTimer(win)
             _t.setInterval(4)
             _t.timeout.connect(agent.drain)
             _t.start()
-            win._agent_service = agent
         except Exception as e:
             print("[agent] EAI 启动失败: %r" % e)
     if auto_close > 0:

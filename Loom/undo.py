@@ -1052,6 +1052,28 @@ class UIAddCanvasCommand(Command):
             pass
 
 
+# ---------------- 批次命令 (2026-11-07 D: Agent 批次一键撤销) ----------------
+
+class BatchCommand(Command):
+    """把批内多条命令合成"一步"撤销: undo 逆序, redo 正序.
+
+    构造时命令**已经执行过** (批内 push 正常 do()), 因此 do()/undo() 只负责
+    整体重做/回退, end_batch 压栈时绝不重复调用 do() (否则同一批操作会执行两遍).
+    """
+
+    def __init__(self, label, cmds):
+        self.label = label or ("批量操作(%d)" % len(cmds))
+        self.cmds = list(cmds)
+
+    def do(self):
+        for c in self.cmds:
+            c.do()
+
+    def undo(self):
+        for c in reversed(self.cmds):
+            c.undo()
+
+
 # ---------------- 撤销管理器 ----------------
 
 class UndoManager:
@@ -1059,24 +1081,77 @@ class UndoManager:
         self.undo_stack = []
         self.redo_stack = []
         self.limit = limit
+        # 批次状态 (None = 不在批次内; list = 批内已执行、待合成的命令)
+        self._batch = None
+        self._batch_label = None
 
-    def push(self, cmd):
-        """执行 cmd 并压入撤销栈, 同时清空重做栈."""
-        cmd.do()
+    # ---- 批次 API (agent_batch_begin/end/cancel 命令层调用) ----
+    @property
+    def batch_active(self):
+        return self._batch is not None
+
+    @property
+    def batch_size(self):
+        return len(self._batch) if self._batch is not None else 0
+
+    def begin_batch(self, label=None):
+        """开始收集批次. 已有未结束的批次 -> 先 cancel 旧批 (防悬挂), 返回 True."""
+        had_stale = self._batch is not None
+        if had_stale:
+            self.cancel_batch()
+        self._batch = []
+        self._batch_label = label
+        return had_stale
+
+    def end_batch(self):
+        """把批内命令合成一个 BatchCommand 压栈 (不重复执行). 无批次返回 None."""
+        if self._batch is None:
+            return None
+        cmds = self._batch
+        self._batch = None
+        label = self._batch_label
+        self._batch_label = None
+        if not cmds:
+            return None
+        batch = BatchCommand(label, cmds)
+        self._append(batch)
+        return batch
+
+    def cancel_batch(self):
+        """丢弃当前批次: 批内命令已执行过的 do() 不回滚, 也不留下撤销记录.
+        返回被丢弃的命令条数."""
+        if self._batch is None:
+            return 0
+        n = len(self._batch)
+        self._batch = None
+        self._batch_label = None
+        return n
+
+    def _append(self, cmd):
+        """压入撤销栈 (限长) + 清空重做栈 (push/push_no_do/end_batch 共用)."""
         self.undo_stack.append(cmd)
         if len(self.undo_stack) > self.limit:
             self.undo_stack.pop(0)
         self.redo_stack.clear()
         return cmd
+
+    def push(self, cmd):
+        """执行 cmd 并压入撤销栈, 同时清空重做栈.
+        批次进行中: 照常 do(), 但只收进批列表, 等 end_batch 合成一步."""
+        cmd.do()
+        if self._batch is not None:
+            self._batch.append(cmd)
+            return cmd
+        return self._append(cmd)
 
     def push_no_do(self, cmd):
         """只压栈不执行 cmd.do() —— 用于"命令函数已执行完修改"的场景
-        (如 ui_set 已改完字段, 只需记录快照差异). 2026-10-18 阶段5."""
-        self.undo_stack.append(cmd)
-        if len(self.undo_stack) > self.limit:
-            self.undo_stack.pop(0)
-        self.redo_stack.clear()
-        return cmd
+        (如 ui_set 已改完字段, 只需记录快照差异). 2026-10-18 阶段5.
+        批次进行中同样只收进批列表 (end_batch 时合成)."""
+        if self._batch is not None:
+            self._batch.append(cmd)
+            return cmd
+        return self._append(cmd)
 
     def undo(self):
         if not self.undo_stack:
@@ -1111,3 +1186,6 @@ class UndoManager:
     def clear(self):
         self.undo_stack.clear()
         self.redo_stack.clear()
+        # 2026-11-07 D: 换场/清栈时批次状态一并复位 (防跨场景悬挂)
+        self._batch = None
+        self._batch_label = None

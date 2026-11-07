@@ -837,6 +837,29 @@ def t_api_coverage_fill():
         check("%s 网络失败仍返回结构化结果 (不抛)" % cmd,
               "ok" in rr, str(rr)[:80])
 
+    # ---- 2026-11-07 Agent 可视化: 相机聚焦 + 批次撤销 (命令台账必须覆盖) ----
+    r = res("view_focus", {"name": target, "smooth": False})
+    check("view_focus 按 guid 聚焦 (target/distance 回读一致)",
+          r.get("focused") is not None
+          and abs(float(r.get("distance", -1)) - ED.camera_distance) < 1e-9,
+          str(r)[:90])
+    r = res("view_focus", {"index": 0, "smooth": True})
+    check("view_focus index + smooth 可执行", r.get("index") == 0, str(r)[:90])
+    run("agent_batch_begin", {"label": "EAI 覆盖率"})
+    res("set_layer", {"name": target, "layer": 3})
+    res("set_tag", {"name": target, "tag": "Batch"})
+    r = res("agent_batch_end")
+    check("agent_batch_end 合成一步 (commands=2)",
+          r.get("commands") == 2 and r.get("undoable") is True, str(r)[:90])
+    run("undo")
+    check("批次 undo 一步回退批内写命令 (layer 回 2)",
+          res("get_layer_tag", {"name": target}).get("layer") == 2)
+    run("agent_batch_begin")
+    res("set_layer", {"name": target, "layer": 4})
+    r = res("agent_batch_cancel")
+    check("agent_batch_cancel 丢弃批次记录", r.get("cancelled") == 1, str(r)[:90])
+    res("set_layer", {"name": target, "layer": 2})   # 复位, 不影响后续断言
+
 
 # ============ 14. 覆盖率闸门 ============
 def t_coverage():

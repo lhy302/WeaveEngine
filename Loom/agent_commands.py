@@ -520,9 +520,16 @@ def cmd_scene_load(win, args):
 @command('object_add', '添加基元: cube|sphere|plane')
 def cmd_object_add(win, args):
     typ = args.get('type', 'cube')
+    ed = win.editor
     # 2026-10-19 P0-3: _add_primitive 现在返回 model，命令层直接拿到 guid/name，
     # 不再"创建完让 Agent 猜最后一个"（重名/撤销后必错）。
-    m = win.editor._add_primitive(typ)
+    m = ed._add_primitive(typ)
+    # 2026-11-07 C: 新物体创建后自动聚焦 (Agent 每一步都要人类看得见)
+    if m is not None:
+        try:
+            _auto_focus(win, ed, ed.models.index(m))
+        except ValueError:
+            pass
     return {
         'type': typ,
         'guid': getattr(m, 'guid', None),
@@ -568,6 +575,36 @@ def _find(ed, name):
     return hits[0] if hits else (None, None, -1)
 
 
+# ---- 自动聚焦 (2026-11-07 C: Agent 操作必须"看得见") ----
+def _auto_focus_enabled(win):
+    """settings.agent_auto_focus 未显式关闭 -> True (缺省 True).
+
+    设置来自与设置面板同一份 设置.json (guiloader.load_settings); 读不到/坏值
+    一律按开 (Agent 操作默认要可见, 与用户裁决一致).
+    """
+    try:
+        import guiloader
+        s = guiloader.load_settings('loom')
+        return as_bool(s.get('agent_auto_focus', True), True)
+    except Exception:
+        return True
+
+
+def _auto_focus(win, ed, index):
+    """object_add / object_select 成功后把相机聚焦到目标 (失败不影响命令结果).
+    返回 True/False/None (None = 未尝试: 开关关闭或编辑器不支持)."""
+    fn = getattr(ed, 'focus_on_object', None)
+    if fn is None:
+        return None
+    if not _auto_focus_enabled(win):
+        return None
+    try:
+        return bool(fn(index, smooth=True))
+    except Exception as e:
+        log('[命令] 自动聚焦失败: %r' % e)
+        return False
+
+
 @command('object_list', '场内全部物体/光源/相机 (带序号, 重名时用 index= 指定)')
 def cmd_object_list(win, args):
     ed = win.editor
@@ -598,6 +635,8 @@ def cmd_object_select(win, args):
         if not 0 <= idx < len(ed.models):
             return {'error': 'index 越界: %d (物体数 %d)' % (idx, len(ed.models))}
         ed._select_model(idx)
+        # 2026-11-07 C: 按 index 选中物体也自动聚焦
+        _auto_focus(win, ed, idx)
         return {'selected': getattr(ed._selected(), 'name', None)}
     hits = _find_all(ed, name)
     if not hits:
@@ -621,6 +660,8 @@ def cmd_object_select(win, args):
     kind, obj, i = hits[0]
     if kind == 'model':
         ed._select_model(i)
+        # 2026-11-07 C: 选中物体后自动聚焦 (与 GUI 双击层级行同款"看得见")
+        _auto_focus(win, ed, i)
     elif kind == 'light':
         ed.selected_light_index = i
         ed.selected_index = ed.selected_camera_index = -1
@@ -717,6 +758,100 @@ def cmd_undo(win, args):
 def cmd_redo(win, args):
     win.editor._redo_action()
     return {'ok': True}
+
+
+# ---- 批次撤销 (2026-11-07 D: Agent 一整批操作一键撤销) ----
+def _undo_manager(win):
+    """取编辑器实例上的 UndoManager; 不可用时返回 (None, 错误串).
+    (不直接写 win.editor.undo —— 命令层 API 静态扫描会把这种写法当成方法调用)"""
+    ed = getattr(win, 'editor', None)
+    um = getattr(ed, 'undo', None)
+    if um is None:
+        return None, '编辑器没有 undo 管理器 (undo 缺失)'
+    for name in ('begin_batch', 'end_batch', 'cancel_batch'):
+        if not hasattr(um, name):
+            return None, 'UndoManager 不支持批次 (缺 %s)' % name
+    return um, None
+
+
+@command('agent_batch_begin', '开始 Agent 批次: 之后每条写命令合并为一步撤销 '
+                             '{label?} (未 end 又 begin 会自动 cancel 旧批并告警)')
+def cmd_agent_batch_begin(win, args):
+    um, err = _undo_manager(win)
+    if um is None:
+        return {'error': err}
+    stale = bool(getattr(um, 'batch_active', False))
+    if stale:
+        # 异常/超时导致上一批没 end: 自动丢弃 (防悬挂), 并把告警写进日志环
+        um.cancel_batch()
+        log('[命令] agent_batch_begin: 上一批次未 end, 已自动 cancel (防悬挂)')
+    um.begin_batch(args.get('label') or 'Agent 批次')
+    return {'batch': True, 'label': args.get('label') or 'Agent 批次',
+            'cancelled_stale': stale}
+
+
+@command('agent_batch_end', '结束 Agent 批次: 批内全部命令合成一步撤销 (不重复执行)')
+def cmd_agent_batch_end(win, args):
+    um, err = _undo_manager(win)
+    if um is None:
+        return {'error': err}
+    if not getattr(um, 'batch_active', False):
+        return {'error': '没有进行中的批次 (先 agent_batch_begin)'}
+    n = int(getattr(um, 'batch_size', 0))
+    batch = um.end_batch()
+    return {'batch': False, 'commands': n,
+            'label': getattr(batch, 'label', None) if batch is not None else None,
+            'undoable': batch is not None}
+
+
+@command('agent_batch_cancel', '取消 Agent 批次: 丢弃批记录 (已执行的修改不回滚)')
+def cmd_agent_batch_cancel(win, args):
+    um, err = _undo_manager(win)
+    if um is None:
+        return {'error': err}
+    n = um.cancel_batch() if getattr(um, 'batch_active', False) else 0
+    return {'batch': False, 'cancelled': n}
+
+
+@command('view_focus', '相机聚焦到物体: {name?|index?, smooth?=true} '
+                       '(世界 AABB 中心 + 包围球适配距离; 缺省=当前选中)')
+def cmd_view_focus(win, args):
+    ed = win.editor
+    smooth = as_bool(args.get('smooth', True), True)
+    name = args.get('name') or args.get('name_or_id')
+    idx = args.get('index')
+    if name is not None:
+        hits = [h for h in _find_all(ed, name) if h[0] == 'model']
+        if not hits:
+            return {'error': '找不到物体: %s (先 object_list 看全部)' % name}
+        if len(hits) > 1:
+            want = args.get('index')
+            if want is None:
+                raise _Ambiguous(name, _find_all(ed, name))
+            picked = [h for h in hits if h[2] == int(as_float(want, -1))]
+            if len(picked) != 1:
+                raise _Ambiguous(name, _find_all(ed, name))
+            hits = picked
+        idx = hits[0][2]
+    elif idx is None:
+        sel = ed._selected()
+        if sel is None:
+            return {'error': '没有选中物体: 传 name= 或 index=, 或先 object_select'}
+        try:
+            idx = ed.models.index(sel)
+        except ValueError:
+            return {'error': '选中物体不在场景中'}
+    idx = int(as_float(idx, -1))
+    if not 0 <= idx < len(ed.models):
+        return {'error': 'index 越界: %d (物体数 %d)' % (idx, len(ed.models))}
+    fn = getattr(ed, 'focus_on_object', None)
+    if fn is None:
+        return {'error': '当前编辑器不支持 focus_on_object'}
+    if not fn(idx, smooth=smooth):
+        return {'error': '聚焦失败 (播放态不能移动编辑器相机)'}
+    return {'focused': getattr(ed.models[idx], 'name', None), 'index': idx,
+            'target': list(ed.camera_target),
+            'distance': ed.camera_distance, 'smooth': smooth}
 
 
 @command('gizmo', 'gizmo 模式: translate|rotate')
@@ -3010,8 +3145,30 @@ class _CmdHandler(BaseHTTPRequestHandler):
                 pass
 
 
+def _env_float(name, default):
+    """环境变量 -> 非负浮点 (缺省/坏值/负数回 default)."""
+    try:
+        v = float(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        return float(default)
+    if v != v or v < 0:        # NaN / 负数
+        return float(default)
+    return v
+
+
 class AgentService:
-    """EAI 服务: 命令队列 -> Qt 主线程执行 (qt_view QTimer 轮询 drain)."""
+    """EAI 服务: 命令队列 -> Qt 主线程执行 (qt_view QTimer 轮询 drain).
+
+    2026-11-07 A/E (用户裁决 B): 逐条执行 + 节奏 + 步进模式.
+      · drain() 每拍**最多执行 1 条**; 距上次执行不足 pace_ms 直接返回
+        (QTimer 4ms 会持续触发, 节奏由时间戳判, 不靠定时器精度);
+      · LOOM_AGENT_PACE_MS=0 -> 一次排空 (旧行为, 批量脚本用);
+      · LOOM_AGENT_STEP=1 -> 每执行完 1 条 paused=True, resume_step() 继续;
+      · GUI 钩子 (getattr 缺失即跳过, 绝不因 UI 未实现而崩命令链):
+          win._agent_progress(cmd, args, done, total)
+          win._agent_busy(active)
+          win._agent_after_command()
+    """
 
     def __init__(self, win, base=None):
         self.win = win
@@ -3022,6 +3179,17 @@ class AgentService:
         self.thread = None
         self.started = False
         self.port = 0
+        # ---- 节奏/步进/进度 (契约见 docs/audit/fix_agent_visual_*.md) ----
+        self.pace_ms = _env_float('LOOM_AGENT_PACE_MS', 120.0)
+        self.step_mode = os.environ.get('LOOM_AGENT_STEP', '').strip() == '1'
+        self.paused = False
+        self._last_run = None       # 上次执行完成的 perf_counter (None=从未执行)
+        self._busy = False          # GUI 忙态 (队列空转非空 -> True; 空闲 0.8s -> False)
+        self._run_done = 0          # 本轮已执行条数
+        self._inflight = None       # 正在执行的 (cmd, args) 或 None
+        self._last_info = ('', False, 0.0)
+        self._draining = False
+        self._idle_release_s = 0.8
 
     def start(self):
         """启动 HTTP 服务 + 写端口文件 (Qt 事件循环前调用).
@@ -3051,19 +3219,146 @@ class AgentService:
         """HTTP 线程调用: 入队 + 等主线程执行结果 (超时 30s)."""
         ev = threading.Event()
         self.queue.put((cmd, args, ev))
-        if not ev.wait(30.0):
-            return {'ok': False, 'error': '命令超时 (30s): %s' % cmd}
+        # 2026-11-07 步进模式: 命令要等人点"下一步"才执行, 30s 超时会让 Agent
+        # 误判失败并重试同一条命令 -> 重复提交。步进模式放宽到
+        # LOOM_AGENT_STEP_TIMEOUT (默认 600s); 超时仍应视为"未知",
+        # 调用方应查 status 后再决定是否重发。
+        _timeout = 30.0
+        if getattr(self, "step_mode", False):
+            try:
+                _timeout = float(os.environ.get("LOOM_AGENT_STEP_TIMEOUT", "600"))
+            except (TypeError, ValueError):
+                _timeout = 600.0
+        if not ev.wait(_timeout):
+            return {"ok": False,
+                    "error": "命令超时 (%.0fs): %s%s" % (
+                        _timeout, cmd,
+                        "；步进模式需人工点下一步" if getattr(self, "step_mode", False) else ""),
+                    "timeout": True, "retry_risk": "duplicate"}
         return ev.result
 
+    # ---- GUI 钩子 (缺失/异常一律跳过: UI 未实现时命令链必须照常跑) ----
+    def _hook(self, name, *a):
+        fn = getattr(self.win, name, None)
+        if fn is None:
+            return
+        try:
+            fn(*a)
+        except Exception as e:
+            log('[agent] GUI 钩子 %s 失败: %r' % (name, e))
+
+    def _set_busy(self, active):
+        """忙态切换 (只在状态真变时通知 GUI, 避免 4ms 定时器刷爆状态栏)."""
+        if self._busy == active:
+            return
+        self._busy = active
+        if active:
+            self._run_done = 0      # 新一轮开始: 进度从 0 计
+        self._hook('_agent_busy', active)
+
+    def _update_busy(self, now, has_work):
+        """队列空转非空 -> busy True; 队列空且距上次执行 >= 0.8s -> busy False."""
+        if has_work:
+            if not self._busy:
+                self._set_busy(True)
+            return
+        if (self._busy and self._last_run is not None
+                and (now - self._last_run) >= self._idle_release_s):
+            self._set_busy(False)
+            self._run_done = 0
+
+    def _notify_progress(self, cmd, args):
+        """每条命令执行后回调进度 (done = 本轮已执行, total = done + 队列剩余)."""
+        total = self._run_done + self.queue.qsize()
+        self._hook('_agent_progress', cmd, args, self._run_done, total)
+
+    def _run_one(self):
+        """出队并执行 1 条, 回填结果. 返回执行条数 (0/1)."""
+        try:
+            cmd, args, ev = self.queue.get_nowait()
+        except queue.Empty:
+            return 0
+        self._inflight = (cmd, args)
+        t0 = time.perf_counter()
+        try:
+            res = dispatch(cmd, args, self.win)
+        except Exception as e:          # dispatch 已兜底; 这里再兜一层防 ev 永挂
+            res = {'ok': False, 'error': repr(e)}
+        finally:
+            self._inflight = None
+        ms = (time.perf_counter() - t0) * 1000.0
+        self._last_run = time.perf_counter()
+        ev.result = res
+        ev.set()
+        self._run_done += 1
+        self._last_info = (cmd, bool(res.get('ok')), ms)
+        self._notify_progress(cmd, args)
+        self._hook('_agent_after_command')
+        return 1
+
     def drain(self):
-        """Qt 主线程轮询 (QTimer): 执行队列命令, 回填结果."""
-        while True:
-            try:
-                cmd, args, ev = self.queue.get_nowait()
-            except queue.Empty:
-                break
-            ev.result = dispatch(cmd, args, self.win)
-            ev.set()
+        """Qt 主线程轮询 (QTimer 4ms): 按节奏执行命令, 回填结果.
+
+        返回本拍实际执行的条数 (观测/测试用).
+          · paused (步进模式等人点下一步) -> 直接返回;
+          · 队列空 -> 只做忙态释放, 返回;
+          · 距上次执行不足 pace_ms -> 直接返回 (等下一次 4ms 触发);
+          · pace_ms > 0: 每拍最多 1 条; pace_ms == 0: 一次排空 (旧行为).
+        """
+        now = time.perf_counter()
+        self._update_busy(now, (not self.queue.empty())
+                          or (self._inflight is not None))
+        if self.paused or self.queue.empty():
+            return 0
+        if self._draining:              # resume_step 在钩子里重入的兜底
+            return 0
+        self._draining = True
+        n = 0
+        try:
+            while True:
+                if self.paused or self.queue.empty():
+                    break
+                if (self.pace_ms > 0 and self._last_run is not None
+                        and (time.perf_counter() - self._last_run) * 1000.0
+                        < self.pace_ms):
+                    break
+                n += self._run_one()
+                if self.step_mode:
+                    self.paused = True      # 步进模式: 一条一停, 等人点"下一步"
+                    break
+                if self.pace_ms > 0:
+                    break                   # 有节奏: 本拍只放一条
+                # pace_ms == 0: 继续排空 (向后兼容批量脚本)
+        finally:
+            self._draining = False
+        # 排空/暂停后按最新时间戳释放忙态 (最后一条执行完的时刻)
+        self._update_busy(time.perf_counter(),
+                          (not self.queue.empty())
+                          or (self._inflight is not None))
+        return n
+
+    def resume_step(self):
+        """步进模式: 人点"下一步" -> 解除暂停并立即执行下一条."""
+        self.paused = False
+        if self._draining:
+            return True
+        if not self.queue.empty():
+            self.drain()
+        return True
+
+    def progress(self):
+        """(done, total): total = 本轮已执行 + 队列剩余 (+ 在途 1 条).
+        队列空且无在途时归零."""
+        q = self.queue.qsize()
+        if q == 0 and self._inflight is None:
+            self._run_done = 0
+            return (0, 0)
+        total = self._run_done + q + (1 if self._inflight is not None else 0)
+        return (self._run_done, total)
+
+    def last_info(self):
+        """最后一条命令 (cmd, ok, ms)."""
+        return self._last_info
 
     def stop(self):
         self.started = False
@@ -3073,6 +3368,7 @@ class AgentService:
             os.remove(port_file_path(self.base))
         except Exception:
             pass
+        self._set_busy(False)           # 关服务后 GUI 忙态红点必须熄掉
 
 
 def load_agent_info(base=None):

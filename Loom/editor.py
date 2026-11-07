@@ -227,6 +227,8 @@ class EditorApp(GLEngine):
         self.camera_distance = 10.0
         self.camera_yaw = 0.6
         self.camera_pitch = -0.35
+        # 2026-11-07 C: Agent 自动聚焦/相机聚焦插值状态 (None = 无动画)
+        self._focus_anim = None
         self.apply_orbit_camera()
         self._cam_prev_mouse = (0, 0)   # 相机拖拽的上帧鼠标
         self._right_drag_view = False   # 2026-08-12: 视口内按下右键即激活视角拖动, 拖出视口仍持续到松开 (Unity 风格)
@@ -1962,6 +1964,9 @@ class EditorApp(GLEngine):
     def render(self, delta_time):
         # 防御: 上一帧 GUI 若残留 scissor 裁剪, 会框住本帧的 clear/场景 (残影 bug)
         self.ctx.scissor = None
+        # 2026-11-07 C: 相机聚焦插值 (180ms 线性; 播放态不推进, 不动播放相机)
+        if not self.is_playing:
+            self._advance_focus_anim()
         # 状态栏提示 (toast) 到期清空 (2026-08-17: _notify 定时消失)
         if self.msg and time.time() > self._msg_until:
             self.msg = ""
@@ -2173,6 +2178,101 @@ class EditorApp(GLEngine):
         return (vp[0] <= pos[0] < vp[0] + vp[2] and
                 vp[1] <= pos[1] < vp[1] + vp[3])
 
+    # ================ 相机聚焦 (2026-11-07 C: Agent 操作必须看得见) ================
+    FOCUS_DURATION = 0.18          # 平滑聚焦时长 (秒, 线性插值)
+    FOCUS_DISTANCE_FACTOR = 2.6    # camera_distance = 包围球半径 * 系数
+
+    def _focus_aabb(self, index):
+        """第 index 个物体的世界 AABB (当帧世界矩阵; 失败回 None).
+
+        世界矩阵走 compute_world_matrices (与 render 同源, 静止时有缓存);
+        单个物体 get_bounding_box 失败时回 None, 聚焦命令转成错误而不是崩.
+        """
+        try:
+            fw = self.compute_world_matrices(self.models)
+            return self.get_bounding_box(self.models[index], fw[index])
+        except Exception:
+            try:
+                return self.get_bounding_box(self.models[index])
+            except Exception:
+                return None
+
+    def focus_on_object(self, index, smooth=True):
+        """把轨道相机对准第 index 个物体 (EAI view_focus / 自动聚焦).
+
+        camera_target = 世界 AABB 中心; camera_distance = 包围球半径 *
+        FOCUS_DISTANCE_FACTOR (保持 yaw/pitch 不变). smooth=True 时记录
+        _focus_anim, 由 render/_update_camera 在 ~180ms 内线性插值; 逻辑值
+        先落目标值, 任何即时读取都看到最终结果. 播放态不移动编辑器相机
+        (不动播放相机), 返回 False.
+        """
+        if getattr(self, 'is_playing', False):
+            return False
+        try:
+            index = int(index)
+        except (TypeError, ValueError):
+            return False
+        if not 0 <= index < len(self.models):
+            return False
+        box = self._focus_aabb(index)
+        if box is None:
+            return False
+        mn, mx = box
+        if mn is None or mx is None:
+            return False
+        target = ((mn.x + mx.x) * 0.5, (mn.y + mx.y) * 0.5,
+                  (mn.z + mx.z) * 0.5)
+        dx, dy, dz = (mx.x - mn.x), (mx.y - mn.y), (mx.z - mn.z)
+        radius = 0.5 * math.sqrt(dx * dx + dy * dy + dz * dz)
+        try:
+            from loom_camera import clamp_camera_distance
+            dist = clamp_camera_distance(radius * self.FOCUS_DISTANCE_FACTOR)
+        except Exception:
+            dist = max(0.5, min(1000.0, radius * self.FOCUS_DISTANCE_FACTOR))
+        from_target = tuple(self.camera_target)
+        from_dist = float(self.camera_distance)
+        self.camera_target = target
+        self.camera_distance = dist
+        if smooth and self.FOCUS_DURATION > 0:
+            self._focus_anim = {
+                't0': time.perf_counter(),
+                'dur': float(self.FOCUS_DURATION),
+                'from_target': from_target,
+                'to_target': target,
+                'from_distance': from_dist,
+                'to_distance': dist,
+            }
+        else:
+            self._focus_anim = None
+            self.apply_orbit_camera()      # 无动画: 立即把 camera 摆到新位姿
+        return True
+
+    def _cancel_focus_anim(self):
+        """用户主动操作相机 / 新聚焦 -> 丢弃进行中的插值动画."""
+        self._focus_anim = None
+
+    def _advance_focus_anim(self, now=None):
+        """推进聚焦插值 (render/_update_camera 每拍调). 返回是否仍在动画中."""
+        anim = getattr(self, '_focus_anim', None)
+        if not anim:
+            return False
+        now = time.perf_counter() if now is None else float(now)
+        dur = float(anim.get('dur') or 0.0)
+        p = 1.0 if dur <= 0 else (now - anim['t0']) / dur
+        if p >= 1.0:
+            self.camera_target = anim['to_target']
+            self.camera_distance = anim['to_distance']
+            self._focus_anim = None
+            return False
+        p = max(0.0, p)
+        a, b = anim['from_target'], anim['to_target']
+        self.camera_target = (a[0] + (b[0] - a[0]) * p,
+                              a[1] + (b[1] - a[1]) * p,
+                              a[2] + (b[2] - a[2]) * p)
+        self.camera_distance = (anim['from_distance']
+                                + (anim['to_distance'] - anim['from_distance']) * p)
+        return True
+
     def _update_camera(self, delta_time=None):
         # 2026-10-18: UI 鼠标事件分发 (在相机/3D 消费之前). 两条路径 (pygame 主循环
         # 与 Qt loom_gui) 都走本方法, 所以这里是唯一的插入点.
@@ -2183,6 +2283,9 @@ class EditorApp(GLEngine):
         2026-08-19: 移动/转向全部按 delta_time 缩放 (帧率恒定) —— 原每帧固定
         步长导致 30帧(2.4单位/秒) 与无上限 245帧(19.6单位/秒) 移速差 8 倍.
         2026-10-18: UI 鼠标分发置于本方法开头 (两条路径共用入口)."""
+        # 2026-11-07 C: 推进聚焦插值 (render 之外的第二推进点; 播放态不动相机)
+        if not getattr(self, 'is_playing', False):
+            self._advance_focus_anim()
         # 2026-10-18: UI 鼠标事件分发 (在相机/3D 消费之前). 两条路径 (pygame 主循环
         # 与 Qt loom_gui) 都走本方法, 所以这里是唯一的插入点.
         self._dispatch_ui_mouse()
@@ -2239,6 +2342,7 @@ class EditorApp(GLEngine):
             # 2026-10-20 视距提升：相机滚动上限 200→1000（匹配 far=1000）
             self.camera_distance = max(0.5, min(1000.0,
                 self.camera_distance * math.exp(-self.mouse_wheel * 0.1)))
+            self._cancel_focus_anim()      # 用户滚轮 -> 放弃聚焦插值
 
         # 2026-08-12: 右键转视角 = 视口内按下即激活, 拖动过程(即使拖出视口)持续, 松开停
         # (Unity 风格: 大范围拖动更合理; 检查器/面板上右键仍走拖条数值输入)
@@ -2262,15 +2366,18 @@ class EditorApp(GLEngine):
                 self.camera_target = (t[0] - r[0] * dx * k - u[0] * dy * k,
                                       t[1] - r[1] * dx * k - u[1] * dy * k,
                                       t[2] - r[2] * dx * k - u[2] * dy * k)
+                self._cancel_focus_anim()      # 用户平移 -> 放弃聚焦插值
             # 转动视角: 右键(激活) 或 Alt+左 / 中键(无 Shift)
             # 上下方向: 向上拖 pitch 增大 (相机上抬看顶, 与方向键一致) —— 2026-08-12 翻正
             elif self._right_drag_view or (left and alt) or (mid and not shift):
                 self.camera_yaw += dx * 0.01
                 self.camera_pitch = max(-1.55, min(1.55, self.camera_pitch - dy * 0.01))
+                self._cancel_focus_anim()      # 用户转视角 -> 放弃聚焦插值
         elif self._right_drag_view:
             # 右键按下在视口内, 拖出视口仍继续转视角 (Unity 风格)
             self.camera_yaw += dx * 0.01
             self.camera_pitch = max(-1.55, min(1.55, self.camera_pitch - dy * 0.01))
+            self._cancel_focus_anim()
 
         # 键盘平移 target / 方向键轨道 (输入框失焦时)
         # ★2026-09-06 相机统一 (用户定案): 播放态 = 编辑态同一套轨道相机逻辑

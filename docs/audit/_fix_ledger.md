@@ -237,3 +237,42 @@
 **新增测试**：`test_scene_driver_physics_log.py`(17) / `test_scale_all_paths.py`(36) / `test_parent_cycle_guard.py`(27) / `test_lod_fastpath.py`(18)，全 PASS。
 **测试适配**：`tests/test_scene_cycle_reject.py` 用例 3 原用 `GameObject.parent` 直写造环（现会抛 ValueError），改为在 `TransformComponent` 层直写构造损坏环，验证 sceneio 保存前防御语义不变（报告 §5）。
 **遗留**：`TransformComponent.parent` 层直写仍可造环（sceneio 保存前 `_validate_model_graph` 会拒绝）；直接改 `driver.models` 列表（不走 remove_model/load）时 LOD 集合可能滞后一帧。
+
+## A1_agent_core（agent_commands / undo / editor）—— Agent 操作可视化（A/E/D/C）
+
+| 项 | 实现 | 验收 |
+|---|---|---|
+| **A 逐条 + 节奏** | `drain()` 每拍最多 1 条；距上次 < `pace_ms`（默认 **120**，env `LOOM_AGENT_PACE_MS`）直接返回；执行后 `_agent_progress` → `_agent_after_command()`；队列空转非空 `_agent_busy(True)`、空闲 0.8s `_agent_busy(False)`；`pace=0` 一次排空 = 旧行为 | `tests/test_agent_pacing.py` ALL PASS（改前 exit=1） |
+| **E 步进模式** | `LOOM_AGENT_STEP=1` 时每条执行完 `paused=True`，drain 返回；`resume_step()` 解除并立即执行下一条（`_draining` 防重入） | 同上 |
+| **D 批次撤销** | `UndoManager.begin_batch/end_batch/cancel_batch` + `batch_active/batch_size`；`BatchCommand` undo 逆序 / redo 正序，`end_batch` 不重复执行；EAI `agent_batch_begin/end/cancel`；未 end 又 begin 自动 cancel 旧批并告警；空批不压栈 | `tests/test_undo_batch.py` ALL PASS（3 条命令 undo 一步全回退、redo 一步全恢复） |
+| **C 相机聚焦** | `editor.focus_on_object(index, smooth=True)`：世界 AABB 中心 + 包围球半径 ×2.6，180ms 线性插值（播放态不推进；用户滚轮/平移/转视角取消）；EAI `view_focus{name?|index?,smooth?}`；`object_add`/`object_select` 成功后自动聚焦（`settings.agent_auto_focus` 缺省 True） | `tests/test_editor_focus.py` ALL PASS |
+
+**验收**：`run_all` exit=0（全部测试完成）；`ab_batch` 22/22，MAE max 0.000082（与改前一致）。
+**职责外改动**：`tests/test_eai_real.py` 命令台账补 4 条新命令（命令表 95 条全绿），否则覆盖率闸门必红；无业务代码改动。
+**遗留**：① 步进模式下 HTTP `submit` 仍 30s 超时（命令会等人点击后执行，Agent 重试可能重复提交）；② `preview_camera` 期间聚焦不可见（不强制退预览）。
+
+## A2_agent_ui（ui/loom_gui.py）—— 可视化指示（B）与步进按钮（E）
+
+| 项 | 实现 | 验收 |
+|---|---|---|
+| **B 状态栏进度** | `_agent_progress`：`AI: <cmd> <k=v摘要≤40> (done/total)`；1.5s 空闲 token 防重入恢复默认 | `tests/test_agent_ui_indicator.py` 18/18 PASS |
+| **B 忙态指示** | `_agent_busy`：工具栏红点「● AI 操作中」显隐 + 状态栏 `#e06c75` 变色/复位 | 同上 |
+| **A 立即出图** | `_agent_after_command`：`viewport.update()+repaint()` | 同上 |
+| **E 步进按钮** | 工具栏「下一步」仅 `service.step_mode` 可见，点击 `resume_step()`，状态栏显示「AI 等待下一步」；`--agent` 分支改 `_bind_agent_service(agent)`（含 QToolBar QWidgetAction 重藏坑的 singleShot 重同步） | 同上 |
+
+**验收**：`run_all` exit=0；`ab_batch` 22/22（MAE 0.000082）；`test_agent_pacing` 26/26 PASS。
+
+## 端到端可视化验收（真实窗口，2026-11-07）
+
+`tests/_tmp/probe_agent_e2e_real.py`：起真实 `Loom.py --agent` 窗口 → HTTP 连发 **6 条 `object_add`** → 每条后截屏。
+
+| step | 结果 | 耗时 |
+|---|---|---|
+| 0 | ok | 255ms |
+| 1..5 | ok | 69/29/49/15/10ms |
+
+相邻截图差异：每步 **~21750 像素（1.05%）** 变化（新立方体出现 + 选中高亮），最后一步 2.77% 变化（相机聚焦动画）。
+截图可见：Hierarchy 出现 `AI_0..AI_5`、AI_5 选中、视口聚焦到该物体、**状态栏显示 `AI: object_add primitive=cube name=AI_5 position=[10.0... (6/6)`**、工具栏「AI 操作中」红字。
+证据图：`docs/audit/agent_visual_step05.png`。
+
+**步进模式超时修复（主 Agent 追加）**：步进模式下命令要等人点「下一步」，原 30s 超时会让 Agent 误判失败并**重试同一条命令** → 重复提交。已改为 `LOOM_AGENT_STEP_TIMEOUT`（默认 600s），超时返回 `timeout: true, retry_risk: "duplicate"` 提示调用方先查 status。
