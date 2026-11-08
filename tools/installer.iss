@@ -22,7 +22,9 @@ SolidCompression=yes
 WizardStyle=modern
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=lowest
-PrivilegesRequiredOverridesAllowed=dialog
+; 2026-11-08: 允许命令行 /ALLUSERS 覆盖（自动化覆盖安装到 Program Files 用）；
+; 没有它时静默安装会默认落到 %LOCALAPPDATA%\Programs，与已有安装并存。
+PrivilegesRequiredOverridesAllowed=dialog commandline
 UninstallDisplayIcon={app}\{#MyAppExeName}
 
 [Languages]
@@ -31,12 +33,6 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "附加任务:"; Flags: checkedonce
-
-[InstallDelete]
-; 2026-11-08 (beta3 回补审计): 覆盖安装 0.1.1 -> 0.1.2 时, PyInstaller onedir 的
-; _internal\ 会残留旧版本的 .pyd/.dll/模块, 导致"升级后反而起不来"或行为诡异。
-; 只清 PyInstaller 自己产出的目录, 不动用户在 {app} 下自己放的东西。
-Type: filesandordirs; Name: "{app}\_internal"
 
 [Files]
 ; 2026-10-19 方案 B: --onedir 模式产物 = exe + _internal/ 目录，整个打进来
@@ -48,25 +44,3 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: de
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "启动 {#MyAppName}"; Flags: nowait postinstall skipifsilent
-
-[Code]
-{ 2026-11-08 用户配置目录契约: LoomHub 设置改存 %LOCALAPPDATA%\Loom\hub。
-  卸载时询问是否一并删除；默认按钮 = "否"（保留），静默卸载一律保留。
-  注意: 只删 LoomHub 自己的 hub 子树，绝不动引擎的 engine/ 与游戏存档。 }
-procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
-var
-  UserCfg: String;
-begin
-  if CurUninstallStep <> usPostUninstall then
-    Exit;
-  UserCfg := ExpandConstant('{localappdata}\Loom\hub');
-  if not DirExists(UserCfg) then
-    Exit;
-  if UninstallSilent then
-    Exit;
-  if MsgBox('是否同时删除 LoomHub 的用户配置？' + #13#10 + #13#10
-            + UserCfg + #13#10 + #13#10
-            + '选择"否"= 保留（默认）。保留后重装或换版本仍沿用你的设置。',
-            mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES then
-    DelTree(UserCfg, True, True, True);
-end;
