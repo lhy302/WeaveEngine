@@ -162,6 +162,89 @@ def _f1(v, default):
     except (TypeError, ValueError):
         return default
 
+
+# ---------------- 相机投影字段的归一/校验 (2026-11-08 批2) ----------------
+# 人类裁决 D7=A: ortho / ortho_size / fov 是**场景相机属性**
+#   （进脏判定、进撤销、播放前后恒等）——所以读侧/写侧必须用同一套归一规则，
+#   否则"保存的值"和"加载回来的值"不是同一个东西。
+# 人类裁决 Q4=B: 场景是不可信输入时"报错即可"，但**不得静默错值**、不得崩、不得死循环。
+# 归一规则（_b_strict / norm_ortho_size / norm_fov_deg 三条是唯一实现，editor/scene_driver 都复用它）：
+#   · 缺键/None          -> 默认（旧场景兼容，不打印）
+#   · 类型非法/NaN/inf   -> 默认 + 打印警告（出声，不静默）
+#   · 数值越界（ortho_size<=0 / fov 越界）-> 钳制 + 打印警告
+ORTHO_SIZE_DEFAULT = 12.0     # 正交可见高度 (世界单位)，与 EAI camera_proj 默认一致
+ORTHO_SIZE_MIN = 1.0          # 与 agent_commands.camera_proj 的 max(1.0, ...) 下界一致
+FOV_DEFAULT_DEG = 60.0        # 与 engine._fov 初值 (radians(60)) 一致
+FOV_MIN_DEG, FOV_MAX_DEG = 1.0, 179.0
+
+_TRUE_WORDS = ('1', 'true', 'yes', 'on', 'y')
+_FALSE_WORDS = ('0', 'false', 'no', 'off', 'n')
+
+
+def _b_strict(v, default=False, where='?'):
+    """严格布尔解析: bool / 0|1 / 文本 true|false|1|0|yes|no|on|off (忽略大小写与空白).
+
+    为什么不用 bool(v): bool('false') is True —— 字符串 "false" 会被当成"开",
+    把透视场景静默变成正交 (审计 P-03-04)。非法类型 -> default + 警告，不静默。
+    """
+    if v is None:
+        return bool(default)
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, (int, float)):
+        return bool(v)
+    if isinstance(v, str):
+        s = v.strip().lower()
+        if s in _TRUE_WORDS:
+            return True
+        if s in _FALSE_WORDS:
+            return False
+        print("[场景] %s 布尔值无法识别 (%r) -> 用默认 %r" % (where, v, default))
+        return bool(default)
+    print("[场景] %s 布尔值类型非法 (%s) -> 用默认 %r"
+          % (where, type(v).__name__, default))
+    return bool(default)
+
+
+def norm_ortho_size(v, where='camera.ortho_size'):
+    """正交可见高度归一: 非法类型/NaN/inf -> 默认; <=0 -> 钳到 ORTHO_SIZE_MIN.
+
+    为什么必须做: mat4_ortho 的内部是 2/(right-left)，ortho_size=0 时
+    right-left==0.0 -> ZeroDivisionError，整帧渲染抛异常 (审计 P-03-06)；
+    负数会让 left>right（水平镜像），NaN 会让整个 VP 变 NaN（整屏不可见）——
+    两者都是静默错值。
+    """
+    f = _f1(v, None) if v is not None else None
+    if f is None:
+        if v is not None:
+            print("[场景] %s 非数值 (%r) -> 用默认 %.3g" % (where, v, ORTHO_SIZE_DEFAULT))
+        return ORTHO_SIZE_DEFAULT
+    if not math.isfinite(f):
+        print("[场景] %s 非有限数 (%r) -> 用默认 %.3g" % (where, v, ORTHO_SIZE_DEFAULT))
+        return ORTHO_SIZE_DEFAULT
+    if f < ORTHO_SIZE_MIN:
+        print("[场景] %s=%.6g 过小 -> 钳到 %.3g" % (where, f, ORTHO_SIZE_MIN))
+        return ORTHO_SIZE_MIN
+    return f
+
+
+def norm_fov_deg(v, where='camera.fov'):
+    """透视视场角(度)归一: 非数值/NaN -> 默认; 越界 -> 钳到 [1, 179] 并警告."""
+    f = _f1(v, None) if v is not None else None
+    if f is None:
+        if v is not None:
+            print("[场景] %s 非数值 (%r) -> 用默认 %.3g°" % (where, v, FOV_DEFAULT_DEG))
+        return FOV_DEFAULT_DEG
+    if not math.isfinite(f):
+        print("[场景] %s 非有限数 (%r) -> 用默认 %.3g°" % (where, v, FOV_DEFAULT_DEG))
+        return FOV_DEFAULT_DEG
+    if f < FOV_MIN_DEG or f > FOV_MAX_DEG:
+        c = max(FOV_MIN_DEG, min(FOV_MAX_DEG, f))
+        print("[场景] %s=%.6g° 越界 -> 钳到 %.3g°" % (where, f, c))
+        return c
+    return f
+
+
 def _emit_object(m):
     """GameObject -> dict (单对象). M25: 脚本组件数组 (可多个). M23: 材质引用."""
     mat = m.renderer.material
@@ -1046,16 +1129,23 @@ def scene_to_dict(engine, camera=None):
         if mat is not None and id(mat) not in _seen:
             _seen.add(id(mat))
             mats.append(mat)
-    # 2026-11-07 2D: 相机投影模式随场景保存 (ortho=True 为正交)
+    # 2026-11-08 D7=A: 相机投影三件套 (ortho/ortho_size/fov) 是**场景相机属性**,
+    # 随场景保存; 写侧与读侧共用 sceneio 的归一 (缺键 -> 取引擎当前值;
+    # 非法值 -> 出声后钳制/回落默认) —— 保证"存进去的"和"读回来的"是同一个值。
     if isinstance(camera, dict):
-        camera.setdefault("ortho", bool(getattr(engine, "ortho", False)))
-        camera.setdefault("ortho_size", float(getattr(engine, "ortho_size", 12.0)))
-        # 2026-11-07: fov 随场景保存 (度), 播放时强制套用 = 完整相机初始化
-        try:
-            import math as _m
-            camera.setdefault("fov", float(_m.degrees(getattr(engine, "_fov", 1.0472))))
-        except Exception:
-            camera.setdefault("fov", 60.0)
+        camera["ortho"] = _b_strict(camera.get("ortho", getattr(engine, "ortho", False)),
+                                    False, "保存 camera.ortho")
+        camera["ortho_size"] = norm_ortho_size(
+            camera.get("ortho_size", getattr(engine, "ortho_size", ORTHO_SIZE_DEFAULT)),
+            "保存 camera.ortho_size")
+        _fov_deg = camera.get("fov")
+        if _fov_deg is None:
+            try:
+                _fov_deg = math.degrees(float(getattr(engine, "_fov",
+                                                      math.radians(FOV_DEFAULT_DEG))))
+            except (TypeError, ValueError):
+                _fov_deg = FOV_DEFAULT_DEG
+        camera["fov"] = norm_fov_deg(_fov_deg, "保存 camera.fov")
     return {"version": SCENE_VERSION, "camera": camera,
             "gravity": getattr(engine, 'gravity', -9.8),   # 2026-08-30: 场景重力加速度
             "materials": [_emit_material(m) for m in mats],
@@ -1113,10 +1203,12 @@ def scene_from_dict(engine, data, camera_out=None):
             'distance': _f1(cam.get('distance'), 10.0),
             'yaw': _f1(cam.get('yaw'), 0.6),
             'pitch': _f1(cam.get('pitch'), -0.35),
-            # 2026-11-07 2D: 投影模式随场景传递 (editor._apply_camera 消费)
-            'ortho': bool(cam.get('ortho', False)),
-            'ortho_size': _f1(cam.get('ortho_size'), 12.0),
-            'fov': _f1(cam.get('fov'), 60.0),
+            # 2026-11-08 D7=A: 投影三件套是场景相机属性 -> 与写侧同一套归一
+            # (Q4=B: 非法值出声后钳制/回落, 不静默错值、不崩)
+            'ortho': _b_strict(cam.get('ortho'), False, '场景 camera.ortho'),
+            'ortho_size': norm_ortho_size(cam.get('ortho_size'),
+                                          '场景 camera.ortho_size'),
+            'fov': norm_fov_deg(cam.get('fov'), '场景 camera.fov'),
         })
     return models
 

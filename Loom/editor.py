@@ -29,7 +29,7 @@ from mesh import create_cube, create_plane, create_sphere, spec_to_mesh
 # 已随 pygame 窗口剥离一起删除；gui.py 本身保留供 tests 使用）。
 # 2026-08-28: 默认视图不再引用 ui.loom_gui (Qt 视图需 QApplication, 由入口
 # run_loom_gui 创建后显式注入); EditorApp 默认为零依赖 MinimalEditorView 兜底
-from undo import (UndoManager, StateCommand, AddObjectCommand,
+from undo import (UndoManager, Command, StateCommand, AddObjectCommand,
                   DeleteObjectCommand, ReparentCommand, DuplicateObjectCommand,
                   PrefabPlaceCommand, snapshot as undo_snapshot,
                   apply_snapshot,
@@ -119,6 +119,29 @@ def initial_dir(last_dir):
 
 _SCENE_FILTER = "场景文件 (*.json)\0*.json\0所有文件 (*.*)\0*.*\0"
 _PREFAB_FILTER = "Prefab 文件 (*.prefab)\0*.prefab\0所有文件 (*.*)\0*.*\0"
+
+
+class _CameraProjCommand(Command):
+    """主相机投影（ortho / ortho_size / fov）改值命令（2026-11-08 批2, 裁决 D7=A）.
+
+    为什么需要它: D7=A 把投影三件套定为**场景相机属性** —— 那就必须可撤销，
+    否则 EAI camera_proj / 相机面板改完只能靠"手改回来"。
+    命令只持有两组值（before/after），do/undo 都走引擎的同一条赋值路径，
+    不复制任何归一逻辑（归一在 sceneio，赋值在 EditorApp._apply_camera_proj）。
+    """
+
+    label = "相机投影"
+
+    def __init__(self, engine, before, after):
+        self.engine = engine
+        self.before = dict(before)
+        self.after = dict(after)
+
+    def do(self):
+        self.engine._apply_camera_proj(self.after)
+
+    def undo(self):
+        self.engine._apply_camera_proj(self.before)
 
 
 class EditorApp(GLEngine):
@@ -848,10 +871,69 @@ class EditorApp(GLEngine):
 
 
     def _camera_dict(self):
-        return {"target": list(self.camera_target),
-                "distance": self.camera_distance,
-                "yaw": self.camera_yaw,
-                "pitch": self.camera_pitch}
+        """当前场景相机（写场景文件用）。
+
+        2026-11-08 批2 (D7=A): ortho / ortho_size / fov 是**场景相机属性**，随场景
+        一起保存；这里显式取值，不再依赖 sceneio 的 setdefault 兜底。
+        yaw/pitch 存弧度（与 _apply_camera 读回同单位），fov 存**度**。
+        """
+        d = {"target": list(self.camera_target),
+             "distance": self.camera_distance,
+             "yaw": self.camera_yaw,
+             "pitch": self.camera_pitch}
+        d.update(self._camera_proj_state())
+        return d
+
+    # ---- 相机投影三件套（D7=A: 场景相机属性 -> 脏判定 / 撤销 / 播放前后恒等） ----
+    def _camera_proj_state(self):
+        """当前投影状态 {'ortho','ortho_size','fov'(度)}（值已归一）。"""
+        return {'ortho': bool(getattr(self, 'ortho', False)),
+                'ortho_size': sceneio.norm_ortho_size(
+                    getattr(self, 'ortho_size', None), '编辑器 ortho_size'),
+                'fov': sceneio.norm_fov_deg(
+                    math.degrees(float(getattr(self, '_fov', math.radians(60.0)))),
+                    '编辑器 fov')}
+
+    def _camera_proj_from(self, cam):
+        """从场景 camera 段取归一后的投影状态（非法值出声后钳制/回落）。"""
+        if not isinstance(cam, dict):
+            return self._camera_proj_state()
+        return {'ortho': sceneio._b_strict(cam.get('ortho'), False,
+                                          '场景 camera.ortho'),
+                'ortho_size': sceneio.norm_ortho_size(cam.get('ortho_size'),
+                                                      '场景 camera.ortho_size'),
+                'fov': sceneio.norm_fov_deg(cam.get('fov'), '场景 camera.fov')}
+
+    def _apply_camera_proj(self, proj):
+        """把投影状态写进引擎（**唯一赋值点**：加载/播放还原/撤销都走这里）。"""
+        self.ortho = bool(proj.get('ortho', False))
+        self.ortho_size = sceneio.norm_ortho_size(proj.get('ortho_size'),
+                                                  '相机投影 ortho_size')
+        self._fov = math.radians(sceneio.norm_fov_deg(proj.get('fov'),
+                                                      '相机投影 fov'))
+
+    def set_camera_projection(self, ortho=None, ortho_size=None, fov=None):
+        """改主相机投影（**进脏判定 + 进撤销**；裁决 D7=A）。
+
+        EAI 命令 camera_proj / 未来相机面板都应走本方法 —— 直接写 self.ortho 会绕过
+        撤销栈，也让"改了但没保存"无法被撤销回去。None = 该项不变。
+        返回改后的 {'ortho','ortho_size','fov'}。
+        """
+        before = self._camera_proj_state()
+        after = dict(before)
+        if ortho is not None:
+            after['ortho'] = sceneio._b_strict(ortho, before['ortho'],
+                                               'camera_proj.ortho')
+        if ortho_size is not None:
+            after['ortho_size'] = sceneio.norm_ortho_size(ortho_size,
+                                                          'camera_proj.size')
+        if fov is not None:
+            after['fov'] = sceneio.norm_fov_deg(fov, 'camera_proj.fov')
+        if after != before:
+            self.undo.push(_CameraProjCommand(self, before, after))
+        else:
+            self._apply_camera_proj(after)
+        return self._camera_proj_state()
 
     def _camera_depth(self, cam):
         """摄像机挂父链深度 (层级树缩进用, 相机物体化 2026-08-16)."""
@@ -879,6 +961,10 @@ class EditorApp(GLEngine):
                 return [_norm(x) for x in v]
             return v
         data = sceneio.scene_to_dict(self, camera=None)
+        # 2026-11-08 批2 (D7=A): 轨道相机**视角**(target/distance/yaw/pitch) 仍属
+        # 编辑器视图状态, 不计入场景内容; 但投影三件套是**场景相机属性** -> 必须进
+        # 脏判定, 否则 EAI camera_proj 改完直接关窗口 = 静默丢失（P-03-05 同源）。
+        data['_camera_proj'] = self._camera_proj_state()
         try:
             return json.dumps(_norm(data), ensure_ascii=False, sort_keys=True)
         except Exception:
@@ -953,16 +1039,11 @@ class EditorApp(GLEngine):
 
     def _apply_camera(self, cam):
         self.camera_target = tuple(cam.get('target', [0, 0, 0]))
-        # 2026-11-07 2D: 场景相机投影模式 (ortho=True 为正交, size=可见高度)
-        self.ortho = bool(cam.get('ortho', False))
-        self.ortho_size = float(cam.get('ortho_size', 12.0))
-        # 2026-11-07: 播放/加载时强制套用场景 fov (度 -> 弧度)
-        try:
-            import math as _m
-            if cam.get('fov') is not None:
-                self._fov = _m.radians(float(cam['fov']))
-        except Exception:
-            pass
+        # 2026-11-08 批2 (D7=A / P-03-03/04/06): 投影三件套走 sceneio 的**唯一**归一实现
+        # （与 scene_from_dict / scene_driver.load_from_data 同一出处）：
+        # 非法类型出声后钳制/回落，不再 bool('false')=True，也不再 float('abc') 抛异常。
+        proj = self._camera_proj_from(cam)
+        self._apply_camera_proj(proj)
         # 2026-11-06 R-03: 场景恢复同样在入口钳制 (与 Vk 后端一致)
         from loom_camera import clamp_camera_distance
         self.camera_distance = clamp_camera_distance(cam.get('distance', 10.0))
@@ -1054,7 +1135,17 @@ class EditorApp(GLEngine):
         cam_out = {}
         sceneio.scene_from_dict(self, data, camera_out=cam_out)
         if cam_out:
-            self._apply_camera(cam_out)
+            self._apply_camera(cam_out)          # 含投影三件套 (D7=A)
+        else:
+            # 2026-11-08 批2 (P-03-05): 场景**没有 camera 段**（v1 老存档 /
+            # mcp_procedural_arena 之类）时, 旧实现什么都不做 -> 上一个场景的
+            # ortho/ortho_size/fov 与 _scene_cam 会残留: 旧场景被按正交打开,
+            # 而且随后保存会把残留值写进这份旧文件; 更糟的是点播放会强制套用
+            # 上一个场景的相机。这里显式回到引擎默认投影并清空场景相机快照。
+            self._scene_cam = None
+            self._apply_camera_proj({'ortho': False,
+                                     'ortho_size': sceneio.ORTHO_SIZE_DEFAULT,
+                                     'fov': sceneio.FOV_DEFAULT_DEG})
         base = os.path.splitext(os.path.basename(path))[0]
         if base:
             self.scene_name = base
@@ -1098,26 +1189,49 @@ class EditorApp(GLEngine):
         self.camera_distance = 10.0
         self.camera_yaw = 0.6
         self.camera_pitch = -0.35
+        # 2026-11-08 批2 (D7=A): 新空场景 = 默认透视投影; 场景相机快照清空
+        self._scene_cam = None
+        self._apply_camera_proj({'ortho': False,
+                                 'ortho_size': sceneio.ORTHO_SIZE_DEFAULT,
+                                 'fov': sceneio.FOV_DEFAULT_DEG})
         self.mark_saved()    # 新空场景视为"已保存"基线
 
     # ================ 撤销/重做 ================
-    def _undo_action(self):
+    def _history_op(self, kind):
+        """撤销/重做的公共实现. 返回 {'ok','blocked','error','label'} 供 GUI/EAI 出声.
+
+        2026-11-08 批4 (裁决 D10=B): Agent 批次租约内 undo/redo 会被 UndoManager
+        拒绝 —— 这里把拒绝原因原样带出去, 而不是像旧实现那样"静默什么都不做"。
+        """
         if self.is_playing:
-            return
+            return {'ok': False, 'blocked': '播放态不可撤销/重做（先停止播放）',
+                    'error': None, 'label': ''}
         sel = self._selected()
         guid = sel.guid if sel is not None else None
-        self.undo.undo()
+        um = getattr(self, 'undo', None)
+        if um is None:
+            return {'ok': False, 'blocked': None, 'error': '编辑器没有撤销管理器',
+                    'label': ''}
+        fn = getattr(um, 'undo' if kind == 'undo' else 'redo', None)
+        if fn is not None:
+            fn()
         self._reselect(guid)
         self._clamp_light_selection()
+        blocked = getattr(um, 'last_refusal', None)
+        error = getattr(um, 'last_error', None)
+        label = ''
+        try:
+            label = um.undo_label() if kind == 'undo' else um.redo_label()
+        except Exception:
+            label = ''
+        return {'ok': not (blocked or error), 'blocked': blocked,
+                'error': error, 'label': label}
+
+    def _undo_action(self):
+        return self._history_op('undo')
 
     def _redo_action(self):
-        if self.is_playing:
-            return
-        sel = self._selected()
-        guid = sel.guid if sel is not None else None
-        self.undo.redo()
-        self._reselect(guid)
-        self._clamp_light_selection()
+        return self._history_op('redo')
 
     def _reselect(self, guid):
         if guid is not None:
@@ -1813,6 +1927,10 @@ class EditorApp(GLEngine):
             self._play_edit_cam = (self.camera_target, self.camera_distance,
                                    self.camera_yaw, self.camera_pitch,
                                    self.camera_roll, self.orbit_mode)   # 编辑器轨道视角, 退出恢复
+            # 2026-11-08 批2 (D7=A "播放前后恒等"): 投影三件套也必须快照 ——
+            # 播放会用场景相机覆盖 ortho/ortho_size/fov，退出播放若不还原，
+            # 编辑态投影就被播放态污染（旧实现只还原视角，漏了投影）。
+            self._play_edit_proj = self._camera_proj_state()
             self.is_playing = True
             # 2026-11-07: 播放强制相机 —— 编辑态滑到哪都不影响, 一律回到场景相机
             try:
@@ -1846,8 +1964,6 @@ class EditorApp(GLEngine):
             self._logic_paused = False
             self._step_requested = False
             self._request_exit_play = False   # 脚本可置 True 请求退出播放 (通关UI的"退出游戏")
-            self._dev_cam_active = False     # 开发者相机接管不跨播放会话
-            self._dev_cam_moved = False      # 自由移动盖回保护同复位 (重新回玩家视角)
             # 分离批2: 播放边界对齐 (快照首抓 = 当前编辑态位姿, 首帧不插值)
             clk = getattr(self, '_clock', None)
             if clk is not None:
@@ -1906,8 +2022,13 @@ class EditorApp(GLEngine):
                 self.camera_target, self.camera_distance, self.camera_yaw, \
                     self.camera_pitch, self.camera_roll, self.orbit_mode = self._play_edit_cam
                 self.apply_orbit_camera()
+            # 2026-11-08 批2 (D7=A): 还原编辑态投影（播放期可能套用了场景正交/fov）
+            _pep = getattr(self, '_play_edit_proj', None)
+            if _pep:
+                self._apply_camera_proj(_pep)
             self._play_cameras = self._play_camera_snap = None
             self._play_active_camera = self._play_edit_cam = None
+            self._play_edit_proj = None
             # 6) 清脚本实例 + 全部运行时状态 (2026-08-30 用户实测铁律:
             # "停止播放清除所有状态(包括运动和下落速度)":
             # apply_snapshot 已清 rb.velocity/_colliding + 动画/音频运行态,
@@ -1991,6 +2112,61 @@ class EditorApp(GLEngine):
             self._frame_world = self._profile(
                 'world_matrices',
                 lambda: self.compute_world_matrices(self.models))
+
+    # ================ 退出播放的原子化 (2026-11-08 批4 · 审计 U-01 / 裁决 A) ========
+    def _exit_play_atomic(self):
+        """退出播放: 要么完整成功, 要么**回滚到"仍在播放"**并明确告警 (不留中间态).
+
+        背景: 旧实现 `render` 帧末用裸 `except Exception: pass` 包住 `toggle_play()`,
+        而退出播放是"整场景还原"的复合操作 (移除播放期新物体 / apply_snapshot /
+        父链 / 光源 / 相机 / 物理桥销毁 / GC 解冻) —— 半途失败会留下半还原场景,
+        调用方却什么都看不到, 下一次进播放就以这个坏状态为新基线。
+
+        做法: 先快照播放记录的**引用**(模型/光源/相机/快照表/编辑态相机与投影),
+        失败时整体还原并把 `is_playing` 置回 True。还原路径对已还原项是幂等的
+        (apply_snapshot 写绝对值; remove_model/attach_model 都有存在性判断),
+        所以用户再点一次"停止播放"会从同一基线重跑整条路径。
+
+        告警策略 (共性问题): 不捕 BaseException (SystemExit/KeyboardInterrupt 上抛);
+        失败**首次**打日志+traceback+用户可见提示, 之后的失败只累加计数不再刷屏。
+
+        返回 True=已退出播放; False=失败并已回滚到播放态。
+        """
+        if not getattr(self, 'is_playing', False):
+            return True
+        keep = {}
+        for name in ('_play_models', '_play_lights', '_play_snap',
+                     '_play_light_snap', '_play_parents', '_play_cameras',
+                     '_play_camera_snap', '_play_active_camera',
+                     '_play_edit_cam', '_play_edit_proj'):
+            keep[name] = getattr(self, name, None)
+        try:
+            self.toggle_play()
+        except Exception as e:
+            for name, val in keep.items():
+                setattr(self, name, val)
+            self.is_playing = True
+            self._play_exit_fail_count = int(
+                getattr(self, '_play_exit_fail_count', 0)) + 1
+            self._play_exit_error = '%s: %s' % (type(e).__name__, e)
+            if not getattr(self, '_play_exit_warned', False):
+                self._play_exit_warned = True        # 只告警一次, 之后只计数
+                print('[播放] 退出播放失败, 已回滚到播放态 (可再次停止播放重试): %s'
+                      % self._play_exit_error)
+                try:
+                    import traceback
+                    traceback.print_exc()
+                except Exception as _e:
+                    print('[播放] 打印退出播放异常栈失败: %r' % (_e,))
+                try:
+                    self._notify('退出播放失败, 已留在播放态 (可重试): %s'
+                                 % self._play_exit_error, (235, 90, 90))
+                except Exception as _e:
+                    print('[播放] 退出播放失败提示未能上屏: %r' % (_e,))
+            return False
+        self._play_exit_error = None
+        self._play_exit_warned = False               # 成功退出 -> 下次失败重新告警
+        return True
 
     # ================ 渲染 (覆写) ================
     def render(self, delta_time):
@@ -2127,10 +2303,9 @@ class EditorApp(GLEngine):
         # 帧末再退出播放 (不能在脚本迭代中还原场景)
         if getattr(self, '_request_exit_play', False):
             self._request_exit_play = False
-            try:
-                self.toggle_play()
-            except Exception:
-                pass
+            # 2026-11-08 批4 (U-01 / 裁决 A): 原子化退出 —— 失败会回滚到播放态并
+            # 告警一次 (旧实现是裸 except: pass, 失败=半还原场景 + 无人知情)。
+            self._exit_play_atomic()
         if not self._external_ctx:      # 外部模式: 宿主 (QOpenGLWidget) 自动交换缓冲
             # 2026-10-18 A2: GLFW swap（原 pygame.display.flip）
             self._glfw_swap_buffers()
@@ -2190,10 +2365,14 @@ class EditorApp(GLEngine):
                     self._notify("步进 1 逻辑帧", (240, 200, 90))
                 return True
             if (ev.key == pygame.K_z) and (ev.mod & pygame.KMOD_CTRL):
-                self._undo_action()
+                _r = self._undo_action()
+                if isinstance(_r, dict) and (_r.get('blocked') or _r.get('error')):
+                    self._notify(_r.get('blocked') or _r.get('error'), (240, 200, 90))
                 return True
             if (ev.key == pygame.K_y) and (ev.mod & pygame.KMOD_CTRL):
-                self._redo_action()
+                _r = self._redo_action()
+                if isinstance(_r, dict) and (_r.get('blocked') or _r.get('error')):
+                    self._notify(_r.get('blocked') or _r.get('error'), (240, 200, 90))
                 return True
             if ev.key == pygame.K_TAB and self.models:
                 self.selected_index = (self.selected_index + 1) % len(self.models)
@@ -2253,20 +2432,31 @@ class EditorApp(GLEngine):
         _focus_anim, 由 render/_update_camera 在 ~180ms 内线性插值; 逻辑值
         先落目标值, 任何即时读取都看到最终结果. 播放态不移动编辑器相机
         (不动播放相机), 返回 False.
+
+        2026-11-08 批4 (P-04-10): 失败原因写进 self._focus_fail
+        ('playing' / 'bad_index' / 'no_aabb'), 让 EAI view_focus 能给出**不同**
+        的 error —— 旧实现在编辑态取不到包围盒时也报"播放态不能移动编辑器相机",
+        把排查方向带偏。
         """
+        self._focus_fail = None
         if getattr(self, 'is_playing', False):
+            self._focus_fail = 'playing'
             return False
         try:
             index = int(index)
         except (TypeError, ValueError):
+            self._focus_fail = 'bad_index'
             return False
         if not 0 <= index < len(self.models):
+            self._focus_fail = 'bad_index'
             return False
         box = self._focus_aabb(index)
         if box is None:
+            self._focus_fail = 'no_aabb'
             return False
         mn, mx = box
         if mn is None or mx is None:
+            self._focus_fail = 'no_aabb'
             return False
         target = ((mn.x + mx.x) * 0.5, (mn.y + mx.y) * 0.5,
                   (mn.z + mx.z) * 0.5)

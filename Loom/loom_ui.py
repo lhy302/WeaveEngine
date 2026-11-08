@@ -18,6 +18,19 @@ import math
 # 原因：UI 事件（on_mouse_up 等）在输入轮询里触发，不经过 update 循环，
 # 需要 module 级引用才能从"某个 UI 元素"反查"引擎里挂了这个脚本的物体"。
 _ACTIVE_ENGINE = None
+_SCRIPT_HOST_WARNED = False      # 2026-11-08: "宿主不可用"告警每进程只打一次
+
+
+def _warn_script_host_once(host, engine):
+    """宿主缺 .models/.scripts 时告警一次（P-03-09: 不得静默丢事件）。"""
+    global _SCRIPT_HOST_WARNED
+    if _SCRIPT_HOST_WARNED:
+        return
+    _SCRIPT_HOST_WARNED = True
+    print('[UI 事件] 脚本宿主缺少 .models/.scripts: host=%s draw=%s -> 声明式 UI 事件'
+          '将无法派发到脚本；调用方必须传 script_host=(引擎/驱动)，例如'
+          ' draw_frame(..., engine=driver)（本提示每进程只打印一次）'
+          % (type(host).__name__, type(engine).__name__))
 
 
 def _find_script_instances(script_id, owner_guid=None):
@@ -69,12 +82,21 @@ def _fire_binding(elem, event, *args):
         fired = False
         for obj, sc in insts:
             # 2026-11-07 修复: 方法在"运行时脚本实例"上, 不在 ScriptComponent 上。
-            # 旧实现直接 getattr(组件, method) 永远 None -> 声明式 UI 事件
-            # (ui_bind_event) 绑定后点击从不触发。
-            target = getattr(sc, '_script', None) or sc
+            # 2026-11-08 批2 (P-03-08): 用**存在性**判断替代真值判断 ——
+            # 旧写法 `getattr(sc,'_script',None) or sc` 在运行时实例为"假值"时
+            # （脚本类自己定义了 __len__/__bool__，例如容器式脚本）会静默回落成
+            # ScriptComponent，随后以"无方法"丢弃事件，玩家看到的就是"点不动"。
+            target = getattr(sc, '_script', None)
+            if target is None:
+                # 未实例化（惰性实例化还没跑到）与"实例缺方法"必须分开报，
+                # 否则排查方向会被带错（旧文案把两者都说成"无方法"）。
+                print('[UI 事件] 脚本 %r 的运行时实例尚未创建（惰性实例化未运行）'
+                      ': event=%r 触发自 %r.%r -> 本次事件丢弃'
+                      % (sid, event, getattr(obj, 'name', '?'), elem.name))
+                continue
             fn = getattr(target, method, None)
             if fn is None:
-                print('[UI 事件] 脚本 %r 无方法 %r（触发自 %r.%r）'
+                print('[UI 事件] 脚本 %r 缺方法 %r（触发自 %r.%r）'
                       % (sid, method, getattr(obj, 'name', '?'), elem.name))
                 continue
             try:
@@ -703,7 +725,14 @@ class UIManager:
         """
         # 2026-10-19 P0-5: 每帧刷新 _ACTIVE_ENGINE（供 _fire_binding 查脚本实例）
         global _ACTIVE_ENGINE
-        _ACTIVE_ENGINE = script_host if script_host is not None else engine
+        host = script_host if script_host is not None else engine
+        # 2026-11-08 批2 (P-03-09): 宿主没有 .models/.scripts 时**出声**（每进程一次）。
+        # 场景: 调用方忘了把 engine/驱动透传过来（例如 draw_frame(..., engine=None)），
+        # 于是 _ACTIVE_ENGINE 变成"绘制门面"，UI 画得全对、事件永远派发不到脚本 ——
+        # 旧行为只有点击那一刻往 stdout 打一行，打包版无控制台 = 完全不可见。
+        if not hasattr(host, 'models'):
+            _warn_script_host_once(host, engine)
+        _ACTIVE_ENGINE = host
         # 1) 主树渲染 (Dropdown 展开时其列表暂不画, 留到第 2 轮)
         expanded_dd = self._find_expanded_dropdown()
         for c in self.canvases:

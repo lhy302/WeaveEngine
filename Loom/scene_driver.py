@@ -12,6 +12,7 @@ SceneDriver = 场景数据 + 每帧步进 (脚本/物理/动画/轨道相机), �
     world_position/输入与相机安全默认), 修 Vk 播放器脚本全体 broken.
 """
 import math
+import os
 
 import numpy as np
 
@@ -442,26 +443,44 @@ class SceneDriver:
         # 直接写 key_state / actions)
         self.key_state = {}                      # 键名 -> bool (同 engine.script_keys)
         self.actions = dict(DEFAULT_ACTIONS)     # 动作 -> 键名列表 (同 engine.actions)
-        # 2026-11-07: VK 播放器此前**不读任何键位配置** -> 玩家改键在打包版无效。
-        # 顺序: 引擎 输入配置.json -> 本游戏 游戏设置.json 的 key_bindings 覆盖
+        # 2026-11-08 批2 (01 号遗留①): 键位加载改走"只读模板 + 用户层 delta"体系,
+        # 权威常量来自 loom_input（模板名只在那里定义一次），用户层覆盖来自
+        # game_settings.read_key_bindings()（%LOCALAPPDATA%\Loom\…）。
+        # 本文件不再拼 '输入配置.json' 旧路径，也**不写**引擎目录
+        # （docs/design/用户配置目录契约_20261108.md §4/§8）。
         try:
             import json as _json
-            _p = os.path.join(os.path.dirname(os.path.abspath(__file__)), '输入配置.json')
-            with open(_p, 'r', encoding='utf-8') as _f:
-                _d = _json.load(_f)
-            if isinstance(_d.get('actions'), dict):
-                self.actions = {a: list(ks) for a, ks in _d['actions'].items()}
-                for _a, _ks in DEFAULT_ACTIONS.items():
-                    self.actions.setdefault(_a, list(_ks))
-        except Exception:
-            pass
-        try:
             import game_settings as _gs
+            from loom_input import (_ACTION_FILE as _TPL_NEW,
+                                    _ACTION_FILE_LEGACY as _TPL_OLD)
+            _d = os.path.dirname(os.path.abspath(__file__))
+            _p = next((q for q in (os.path.join(_d, _TPL_NEW), os.path.join(_d, _TPL_OLD))
+                       if os.path.exists(q)), None)
+            _acts = None
+            if _p is None:
+                # 2026-11-08 批2 (N1): 两份模板都不存在 = 安装/裁剪异常，
+                # 必须出声后回落默认（旧实现在这里被 except: pass 连带吞掉，
+                # 连"NameError 导致从没读过键位"都看不见）。
+                print('[输入] 键位模板缺失 (%s / %s 都不在 %s) -> 用默认键位'
+                      % (_TPL_NEW, _TPL_OLD, _d))
+            if _p is not None:
+                try:
+                    with open(_p, 'r', encoding='utf-8') as _f:
+                        _tpl = _json.load(_f)
+                    _acts = _tpl.get('actions') if isinstance(_tpl, dict) else None
+                except Exception as e:
+                    print('[输入] 键位模板读取失败 (%r): %s -> 用默认键位' % (e, _p))
+            if isinstance(_acts, dict):
+                for _a, _ks in _acts.items():
+                    try:
+                        self.actions[str(_a)] = list(_ks)
+                    except Exception as e:
+                        print('[输入] 键位模板条目 %r 非法 (%r) -> 跳过该条' % (_a, e))
             for _a, _ks in (_gs.read_key_bindings() or {}).items():
-                if _ks:
-                    self.actions[_a] = list(_ks)
-        except Exception:
-            pass
+                self.actions[_a] = list(_ks)
+        except Exception as e:
+            print('[输入] 键位加载失败 (%r) -> 用默认键位' % (e,))
+            self.actions = dict(DEFAULT_ACTIONS)
         self.mouse_rel = (0, 0)                  # 本帧鼠标增量 (像素, 同 engine.mouse_rel)
         # 2026-11-07: 初始锁定状态由游戏配置决定 (vk_player 也会设一次; 这里兜底,
         # 保证任何入口 (含测试/工具) 都遵守 mouse_lock_allowed / mouse_locked)
@@ -569,14 +588,25 @@ class SceneDriver:
         if not _has_cam:
             cam = {}
         _def_yaw, _def_pitch = (0.6, -0.35) if _has_cam else (0.0, 0.0)
-        # 2026-11-07 2D: 场景相机投影模式 (与 GL 编辑器同源)
-        self.ortho = bool(cam.get('ortho', False))
-        # 2026-11-07: 玩家相机 fov (度) + 暂停/退出状态
+        # 2026-11-08 批2 (P-03-02/03/04/06, D7=A): 投影三件套是**场景相机属性**,
+        # 读侧统一走 sceneio 的归一实现（唯一出处）:
+        #   · 缺键       -> 默认 (旧场景兼容: fov=60°, ortho=False, size=12)
+        #   · 类型非法   -> 出声后回落默认 (Q4=B: 不静默错值, 也不抛 -> B4 契约)
+        #   · 数值越界   -> 钳制并警告 (ortho_size<=0 会让 mat4_ortho 除零; fov 越界无意义)
+        # 注意: 这里**不再**在下面无条件重置 fov —— 旧实现把读到的场景 fov 立刻覆盖成
+        # 60°, 导致 VK 忽略场景 fov 而 GL(PlayerApp) 生效（双后端分叉，审计 P-03-02）。
         try:
-            self.fov = float(cam.get('fov', 60.0)) * 3.141592653589793 / 180.0
-        except Exception:
-            pass
-        self.ortho_size = float(cam.get('ortho_size', 12.0))
+            import sceneio as _sio_cam
+            _fov_deg = _sio_cam.norm_fov_deg(cam.get('fov'), '场景 camera.fov')
+            _ortho_v = _sio_cam._b_strict(cam.get('ortho'), False, '场景 camera.ortho')
+            _osz = _sio_cam.norm_ortho_size(cam.get('ortho_size'),
+                                            '场景 camera.ortho_size')
+        except Exception as e:
+            print('[驱动] 相机投影字段归一失败 (%r) -> 用默认' % (e,))
+            _fov_deg, _ortho_v, _osz = 60.0, False, 12.0
+        self.fov = math.radians(_fov_deg)
+        self.ortho = _ortho_v
+        self.ortho_size = _osz
         self.target = _f3(cam.get('target'), (0, 0, 0))
         # 2026-11-06 R-03: 场景是外部输入, 距离在**入口**钳制 (与 GL 加载路径同语义).
         # 只钳 setter 会留下"加载路径绕过"的洞 (复核 B 实测 distance=5000 原样进场景).
@@ -584,9 +614,8 @@ class SceneDriver:
         self.distance = clamp_camera_distance(_f1(cam.get('distance'), 10.0))
         self.yaw = _f1(cam.get('yaw'), _def_yaw)
         self.pitch = _f1(cam.get('pitch'), _def_pitch)
-        # 加载 = 一次新会话基线: FOV 回到默认 60° (同 PlayerApp 的 self._fov 初值),
-        # 有 active_camera 时下面 apply_camera 会用相机自身 fov 覆盖.
-        self.fov = math.radians(60.0)
+        # 加载 = 一次新会话基线: 相机 roll 归零 (投影三件套已在上面按场景相机段归一,
+        # 有 active_camera 时下面 apply_camera 会用相机自身 fov 覆盖 —— 与 GL 同序)。
         self.camera_roll = 0.0
         # 玩家视角: 场景 active_camera 优先, 否则默认轨道相机 ——
         # 与 runtime.PlayerApp.__init__ 的分支逐条对应 (同一份场景, 同一台相机).
@@ -663,18 +692,27 @@ class SceneDriver:
             return None
 
     def set_render_api(self, api):
+        """写**用户层**的游戏设置 (重启生效)。返回 {'ok','saved','current','path'?}.
+
+        2026-11-08 批2 (契约 §7/§8.1): 失败时 ok=False + error，且**不打印成功语气**；
+        路径取 game_settings.user_path()（用户层唯一落点），不再指向引擎目录。
+        """
+        ok, val, err, p = False, None, None, None
         try:
             import game_settings
             ok, val, err = game_settings.write_render_api(api)
+            p = game_settings.user_path()
         except Exception as e:
-            ok, val, err = False, None, '写入失败: %r' % (e,)
+            err = '写入失败: %r' % (e,)
         res = {'ok': bool(ok), 'saved': val, 'current': self.get_render_api(),
-               'restart_required': True,
-               'path': (game_settings.path() if ok else None)}
+               'restart_required': True, 'path': (p if ok else None)}
         if err:
             res['error'] = err
-        print('[渲染后端] %s -> 配置已保存 %r (重启游戏后生效; 当前 %s)'
-              % ('写入成功' if ok else '写入失败', val, res['current']))
+        if ok:
+            print('[渲染后端] 已写入用户层配置 %r -> %s (重启游戏后生效; 当前 %s)'
+                  % (val, p, res['current']))
+        else:
+            print('[渲染后端] 写入失败: %s (当前 %s)' % (err, res['current']))
         return res
 
     def _physics_frame(self, phys_dt):
@@ -689,6 +727,13 @@ class SceneDriver:
         # 开发者视角鼠标 -> 逻辑步 (脚本)) —— 脚本后写仍覆盖, 契约不变。
         # 2026-11-07 通关暂停: 逻辑帧冻结 (脚本/物理/动画都不走), 渲染继续
         if getattr(self, 'logic_paused', False):
+            # 2026-11-08 批2 (P-03-07): 暂停冻结的是"游戏逻辑", 不能连**输入逃生通道**
+            # 一起冻掉 —— 解锁键轮询从逻辑帧移到渲染帧（裁决 D6=A: 引擎独占该键）。
+            self.poll_unlock()
+            # 暂停期鼠标增量既不结算也不累积: 旧实现让 _pending_mouse_rel 整段累积,
+            # 恢复首帧一次性结算成数百像素的巨值（B6 契约: mouse_rel 只能是"本帧"增量）。
+            self._pending_mouse_rel = (0.0, 0.0)
+            self.mouse_rel = (0, 0)
             self._end_frame_input()
             return (0, 0)
         self.consume_mouse_input()
@@ -904,45 +949,90 @@ class SceneDriver:
                       "只计数不打印" % (e,))
 
 
-    def _poll_mouse_unlock_key(self):
-        """2026-11-07: **强制解锁键 Tab** —— 任何游戏都能解/锁鼠标, 不依赖脚本。
+    def poll_unlock(self):
+        """跨批 API（与 GLEngine.poll_unlock 同签名）: True = 本帧发生一次翻转。
 
-        背景: 吃豆人这类不需要鼠标的游戏, 打包版启动即被无条件锁死且无解锁手段。
-        现在: ① mouse_lock_allowed=False 的游戏**永远不锁**;
-              ② 其余游戏始终可按 Tab 切换 (Tab 是引擎保留键)。
+        2026-11-08 批2 接线点（第 1 批 01 号定稿）: advance_logic 的 logic_paused
+        早退分支**之前**每渲染帧调用一次 —— 暂停只冻结游戏逻辑，不冻结输入逃生通道。
+        GL 侧由 GLEngine.update_scripts 内置一次，**不得**在这里重复调用
+        （同一帧翻两次就回到 P-03-01 的病灶）。
+        """
+        return self._poll_mouse_unlock_key()
+
+    def _poll_unlock_now(self):
+        """poll_unlock 的驱动内别名（保留旧调用名，语义完全一致）。"""
+        return self.poll_unlock()
+
+    # ---- GL 同名按键快照别名 + 一次性告警（D6=A 委托的前置条件） ----
+    @property
+    def script_keys(self):
+        """GL 侧同名按键快照（InputMixin 用 `script_keys`，驱动用 `key_state`）。
+
+        2026-11-08 批2 返修（独立验收 B 条）: `engine.GLEngine._poll_mouse_unlock_key`
+        的前置检查要求 `script_keys` 是 dict；缺这个别名时委托**会悄悄失败**并退回
+        驱动内的语义拷贝 —— 正是 D6=A 要消灭的"两套语义"。这里把它暴露成
+        **同一个 dict**（读写同源，不做拷贝，`key_state` 仍是唯一存储）。
+        """
+        ks = self.__dict__.get('key_state')
+        if ks is None:                      # 未初始化（极端构造顺序）-> 建一个
+            ks = self.__dict__['key_state'] = {}
+        return ks
+
+    def _warn_once(self, key, msg):
+        """一次性告警（每进程每个 key 只打一条，绝不每帧刷屏）。"""
+        seen = self.__dict__.setdefault('_warn_once_seen', set())
+        if key in seen:
+            return
+        seen.add(key)
+        print(msg)
+
+    def _warn_unlock_poll_unavailable(self, what):
+        """engine 唯一实现的"前置缺失"回调（vk_player 解析器要求可调用）。"""
+        self._warn_once('unlock_poll_unavailable',
+                        '[输入] 解锁键轮询缺 %s -> 本局解锁键不生效' % (what,))
+
+    def _poll_mouse_unlock_key(self):
+        """解锁键检测 —— **只做委托**：engine.GLEngine._poll_mouse_unlock_key（D6=A）。
+
+        2026-11-08 批2 返修（独立验收 B 条）: 旧版在本文件留了一份 `_poll_unlock_local`
+        语义拷贝，且因缺 `script_keys`/告警回调，vk_player 解析器实际总是走到那份拷贝上
+        —— "唯一实现"没达成。现在:
+          · 本文件**不再有**任何切换语义（拷贝已删）；
+          · `script_keys` property + `_warn_unlock_poll_unavailable` 满足引擎前置，
+            解析器会真正绑定到 `GLEngine._poll_mouse_unlock_key`；
+          · 只有"engine 不可用/实现缺失"这一条兜底，且用**一次性**告警；
+          · 委托调用内部的异常**不吞**（引擎实现自己已按 N3 做了预期内缺失的一次性告警）。
+        返回: True = 本帧发生一次翻转（与 GLEngine.poll_unlock 同返回）。
         """
         try:
-            if not getattr(self, 'mouse_lock_allowed', True):
-                if getattr(self, 'mouse_locked', False):
-                    self.set_mouse_locked(False)
-                self._unlock_key_prev = False
-                return
-            # 2026-11-07: 解锁键不再是硬编码 Tab, 而是动作 '解锁鼠标'
-            # (默认 Tab, 可在 游戏设置.json 的 key_bindings 改键; 游戏开发者可做改键 UI)
-            k = bool(self.get_action('解锁鼠标'))
-            if k and not getattr(self, '_unlock_key_prev', False):
-                self.toggle_mouse_locked()
-                try:
-                    _keys = ','.join(self.actions.get('解锁鼠标') or [])
-                except Exception:
-                    _keys = '?'
-                print('[输入] 按键 [%s] 切换鼠标锁定 -> %s'
-                      % (_keys, '锁定' if getattr(self, 'mouse_locked', False) else '已解锁'))
-            self._unlock_key_prev = k
-        except Exception:
-            pass
+            from engine import GLEngine as _GE
+        except Exception as e:          # 裁剪包: 没有 engine 模块
+            self._warn_once('unlock_delegate_import',
+                            '[输入] 解锁键委托失败: 无 engine 模块 (%r) -> 本局解锁键不生效'
+                            % (e,))
+            return False
+        impl = getattr(_GE, '_poll_mouse_unlock_key', None)
+        if not callable(impl):
+            self._warn_once('unlock_delegate_impl',
+                            '[输入] 解锁键委托失败: engine.GLEngine 缺 '
+                            '_poll_mouse_unlock_key -> 本局解锁键不生效')
+            return False
+        return bool(impl(self))
 
 
     # ---- 键位 API (2026-11-07, 游戏开发者做"改键 UI"用) ----
     def rebind_action(self, name, keys):
-        """改键 (VK 播放器): 立即生效 + 写入本游戏 游戏设置.json。"""
+        """改键 (VK 播放器): 立即生效 + 写入**用户层**配置。
+
+        2026-11-08 批2 (用户配置目录契约 §7/§8.1): 只写 %LOCALAPPDATA%\Loom\… 的
+        game_settings 用户层，绝不写引擎目录的只读模板；**写失败上抛**（不再
+        except: pass 假装成功），由 set_action_binding / 改键 UI 如实告知玩家。
+        内存里的绑定先改（本局立即生效），落盘失败只影响"下次启动"。
+        """
         keys = list(keys)
         self.actions[name] = keys
-        try:
-            import game_settings
-            game_settings.write_key_binding(name, keys)
-        except Exception as e:
-            print('[输入] 写游戏键位失败 (忽略): %r' % (e,))
+        import game_settings
+        game_settings.write_key_binding(name, keys)
         return keys
 
     def get_action_bindings(self):
@@ -953,25 +1043,39 @@ class SceneDriver:
             return {}
 
     def set_action_binding(self, action, keys):
-        """改某个动作的按键并**写入本游戏配置** (立即生效)。
+        """改某个动作的按键并**写入用户层配置** (立即生效)。
 
-        keys: 'f' 或 ['f','F10']。返回 {'ok', 'action', 'keys', 'saved'}。
+        2026-11-08 批2 (契约 §7): saved 只在真落盘时为 True；写失败返回
+        ok=False + saved=False + error（不再返回 {'ok': True, 'saved': True} 假成功）。
+
+        keys: 'f' 或 ['f','F10']。返回 {'ok','action','keys','saved','path'?}。
         """
+        action = str(action)
+        keys = [keys] if isinstance(keys, str) else list(keys or [])
+        keys = [str(k) for k in keys if str(k)]
         try:
-            if isinstance(keys, str):
-                keys = [keys]
-            keys = [str(k) for k in (keys or []) if str(k)]
-            self.rebind_action(str(action), keys)
-            return {'ok': True, 'action': str(action), 'keys': keys,
-                    'saved': True}
+            self.rebind_action(action, keys)
         except Exception as e:
-            return {'ok': False, 'action': str(action), 'error': repr(e)}
+            print('[输入] 写键位失败: %r' % (e,))
+            return {'ok': False, 'action': action, 'keys': keys,
+                    'saved': False, 'error': repr(e)}
+        res = {'ok': True, 'action': action, 'keys': keys, 'saved': True}
+        try:
+            import game_settings
+            res['path'] = game_settings.user_path()
+        except Exception as e:
+            print('[输入] 取用户层路径失败 (%r)' % (e,))
+        return res
 
     def _update_scripts(self, dt):
-        self._poll_mouse_unlock_key()
         """复刻 engine.GLEngine.update_scripts: 惰性实例化 + update (坏脚本标记跳过).
         组2: 引用迭代 (与 engine 同改; 契约: update 不增删本物体脚本组件).
         2026-10-18 阶段1档序12 执行顺序：按 Script.order 稳定排序后再 update。"""
+        # 2026-11-08 批2: 轮询移到 docstring 之后 —— 旧位置让本函数的文档字符串退化
+        # 成"无效果字符串表达式"（__doc__ = None, 审计 P-01-10 的同款问题）。
+        # 非暂停帧的轮询仍在这里（暂停帧由 advance_logic 的 _poll_unlock_now 负责，
+        # 两处都带按下沿检测 _unlock_key_prev，同一帧重复调用不会翻转两次）。
+        self._poll_mouse_unlock_key()
         # 先收集所有脚本实例（惰性实例化）
         items = []
         for m in self.models:
