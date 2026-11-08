@@ -56,28 +56,59 @@ def _collect_scripts(directory):
     return out
 
 
+# 2026-11-08 P-05-10/11: 两条入口（默认 player_runtime / 显式 --runtime）
+# 共用一个归一化函数，消除"同一份磁盘布局，默认分支平铺、--runtime 分支多套一层"
+# 的语义分裂；同时把"目录在但没有可用 dist"和"目录不存在"合并成同一条失败。
+_RUNTIME_HINT = (
+    "缺少玩家运行时 (需要含 MyGame.exe 的 game_player.dist)。\n"
+    "  · 正式引擎包已预置该运行时, 无需编译器;\n"
+    "  · 源码工作区首次使用: 在**引擎开发机**跑 --build-runtime \n"
+    "    (需要 Nuitka + MSVC), 或用 --runtime 指定已有 dist 目录。")
+
+
+def _runtime_dist(dir_path):
+    """从一个候选目录里找"可用运行时 dist"（含 MyGame.exe）；找不到返回 None。
+
+    接受两种历史布局：
+      · <dir>/game_player.dist/MyGame.exe   (Nuitka --standalone 产物, 现行布局)
+      · <dir>/MyGame.exe                    (更早的直接铺开布局)
+    """
+    if not dir_path or not os.path.isdir(dir_path):
+        return None
+    if os.path.isfile(os.path.join(dir_path, 'MyGame.exe')):
+        return dir_path
+    sub = os.path.join(dir_path, 'game_player.dist')
+    if os.path.isfile(os.path.join(sub, 'MyGame.exe')):
+        return sub
+    return None
+
+
 def _resolve_runtime(runtime_arg):
-    """定位玩家运行时: 可以是 dist 目录 (全拷) 或单个 exe (拷夹内全部运研).
-    v1 要求 runtime 是'完整 dist 目录'或已预置的 <BIN>玩家运行时 目录."""
+    """定位玩家运行时: dist 目录 (全拷) / 单个 exe (取其所在目录) / 默认预置目录.
+
+    返回 **可平铺进发布夹** 的 dist 目录（保证 MyGame.exe 直接位于返回值下），
+    找不到就给出明确错误（绝不静默返回一个没有 exe 的目录）。"""
     if runtime_arg:
         p = os.path.abspath(runtime_arg)
-        if os.path.isdir(p):
-            return p
         if os.path.isfile(p):
-            return os.path.dirname(p)
-        raise SystemExit("--runtime 不存在: %s" % p)
-    if os.path.isdir(DEFAULT_RUNTIME_DIR):
-        # 2026-11-07 修复: _build_runtime 的产物在 player_runtime/game_player.dist/,
-        # 旧实现直接返回 player_runtime -> 发布夹里 exe 被多套一层子目录
-        # (Desktop/PacMan2D/game_player.dist/MyGame.exe), 用户双击找不到 exe.
-        _dist = os.path.join(DEFAULT_RUNTIME_DIR, 'game_player.dist')
-        if os.path.isfile(os.path.join(_dist, 'MyGame.exe')):
-            return _dist
-        return DEFAULT_RUNTIME_DIR
-    raise SystemExit("缺少玩家运行时 (player_runtime/game_player.dist)。\n"
-                     "  · 正式引擎包已预置该运行时, 无需编译器;\n"
-                     "  · 源码工作区首次使用: 在**引擎开发机**跑 --build-runtime \n"
-                     "    (需要 Nuitka + MSVC), 或用 --runtime 指定已有 dist 目录。")
+            p = os.path.dirname(p)
+        if not os.path.isdir(p):
+            raise SystemExit("--runtime 不存在: %s" % p)
+        dist = _runtime_dist(p)
+        if dist is None:
+            raise SystemExit(
+                "--runtime 指定的目录里没有可用的玩家运行时: %s\n"
+                "  期望: <该目录>/MyGame.exe 或 <该目录>/game_player.dist/MyGame.exe\n"
+                "  (给 .dist 目录、给 player_runtime 目录、或直接给 MyGame.exe 都可以)"
+                % p)
+        if dist != p:
+            print("[4/5] --runtime 归一化: %s -> %s" % (p, dist))
+        return dist
+    dist = _runtime_dist(DEFAULT_RUNTIME_DIR)
+    if dist is None:
+        # 目录不存在 / 目录在但只有 .build 残留 —— 同一条失败，避免静默选错层
+        raise SystemExit(_RUNTIME_HINT)
+    return dist
 
 
 def _build_runtime():
