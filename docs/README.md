@@ -24,7 +24,8 @@
 - 审计规模：6 个子代理 / 115 条粗筛 / 70 PROVED / 36 DISPROVED / **37 条 [REGRESSION]**（beta3 修补引入）
 - 修复：8 个批次、37 个受跟踪文件；审计基线的 5 个红（`test_hub` / `test_scripts` / `test_render_api` / `test_vk_camera_align` / `test_eai_real`）**全部转绿**
 - **配置体系重建**：所有运行期配置改为「只读模板 + 用户层 delta」，装到 `C:\Program Files\` 也能正常保存（含 LoomHub 的设置/解释器台账/项目台账）
-- **版本口径锁定**：引擎 `0.1.0.beta4`（内部开发名，不改）、LoomHub `0.1.2`；包名 = 包内元数据 = tag
+- **版本口径锁定**：引擎 `0.1.0.beta4`、LoomHub `0.1.2`；包名 = 包内元数据 = tag = Release 资产名
+- **发布形态改为「编译版」**：引擎包 = `Loom.exe`（Nuitka standalone）+ `build_game.exe`（onefile）+ 预置运行时 + 可编辑数据目录；**不再带嵌入式 Python 与 .py 源码**（332 MB -> 110 MB）。配方与三个坑见 `handoff/接手总纲…md` §3.2b
 - **重要更正**：旧交接总纲 §6.1 把「VK UI 按钮点不动」归因为命中坐标系不一致 —— **已证伪**（绘制与命中共用同一像素空间）；真因是光标锁死 + Tab 解锁键被双翻转吃掉，另有 VK 键位加载因缺 `import os` 静默失效
 - **方法论结论**：`except: pass` / `or True` / 假 `saved:True` 会让此后**所有**审计一起失效（本轮 N1、N3 两次现场证据），故新增硬不变量：不得出现被吞异常
 
