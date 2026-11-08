@@ -136,7 +136,9 @@ SolidCompression=yes
 WizardStyle=modern
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=lowest
-PrivilegesRequiredOverridesAllowed=dialog
+; 2026-11-08: 允许命令行 /ALLUSERS（自动化覆盖安装到 Program Files 用）。
+; 只有 dialog 时, 静默安装会默认落 %%LOCALAPPDATA%%\Programs, 与既有安装并存成两份。
+PrivilegesRequiredOverridesAllowed=dialog commandline
 UninstallDisplayIcon={app}\{#MyAppExeName}
 
 [Languages]
@@ -145,6 +147,12 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "附加任务:"; Flags: checkedonce
+
+[InstallDelete]
+; 2026-11-08: 覆盖安装时必须清掉 PyInstaller 的 _internal/ 旧文件。
+; 只覆盖不删除会让旧版残留的 .pyd/.dll/模块混进新版本, 典型后果是"升级后反而起不来"。
+; 实测证据: 0.1.1 -> 0.1.2 覆盖后, _internal 里仍留着 0.1.1 写的 interpreters.json/projects.json。
+Type: filesandordirs; Name: "{app}\_internal"
 
 [Files]
 ; 2026-10-19 方案 B: --onedir 模式产物 = exe + _internal/ 目录，整个打进来
