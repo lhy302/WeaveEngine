@@ -34,6 +34,13 @@ from fastpath import ancestry_dfs as _fp_ancestry
 from loom_types import Point3D
 
 
+# 2026-11-08 beta3 scan_06 P-06-02: 盒-球"球心在盒内"分支的**同分判定阈值**.
+# 沿某轴推向两面所需的位移差 <= 该值即视为"两面等距", 走显式破同分规则
+# (朝远离盒中心的一侧), 不再让方向由浮点噪声/轴序决定.
+# 取 1e-9 与本分支入口判据 (dist < 1e-9, 见 _push_out) 同量级, 影响面最小.
+_PUSH_TIE_EPS = 1e-9
+
+
 def _script_overrides_stay(inst):
     """C1: 脚本实例是否重写了 on_collision_stay (非 Script 基类空方法).
     未定义 → 走原热路径早退 (保持'无事件零开销'契约)."""
@@ -357,18 +364,39 @@ class PhysicsMixin:
             # 方向推 —— 球心一旦越过盒中心, 推出方向就继续指向**另一侧**,
             # 反复推挤会把物体挤到墙的另一边 (实测 x 0.71 -> 1.238 并继续).
             # 改为沿**最近面**推出 (与盒-盒最小穿透轴一致): 永远走最短路径出去.
+            # 2026-11-08 beta3 scan_06 P-06-02 / D12=A: 同分 (两面等距) 时上面的
+            # 旧写法由"轴序 + 严格小于 + 浮点噪声"决定 —— 1e-9 级输入差即可把
+            # 推出方向从 +y 翻成 -y (实测: 球心正在低墙中分面时被塞到地板下方).
+            # 现在显式破同分, 三条一起生效:
+            #   ① 仍取最小推出距离 (最短路径, 契约不变);
+            #   ② 两面等距 (|lo-hi| <= _PUSH_TIE_EPS) -> 朝"远离盒中心"的一侧推,
+            #      与盒-盒分支的既有口径同源 (见本文件 :320-322 "相等: 朝远离对方中心方向");
+            #   ③ 球心正好在盒中心 (完全对称, 无远近可言) -> 固定取 + 侧;
+            #   ④ 跨轴同分沿用盒-盒的轴序优先 (x -> y -> z), 由下面的严格小于比较保证.
+            cc = ((bmn.x + bmx.x) * 0.5, (bmn.y + bmx.y) * 0.5, (bmn.z + bmx.z) * 0.5)
             best = None
             for i in (0, 1, 2):
-                lo = (sc.__getitem__(i) - bmn[i]) + r    # 推向 -面
-                hi = (bmx[i] - sc.__getitem__(i)) + r    # 推向 +面
-                if best is None or lo < best[0]:
-                    best = (lo, i, -1.0)
-                if hi < best[0]:
-                    best = (hi, i, +1.0)
+                s = sc.__getitem__(i)
+                lo = (s - bmn[i]) + r                    # 推向 -面
+                hi = (bmx[i] - s) + r                    # 推向 +面
+                if abs(lo - hi) <= _PUSH_TIE_EPS:        # 同分: 显式规则
+                    sign = +1.0 if s >= cc[i] else -1.0
+                    dist_i = lo if sign < 0 else hi
+                elif lo < hi:
+                    sign, dist_i = -1.0, lo
+                else:
+                    sign, dist_i = +1.0, hi
+                if best is None or dist_i < best[0] - _PUSH_TIE_EPS:
+                    best = (dist_i, i, sign)
             need = best[0] + 1e-4
             u = [0.0, 0.0, 0.0]
             u[best[1]] = best[2]
             u = (u[0], u[1], u[2])
+            if not a_is_sphere:
+                # 2026-11-08 beta3 scan_06 P-06-03: a 是盒时必须与"球心在盒外"分支
+                # (:403-404) 同语义 —— 反方向把**盒**推离球. 旧实现此处漏了取反,
+                # 盒会朝着球那一侧移动 (不分离且位移指向错误方向).
+                u = (-u[0], -u[1], -u[2])
         else:
             need = r - dist + 1e-4
             u = (dx / dist, dy / dist, dz / dist)      # 盒最近点 -> 球心

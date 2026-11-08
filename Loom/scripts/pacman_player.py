@@ -25,19 +25,31 @@ class PacmanPlayerScript(Script):
         self.won = False
         self._invuln = 0.0        # 复活无敌剩余秒数 (经典吃豆人: 复活不被秒)
         # 只统计"可见"的豆子 (隐藏的不算目标, 便于分关卡/调试)
-        self.total = sum(1 for m in self.engine.models
-                         if (getattr(m, "name", "") or "").startswith("豆子")
-                         and getattr(m, "visible", True))
+        # 2026-11-08 beta3 scan_06 P-06-06: 把"本局目标豆"记成列表 —— on_restart
+        # 只能恢复这些, 不能把设计上隐藏的豆点亮 (否则 score 上限与 total 脱节).
+        self._beans = [m for m in self.engine.models
+                       if (getattr(m, "name", "") or "").startswith("豆子")
+                       and getattr(m, "visible", True)]
+        self.total = len(self._beans)
         self._walls = set()
+        _bad_wall_names = 0
         for m in self.engine.models:
             n = getattr(m, "name", "") or ""
             if n.startswith("墙_"):
                 parts = n.split("_")
+                _ok_name = False
                 if len(parts) >= 3:
                     try:
                         self._walls.add((int(parts[1]), int(parts[2])))
+                        _ok_name = True
                     except ValueError:
-                        pass
+                        _ok_name = False
+                if not _ok_name:
+                    _bad_wall_names += 1
+        # 2026-11-08 beta3 scan_06 P-06-07: 关卡几何靠"墙_<整数x>_<整数z>"命名约定,
+        # 解析失败过去是静默 pass (该墙不生效 -> 玩家能走进墙里). 改为一次性告警.
+        if _bad_wall_names:
+            print("[吃豆人] 墙名不合规, 已忽略 %d 个 (需要 墙_<整数x>_<整数z>)" % _bad_wall_names)
         p = self.engine.world_position(self.obj)
         self._cx, self._cz = int(round(p.x)), int(round(p.z))
         self._tx, self._tz = self._cx, self._cz
@@ -84,9 +96,10 @@ class PacmanPlayerScript(Script):
 
     def on_restart(self, *a):
         """UI 按钮: 新开一局"""
-        for m in self.engine.models:
-            if (getattr(m, "name", "") or "").startswith("豆子"):
-                m.visible = True
+        # 2026-11-08 beta3 scan_06 P-06-06: 只恢复 on_start 时统计到的目标豆,
+        # 设计上隐藏的豆保持隐藏 (与 total 的口径一致).
+        for m in getattr(self, "_beans", ()):
+            m.visible = True
         self.score = 0
         self.caught = 0
         self.won = False
@@ -158,7 +171,9 @@ class PacmanPlayerScript(Script):
             gp = e.world_position(g)
             if (p.x - gp.x) ** 2 + (p.z - gp.z) ** 2 <= 0.55 ** 2:
                 self.caught += 1
-                self._invuln = 1.5        # 1.5s 无敌, 避免复活即被同一只幽灵连续吃掉
+                # 2026-11-08 beta3 scan_06 P-06-14: 读参数 invuln (默认 1.5s).
+                # 之前硬编码 1.5, 导致场景 vars / 编辑器面板调这个参数完全无效.
+                self._invuln = max(0.0, float(self.vals.get("invuln", 1.5)))
                 self.obj.position = Point3D(self._spawn[0], self._y, self._spawn[1])
                 self._cx, self._cz = int(self._spawn[0]), int(self._spawn[1])
                 self._tx, self._tz = self._cx, self._cz
