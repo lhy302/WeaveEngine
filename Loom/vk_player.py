@@ -130,6 +130,96 @@ def _wheel_taken_by_scrollview(ui, pos):
         return True
 
 
+def _unlock_poll_fn(driver):
+    """解析一次"解锁键采样实现"（不复制语义, 每个 driver 只解析一次）。
+
+    优先 `engine.GLEngine._poll_mouse_unlock_key`（第 1 批定稿的唯一实现），但它有
+    前置：`actions` 是 dict、`get_action` 可用、**`script_keys` 是 dict**（GL 侧属性名），
+    且需要 `_warn_unlock_poll_unavailable` 兜底告警。SceneDriver 用的是 `key_state`，
+    不满足该前置 —— 那时改用驱动自带的回退实现（`_poll_unlock_local`，批 2 提供），
+    而不是每帧去撞 SceneDriver.poll_unlock 的委托（它会每帧打印一次失败原因）。
+    返回 None = 该对象无法采样（调用方告警一次）。
+    """
+    cached = getattr(driver, '_unlock_poll_fn', None)
+    if cached is not None:
+        return cached
+    fn = None
+    try:
+        import engine as _E
+        impl = getattr(_E.GLEngine, '_poll_mouse_unlock_key', None)
+        if (callable(impl)
+                and isinstance(getattr(driver, 'script_keys', None), dict)
+                and callable(getattr(driver, '_warn_unlock_poll_unavailable', None))):
+            fn = lambda: bool(impl(driver))
+    except ImportError:                 # engine 不可用（裁剪包）-> 走驱动自带实现
+        fn = None
+    if fn is None:
+        local = getattr(driver, '_poll_unlock_local', None)
+        if callable(local):
+            fn = lambda: bool(local())
+        else:
+            pub = getattr(driver, 'poll_unlock', None) or getattr(
+                driver, '_poll_mouse_unlock_key', None)
+            if callable(pub):
+                fn = lambda: bool(pub())
+    if fn is None:
+        return None
+    try:
+        driver._unlock_poll_fn = fn      # 缓存解析结果（slots/只读实例上失败无影响）
+    except (AttributeError, TypeError):
+        pass
+    return fn
+
+def poll_unlock_frame(driver):
+    """渲染帧的解锁键采样（D6=A：「解锁鼠标」动作归引擎独占）。
+
+    N4 修复（2026-11-08 独立验收）: VK 侧原先**只在逻辑步**（30Hz）采样解锁键，
+    跨不过一个逻辑步的短按整体丢失，而 GL 由 GLEngine.update_scripts 每帧采样。
+    这里每渲染帧调用一次，且**委托唯一实现**（SceneDriver.poll_unlock -> 
+    engine.GLEngine._poll_mouse_unlock_key），不复制任何切换语义。
+
+    ① 短按: 不依赖逻辑帧, 因此 <1 个逻辑步的按键也能翻转;
+    ② 首帧顺序: draw() 把它排在 advance_logic 之后 —— 脚本 on_start 的初始锁定
+       先落定, 首次 poll 才不会把玩家意图与 locked 状态拧成矛盾;
+    ③ 顺带消除 locked=True 且 unlock_requested=True 的矛盾态（脚本直接
+       set_mouse_locked(True) 撞上玩家解锁意图时, 按玩家意图解锁; 只报一次）。
+
+    返回 True = 本帧发生了一次 锁定<->解锁 翻转。
+    """
+    fn = _unlock_poll_fn(driver)
+    if fn is None:
+        _warn_once(driver, 'noimpl', '找不到解锁键采样实现 -> 本局解锁键不生效')
+        return False
+    try:
+        toggled = bool(fn())
+    except Exception as e:          # 只有外层包装失败才到这里（被调方内部已自捕）
+        _warn_once(driver, 'poll', '解锁键采样失败 (%r)' % (e,))
+        return False
+    try:
+        if getattr(driver, 'mouse_locked', False) and getattr(
+                driver, 'mouse_unlock_requested', False):
+            apply_lock = getattr(driver, '_apply_mouse_lock', None)
+            if apply_lock is not None:
+                apply_lock()
+            _warn_once(driver, 'state',
+                       '锁定状态与解锁意图矛盾 (locked=True / requested=True) '
+                       '-> 已按玩家意图解锁')
+    except Exception as e:
+        _warn_once(driver, 'state2', '解锁状态矫正失败 (%r)' % (e,))
+    return toggled
+
+
+_WARN_ONCE_SEEN = set()          # (id(driver), tag) -> 已告警过（不写 driver 属性，避免 setattr 失败）
+
+
+def _warn_once(driver, tag, msg):
+    """每条告警在每个 driver 实例上只打一次（防 120Hz 刷屏）。"""
+    key = (id(driver), tag)
+    if key in _WARN_ONCE_SEEN:
+        return
+    _WARN_ONCE_SEEN.add(key)
+    print('[输入] %s (本局只报一次)' % (msg,))
+
 def run_vk(scene=None, frames_n=None, keep=False, mini=False, no_shadow=False,
            stage='p4', width=1280, height=800, title="Loom (Vulkan)",
            scene_data=None):
@@ -352,9 +442,12 @@ def run_vk(scene=None, frames_n=None, keep=False, mini=False, no_shadow=False,
                     pass
 
             driver.on_mouse_lock_changed = _apply_cursor_mode
-            # 与 runtime.PlayerApp 一致: 播放期默认锁定鼠标 (玩家按 Tab 释放/回锁,
-            # Tab 的切换由 first_person/third_person 脚本走 driver.toggle_mouse_locked)。
-            # 2026-11-07: 同 GL 播放器 —— 锁定与否由游戏配置决定 (默认沿用旧行为)
+            # 与 runtime.PlayerApp 一致: 播放期是否锁定由**游戏配置**决定
+            # (mouse_lock_allowed / mouse_locked; 默认沿用旧行为 = 允许且锁定)。
+            # 2026-11-08 更新: 解锁键已归**引擎独占** (D6=A) —— 由输入层
+            # GLEngine._poll_mouse_unlock_key / poll_unlock() 统一处理"解锁鼠标"
+            # 动作 (默认 Tab, 可在 游戏设置.json 的 key_bindings 改键);
+            # first/third_person 脚本**不再**自行 toggle, 此处也不要再补脚本级切换。
             try:
                 import game_settings as _gs
                 driver.mouse_lock_allowed = bool(_gs.mouse_lock_allowed())
@@ -416,6 +509,10 @@ def run_vk(scene=None, frames_n=None, keep=False, mini=False, no_shadow=False,
                 print('[vk] UI 输入结算异常 (跳过本帧):', repr(_ie))
             # 分离批1+2: 时钟推进 (排逻辑+物理步) → alpha 透传插值层 → 渲染段
             driver.advance_logic(render_dt)
+            # N4: 解锁键改为**每渲染帧**采样（排在 advance_logic 之后 = on_start 先落定），
+            # 委托 engine.GLEngine 的唯一实现；暂停帧 advance_logic 内已 poll 过一次，
+            # 本调用因按下沿去重（_unlock_key_prev）不会二次翻转。
+            poll_unlock_frame(driver)
             if getattr(driver, '_interp', None) is not None:
                 driver._interp.alpha = driver._clock.alpha
             vp, cam_pos = driver.render_pose(aspect=w / h)
@@ -496,11 +593,39 @@ def run_vk(scene=None, frames_n=None, keep=False, mini=False, no_shadow=False,
     import threading
 
 
+    # 2026-11-08 D11=A: 看门狗只在**窗口可见**时计时。
+    #   依据: rendercanvas 的公开契约 —— 窗口最小化/不可见时"帧不渲染, 事件照收"
+    #   (backends/glfw.py `_on_iconify -> _set_visible(not iconified)`,
+    #    base.py `_set_visible() -> scheduler.set_enabled(visible)`,
+    #    core/scheduler.py 文档:"When the window is minimized, the draw will not occur",
+    #    base.py:"If not visible, frames are not rendered")。
+    #   => 最小化期间"无帧"是**合法状态**, 不能算"渲染无进展"。
+    #   真卡死 (窗口可见却不出帧) 仍然照杀 —— 本改动不豁免它。
+    _watch_stop = [False]
+
+    def _canvas_hidden():
+        """窗口是否处于"最小化/不可见"(框架约定不渲染的合法状态)。"""
+        try:
+            if getattr(canvas, '_is_minimized', False):
+                return True
+            win = getattr(canvas, '_window', None)
+            if win is not None:
+                import glfw
+                return bool(glfw.get_window_attrib(win, glfw.ICONIFIED))
+        except Exception:
+            return False
+        return False
+
     def _heartbeat():
-        while True:
+        while not _watch_stop[0]:
             time.sleep(5)
+            if _watch_stop[0]:          # 渲染循环已结束: 不再计时 (防宿主进程存活被杀)
+                return
+            if _canvas_hidden():
+                last_ok[0] = time.perf_counter()   # 最小化期间不计停滞
+                continue
             if time.perf_counter() - last_ok[0] > 60:
-                print("watchdog: 渲染无进展 60s, 强制退出 (防卡死)")
+                print("watchdog: 渲染无进展 60s (窗口可见), 强制退出 (防卡死)")
                 os._exit(9)
     threading.Thread(target=_heartbeat, daemon=True).start()
 
@@ -525,6 +650,7 @@ def run_vk(scene=None, frames_n=None, keep=False, mini=False, no_shadow=False,
     except KeyboardInterrupt:
         pass
     finally:
+        _watch_stop[0] = True          # 2026-11-08: 渲染循环结束即停表 (宿主进程存活也不再被杀)
         _release_cursor()
     # 2026-11-07 P-10: 循环内失败 -> 非零退出并说明 (不回退, 也不假装成功)
     if _loop_error[0] is not None:

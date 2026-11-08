@@ -29,17 +29,24 @@ _EXE_DIR = os.path.dirname(os.path.abspath(sys.argv[0]))
 
 
 def _bootstrap_logging():
-    """2026-11-07: 打包版无控制台, 崩溃信息全丢 -> 落盘到 exe 旁 日志.txt。
+    """打包版无控制台 -> 崩溃信息落**用户目录**（契约 §7）。
+
+    落点: userpaths.log_path('game') = %LOCALAPPDATA%\Loom\logs\game\日志.txt
+    （2026-11-08 审计 P-02-08/P-02-17: 旧实现写在 exe 旁, 只读安装目录写不进去,
+     且放在模块级执行 —— import 也会改写 stdout 并建文件）。
 
     - stdout/stderr tee 到 日志.txt (脚本 print / Nuitka / wgpu 警告都留证);
     - sys.excepthook 写完整 traceback;
-    - faulthandler 捕获硬崩溃 (段错误/访问冲突) 的栈。
+    - faulthandler 捕获硬崩溃 (段错误/访问冲突) 的栈;
+    - 任何失败向 stderr 报一次（不再完全静默）。
     """
     try:
         import faulthandler
         import time
         import traceback
-        path = os.path.join(_EXE_DIR, '日志.txt')
+        import userpaths
+        path = userpaths.log_path('game')
+        userpaths.ensure_parent(path)
         f = open(path, 'a', encoding='utf-8', buffering=1)
 
         class _Tee:
@@ -75,13 +82,30 @@ def _bootstrap_logging():
             traceback.print_exception(t, v, tb)
 
         sys.excepthook = _hook
-        print("\n===== 启动 %s | exe=%s =====\n"
-              % (time.strftime("%Y-%m-%d %H:%M:%S"), sys.argv[0]))
+        print("\n===== 启动 %s | exe=%s | log=%s =====\n"
+              % (time.strftime("%Y-%m-%d %H:%M:%S"), sys.argv[0], path))
+        return True
+    except Exception as e:
+        _warn_logging_failed(e)
+        return False
+
+
+_LOGGING_WARNED = [False]
+
+
+def _warn_logging_failed(exc):
+    """日志引导失败发声**一次**（契约 §7: 不再完全静默, 也不刷屏）。"""
+    if _LOGGING_WARNED[0]:
+        return
+    _LOGGING_WARNED[0] = True
+    try:
+        stream = sys.__stderr__ or sys.stderr
+        if stream is not None:
+            stream.write("[game_player] 日志落盘失败 (%r) —— 本次崩溃信息只输出到控制台\n"
+                         % (exc,))
+            stream.flush()
     except Exception:
         pass
-
-
-_bootstrap_logging()
 
 
 def _run_from_pack():
@@ -121,19 +145,38 @@ def _run_from_scene(scene):
 
 
 def _pick_backend(overridden=None):
-    """发布游戏渲染 API: --backend 参数 > <exe目录>/游戏配置.json 的 render_api
-    > 应用设置 render_api (编辑器里选) > 默认 vulkan. 玩家可自行调整
-    (参数覆盖; 配置持久化见 run_player.resolve_backend)."""
-    try:
-        with open(os.path.join(_EXE_DIR, "游戏配置.json"),
-                  'r', encoding='utf-8') as f:
-            cfg = json.load(f)
-        if isinstance(cfg, dict):
-            overridden = overridden or cfg.get('render_api')
-    except Exception:
-        pass
+    """发布游戏渲染 API: --backend > 游戏设置.json > 引擎 设置.json > 默认 vulkan.
+
+    ``overridden`` 通常来自命令行 ``--backend``（最高优先级）。
+
+    2026-11-08 审计 P-02-03 修复: 旧 ``游戏配置.json`` 的 ``render_api`` **不再**
+    抢在 游戏设置.json 之上 —— 它已在 ``game_settings.bootstrap()`` 里一次性
+    迁移进用户层（契约 §6-2）。这里只在发现该旧键时提示一次，避免"旧配置
+    静默失效"；``scene`` 键仍由 main() 的旧发布兼容分支读取，语义不变。
+    """
+    _note_legacy_render_api()
     import run_player
     return run_player.resolve_backend(overridden)
+
+
+_LEGACY_API_NOTED = [False]
+
+
+def _note_legacy_render_api():
+    """旧 游戏配置.json 里还留着 render_api 时提醒一次（已迁移, 不再参与优先级）。"""
+    if _LEGACY_API_NOTED[0]:
+        return
+    path = os.path.join(_EXE_DIR, "游戏配置.json")
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            cfg = json.load(f)
+    except Exception:
+        return
+    _LEGACY_API_NOTED[0] = True
+    if isinstance(cfg, dict) and cfg.get('render_api'):
+        print("[game_player] 旧 游戏配置.json 的 render_api=%r 已按契约 §6-2 迁移到用户层, "
+              "该键不再参与后端优先级（可用 游戏设置.json 或 --backend 覆盖）"
+              % (cfg.get('render_api'),))
 
 
 def _run_backend_safe(backend, scene=None, explicit=False, **kw):
@@ -211,6 +254,7 @@ def _start_pack(backend, explicit=False):
 
 
 def main():
+    _bootstrap_logging()          # 2026-11-08 P-02-08: 从模块级挪进入口, import 无副作用
     args = sys.argv[1:]
     backend = None
     for i, a in enumerate(args):

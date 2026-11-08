@@ -74,7 +74,8 @@ class PlayerApp(GLEngine):
             self.apply_orbit_camera()
         # 2026-11-07: 鼠标锁定改为**游戏配置驱动** (吃豆人这类不需要锁的游戏不能被锁死)。
         #   游戏设置.json: mouse_lock_allowed (是否允许锁) / mouse_locked (启动是否锁)
-        #   运行时永远提供 Tab 解锁键 (见 GLEngine._poll_mouse_unlock_key), 不依赖脚本。
+        #   解锁键归**引擎独占** (D6=A): GLEngine._poll_mouse_unlock_key / poll_unlock()
+        #   统一处理 解锁鼠标 动作 (默认 Tab, 可改键), 不依赖游戏脚本。
         try:
             import game_settings as _gs
             self.mouse_lock_allowed = bool(_gs.mouse_lock_allowed())
@@ -111,6 +112,68 @@ class PlayerApp(GLEngine):
         finally:
             if frozen:
                 gc_play_enter()          # 冻结新场景 + 播放阈值 (加载失败也重冻)
+
+    # ==================== 2026-11-08 D8=A: GL 播放器补 UI 鼠标派发 ====================
+    # 审计 P-06-01: 此前只有编辑器 (editor._dispatch_ui_mouse) 与 VK (vk_ui.UIInputBridge)
+    # 会把鼠标事件交给 UIManager, GL 播放器 (PlayerApp / 打包版 opengl) 完全没有派发通道
+    # -> Canvas 按钮的声明式事件 (_fire_binding) 在 GL 播放器里永远不触发。
+    # 语义与两端对齐: 回调只缓存 -> 帧首一次 dispatch_mouse -> 未被消费再 update_hover_only
+    # (UIManager.dispatch_mouse 是唯一入口; 每帧最多一次, pressed/released 由
+    #  GlfwWindowMixin._handle_events 每帧清空)。**不引入任何编辑器交互**。
+    def _dispatch_ui_mouse(self):
+        """把本帧新按下/松开 + 光标位置 + 滚轮交给 UI。返回 consumed。
+
+        只在**非外部上下文** (自建 GLFW 窗口, 即 --run/打包版 opengl) 调用:
+        外部上下文由宿主喂事件, 其 pressed/released 不按帧清空, 在这里重复派发
+        会变成"一次点击触发多次"(见 handler 注释)。
+        """
+        ui = getattr(self, 'ui', None)
+        if ui is None:
+            self.ui_consumed = False
+            return False
+        pos = getattr(self, 'mouse_pos', (0, 0))
+        pressed = set(getattr(self, 'pressed', ()) or ())
+        released = set(getattr(self, 'released', ()) or ())
+        try:
+            wheel = int(getattr(self, 'mouse_wheel', 0) or 0)
+        except (TypeError, ValueError):      # 只有坏值才回落 (不吞其它异常)
+            wheel = 0
+        consumed = False
+        try:
+            consumed = bool(ui.dispatch_mouse(pos, pressed, released, wheel))
+        except Exception as e:
+            # 每帧都可能命中 -> 只报一次 (打包版日志不做 120Hz 刷屏)
+            if not getattr(self, '_ui_dispatch_err_logged', False):
+                self._ui_dispatch_err_logged = True
+                print('[player] UI 鼠标派发异常 (本局只报一次, 之后静默跳过): %r' % (e,))
+            consumed = False
+        if not consumed:
+            try:
+                ui.update_hover_only(pos)
+            except Exception as e:
+                if not getattr(self, '_ui_hover_err_logged', False):
+                    self._ui_hover_err_logged = True
+                    print('[player] UI hover 更新异常 (本局只报一次): %r' % (e,))
+        self.ui_consumed = consumed
+        return consumed
+
+    def _handle_events(self):
+        """帧首: 先轮转窗口事件 (super), 再把本帧鼠标事件交给 UI。"""
+        super()._handle_events()
+        if not getattr(self, '_external_ctx', False):
+            self._dispatch_ui_mouse()
+
+    def move_camera(self, delta_time):
+        """UI 捕获鼠标时本帧不移动相机 (与 editor/ui_consumed 同语义)。"""
+        if getattr(self, 'ui_consumed', False):
+            return
+        return super().move_camera(delta_time)
+
+    def rotate_camera(self, delta_time):
+        """UI 捕获鼠标时本帧不旋转相机 (与 editor/ui_consumed 同语义)。"""
+        if getattr(self, 'ui_consumed', False):
+            return
+        return super().rotate_camera(delta_time)
 
     def _draw_hud(self):
         """M39: 播放器不画引擎调试 HUD (相机坐标/FPS/操作提示等 — 玩家不该看到).
