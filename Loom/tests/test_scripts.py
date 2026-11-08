@@ -16,6 +16,12 @@ except Exception:
 # 其余 FAIL 也 exit 0 -> run_all 假绿, 失败被静默吞掉)。
 # 做法: 包一层 stdout, 出现以 "FAIL" 开头的行就在进程退出时把状态码改成 1。
 # 只在真出现 FAIL 时才改码, 全 PASS 的测试行为完全不变。
+# 2026-11-08 (审计 N2): 本文件第 178 行会真的调 rebind_action -> 写用户层配置。
+# 不隔离就会在真实 %LOCALAPPDATA%\Loom\games\tests-* 里留假游戏配置 (实测)。
+import os as _os_iso
+import tempfile as _tf_iso
+_os_iso.environ.setdefault('LOOM_USER_ROOT', _tf_iso.mkdtemp(prefix='loom_test_scripts_'))
+
 import atexit as _atexit_gate
 import os as _os_gate
 import sys as _sys_gate
@@ -243,17 +249,32 @@ s.vals['sens'] = 0.002
 eng.mouse_rel = (0, 0)
 s.on_start()
 check("M39: 播放锁定鼠标", eng.mouse_locked is True)
+# 2026-11-08 (P-01-02 / D6=A): 解锁键改由**引擎独占**, first_person 不再 toggle
+# (旧断言锁定的正是"引擎 poll + 脚本各翻一次"的双翻转病灶)。这里把真实
+# GLEngine._poll_mouse_unlock_key 挂到桩引擎上, 复刻 engine.update_scripts 的
+# 真实次序 (poll -> 脚本 update), 断言"按一次 Tab 恰好翻转一次"。
+eng.mouse_unlock_requested = False
+eng._ui_capture_mouse = False
+eng._unlock_key_prev = False
+eng._poll_mouse_unlock_key = lambda: E.GLEngine._poll_mouse_unlock_key(eng)
+
+
+def _frame():
+    eng._poll_mouse_unlock_key()     # 引擎独占的解锁键检测 (每逻辑帧)
+    s.update(0.0)                    # 脚本只读 mouse_locked 状态
+
+
 eng.keys = {'Tab': True}; eng.mouse_rel = (500, 0)   # Tab 按下帧 + 鼠标右移
-s.update(0.0)
+_frame()
 check("M39: Tab 释放锁定", eng.mouse_locked is False)
 check("M39: 释放状态鼠标不转视角", abs(s.yaw) < 1e-9, "yaw=%.3f" % s.yaw)
 eng.keys = {}; eng.mouse_rel = (0, 0)
-s.update(0.0)
+_frame()
 eng.keys = {'Tab': True}
-s.update(0.0)                                        # 再按 Tab -> 回锁
+_frame()                                             # 再按 Tab -> 回锁
 check("M39: 再按 Tab 回锁", eng.mouse_locked is True)
 eng.mouse_rel = (500, 0)
-s.update(0.0)                                        # 回锁后鼠标转视角
+_frame()                                             # 回锁后鼠标转视角
 check("M39: 回锁后鼠标转动视角", abs(s.yaw) > 0, "yaw=%.3f" % s.yaw)
 
 # ---- M39 真实引擎解锁回锁逻辑 (特殊场景强制回锁, 退出正常回锁) ----
@@ -302,6 +323,9 @@ check("游戏脚本: 非白名单文件名跳过 (隐蔽文件名)", set(scripts
 
 # ---- 调度: update_scripts 实例化 + 参数覆盖 + 持续累计 ----
 e = GLEngine.__new__(GLEngine)
+# 2026-11-08 N3: update_scripts 首行轮询解锁键; 桩缺输入状态时轮询被静默跳过(假绿)
+e.actions = dict(E.DEFAULT_ACTIONS); e.script_keys = {}
+e.mouse_locked = False
 m = GameObject(None, Point3D(0, 0, 0), Point3D(0, 0, 0))
 m.name = '立方体'
 m.script_id = 'rotate'

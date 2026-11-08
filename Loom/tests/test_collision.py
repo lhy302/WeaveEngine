@@ -134,6 +134,10 @@ check("静止后不再被推 (贴边=不碰撞)", abs(ball.position.y - y1) < 1e
 eng_fall = E.GLEngine.__new__(E.GLEngine)
 eng_fall.models = []; eng_fall.materials = []; eng_fall.lights = []
 eng_fall.current_model_index = 0
+# 2026-11-08 N3: update_scripts 首行会轮询解锁键; 桩缺 actions/script_keys 时
+# 轮询被静默跳过(假绿)。补最小输入状态让轮询真的执行。
+eng_fall.actions = dict(E.DEFAULT_ACTIONS); eng_fall.script_keys = {}
+eng_fall.mouse_locked = False
 E.GLEngine._build_gpu = lambda self, m: None
 g2 = eng_fall.add_model(create_plane(8, 8), E.Point3D(0, -4, 0),
                         E.Point3D(0, 0, 0))
@@ -149,6 +153,8 @@ check("重力落地: 落下并停在地面 (中心≈-3.5)", abs(drop.position.y
 eng_b = E.GLEngine.__new__(E.GLEngine)
 eng_b.models = []; eng_b.materials = []; eng_b.lights = []
 eng_b.current_model_index = 0
+eng_b.actions = dict(E.DEFAULT_ACTIONS); eng_b.script_keys = {}
+eng_b.mouse_locked = False
 E.GLEngine._build_gpu = lambda self, m: None
 g3 = eng_b.add_model(create_plane(8, 8), E.Point3D(0, -4, 0),
                      E.Point3D(0, 0, 0))

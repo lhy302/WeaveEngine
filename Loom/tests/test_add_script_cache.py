@@ -61,6 +61,7 @@ sys.path.insert(0, ROOT)
 
 import script_glue                                       # noqa: E402
 from engine import GLEngine, GameObject, ScriptComponent  # noqa: E402
+from engine import DEFAULT_ACTIONS   # N3: 桩需要最小键位表（update_scripts 首行轮询解锁键）
 
 ok = True
 
@@ -76,6 +77,11 @@ def _stub_engine():
     e = GLEngine.__new__(GLEngine)
     e.models = []
     e._struct_gen = 0
+    # 2026-11-08 N3: 解锁键轮询在 update_scripts 首行, 桩缺 actions/script_keys 时
+    # 轮询根本不会执行(假绿)。这里补最小可用输入状态, 让轮询真的跑起来。
+    e.actions = dict(DEFAULT_ACTIONS)
+    e.script_keys = {}
+    e.mouse_locked = False
     return e
 
 

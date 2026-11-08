@@ -195,6 +195,32 @@ def script_options():
     return [(None, '无')] + [(sid, SCRIPTS[sid].name) for sid in SCRIPTS]
 
 
+KEY_ACTION_PREFIX = 'action:'
+
+
+def script_key_uses(script_id=None):
+    """脚本声明的输入占用: {script_id: (声明项, ...)}（只含声明过 keys_used 的脚本）。
+
+    2026-11-08 (P-01-02): 供引擎做键位冲突判定（引擎独占"解锁键"，不允许绑到
+    已被脚本消费的键上）。展开成具体键名由调用方完成（需要 actions 表）。
+    """
+    out = {}
+    for sid, cls in list(SCRIPTS.items()):
+        if script_id is not None and sid != script_id:
+            continue
+        ku = tuple(getattr(cls, 'keys_used', ()) or ())
+        if ku:
+            out[sid] = ku
+    return out
+
+
+def script_display_name(script_id):
+    """脚本显示名（冲突提示用）: '第一人称(first_person)'。"""
+    cls = SCRIPTS.get(script_id)
+    nm = getattr(cls, 'name', None) if cls is not None else None
+    return '%s(%s)' % (nm or script_id, script_id)
+
+
 class Script:
     """脚本基类. 子类覆盖 script_id/name/params, 实现 on_start/update."""
     script_id = None   # 唯一标识 (小写蛇形, 序列化用)
@@ -204,6 +230,13 @@ class Script:
     # 数值小的先执行（默认 0）；同 order 保持"物体顺序 + 脚本列表顺序"（稳定排序）。
     # 用法：子类里写 order = -100 让它比默认脚本更早 update。
     order = 0
+    # 2026-11-08 (P-01-02 / D6=A "解锁键归引擎独占"): 本脚本会消费哪些输入。
+    # 只用于**键位冲突判定**（引擎把"解锁键"绑到这儿会被拒绝），不改变运行语义。
+    # 声明项两种写法:
+    #   'Tab' / 'space'         —— 直接键名（与 loom_input._KEYMAP 同名）
+    #   'action:向前'            —— 输入动作名（按当前绑定展开成具体键名）
+    # 例: keys_used = ('action:向前', 'action:跳跃') / ('Tab',)
+    keys_used = ()
 
     def __init__(self):
         self.obj = None       # 宿主物体 (GameObject)
@@ -550,6 +583,8 @@ class WASDMoveScript(Script):
     script_id = 'wasd_move'
     name = 'WASD移动'
     params = (('speed', '速度', 3.0, 0.0, 30.0, '%.1f'),)
+    # 2026-11-08: 声明消费的输入动作（供解锁键冲突判定）
+    keys_used = ('action:向前', 'action:向后', 'action:向左', 'action:向右')
 
     def update(self, dt):
         a = self.engine.get_action
@@ -627,22 +662,22 @@ class FirstPersonScript(Script):
               ('eye', '眼高', 1.6, 0.0, 5.0, '%.1f'),
               ('sens', '鼠标灵敏度', 0.002, 0.0, 0.01, '%.3f'),
               ('jump_v', '跳跃速度', 6.0, 0.0, 20.0, '%.1f'))
+    # 2026-11-08 (P-01-02 / D6=A): 解锁键归**引擎独占**（GLEngine._poll_mouse_unlock_key）。
+    # 本脚本不再占用 Tab、不再 toggle 鼠标锁定 —— 之前引擎 poll 与本脚本同一帧各翻一次,
+    # 净效果"解锁键没反应"。这里只声明自己真正消费的动作, 供冲突判定。
+    keys_used = ('action:向前', 'action:向后', 'action:向左', 'action:向右',
+                 'action:跳跃')
 
     def on_start(self):
         self.yaw = self.engine.camera_yaw
         self.pitch = self.engine.camera_pitch
-        self._tab_was = False
         sml = getattr(self.engine, 'set_mouse_locked', None)   # M39: 播放锁定鼠标
         if sml is not None:
             sml(True)
 
     def update(self, dt):
         e = self.engine
-        # M39: Tab 切换鼠标锁定 (按下帧检测); 释放状态鼠标滑动不转视角
-        tab = e.is_key('Tab')
-        if tab and not self._tab_was:
-            e.toggle_mouse_locked()
-        self._tab_was = tab
+        # M39: 只**读**锁定状态决定是否用鼠标转视角 (解锁键的翻转由引擎负责)
         if getattr(e, 'mouse_locked', True):   # 仅锁定状态用鼠标转视角
             mx, my = getattr(e, 'mouse_rel', (0, 0))
             self.yaw += mx * self.vals['sens']
@@ -686,22 +721,19 @@ class ThirdPersonScript(Script):
               ('dist', '相机距离', 6.0, 1.0, 30.0, '%.1f'),
               ('height', '相机高度', 3.0, 0.0, 10.0, '%.1f'),
               ('sens', '鼠标灵敏度', 0.002, 0.0, 0.01, '%.3f'))
+    # 2026-11-08 (P-01-02 / D6=A): 同 first_person —— 解锁键归引擎独占, 脚本只读状态。
+    keys_used = ('action:向前', 'action:向后', 'action:向左', 'action:向右')
 
     def on_start(self):
         self.yaw = self.engine.camera_yaw
         self.pitch = self.engine.camera_pitch
-        self._tab_was = False
         sml = getattr(self.engine, 'set_mouse_locked', None)   # M39: 播放锁定鼠标
         if sml is not None:
             sml(True)
 
     def update(self, dt):
         e = self.engine
-        # M39: Tab 切换鼠标锁定; 释放状态鼠标滑动不转视角
-        tab = e.is_key('Tab')
-        if tab and not self._tab_was:
-            e.toggle_mouse_locked()
-        self._tab_was = tab
+        # M39: 只读锁定状态 (解锁键的翻转由引擎负责, 见 first_person 注)
         if getattr(e, 'mouse_locked', True):
             mx, my = getattr(e, 'mouse_rel', (0, 0))
             self.yaw += mx * self.vals['sens']
@@ -732,6 +764,8 @@ class JumpScript(Script):
     script_id = 'jump'
     name = '跳跃'
     params = (('v', '跳跃速度', 6.0, 0.0, 20.0, '%.1f'),)
+    # 2026-11-08: 声明消费的输入动作（供解锁键冲突判定）
+    keys_used = ('action:跳跃',)
 
     def update(self, dt):
         rb = getattr(self.obj, 'rigidbody', None)
