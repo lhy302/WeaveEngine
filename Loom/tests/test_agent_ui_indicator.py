@@ -168,7 +168,50 @@ check('LoomGUI 实现 _agent_progress/_agent_busy/_agent_after_command',
       all(hasattr(loom_gui.LoomGUI, n) for n in
           ('_agent_progress', '_agent_busy', '_agent_after_command')))
 
-for w in (win,):
+# ---------------- 5) U-02: 窗口销毁后定时器不反复抛 ----------------
+print('=== 5) 窗口销毁后 _agent_idle 静默 + 单次告警 (U-02) ===')
+import contextlib
+import io
+
+
+def _raise_deleted(*a, **k):
+    raise RuntimeError('Internal C++ object already deleted')
+
+
+# 真 LoomGUI 实例 + 把 QWidget 入口换成"已销毁"行为 (等价于 deleteLater 之后)
+dead = _make_win()
+dead.statusBar = _raise_deleted
+dead._refresh_status = _raise_deleted
+dead._agent_status_active = True
+_tok = dead._agent_idle_token          # 用当前令牌, 否则 _agent_idle 会当成作废回调早退
+err = io.StringIO()
+raised = None
+with contextlib.redirect_stderr(err):
+    try:
+        loom_gui.LoomGUI._agent_idle(dead, _tok)   # 第一次: 告警一次
+        loom_gui.LoomGUI._agent_idle(dead, _tok)   # 第二次: 静默
+    except Exception as e:                          # 修前: 这里会捕到 RuntimeError
+        raised = e
+check('U-02 窗口销毁后 _agent_idle 不抛异常', raised is None, repr(raised))
+check('U-02 标记窗口已死 (之后静默停表)', getattr(dead, '_agent_gui_dead', None) is True,
+      getattr(dead, '_agent_gui_dead', None))
+warn = err.getvalue()
+check('U-02 只告警一次且带原因',
+      warn.count('GUI 状态栏不可用') == 1 and 'RuntimeError' in warn, warn.strip()[:90])
+tok0 = dead._agent_idle_token
+tok_raised = None
+with contextlib.redirect_stderr(io.StringIO()):
+    try:
+        loom_gui.LoomGUI._agent_progress(dead, 'object_add', {}, 1, 1)
+    except Exception as e:
+        tok_raised = e
+check('U-02 窗口已死后 _agent_progress 不再碰 QWidget',
+      tok_raised is None and dead._agent_idle_token == tok0,
+      repr(tok_raised))
+check('U-02 窗口已死后不再排新的空闲定时器', dead._agent_idle_token == tok0,
+      dead._agent_idle_token)
+
+for w in (win, dead):
     w.hide()
     w.deleteLater()
 _APP.processEvents()

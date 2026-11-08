@@ -930,6 +930,12 @@ class LoomGUI(QMainWindow):
         self._agent_status_active = False   # 状态栏当前被 AI 进度占用
         self._agent_busy_active = False     # Agent 正在执行 (红点)
         self._agent_idle_token = 0          # 1.5s 空闲恢复的重入令牌
+        # 2026-11-08 批4 (裁决 D10): Agent 批次租约可视化
+        self._agent_batch_active = False    # 批次进行中 (状态栏已被占用)
+        self._agent_batch_remaining = None  # 剩余秒数 (None = 无批次)
+        # 2026-11-08 批4 (U-02): 窗口销毁后的静默/单次告警状态
+        self._agent_gui_dead = False        # True = 底层 QWidget 已失效
+        self._agent_gui_warned = False      # 已告警一次 (之后静默)
 
         self._build_toolbar()
         self._build_central()          # 层级/资源 | 视口 | 检查器
@@ -1777,7 +1783,13 @@ class LoomGUI(QMainWindow):
         return txt
 
     def _agent_progress(self, cmd, args, done, total):
-        """状态栏: 'AI: <cmd> <参数摘要≤40> (done/total)'."""
+        """状态栏: 'AI: <cmd> <参数摘要≤40> (done/total)'.
+
+        窗口已销毁时直接返回 —— 既不碰 QWidget, 也不再排新的空闲定时器
+        (U-02: 保证"销毁后静默停表", 而不是每来一条命令再抛一次)。
+        """
+        if getattr(self, '_agent_gui_dead', False):
+            return
         try:
             done_i, total_i = int(done), int(total)
         except Exception:
@@ -1785,6 +1797,9 @@ class LoomGUI(QMainWindow):
         summ = self._agent_args_summary(args)
         txt = "AI: %s%s (%d/%d)" % (
             cmd, (" " + summ) if summ else "", done_i, total_i)
+        rem = getattr(self, '_agent_batch_remaining', None)
+        if rem is not None:
+            txt += " · 批次剩余 %ds" % int(rem)
         self._agent_status_active = True
         self.statusBar().showMessage(txt)
         if self._agent_busy_active:
@@ -1794,21 +1809,77 @@ class LoomGUI(QMainWindow):
         tok = self._agent_idle_token
         QTimer.singleShot(1500, lambda: self._agent_idle(tok))
 
+    def _agent_gui_alive(self):
+        """窗口底层 C++ 对象是否还活着 (2026-11-08 批4 · 审计 U-02).
+
+        Qt 里窗口 close/deleteLater 之后, 再调它任何方法都会抛
+        RuntimeError("Internal C++ object already deleted")。定时器是
+        QTimer.singleShot 排的一次性回调, 排完就没了 —— 真正要防的是
+        "_refresh_status 抛出来后每来一条命令又排一个新定时器、每次再抛一遍"。
+        """
+        if getattr(self, '_agent_gui_dead', False):
+            return False
+        try:
+            self.statusBar()
+            return True
+        except RuntimeError as e:            # 只认"对象已销毁"这一类
+            self._agent_gui_dead = True
+            self._agent_gui_warn_once('statusBar 已失效 (%s): %s'
+                                      % (type(e).__name__, e))
+            return False
+        except Exception as e:               # 其它异常: 记一次原因, 复现照旧
+            self._agent_gui_warn_once('statusBar 访问异常: %r' % (e,))
+            return False
+
+    def _agent_gui_warn_once(self, reason):
+        """GUI 已销毁/异常时只告警一次 (之后静默, 避免每帧刷屏)."""
+        if getattr(self, '_agent_gui_warned', False):
+            return
+        self._agent_gui_warned = True
+        try:
+            import sys as _sys
+            print('[agent] GUI 状态栏不可用, 之后静默: %s' % reason,
+                  file=_sys.stderr)
+        except Exception as e:
+            self._agent_gui_warned = False
+            print('[agent] 告警输出失败: %r (原因: %s)' % (e, reason))
+
     def _agent_idle(self, token):
-        """1.5s 无新命令: 释放状态栏, 回落 _refresh_status 的默认文本."""
+        """1.5s 无新命令: 释放状态栏, 回落 _refresh_status 的默认文本.
+
+        2026-11-08 批4 (审计 U-02): 旧实现把 `_refresh_status()` 放在所有 try 之外,
+        窗口销毁后定时器一触发就抛 RuntimeError; 现在:
+          · 先判窗口是否还活着 (_agent_gui_alive, 销毁即静默停表);
+          · _refresh_status 包 try, 失败**只告警一次并带原因** (不无差别吞).
+        """
         if token != getattr(self, '_agent_idle_token', -1):
             return                      # 期间又来了新命令, 旧定时器作废
+        if getattr(self, '_agent_batch_active', False):
+            return                      # 批次提示占用状态栏 (D10 可视化), 不清
+        if not self._agent_gui_alive():
+            return                      # 窗口已销毁: 静默停止, 不再碰任何 QWidget
         self._agent_status_active = False
         if not self._agent_busy_active:
             try:
                 self.statusBar().setStyleSheet("")
-            except Exception:
-                pass
+            except RuntimeError as e:
+                self._agent_gui_warn_once('setStyleSheet 失败 (%s): %s'
+                                          % (type(e).__name__, e))
+                return
         try:
             self.statusBar().clearMessage()
-        except Exception:
-            pass
-        self._refresh_status()
+        except RuntimeError as e:
+            self._agent_gui_warn_once('clearMessage 失败 (%s): %s'
+                                      % (type(e).__name__, e))
+            return
+        try:
+            self._refresh_status()
+        except RuntimeError as e:
+            self._agent_gui_warn_once('_refresh_status 失败 (%s): %s'
+                                      % (type(e).__name__, e))
+        except Exception as e:
+            # 非"对象已销毁"类异常: 只告警一次, 带上类型与原因, 不静默
+            self._agent_gui_warn_once('_refresh_status 异常: %r' % (e,))
 
     @staticmethod
     def _agent_tb_visible(act, widget, visible):
@@ -1839,6 +1910,29 @@ class LoomGUI(QMainWindow):
                     self.statusBar().clearMessage()
         except Exception:
             pass
+
+    def _agent_batch_status(self, remaining):
+        """Agent 批次租约状态 (2026-11-08 批4 / 裁决 D10).
+
+        remaining=None -> 批次结束/没有批次: 清提示并回落默认文本;
+        remaining=数字  -> 状态栏 'Agent 批次进行中（剩余 Xs）'.
+
+        AgentService 每拍调 (只在"剩余秒数变化"时), 所以这里不做节流。
+        """
+        self._agent_batch_remaining = None if remaining is None else int(remaining)
+        self._agent_batch_active = remaining is not None
+        try:
+            if remaining is None:
+                self._agent_status_active = False
+                self.statusBar().setStyleSheet("")
+                self.statusBar().clearMessage()
+                self._refresh_status()
+            else:
+                self._agent_status_active = True
+                self.statusBar().showMessage(
+                    "Agent 批次进行中（剩余 %ds）" % int(remaining))
+        except Exception as e:
+            print("[agent] 批次状态栏更新失败: %r" % (e,))
 
     def _agent_after_command(self):
         """每条命令执行完强制重绘视口, 保证人眼立刻看到结果."""
@@ -2115,14 +2209,37 @@ class LoomGUI(QMainWindow):
             self.editor.new_scene_cmd()
             self._refresh_all()
 
+    def _report_history_result(self, res):
+        """撤销/重做被拒或被批次租约挡住 -> 出声 (D10=B: 不允许静默无效).
+
+        注意: LoomGUI 自身没有 _notify (见 ui/qt_uitree.py:_notify_win 的注释),
+        toast 走 EditorApp._notify; 拿不到再退回状态栏 showMessage。
+        """
+        if not isinstance(res, dict):
+            return
+        msg = res.get('blocked') or res.get('error')
+        if not msg:
+            return
+        ed = getattr(self, 'editor', None)
+        if ed is not None:
+            try:
+                ed._notify(str(msg), (240, 200, 90))
+                return
+            except Exception:
+                pass
+        try:
+            self.statusBar().showMessage(str(msg), 4000)
+        except Exception:
+            pass
+
     def _cmd_undo(self):
         if self.editor is not None:
-            self.editor._undo_action()
+            self._report_history_result(self.editor._undo_action())
             self._refresh_all()
 
     def _cmd_redo(self):
         if self.editor is not None:
-            self.editor._redo_action()
+            self._report_history_result(self.editor._redo_action())
             self._refresh_all()
 
     def _cmd_gizmo(self, mode):

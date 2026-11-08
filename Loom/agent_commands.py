@@ -317,11 +317,22 @@ def command_names():
 
 def dispatch(cmd, args, win):
     """执行一条命令 (win=LoomGUI 或桩). 返回 {"ok":..., "result"/"error"}.
-    命令报错不会崩编辑器: 记录日志并返回错误."""
+    命令报错不会崩编辑器: 记录日志并返回错误.
+
+    2026-11-08 批4 (裁决 D10=A): **一条 EAI 命令 = 一个 Agent 命令单位** ——
+    这里给 UndoManager 打上 "agent 命令作用域", 让批次只吸 EAI 命令产生的写命令。
+    用户在检查器/gizmo/层级面板上的编辑不走 dispatch, 因此仍是"用户编辑":
+    不进批、不续租 (批内 undo 时会被 D10=B 拒绝, 历史不丢)。
+    """
     fn = _COMMANDS.get(cmd)
     if fn is None:
         return {'ok': False, 'error': '未知命令: %s (可用: %s)'
                 % (cmd, ' '.join(sorted(_COMMANDS)))}
+    _um, _ = _undo_manager(win)
+    if _um is not None and hasattr(_um, 'agent_command_begin'):
+        _um.agent_command_begin()
+    else:
+        _um = None
     try:
         t0 = time.perf_counter()
         result = fn(win, args or {})
@@ -341,6 +352,12 @@ def dispatch(cmd, args, win):
     except Exception as e:
         log('[命令] %s 失败: %r' % (cmd, e))
         return {'ok': False, 'error': repr(e)}
+    finally:
+        if _um is not None:
+            try:
+                _um.agent_command_end()
+            except Exception:
+                pass
 
 
 # ====================================================================
@@ -748,15 +765,28 @@ def cmd_script_add(win, args):
 # ====================================================================
 # 编辑 / 播放 / 视图
 # ====================================================================
-@command('undo', '撤销一步')
+@command('undo', '撤销一步 (Agent 批次租约内会被拒绝并给出剩余秒数)')
 def cmd_undo(win, args):
-    win.editor._undo_action()
-    return {'ok': True}
+    """撤销一步. 2026-11-08 批4 (D10=B): 批次租约内的拒绝必须变成 ok=False + 原因,
+    不能像旧实现那样返回 ok=True 而什么都没做（Agent 会误判"已撤销"）。"""
+    res = win.editor._undo_action()
+    return _history_result(res)
 
 
-@command('redo', '重做一步')
+@command('redo', '重做一步 (Agent 批次租约内会被拒绝并给出剩余秒数)')
 def cmd_redo(win, args):
-    win.editor._redo_action()
+    res = win.editor._redo_action()
+    return _history_result(res)
+
+
+def _history_result(res):
+    """_undo_action/_redo_action 的返回值 -> 命令结果 (blocked/error 一律报错)."""
+    if isinstance(res, dict):
+        if res.get('blocked'):
+            return {'ok': False, 'error': res['blocked'], 'blocked': True}
+        if res.get('error'):
+            return {'ok': False, 'error': res['error']}
+        return {'ok': True, 'label': res.get('label') or ''}
     return {'ok': True}
 
 
@@ -774,20 +804,57 @@ def _undo_manager(win):
     return um, None
 
 
-@command('agent_batch_begin', '开始 Agent 批次: 之后每条写命令合并为一步撤销 '
-                             '{label?} (未 end 又 begin 会自动 cancel 旧批并告警)')
+def _batch_status_hook(win, um):
+    """把批次租约剩余秒数推给 GUI (状态栏"Agent 批次进行中（剩余 Xs）")."""
+    fn = getattr(win, '_agent_batch_status', None)
+    if fn is None:
+        return
+    try:
+        rem = um.batch_remaining() if hasattr(um, 'batch_remaining') else None
+        if rem is None:
+            fn(None)
+        else:
+            secs = int(rem) + (1 if rem > int(rem) else 0)
+            fn(secs)
+    except Exception as e:
+        log('[agent] 批次状态钩子失败: %r' % (e,))
+
+
+@command('agent_batch_begin', '开始 Agent 批次: 之后每批写命令合并为一步撤销 '
+                             '{label?, lease_s?:默认30} (未 end 又 begin 会自动 cancel 旧批并告警)')
 def cmd_agent_batch_begin(win, args):
     um, err = _undo_manager(win)
     if um is None:
         return {'error': err}
+    # 2026-11-08 批4 (D10=A): 先让"已过租约"的悬挂批自动收口 (end_batch, 历史保留),
+    # 再做"仍活着"的悬挂判定 —— 旧实现在这里直接 cancel, 把整批历史丢掉。
+    closed = um.tick_batch() if hasattr(um, 'tick_batch') else None
+    if closed is not None:
+        log('[命令] agent_batch_begin: 上一批次租约到期, 已收口为一步 (%d 条)'
+            % len(getattr(closed, 'cmds', ()) or ()))
     stale = bool(getattr(um, 'batch_active', False))
     if stale:
-        # 异常/超时导致上一批没 end: 自动丢弃 (防悬挂), 并把告警写进日志环
+        # 租约还没到、上一批也没 end: 仍按原契约丢弃 (deny 半批), 并写日志告警
         um.cancel_batch()
         log('[命令] agent_batch_begin: 上一批次未 end, 已自动 cancel (防悬挂)')
-    um.begin_batch(args.get('label') or 'Agent 批次')
-    return {'batch': True, 'label': args.get('label') or 'Agent 批次',
-            'cancelled_stale': stale}
+    label = args.get('label') or 'Agent 批次'
+    lease = None
+    if args.get('lease_s') is not None:
+        lease = as_float(args.get('lease_s'), 0.0)
+    try:
+        # absorb=False: 只吸"Agent 命令作用域"内的写命令, 用户编辑不进批 (D10-A)
+        um.begin_batch(label, lease_s=lease, absorb=False)
+    except TypeError:            # 兼容没有租约参数的旧 UndoManager
+        um.begin_batch(label)
+    _batch_status_hook(win, um)
+    return {'batch': True, 'label': label,
+            # 契约键 (docs/audit/fix_agent_visual_pacing_batch_focus.md §4): had_stale
+            'had_stale': stale,
+            # 兼容别名 (2026-11-07 实现里用的键; 保留以免破坏既有调用方)
+            'cancelled_stale': stale,
+            'closed_stale': (getattr(closed, 'label', None)
+                             if closed is not None else None),
+            'lease_s': getattr(um, 'batch_lease_s', None)}
 
 
 @command('agent_batch_end', '结束 Agent 批次: 批内全部命令合成一步撤销 (不重复执行)')
@@ -799,6 +866,7 @@ def cmd_agent_batch_end(win, args):
         return {'error': '没有进行中的批次 (先 agent_batch_begin)'}
     n = int(getattr(um, 'batch_size', 0))
     batch = um.end_batch()
+    _batch_status_hook(win, um)
     return {'batch': False, 'commands': n,
             'label': getattr(batch, 'label', None) if batch is not None else None,
             'undoable': batch is not None}
@@ -810,6 +878,7 @@ def cmd_agent_batch_cancel(win, args):
     if um is None:
         return {'error': err}
     n = um.cancel_batch() if getattr(um, 'batch_active', False) else 0
+    _batch_status_hook(win, um)
     return {'batch': False, 'cancelled': n}
 
 
@@ -848,7 +917,14 @@ def cmd_view_focus(win, args):
     if fn is None:
         return {'error': '当前编辑器不支持 focus_on_object'}
     if not fn(idx, smooth=smooth):
-        return {'error': '聚焦失败 (播放态不能移动编辑器相机)'}
+        # 2026-11-08 批4 (P-04-10): 按真实原因给 error, 不再把"取不到包围盒"
+        # 也说成"播放态"（那会把排查方向带偏）。
+        why = getattr(ed, '_focus_fail', None)
+        msg = {'playing': '聚焦失败 (播放态不能移动编辑器相机)',
+               'bad_index': '聚焦失败 (index=%s 无效)' % (idx,),
+               'no_aabb': '聚焦失败 (取不到该物体的世界包围盒; 网格/变换异常?)'
+               }.get(why, '聚焦失败 (原因未知: %r)' % (why,))
+        return {'error': msg, 'reason': why}
     return {'focused': getattr(ed.models[idx], 'name', None), 'index': idx,
             'target': list(ed.camera_target),
             'distance': ed.camera_distance, 'smooth': smooth}
@@ -989,17 +1065,34 @@ def cmd_camera_move(win, args):
 @command('key_binding', '键位: 查询 {action?} / 改键 {action, keys="f"|"f,F10"}'
                           ' (写入游戏配置, 立即生效)')
 def cmd_key_binding(win, args):
+    """键位查询/改键.
+
+    2026-11-08 批4 (审计 P-04-08):
+      ① **动作名白名单** —— 拼错的动作名旧实现会被 rebind_action 静默收下并落盘
+         ("幽灵动作"进两份配置), 现在直接拒绝并列出可用动作;
+      ② **透传真实结果** —— engine.set_action_binding 已如实返回 ok/saved/error/path
+         (第 1 批改), 这里不再包装成"总是成功"; 失败时给 {'error': ...},
+         dispatch 会把它变成 ok=False, MCP 层据此判失败。
+    """
     ed = win.editor
+    bindings = ed.get_action_bindings() if hasattr(ed, 'get_action_bindings') else {}
     action = args.get('action')
     if not action:
-        return {'bindings': ed.get_action_bindings() if hasattr(ed, 'get_action_bindings') else {}}
+        return {'bindings': bindings}
     keys = args.get('keys')
     if keys is None:
-        return {'action': action,
-                'keys': (ed.get_action_bindings() or {}).get(action)}
+        return {'action': action, 'keys': (bindings or {}).get(action)}
+    name = str(action).strip()
+    if name not in (bindings or {}):
+        return {'error': '未知动作: %r (可用: %s)'
+                         % (action, ', '.join(sorted(bindings or {})) or '(空)'),
+                'action': action, 'available': sorted(bindings or {})}
     if isinstance(keys, str):
         keys = [k.strip() for k in keys.split(',') if k.strip()]
-    return ed.set_action_binding(action, keys)
+    res = ed.set_action_binding(name, keys)
+    if isinstance(res, dict) and not res.get('ok', True):
+        return {'error': res.get('error') or '改键失败', 'action': name, 'result': res}
+    return res
 
 
 @command('render_api', '渲染后端: 查询 {api?缺省=查} 或 写入配置 {api=vulkan|opengl|auto}'
@@ -1014,16 +1107,34 @@ def cmd_render_api(win, args):
     return {'current': cur, 'saved': saved, 'restart_required': bool(saved and saved != cur)}
 
 
-@command('camera_proj', '投影模式: {ortho?:bool, size?} (正交时 size = 可见高度世界单位)')
+@command('camera_proj', '投影模式: {ortho?:bool, size?, fov?(度)} '
+                         '(正交时 size = 可见高度世界单位; 进场景脏判定与撤销)')
 def cmd_camera_proj(win, args):
-    """2026-11-07 2D: 切换主相机透视/正交。ortho=True 时用正交投影 (Unity 2D 同款)。"""
+    """切换主相机投影。ortho=True 时用正交投影 (Unity 2D 同款)。
+
+    2026-11-08 批4 (P-03-11 / 对齐第 2 批 D7=A): 投影是**场景相机属性**, 必须走
+    ed.set_camera_projection() —— 它负责 sceneio 归一 + 进脏判定 + 进撤销栈。
+    旧实现直接写 ed.ortho / ed.ortho_size, 绕过了撤销与归一（改了撤不回、坏值不钳制）。
+    """
     ed = win.editor
-    if 'ortho' in args:
-        ed.ortho = as_bool(args.get('ortho'), False)
-    if 'size' in args:
-        ed.ortho_size = max(1.0, as_float(args.get('size'), 12.0))
-    return {'ortho': bool(getattr(ed, 'ortho', False)),
-            'size': float(getattr(ed, 'ortho_size', 12.0))}
+    setter = getattr(ed, 'set_camera_projection', None)
+    if setter is not None:
+        setter(ortho=(as_bool(args.get('ortho'), False) if 'ortho' in args else None),
+               ortho_size=(args.get('size') if 'size' in args else None),
+               fov=(args.get('fov') if 'fov' in args else None))
+    else:                                  # 兼容没有该方法的桩/老编辑器
+        if 'ortho' in args:
+            ed.ortho = as_bool(args.get('ortho'), False)
+        if 'size' in args:
+            ed.ortho_size = max(1.0, as_float(args.get('size'), 12.0))
+    out = {'ortho': bool(getattr(ed, 'ortho', False)),
+           'size': float(getattr(ed, 'ortho_size', 12.0))}
+    try:
+        import math as _m
+        out['fov'] = round(_m.degrees(float(getattr(ed, '_fov'))), 6)
+    except Exception:
+        pass
+    return out
 
 
 @command('camera_look', '开发者相机视角: {yaw,pitch}(度) 绝对 或 {dyaw,dpitch}(度) 增量')
@@ -1462,41 +1573,55 @@ def cmd_set_pbr(win, args):
 @command('set_lod', '设 LOD: {name?, bias?, screen?, on?} (对标 Unity LODGroup; 为基元自动生成低精度)')
 def cmd_set_lod(win, args):
     """M36 LOD (对标 Unity LODGroup): 按屏幕占比切换网格精度。
-    sphere 自动生成半精度低模; on=False 关闭 LOD; bias 为 LOD 偏移 (大=更高质量)。"""
+    sphere 自动生成半精度低模; on=False 关闭 LOD; bias 为 LOD 偏移 (大=更高质量)。
+
+    2026-11-08 批4 (审计 P-04-07 / 裁决 Q5=A):
+      ① **先校验后改**: 非 sphere 又不关 LOD 时直接拒绝, 一个字段都不改
+         (旧实现先写 lod_bias 再报 error -> 调用方按失败处理, 状态已经变了);
+      ② **bias 与 levels 一起进 commit_model**: 旧实现直写 r.lod_bias 绕过撤销栈,
+         导致 LOD 偏移不可撤销 (Q5=A 要求的"LOD 可撤销"实际只有一半)。
+    """
     ed = win.editor
     kind, m = _resolve(ed, args, ('model',))
     if m is None:
         return _no_target(('model',))
     r = m.renderer
+    bias = None
     if args.get('bias') is not None:
-        r.lod_bias = max(0.1, as_float(args.get('bias'), 1.0))
-    if args.get('on') is not None and not as_bool(args.get('on')):
-        def _off():
-            r.lod_screen_levels = None
-            r.lod_levels = None
-            r._lod_cur = None
-        ed.commit_model(m, "关闭 LOD", _off)
-        return {'name': m.name, 'lod': None}
-    # 自动生成: 基元 sphere -> 半精度低模; 其它基元 -> 无细分可降 (返回提示)
+        bias = max(0.1, as_float(args.get('bias'), 1.0))
+    want_off = args.get('on') is not None and not as_bool(args.get('on'))
     prim = getattr(m, 'primitive', None)
     params = dict(getattr(m, 'params', None) or {})
-    if prim == 'sphere':
+    if not want_off and prim != 'sphere':
+        # 校验先行: 拒绝时保持"命令没生效"的常规定义 (P-04-07 ①)
+        return {'name': m.name,
+                'error': '仅 sphere 基元支持自动 LOD (其它网格无细分可降)',
+                'primitive': prim}
+    lo = None
+    thr = max(0.0, min(1.0, as_float(args.get('screen'), 0.1)))
+    if not want_off:
         import mesh as _mesh
-        hi = m.mesh
         lo = _mesh.create_sphere(
             params.get('radius', 0.5),
             max(3, int(params.get('stacks', 14)) // 2),
             max(6, int(params.get('slices', 28)) // 2))
-        thr = max(0.0, min(1.0, as_float(args.get('screen'), 0.1)))
 
-        def _on():
-            r.lod_screen_levels = [(thr, hi), (0.0, lo)]
-        ed.commit_model(m, "设 LOD", _on)
-        return {'name': m.name, 'mode': 'screen', 'threshold': thr,
-                'levels': 2, 'hi_verts': len(hi.vertices),
-                'lo_verts': len(lo.vertices), 'bias': r.lod_bias}
-    return {'name': m.name, 'error': '仅 sphere 基元支持自动 LOD (其它网格无细分可降)',
-            'primitive': prim}
+    def _apply():
+        if bias is not None:
+            r.lod_bias = bias
+        if want_off:
+            r.lod_screen_levels = None
+            r.lod_levels = None
+            r._lod_cur = None
+        else:
+            r.lod_screen_levels = [(thr, m.mesh), (0.0, lo)]
+
+    ed.commit_model(m, "关闭 LOD" if want_off else "设 LOD", _apply)   # P-04-07 ②
+    if want_off:
+        return {'name': m.name, 'lod': None, 'bias': r.lod_bias}
+    return {'name': m.name, 'mode': 'screen', 'threshold': thr,
+            'levels': 2, 'hi_verts': len(m.mesh.vertices),
+            'lo_verts': len(lo.vertices), 'bias': r.lod_bias}
 
 
 @command('set_env', '设材质环境反射贴图: {name?, paths=[6图] | color=#RRGGBB} (对标 Unity Reflection Probe)')
@@ -3227,6 +3352,9 @@ class AgentService:
         self._last_info = ('', False, 0.0)
         self._draining = False
         self._idle_release_s = 0.8
+        # 批次租约可视化 (2026-11-08 批4 / D10): 上次推给 GUI 的剩余秒数,
+        # 用于"每秒只变一次"的节流; 'init' = 尚未同步过。
+        self._batch_secs = 'init'
 
     def start(self):
         """启动 HTTP 服务 + 写端口文件 (Qt 事件循环前调用).
@@ -3295,6 +3423,36 @@ class AgentService:
         total = self._run_done + self.queue.qsize()
         self._hook('_agent_progress', cmd, args, self._run_done, total)
 
+    def _undo_of_editor(self):
+        """取编辑器上的 UndoManager (没有就是 None; 桩/无头路径照常跑)."""
+        ed = getattr(self.win, 'editor', None)
+        return getattr(ed, 'undo', None) if ed is not None else None
+
+    def _tick_batch(self):
+        """练约维护 (D10=A): 到点自动 end_batch (历史保留) + 状态栏剩余秒数 (D10=可视化).
+
+        2026-11-08 批4: 4ms QTimer 每拍调一次 —— 只有剩余秒数变化才通知 GUI,
+        避免刷爆状态栏；收口时写一条日志, 便于事后核查"这批为何变成一步"。
+        """
+        um = self._undo_of_editor()
+        if um is None or not hasattr(um, 'tick_batch'):
+            return
+        try:
+            closed = um.tick_batch()
+            if closed is not None:
+                log('[agent] 批次租约到期, 已自动收口为一步 (%d 条命令)'
+                    % len(getattr(closed, 'cmds', ()) or ()))
+            rem = um.batch_remaining()
+            if rem is None:
+                secs = None
+            else:
+                secs = int(rem) + (1 if rem > int(rem) else 0)
+            if secs != self._batch_secs:
+                self._batch_secs = secs
+                self._hook('_agent_batch_status', secs)
+        except Exception as e:
+            log('[agent] 批次租约维护失败: %r' % (e,))
+
     def _run_one(self):
         """出队并执行 1 条, 回填结果. 返回执行条数 (0/1)."""
         try:
@@ -3308,6 +3466,8 @@ class AgentService:
         except Exception as e:          # dispatch 已兜底; 这里再兜一层防 ev 永挂
             res = {'ok': False, 'error': repr(e)}
         finally:
+            # "Agent 命令作用域"由 dispatch 统一标记 (见其 docstring):
+            # 一条 EAI 命令 = 一个 Agent 命令单位, 与调用来源 (HTTP/控制台/直调) 无关。
             self._inflight = None
         ms = (time.perf_counter() - t0) * 1000.0
         self._last_run = time.perf_counter()
@@ -3330,6 +3490,9 @@ class AgentService:
         now = time.perf_counter()
         self._update_busy(now, (not self.queue.empty())
                           or (self._inflight is not None))
+        # 2026-11-08 批4 (D10=A): 批次租约维护必须在"队列空早退"之前 —— 悬挂批
+        # 往往正是"队列已空、客户端已断"的状态, 只有这里还在按拍跑。
+        self._tick_batch()
         if self.queue.empty():
             return 0
         if self._draining:              # GUI 钩子里重入的兜底

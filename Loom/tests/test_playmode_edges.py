@@ -71,6 +71,10 @@ def new_app():
     app.selected_light_index = -1
     app.selected_camera_index = -1
     app.is_playing = False
+    # 2026-11-08 N3: update_scripts 首行轮询解锁键, 桩缺输入状态时轮询被跳过(假绿)
+    app.actions = dict(E.DEFAULT_ACTIONS)
+    app.script_keys = {}
+    app.mouse_locked = False
     # 相机状态 (toggle_play 播放视角快照/恢复 apply_orbit_camera 用)
     app.camera = E.Point3D(0, 0, -5)
     app.camera_target = (0, 0, 0)
@@ -146,6 +150,56 @@ stale = [sc._script for sc in m.scripts]
 check("A8 多脚本播放后全部还原且实例缓存清空",
       abs(m.rotation.y) < 1e-6 and abs(m.position.y) < 1e-6
       and all(s is None for s in stale), str((m.rotation, m.position, stale)))
+
+# ---- A9 退出播放原子化 (2026-11-08 批4 · 审计 U-01 / 裁决 A) ----
+# 修前: render 帧末用裸 `except Exception: pass` 包住 toggle_play() -> 退出失败会留下
+# 半还原场景, 且 is_playing 已被置 False, 调用方什么都看不到。
+# 修后: _exit_play_atomic() 失败时回滚到"仍在播放"并告警一次(带原因)。
+app = new_app()
+add(app, create_cube(1.0), (0, 0, 0))
+app.toggle_play()
+check("A9 前置: 已进入播放", app.is_playing is True)
+_real_apply = editor.apply_snapshot
+
+
+def _boom_apply(m, snap):
+    raise RuntimeError('模拟 apply_snapshot 失败')
+
+
+editor.apply_snapshot = _boom_apply
+try:
+    ok_exit = app._exit_play_atomic()
+finally:
+    editor.apply_snapshot = _real_apply
+check("A9 退出失败 -> 返回 False", ok_exit is False, str(ok_exit))
+check("A9 退出失败 -> 仍在播放态 (无中间态, 修前会是 is_playing=False)",
+      app.is_playing is True, str(app.is_playing))
+check("A9 退出失败 -> 播放快照保留 (可重试)",
+      app._play_models is not None and app._play_snap is not None,
+      str((app._play_models is not None, app._play_snap is not None)))
+check("A9 退出失败 -> 记录了原因",
+      'RuntimeError' in (getattr(app, '_play_exit_error', '') or ''),
+      str(getattr(app, '_play_exit_error', None)))
+check("A9 退出失败 -> 用户可见提示 (toast)",
+      '退出播放失败' in (app.msg or ''), str(app.msg))
+check("A9 告警只打一次 (第二次失败只计数)",
+      getattr(app, '_play_exit_warned', False) is True,
+      str(getattr(app, '_play_exit_warned', None)))
+editor.apply_snapshot = _boom_apply
+try:
+    app._exit_play_atomic()
+finally:
+    editor.apply_snapshot = _real_apply
+check("A9 二次失败 -> 计数 +1 且不重复告警",
+      getattr(app, '_play_exit_fail_count', 0) == 2,
+      str(getattr(app, '_play_exit_fail_count', None)))
+ok_retry = app._exit_play_atomic()
+check("A9 故障消除后重试 -> 完整退出",
+      ok_retry is True and app.is_playing is False, str((ok_retry, app.is_playing)))
+check("A9 render 帧末走原子化入口 (不再裸 except)",
+      'self._exit_play_atomic()' in open(os.path.join(
+          os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+          'editor.py'), encoding='utf-8').read())
 
 print()
 print("总结果:", "ALL PASS ✅" if ok else "有 FAIL ❌")

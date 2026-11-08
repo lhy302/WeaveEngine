@@ -188,6 +188,19 @@ class _FakeWin:
         self.editor = ed
 
 
+def _push_agent(um, cmd):
+    """模拟真实 Agent 路径: AgentService 在执行一条 EAI 命令期间会先
+    um.agent_command_begin(), 结束后 agent_command_end() (2026-11-08 批4 D10=A)。
+    UndoManager 靠这个作用域区分"批内 Agent 写命令"与"用户自己的编辑"。"""
+    if hasattr(um, 'agent_command_begin'):
+        um.agent_command_begin()
+    try:
+        return um.push(cmd)
+    finally:
+        if hasattr(um, 'agent_command_end'):
+            um.agent_command_end()
+
+
 def t_eai_commands():
     eng.models = []
     um = U.UndoManager()
@@ -195,8 +208,8 @@ def t_eai_commands():
     r = ac.dispatch('agent_batch_begin', {'label': 'Agent 批'}, win)
     check("agent_batch_begin -> ok", r['ok'] and r['result']['batch'] is True, r)
     log = []
-    um.push(_Rec(log, 'a'))
-    um.push(_Rec(log, 'b'))
+    _push_agent(um, _Rec(log, 'a'))
+    _push_agent(um, _Rec(log, 'b'))
     r = ac.dispatch('agent_batch_end', {}, win)
     check("agent_batch_end -> 合成 1 步", r['ok'] and r['result']['commands'] == 2
           and len(um.undo_stack) == 1, r)
@@ -206,12 +219,17 @@ def t_eai_commands():
 
     n_undo, n_redo = len(um.undo_stack), len(um.redo_stack)
     r = ac.dispatch('agent_batch_begin', {}, win)
-    um.push(_Rec(log, 'c'))
+    _push_agent(um, _Rec(log, 'c'))
     r = ac.dispatch('agent_batch_cancel', {}, win)
     check("agent_batch_cancel -> ok 且丢弃", r['ok'] and r['result']['cancelled'] == 1, r)
-    check("cancel 后撤销/重做栈长度不变",
-          len(um.undo_stack) == n_undo and len(um.redo_stack) == n_redo,
-          (len(um.undo_stack), n_undo, len(um.redo_stack), n_redo))
+    # 2026-11-08 批4 (P-04-03): 断言口径变更 —— 原断言"cancel 后撤销/重做栈长度不变"
+    # 把缺陷固化成契约: 批内 do() 已改过场景, 却让重做栈留着旧命令 -> Ctrl+Y 会把
+    # 回退过的旧命令重放到未记录的批改动之上。现与 _append 口径统一: 撤销栈长度不变,
+    # 重做栈必须被清空 (审计 docs/audit/scan_beta3_04_editor_agent_visual.md P-04-03)。
+    check("cancel 后撤销栈长度不变 (批记录不压栈)",
+          len(um.undo_stack) == n_undo, (len(um.undo_stack), n_undo))
+    check("cancel 后重做栈被清空 (与 _append 口径统一, P-04-03)",
+          len(um.redo_stack) == 0 and n_redo > 0, (len(um.redo_stack), n_redo))
 
     r = ac.dispatch('agent_batch_end', {}, win)
     check("无批次时 agent_batch_end -> 拒绝", not r['ok']
@@ -227,6 +245,20 @@ def t_eai_commands():
     r = ac.dispatch('agent_batch_begin', {}, win3)
     check("EAI begin 对悬挂批次自动 cancel 并标注",
           r['ok'] and r['result'].get('cancelled_stale') is True, r)
+    check("EAI begin 同时给出契约键 had_stale (P-04-09)",
+          r['result'].get('had_stale') is True, r['result'])
+
+    # 强化 (D10=A 附注): 走 EAI 批次时, **不在 Agent 命令作用域内**的 push 属于
+    # 用户编辑 —— 不得被吸进批里, 也不得续租 (独立 manager, 不干扰上面的断言)。
+    um_u = U.UndoManager()
+    win_u = _FakeWin(_FakeEd(um_u))
+    ac.dispatch('agent_batch_begin', {}, win_u)
+    um_u.push(_Rec([], 'user'))
+    check("批外(用户)编辑不进批 (强化: D10-A 附注)", um_u.batch_size == 0,
+          um_u.batch_size)
+    check("批外(用户)编辑单独进撤销栈", len(um_u.undo_stack) == 1,
+          len(um_u.undo_stack))
+    ac.dispatch('agent_batch_cancel', {}, win_u)
 
 
 if __name__ == "__main__":
