@@ -220,3 +220,19 @@ EXIT=1
 | U-02（`_agent_idle` 的 `_refresh_status` 未包 try） | 待裁决 | 需窗口销毁后定时器实测 |
 | `--require-tests` 发布闸门 | 已实现、**默认关闭** | 等全量回归清零后由主审改默认 |
 | `LoomHub/interpreters.json`/`projects.json` 是否移出版本库 | 待裁决 | 建议保留一代作为迁移源 |
+
+## 10. 交付状态（2026-11-08 收尾）
+
+| 项 | 状态 |
+|---|---|
+| 全量回归 | `run_all.py` 114 个测试文件 / **0 FAIL** / exit 0（发版闸门已默认开启，见 `release_github.want_test_gate`） |
+| 独立验收 | 两轮独立子代理复跑：第一轮 8/8、第二轮 11/11 全 PASS；两轮各自带回的问题（N1/N2/N3/N4/N5、A/B）已全部返修并再次验证 |
+| 代码提交 | 10 个逻辑提交（带审计编号），已推送 `origin/main`（`0a8e28a..bf1f183`）；**未创建 tag、未发 Release**（按人类要求） |
+| 引擎包 | `tools/dist/Loom-0.1.0.beta4.zip`（332.73 MB），自检"包名/元数据/运行时一致"通过 |
+| 播放器运行时 | 2026-11-08 16:38 重编（Nuitka），96.9 MB / 99 文件（含今日全部修复） |
+| LoomHub | `LoomHub-0.1.2-Setup.exe`（23.79 MB）；覆盖安装成功，注册表 `DisplayVersion=0.1.2`、`InstallLocation=C:\Program Files\LoomHub\`（单一条目，同 AppId 原地升级） |
+| 安装校验 | 引擎 `C:\Program Files\Loom\0.1.0.beta4`：元数据 `0.1.0.beta4`、预置运行时存在、`输入配置.default.json` 有而 `输入配置.json` 无；自带 python 导入 `userpaths`/`engine` 正常，`user_root()=C:\Users\<u>\AppData\Local\Loom` |
+| 实机测试 | **待人类执行** → `docs/audit/beta4实机测试清单_20261108.md` |
+
+### 10.1 交付时仍未验证
+见 §9.3（GPU 像素基线、真鼠标打包版验收、3 条 P-UNKNOWN、`--require-tests` 已在本次改为默认开启并有断言）。
