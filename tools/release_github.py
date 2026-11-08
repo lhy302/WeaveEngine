@@ -302,17 +302,11 @@ def push_tag(tag):
 
 ENGINE_BODY = """## Loom 引擎 {version}
 
-> 内测版本序列：beta1 → beta2 → **{version}**（共 3 个内测版本）。含嵌入式 Python 3.12 运行时，开箱即用，无需安装 Python。
+> {runtime_line}
 
 ### 本版要点
 
-- **预编译玩家运行时随包分发**（约 97 MB）：游戏开发机**无需 Python / 无需 C 编译器**，打包游戏约 2 秒（对齐 Unity 预置 UnityPlayer 的做法）
-- **渲染后端可切换**：`游戏设置.json` 的 `render_api`（`vulkan` / `opengl` / `auto`）；Vulkan 不兼容时自动崩一次并把配置回退为 OpenGL
-- **正交投影**（2D 游戏）+ 播放时强制套用场景相机（位置/朝向/距离/正交/FOV）
-- **鼠标锁定配置化**：`mouse_lock_allowed` / `mouse_locked`，并保留强制解锁键（可改键）
-- **键位可配置**：`key_bindings`（解锁键不再固定 Tab）；键位表 30 → **76 键**（F1–F12 / Esc / Enter / 字母数字 / 标点）
-- **修复**：Vulkan 看门狗 60 秒必杀（"玩一半闪退"）、VK 打包版所有 UI 按钮点击无效、播放器退出残留鼠标捕获
-- **崩溃日志落盘**：打包游戏目录生成 `日志.txt`（含完整 traceback 与 faulthandler 硬崩栈）
+{highlights}
 
 ### 安装方式
 
@@ -327,7 +321,7 @@ LoomHub -> 解释器面板 -> 「从 GitHub 安装」-> 选 {version} -> 下载�
 或 LoomHub -> 「导入目录」-> 选解压后的 Loom 子目录
 
 ### 系统要求
-Windows 10 64-bit 或更高（Python 已内置）
+Windows 10 64-bit 或更高（{python_note}）
 """
 
 HUB_BODY = """## LoomHub 项目管理器 {version}
@@ -345,12 +339,112 @@ Loom 引擎的官方项目管理器。
 - 单实例保护：连点不会开多个窗口
 - **打开项目自动启用 Agent 通道**（`--agent`）：外部 Agent / MCP 可直接连上编辑器
 
+### 本版要点
+
+{highlights}
+
 ### 安装
-下载下方 LoomHub-{version}-Setup.exe，双击安装。桌面会创建快捷方式，控制面板可卸载。
+下载下方 LoomHub-{version}-Setup.exe，双击安装。桌面会创建快捷方式，控制面板可卸载；卸载时会询问是否同时删除用户配置（默认保留）。
 
 ### 系统要求
 Windows 10 64-bit 或更高
 """
+
+
+_RUNTIME_LINE_COMPILED = (
+    '**编译版引擎**：引擎本体为 Nuitka 编译产物 `Loom.exe`（**无需安装 Python**），'
+    '游戏打包器 = 同目录 `build_game.exe`；包内**不含** .py 源码与嵌入式 Python。')
+_RUNTIME_LINE_SOURCE = '含嵌入式 Python {pyver} 运行时，开箱即用，无需安装 Python。'
+_PYTHON_NOTE_COMPILED = '引擎与打包器均为编译产物，不依赖系统 Python'
+_PYTHON_NOTE_SOURCE = 'Python 已内置'
+
+
+def engine_artifact_facts(zip_path):
+    """从引擎 zip 的 Loom/解释器.json 读事实（build_mode / main_exe / python_version）。
+
+    2026-11-08: 发布说明不再手写「含嵌入式 Python」这类会随打包形态变化的话 ——
+    模板必须由**实际产物**决定，否则会出现「编译版包 + 源码版说明」的自相矛盾（本轮回溯取证）。
+    """
+    facts = {'build_mode': 'source', 'main_exe': '', 'python_version': ''}
+    try:
+        import zipfile
+        with zipfile.ZipFile(zip_path) as zf:
+            meta = json.loads(zf.read('Loom/解释器.json').decode('utf-8'))
+        facts['build_mode'] = str(meta.get('build_mode') or 'source')
+        facts['main_exe'] = str(meta.get('main_exe') or '')
+        facts['python_version'] = str(meta.get('python_version') or '')
+    except (OSError, KeyError, ValueError) as e:
+        print('[警告] 读不到包内 解释器.json，按源码版写发布说明: %r' % (e,))
+    return facts
+
+
+DEFAULT_HIGHLIGHTS = (
+    '- **预编译玩家运行时随包分发**（约 97 MB）：游戏开发机**无需 Python / 无需 C 编译器**，打包游戏约数秒'
+    '（对齐 Unity 预置 UnityPlayer 的做法）\n'
+    '- **每游戏配置**：`游戏设置.json`（开发者只读默认）+ 用户层 `%LOCALAPPDATA%/Loom/games/<id>/`（只存改动）；'
+    '装到只读目录也能保存\n'
+    '- **渲染后端可切换**：`render_api`（vulkan / opengl / auto）；Vulkan 不兼容时崩一次并把配置回退 OpenGL\n'
+    '- **鼠标锁定默认关闭**：`mouse_lock_allowed` / `mouse_locked`；解锁键归引擎独占且可改键，'
+    '脚本用 `set_ui_capture_mouse()` 显式决定何时给光标\n'
+    '- **键位可配置**：`key_bindings`，76 键表；与脚本 `keys_used` 冲突时拒绝保存\n'
+    '- **崩溃日志落盘**：`%LOCALAPPDATA%/Loom/logs/`（含 traceback 与 faulthandler 硬崩栈）')
+
+
+def load_highlights(kind, version):
+    """读 tools/release_notes/engine-<version>.md；缺失则用通用条目。
+
+    为什么拆文件：发布说明里的「本版要点」天生是**版本相关**的，混在模板里必然过期
+    （本轮回溯：beta4 的说明还写着 beta3 的功能清单与「含嵌入式 Python」）。
+    """
+    p = os.path.join(ROOT, 'tools', 'release_notes', '%s-%s.md' % (kind, version))
+    try:
+        with open(p, 'r', encoding='utf-8') as fh:
+            txt = fh.read().strip()
+        if txt:
+            print('[发布] 版本要点: %s' % os.path.relpath(p, ROOT))
+            return txt
+    except OSError:
+        pass
+    print('[发布] 未找到版本要点文件，使用通用条目: %s' % os.path.relpath(p, ROOT))
+    return DEFAULT_HIGHLIGHTS
+
+
+def update_notes(token):
+    """只更新已有 Release 的正文（不重传资产）。用于发布说明写错/需补充时。
+
+    2026-11-08 新增：本轮回溯发现「编译版包 + 源码版说明」矛盾，而资产本身没问题 ——
+    没有这个入口就只能删了重发（会丢下载计数与讨论链接）。
+    """
+    ok = True
+    for kind, tag, version in (('engine', 'engine-v%s' % ENGINE_VERSION, ENGINE_VERSION),
+                               ('hub', 'hub-v%s' % HUB_VERSION, HUB_VERSION)):
+        s, b = _req('%s/repos/%s/%s/releases/tags/%s' % (API_BASE, REPO_OWNER, REPO_NAME, tag), token)
+        if s != 200:
+            print('[警告] %s 取不到 release: %s' % (tag, _why(s, b)))
+            ok = False
+            continue
+        rel = json.loads(b.decode())
+        if kind == 'engine':
+            _facts = engine_artifact_facts(ENGINE_ZIP)
+            _compiled = _facts['build_mode'] == 'compiled'
+            body = ENGINE_BODY.format(
+                version=version,
+                runtime_line=(_RUNTIME_LINE_COMPILED if _compiled
+                              else _RUNTIME_LINE_SOURCE.format(pyver=_facts['python_version'] or '3.12')),
+                python_note=(_PYTHON_NOTE_COMPILED if _compiled else _PYTHON_NOTE_SOURCE),
+                highlights=load_highlights('engine', version))
+        else:
+            body = HUB_BODY.format(version=version, highlights=load_highlights('hub', version))
+        payload = json.dumps({'body': body}).encode('utf-8')
+        s, b = _req('%s/repos/%s/%s/releases/%d' % (API_BASE, REPO_OWNER, REPO_NAME, rel['id']),
+                    token, method='PATCH', data=payload,
+                    headers={'Content-Type': 'application/json'})
+        if s == 200:
+            print('[发布] 已更新说明: %s' % tag)
+        else:
+            print('[错误] 更新 %s 失败: %s' % (tag, _why(s, b)))
+            ok = False
+    return ok
 
 
 def publish_engine(token):
@@ -360,7 +454,14 @@ def publish_engine(token):
     print('=' * 60)
     tag = 'engine-v%s' % ENGINE_VERSION
     title = 'Loom 引擎 %s' % ENGINE_VERSION
-    body = ENGINE_BODY.format(version=ENGINE_VERSION)
+    _facts = engine_artifact_facts(ENGINE_ZIP)
+    _compiled = _facts['build_mode'] == 'compiled'
+    body = ENGINE_BODY.format(
+        version=ENGINE_VERSION,
+        runtime_line=(_RUNTIME_LINE_COMPILED if _compiled
+                      else _RUNTIME_LINE_SOURCE.format(pyver=_facts['python_version'] or '3.12')),
+        python_note=(_PYTHON_NOTE_COMPILED if _compiled else _PYTHON_NOTE_SOURCE),
+        highlights=load_highlights('engine', ENGINE_VERSION))
     create_local_tag(tag, title)
     rel = create_release(tag, title, body, token, prerelease=True)
     upload_asset(rel, ENGINE_ZIP, token)
@@ -374,7 +475,8 @@ def publish_hub(token):
     print('=' * 60)
     tag = 'hub-v%s' % HUB_VERSION
     title = 'LoomHub 项目管理器 %s' % HUB_VERSION
-    body = HUB_BODY.format(version=HUB_VERSION)
+    body = HUB_BODY.format(version=HUB_VERSION,
+                           highlights=load_highlights('hub', HUB_VERSION))
     create_local_tag(tag, title)
     rel = create_release(tag, title, body, token, prerelease=False)
     upload_asset(rel, HUB_SETUP, token)
@@ -394,6 +496,11 @@ def want_test_gate(argv):
 
 def main():
     argv = sys.argv[1:]
+    if '--update-notes' in argv:          # 只改发布说明，不重传资产
+        tok = get_token()
+        if not tok or not check_token(tok):
+            sys.exit(1)
+        sys.exit(0 if update_notes(tok) else 1)
     require_tests = want_test_gate(argv)
     rest = [a for a in argv if a not in ('--require-tests', '--no-require-tests')]
     target = rest[0] if rest else 'all'
