@@ -18,7 +18,10 @@ guiloader.py — Loom / LoomHub 可插拔 GUI 加载器 (2026-08-14)
 
 程序目录 = 源码时 Loom.py / LoomHub.py 所在目录；编译版 = exe 所在目录
 （统一用 `os.path.dirname(os.path.abspath(sys.argv[0]))`，与 game_player 同款）。
-设置文件 = `<程序目录>\设置.json`（GUI 选择 + 各程序设置项，原子写）。
+设置文件（2026-11-08 用户配置目录契约）:
+  模板层 = `<程序目录>\设置.json` —— **只读**（发布夹/引擎目录，随版本更新）
+  用户层 = `%LOCALAPPDATA%\Loom\{engine,hub}\settings.json` —— 只存 delta
+  合并   = 默认 <- 模板 <- 用户层；写入一律 tmp + os.replace，失败上抛。
 """
 import importlib.util
 import json
@@ -108,30 +111,117 @@ def gui_folder(program, base=None):
     return os.path.join(program_dir(program, base), 'GUI')
 
 
+def _userpaths():
+    """用户目录收口模块（契约 §2）。不可用时退回旧语义（LoomHub 单独分发时）。"""
+    try:
+        import userpaths
+        return userpaths
+    except Exception:
+        return None
+
+
 def settings_path(program, base=None):
-    return os.path.join(program_dir(program, base), '设置.json')
+    """设置.json 的**模板**（只读）路径.
+
+    base 显式给出 = 测试/工具的目录覆盖（旧语义: 该目录既是模板也是用户层）。
+    base 为 None = 发布夹/程序目录里的 设置.json（运行时只读）。
+    """
+    if base is not None:
+        return os.path.join(os.path.abspath(base), '设置.json')
+    return os.path.join(program_dir(program), '设置.json')
+
+
+def user_settings_path(program, base=None):
+    """设置.json 的**用户层**（可写）路径.
+
+    契约: %LOCALAPPDATA%\Loom\engine\settings.json (loom) /
+          %LOCALAPPDATA%\Loom\hub\settings.json (loomhub)。
+    base 显式给出时与模板同路径（测试隔离用，保持旧行为）。
+    """
+    if base is not None:
+        return os.path.join(os.path.abspath(base), '设置.json')
+    up = _userpaths()
+    if up is None:
+        return settings_path(program, base)
+    return up.hub_settings() if program == 'loomhub' else up.engine_settings()
+
+
+def _extract(d):
+    """统一"新格式 {schema,values}"与"旧格式 plain dict"。"""
+    if not isinstance(d, dict):
+        return {}
+    if 'schema' in d and isinstance(d.get('values'), dict):
+        return dict(d['values'])
+    return dict(d)
+
+
+def _read_layer(path, what='配置'):
+    """读一层设置: 缺文件 -> {}；坏 JSON -> 备份 + {}（出声，不静默）。"""
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            return _extract(json.load(f))
+    except FileNotFoundError:
+        return {}
+    except Exception as e:
+        print('[设置] %s 损坏 (%r): %s -> 备份后按默认' % (what, e, path))
+        up = _userpaths()
+        try:
+            dst = up.backup_path(path) if up is not None else path + '.bak'
+            os.replace(path, dst)
+        except Exception as e2:
+            print('[设置] 备份失败 (%r)，继续按默认运行' % (e2,))
+        return {}
 
 
 def load_settings(program, base=None):
-    """读 设置.json, 坏文件/缺文件回默认. 保留文件里的全部键 (向后兼容)."""
+    """读设置 = 默认 <- 模板 <- 用户层 delta.
+
+    坏文件不会让调用方崩（返回默认），但会打印一次原因并留备份。
+    base 显式给出时保持旧语义（该目录一份文件，直接覆盖）。
+    """
     s = dict(DEFAULT_SETTINGS[program])
-    try:
-        with open(settings_path(program, base), 'r', encoding='utf-8') as f:
-            d = json.load(f)
-        if isinstance(d, dict):
-            s.update(d)
-    except Exception:
-        pass
+    s.update(_read_layer(settings_path(program, base), '模板 设置.json'))
+    if base is None:
+        s.update(_read_layer(user_settings_path(program, base), '用户 设置.json'))
     return s
 
 
 def save_settings(program, settings, base=None):
-    """原子写 设置.json (tmp + os.replace)."""
-    path = settings_path(program, base)
+    """原子写设置（tmp + os.replace）。失败上抛（契约 §7）。
+
+    新语义: 只把**与默认+模板不同的键**写进用户层 {schema,values}；
+    base 显式给出时保持旧语义（整份写该目录的 设置.json）。
+    """
+    path = user_settings_path(program, base)
+    if base is not None:
+        payload = dict(settings)
+    else:
+        base_layer = dict(DEFAULT_SETTINGS[program])
+        base_layer.update(_read_layer(settings_path(program, base), '模板 设置.json'))
+        delta = {k: v for k, v in dict(settings).items()
+                 if k not in base_layer or base_layer[k] != v}
+        import time as _time
+        payload = {'schema': 1, 'app': program,
+                   'updated_at': _time.strftime('%Y-%m-%d %H:%M:%S'),
+                   'values': delta}
+    up = _userpaths()
+    d = os.path.dirname(os.path.abspath(path))
+    if up is not None:
+        up.ensure_dir(d)
+    else:
+        os.makedirs(d, exist_ok=True)
     tmp = path + '.tmp'
-    with open(tmp, 'w', encoding='utf-8') as f:
-        json.dump(settings, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, path)
+    try:
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+    return path
 
 
 def _suffix_ok(program, fname):

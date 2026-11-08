@@ -97,7 +97,8 @@ _KEYMAP = {
 # ================ 输入动作层 (M30b, Unity 输入系统理念) ================
 # 动作 = "玩家想做什么" ('向前'/'跳跃'), 绑定到一组键名 (_KEYMAP 字符键).
 # 脚本/游戏逻辑用 engine.get_action('动作') 而非 is_key('键') —— 改键不动脚本,
-# 像 Unity Input System 的动作层 (Action -> Binding). 键位可在 输入配置.json 重映射.
+# 像 Unity Input System 的动作层 (Action -> Binding). 键位改在用户层
+# (游戏设置.json values.key_bindings), 模板见 输入配置.default.json (只读).
 DEFAULT_ACTIONS = {
     # 2026-11-07: 强制存在的"解锁鼠标"动作 (默认 Tab, 可在
     # 游戏设置.json 的 key_bindings 里改键, 游戏开发者可做改键 UI)
@@ -110,7 +111,12 @@ DEFAULT_ACTIONS = {
     '交互': ['e'],
     '加速': ['Shift'],
 }
-_ACTION_FILE = "输入配置.json"   # 键位重映射配置文件 (放引擎目录, 缺失用默认)
+# 2026-11-08 用户配置目录契约 §8: 引擎目录里的键位文件降级为**只读模板**,
+# 运行时永不写；玩家/开发者的改键落在用户层 (%LOCALAPPDATA%\Loom\...) 的
+# 游戏设置.json -> values.key_bindings。
+UNLOCK_ACTION = '解锁鼠标'   # 引擎独占的解锁动作名 (2026-11-08 D6=A)
+_ACTION_FILE = "输入配置.default.json"    # 只读模板（随版本更新）
+_ACTION_FILE_LEGACY = "输入配置.json"     # 旧名：仍可作模板读（旧安装/开发工作区）
 
 
 # ================ 按键绑定配置 (可在此处修改) ================
@@ -190,12 +196,65 @@ class InputMixin:
 
     def get_action(self, name):
         """输入动作查询 (Unity 动作层): 动作名 -> 绑定的任意键按下即 True.
-        默认动作见 DEFAULT_ACTIONS; 键位可在 输入配置.json 重映射 (改键不动脚本).
+        默认动作见 DEFAULT_ACTIONS; 键位可在用户层重映射 (改键不动脚本).
         未绑定动作时回退为同名键查询 (方便脚本直接写 'w')."""
         for k in self.actions.get(name, (name,)):
             if self.script_keys.get(k, False):
                 return True
         return False
+
+    # ---- 2026-11-08 (P-01-02 / D6=A): 解锁键归引擎独占 + 键位冲突判定 ----
+
+    def script_occupied_keys(self, exclude_action=None):
+        """脚本声明占用的具体键名 -> {键名: [脚本显示名, ...]}。
+
+        声明项展开: 'Tab' 原样; 'action:向前' 用**当前** self.actions 展开。
+        exclude_action = 正在改绑的动作名（它自己的旧绑定不算冲突，否则
+        "把 向前 再绑回 w" 会被自己拒绝）。
+        脚本注册表不可用时出声跳过（不静默通过）。
+        """
+        occ = {}
+        try:
+            import scripts
+            uses = scripts.script_key_uses()
+            disp = scripts.script_display_name
+        except Exception as e:
+            print('[输入] 脚本键位声明不可用 (%r) -> 本次跳过冲突判定' % (e,))
+            return occ
+        for sid, decls in uses.items():
+            who = disp(sid)
+            for d in decls:
+                d = str(d)
+                if d.startswith(getattr(scripts, 'KEY_ACTION_PREFIX', 'action:')):
+                    act = d[len(getattr(scripts, 'KEY_ACTION_PREFIX', 'action:')):]
+                    if act == exclude_action:
+                        continue
+                    keys = self.actions.get(act, (act,))
+                else:
+                    keys = (d,)
+                for k in keys:
+                    occ.setdefault(str(k), []).append(who)
+        return occ
+
+    def validate_action_binding(self, name, keys):
+        """键位冲突校验 -> (ok, reason). 冲突时 reason 可直接展示给玩家。"""
+        occ = self.script_occupied_keys(exclude_action=name)
+        seen = set()
+        hit = []
+        for k in (keys or []):
+            for who in occ.get(str(k), ()):
+                if (k, who) not in seen:
+                    seen.add((k, who))
+                    hit.append((k, who))
+        if hit:
+            k0, who0 = hit[0]
+            if name == UNLOCK_ACTION:
+                return False, ('键位冲突: 解锁键 %s 已被脚本 %s 使用，'
+                               '请先定义解锁键（或先改掉该脚本占用的键）'
+                               % (k0, who0))
+            return False, ('键位冲突: 动作 %s 的键 %s 已被脚本 %s 占用'
+                           % (name, k0, who0))
+        return True, ''
 
     def set_mouse_locked(self, locked):
         """M39 底层: 直接设鼠标锁定状态 (True=隐藏+捕获居中, False=显示+释放).
@@ -241,52 +300,118 @@ class InputMixin:
         self._apply_mouse_lock()
 
     def _action_bindings_file(self):
-        return os.path.join(os.path.dirname(os.path.abspath(__file__)), _ACTION_FILE)
+        """键位**模板**路径（只读）: 优先 <引擎目录>/输入配置.default.json,
+        其次兼容旧名 输入配置.json（旧安装/未迁移的工作区）."""
+        d = os.path.dirname(os.path.abspath(__file__))
+        p_new = os.path.join(d, _ACTION_FILE)
+        if os.path.exists(p_new):
+            return p_new
+        p_old = os.path.join(d, _ACTION_FILE_LEGACY)
+        return p_old if os.path.exists(p_old) else p_new
 
     def _load_action_bindings(self, path=None):
-        """从 输入配置.json 加载动作绑定 (坏文件回退默认)."""
+        """加载动作绑定 = DEFAULT_ACTIONS <- 模板(只读) <- 用户层 key_bindings.
+
+        契约 docs/design/用户配置目录契约_20261108.md §4/§5:
+          · 模板坏/缺 -> 用默认，但**出声**（不再静默）；
+          · 单条坏条目只影响它自己（审计 P-01-16），其余照常加载；
+          · 用户层覆盖由 apply_game_bindings() 收口（审计 P-01-01 的实现点）。
+        """
         import json as _json
         p = path or self._action_bindings_file()
+        self.actions = dict(DEFAULT_ACTIONS)
         try:
             with open(p, 'r', encoding='utf-8') as f:
                 data = _json.load(f)
-            if isinstance(data, dict) and data.get('actions'):
-                self.actions = {a: list(ks) for a, ks in data['actions'].items()}
-                # 补新动作 (旧配置缺的新动作用默认)
-                for a, ks in DEFAULT_ACTIONS.items():
-                    self.actions.setdefault(a, list(ks))
-        except Exception:
-            self.actions = dict(DEFAULT_ACTIONS)
-        # 2026-11-07: 叠加本游戏键位覆盖 (游戏设置.json key_bindings 优先)
+        except FileNotFoundError:
+            data = None
+        except Exception as e:
+            print('[输入] 键位模板读取失败 (%r): %s -> 用默认键位' % (e, p))
+            data = None
+        acts = data.get('actions') if isinstance(data, dict) else None
+        if acts is not None and not isinstance(acts, dict):
+            print('[输入] 键位模板 actions 段应为对象 (%s) -> 忽略该段'
+                  % (type(acts).__name__,))
+            acts = None
+        for a, ks in (acts or {}).items():
+            try:
+                self.actions[str(a)] = list(ks)
+            except Exception as e:
+                print('[输入] 键位模板条目 %r 非法 (%r) -> 跳过该条' % (a, e))
         self.apply_game_bindings()
 
+    def apply_game_bindings(self):
+        """把**用户层** key_bindings 叠加到 self.actions（最高优先级层）.
+
+        契约 §3.4 优先级: 游戏设置.json key_bindings > 引擎模板 > DEFAULT_ACTIONS。
+        读失败不抛（启动必须能跑起来），但会打印原因而不是静默跳过。
+        """
+        try:
+            import game_settings
+            kb = game_settings.read_key_bindings()
+        except Exception as e:
+            print('[输入] 读用户键位失败 (%r) -> 沿用模板/默认键位' % (e,))
+            return
+        for a, ks in (kb or {}).items():
+            try:
+                self.actions[str(a)] = list(ks)
+            except Exception as e:
+                print('[输入] 用户键位条目 %r 非法 (%r) -> 跳过' % (a, e))
+        self.resolve_unlock_key_conflict()
+
+    def resolve_unlock_key_conflict(self):
+        """加载时冲突处置: 用户层已存的解锁键与脚本声明冲突 -> 告警 + 回退默认。
+
+        选择"告警 + 回退默认 Tab"而不是"拒绝启动"的理由: 用户配置目录契约 §5
+        要求启动流程必须能跑（配置写错不应把游戏变成打不开）；且内置脚本不再
+        占用 Tab 后，默认解锁键天然无冲突，回退是安全的最小动作。
+        """
+        cur = self.actions.get(UNLOCK_ACTION)
+        if not cur:
+            return
+        ok, reason = self.validate_action_binding(UNLOCK_ACTION, list(cur))
+        if ok:
+            return
+        default = list(DEFAULT_ACTIONS.get(UNLOCK_ACTION, ['Tab']))
+        ok2, _r2 = self.validate_action_binding(UNLOCK_ACTION, default)
+        if ok2:
+            print('[输入] %s -> 已回退默认解锁键 %s' % (reason, default))
+            self.actions[UNLOCK_ACTION] = default
+        else:
+            print('[输入] %s -> 默认解锁键亦被占用，保持当前值（解锁键可能失效）'
+                  % (reason,))
+
     def save_action_bindings(self, path=None):
-        """保存当前动作绑定到 输入配置.json (供改键 UI 调用)."""
+        """导出/落盘当前动作绑定.
+
+        path 给出 = 写成 {\"actions\": ...} 明文（导出/测试用）；
+        path 缺省 = 写**用户层** delta（契约 §7：失败上抛，不再 except: pass）。
+        """
         import json as _json
-        p = path or self._action_bindings_file()
-        tmp = p + ".tmp"
-        with open(tmp, 'w', encoding='utf-8') as f:
-            _json.dump({"actions": self.actions}, f, ensure_ascii=False, indent=2)
-        os.replace(tmp, p)
+        if path is not None:
+            tmp = path + ".tmp"
+            with open(tmp, 'w', encoding='utf-8') as f:
+                _json.dump({"actions": self.actions}, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, path)
+            return path
+        import game_settings
+        return game_settings.write_key_bindings(self.actions)
 
     def rebind_action(self, name, keys):
         """重映射动作到一组键名 (如 {'跳跃': ['space','j']})。
 
-        2026-11-07: **同时写进本游戏的 游戏设置.json key_bindings** ——
-        打包游戏的玩家改键只影响这个游戏, 不污染引擎 输入配置.json;
-        开发环境另存一份到引擎配置便于复用。
+        2026-11-08（审计 P-01-05）: **只写用户层**（%LOCALAPPDATA%\Loom\… 的
+        游戏设置.json values.key_bindings），绝不写引擎目录的只读模板，
+        也不写任何受版本控制的文件；写失败上抛，由调用方 (set_action_binding /
+        改键 UI) 如实告知玩家（契约 §7）。
         """
         keys = list(keys)
+        ok, reason = self.validate_action_binding(name, keys)
+        if not ok:
+            raise ValueError(reason)          # 冲突即拒绝保存（D6=A 裁决）
         self.actions[name] = keys
-        try:
-            import game_settings
-            game_settings.write_key_binding(name, keys)
-        except Exception as e:
-            print('[输入] 写游戏键位失败 (忽略): %r' % (e,))
-        try:
-            self.save_action_bindings()
-        except Exception:
-            pass
+        import game_settings
+        game_settings.write_key_binding(name, keys)
         return self.actions[name]
 
     def get_action_bindings(self):

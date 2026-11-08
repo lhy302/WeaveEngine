@@ -15,6 +15,14 @@ except Exception:
     pass
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+
+# 2026-11-08 (beta3 回补审计 N2): 统一把运行期配置隔离到临时目录。
+# 背景: 配置体系改为"用户层 %LOCALAPPDATA%\Loom\…"后, 没有显式隔离的测试会在
+# **真实用户目录**里留下 games\tests-<hash>\settings.json / engine\settings.json
+# (实测两处)。setdefault 不覆盖测试自己已设的值, 所以各测试的精细隔离仍然优先。
+import tempfile as _tf_iso
+os.environ.setdefault('LOOM_USER_ROOT', _tf_iso.mkdtemp(prefix='loom_tests_userroot_'))
+
 files = [f for f in sorted(glob.glob(os.path.join(HERE, "test_*.py")))
          if os.path.basename(f) != "test_integration.py"]
 files.append(os.path.join(HERE, "test_integration.py"))  # 真实窗口放最后

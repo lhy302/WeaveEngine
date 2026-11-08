@@ -54,6 +54,30 @@ from loom_physics import PhysicsMixin   # M28 碰撞 + M31 刚体物理 (已抽�
 
 # ---- 按键映射 + 输入动作层（已抽出到 loom_input.py，原 51-77 行） ----
 from loom_input import _KEYMAP, DEFAULT_ACTIONS, _ACTION_FILE   # noqa: E402,F401
+from loom_input import UNLOCK_ACTION   # noqa: E402  引擎独占解锁动作名 (2026-11-08 D6=A)
+
+# N3: 解锁键轮询"跑不起来"的告警闸门 —— 每 (引擎类, 缺失原因) 每进程只打一行
+_UNLOCK_POLL_WARNED = set()
+
+
+def _unlock_poll_warn(obj, missing):
+    """解锁键轮询无法执行时的一次性告警（模块级: 不依赖 self 的方法存在）。
+
+    带上"哪个引擎类 / 缺什么 / 该怎么办"，让"轮询其实没跑"在日志里一眼可见；
+    每 (类名, 原因) 每进程只打一行，避免 N3 的 265 条刷屏。
+    """
+    key = (type(obj).__name__, str(missing))
+    try:
+        obj._unlock_poll_warned = True
+    except Exception:
+        pass
+    if key in _UNLOCK_POLL_WARNED:
+        return False
+    _UNLOCK_POLL_WARNED.add(key)
+    print('[输入] 解锁键轮询未执行: 引擎实例 %s 的 %s 不可用 —— '
+          '解锁键在该实例上不会生效(测试桩请补 actions = dict(DEFAULT_ACTIONS) '
+          '与 toggle_mouse_locked())' % (type(obj).__name__, missing))
+    return True
 from loom_input import InputMixin   # 输入子系统 (按键/动作层/鼠标锁定/键位配置)
 from loom_hud import HudMixin   # HUD/文字渲染子系统
 from loom_camera import CameraMixin   # 相机控制子系统 (轨道相机/键控移动旋转)
@@ -388,7 +412,8 @@ class GLEngine(ShadowMixin, FrameComponentMixin, PhysicsMixin, InputMixin, HudMi
         self.actions = dict(DEFAULT_ACTIONS)
         try:
             self._load_action_bindings()
-        except Exception:
+        except Exception as e:
+            print('[输入] 键位加载失败 (%r) -> 用默认键位' % (e,))
             self.actions = dict(DEFAULT_ACTIONS)
 
         # ================ 鼠标状态 (编辑器 GUI/gizmo 用) ================
@@ -879,57 +904,128 @@ class GLEngine(ShadowMixin, FrameComponentMixin, PhysicsMixin, InputMixin, HudMi
         return res
 
 
+    def _warn_unlock_poll_unavailable(self, missing):
+        """解锁键轮询跑不起来的**一次性**告警 (N3 假绿: 桩缺属性时曾每帧刷屏 265 条)。
+
+        每 (引擎类, 缺失原因) 在进程内只打一行, 并带上"哪个类 / 缺什么 / 该怎么办",
+        使"轮询其实没跑"在日志里一眼可见(而不是被无差别 except 吞掉)。
+        """
+        return _unlock_poll_warn(self, missing)
+
     def _poll_mouse_unlock_key(self):
-        """2026-11-07: **强制解锁键 Tab** —— 任何游戏都能解/锁鼠标, 不依赖脚本。
+        """引擎**独占**的解锁键检测（2026-11-08 D6=A / 审计 P-01-02 / N3）。
 
         背景: 吃豆人这类不需要鼠标的游戏, 打包版启动即被无条件锁死且无解锁手段。
         现在: ① mouse_lock_allowed=False 的游戏**永远不锁**;
-              ② 其余游戏始终可按 Tab 切换 (Tab 是引擎保留键)。
+              ② 其余游戏按"解锁鼠标"动作切换 (默认 Tab, 可改键; 引擎独占).
+
+        唯一所有者: 内置 first_person/third_person 脚本已删掉各自的 Tab 分支
+        (此前引擎 poll 与脚本同一帧各翻一次 → 净效果"解锁键没反应")。
+
+        结构(N3): **取键值** 与 **翻转** 两段分开; 只对**预期内**的缺失
+        (AttributeError: 缺 actions / 缺 toggle_mouse_locked) 做一次性告警,
+        不再用无差别 except 把"轮询其实没跑"伪装成正常。
+
+        返回: True = 本帧发生了 锁定<->解锁 翻转; False = 无变化 / 无法轮询。
         """
+        if not getattr(self, 'mouse_lock_allowed', True):
+            if getattr(self, 'mouse_locked', False):
+                self.set_mouse_locked(False)
+            self._unlock_key_prev = False
+            return False
+
+        # ---- 第 1 段: 取键值（可预期缺失 -> 一次性告警 + 明确不执行）----
+        actions = getattr(self, 'actions', None)
+        if not isinstance(actions, dict):
+            _unlock_poll_warn(self, 'actions (键位表)')
+            return False
+        get_action = getattr(self, 'get_action', None)
+        if not callable(get_action):
+            _unlock_poll_warn(self, 'get_action()')
+            return False
+        if UNLOCK_ACTION not in actions:
+            _unlock_poll_warn(self, '动作 %r (键位表缺该动作)' % (UNLOCK_ACTION,))
+            return False
         try:
-            if not getattr(self, 'mouse_lock_allowed', True):
-                if getattr(self, 'mouse_locked', False):
-                    self.set_mouse_locked(False)
-                self._unlock_key_prev = False
-                return
-            # 2026-11-07: 解锁键不再是硬编码 Tab, 而是动作 '解锁鼠标'
-            # (默认 Tab, 可在 游戏设置.json 的 key_bindings 改键; 游戏开发者可做改键 UI)
-            k = bool(self.get_action('解锁鼠标'))
-            if k and not getattr(self, '_unlock_key_prev', False):
-                self.toggle_mouse_locked()
-                try:
-                    _keys = ','.join(self.actions.get('解锁鼠标') or [])
-                except Exception:
-                    _keys = '?'
-                print('[输入] 按键 [%s] 切换鼠标锁定 -> %s'
-                      % (_keys, '锁定' if getattr(self, 'mouse_locked', False) else '已解锁'))
+            k = bool(get_action(UNLOCK_ACTION))
+        except AttributeError as e:      # 桩缺按键快照(script_keys/keys)等
+            _unlock_poll_warn(self, '按键快照 (%s)' % (e,))
+            return False
+
+        # ---- 第 2 段: 翻转（只捕预期内的 AttributeError）----
+        if k and not getattr(self, '_unlock_key_prev', False):
+            toggle = getattr(self, 'toggle_mouse_locked', None)
+            if not callable(toggle):
+                _unlock_poll_warn(self, 'toggle_mouse_locked()')
+                return False
+            try:
+                toggle()
+            except AttributeError as e:      # 桩的内部状态缺失: 告警一次, 不刷屏
+                _unlock_poll_warn(self, 'toggle_mouse_locked() 内部: %s' % (e,))
+                return False
+            try:
+                _keys = ','.join(actions.get(UNLOCK_ACTION) or [])
+            except (TypeError, AttributeError):
+                _keys = '?'
+            print('[输入] 按键 [%s] 切换鼠标锁定 -> %s'
+                  % (_keys, '锁定' if getattr(self, 'mouse_locked', False) else '已解锁'))
             self._unlock_key_prev = k
-        except Exception:
-            pass
+            return True
+        self._unlock_key_prev = k
+        return False
+
+    def poll_unlock(self):
+        """暂停态/外部驱动的解锁键入口（审计 P-01-04 的跨批 API）。
+
+        签名: poll_unlock() -> bool（True = 本帧发生了一次 锁定<->解锁 翻转）
+        语义: 与 update_scripts 内部调用**同一实现**（_poll_mouse_unlock_key），
+              不依赖逻辑帧 —— 暂停（F9 / 通关暂停）时逻辑帧不跑, 宿主需每渲染帧
+              直接调用本方法。
+        调用方（第 2 批）: scene_driver.SceneDriver 的 advance_logic 暂停早退分支
+              之前 / vk_player 渲染循环；GL 侧 GLEngine.update_scripts 已内置，
+              编辑器/播放器**不要**重复调用（否则同帧翻转两次）。
+        """
+        return self._poll_mouse_unlock_key()
 
 
     # ---- 键位 API (2026-11-07, 游戏开发者做"改键 UI"用) ----
     def get_action_bindings(self):
-        """全部动作 -> 键名列表 (供 UI 展示当前键位)。"""
+        """全部动作 -> 键名列表 (供 UI 展示当前键位)。读失败出声并返回空表。"""
         try:
             return {a: list(ks) for a, ks in self.actions.items()}
-        except Exception:
+        except Exception as e:
+            print('[输入] 读动作绑定失败 (%r) -> 返回空表' % (e,))
             return {}
 
     def set_action_binding(self, action, keys):
-        """改某个动作的按键并**写入本游戏配置** (立即生效)。
+        """改某个动作的按键并**写入用户层**（立即生效）。
 
-        keys: 'f' 或 ['f','F10']。返回 {'ok', 'action', 'keys', 'saved'}。
+        2026-11-08 契约 §7（审计 P-01-03）: 写失败必须让调用方可判定 ——
+        saved 只在真落盘时为 True，失败返回 ok=False + error，不再假成功。
+
+        keys: 'f' 或 ['f','F10']。返回 {'ok','action','keys','saved','path'?}。
         """
+        ks = []
         try:
+            # 注意: 不能先覆盖参数 keys (2026-11-08 自查发现上一版把入参清空 ->
+            # 任何改键都变成"写成空绑定", 冲突校验与落盘全部落空)。
             if isinstance(keys, str):
-                keys = [keys]
-            keys = [str(k) for k in (keys or []) if str(k)]
-            self.rebind_action(str(action), keys)
-            return {'ok': True, 'action': str(action), 'keys': keys,
-                    'saved': True}
+                ks = [keys]
+            else:
+                ks = list(keys or [])
+            ks = [str(k) for k in ks if isinstance(k, str) and k]
+            self.rebind_action(str(action), ks)
+            res = {'ok': True, 'action': str(action), 'keys': ks, 'saved': True}
+            try:
+                import game_settings
+                res['path'] = game_settings.user_path()
+            except Exception as e:
+                print('[输入] 取配置路径失败 (%r)' % (e,))
+            return res
         except Exception as e:
-            return {'ok': False, 'action': str(action), 'error': repr(e)}
+            print('[输入] 写键位失败: %s' % (e,))
+            return {'ok': False, 'action': str(action), 'keys': ks,
+                    'saved': False, 'error': str(e)}
 
     def update_scripts(self, delta_time):
         self._poll_mouse_unlock_key()
