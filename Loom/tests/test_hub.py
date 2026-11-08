@@ -54,6 +54,7 @@ def _enforce_fail_exit_code():
     _os_gate._exit(1)
 
 
+import json
 import os
 import sys
 import tempfile
@@ -74,6 +75,9 @@ import hub_install as inst
 _TEST_CFG_DIR = tempfile.mkdtemp(prefix='loomhub_cfg_test_')
 cfg.INTERPRETERS_FILE = os.path.join(_TEST_CFG_DIR, 'interpreters.json')
 cfg.PROJECTS_FILE = os.path.join(_TEST_CFG_DIR, 'projects.json')
+# 2026-11-08 第 5b 批: Hub 设置/台账已迁到用户目录（%LOCALAPPDATA%\Loom\hub），
+# 测试必须整体重定向到临时根，否则会把开发机真实用户配置改脏。
+os.environ.setdefault('LOOM_USER_ROOT', _TEST_CFG_DIR)
 
 _FAILS = []
 
@@ -295,6 +299,29 @@ def t_projects_crud():
 
 
 # ---------------- 启动命令 ----------------
+def _open_project_cmd(interp_info, scene):
+    """把 HubController.open_project 的命令构造真跑一遍（Popen 换成捕获桩）。
+
+    D3=A 之后 "--agent" 由调用方追加，这条断言盯的就是调用方那一步：恰好一个。
+    """
+    import hub_controller as hc
+    captured = {}
+    old_pop = hc.subprocess.Popen
+    old_interp = cfg.default_interpreter
+    hc.subprocess.Popen = lambda cmd, **kw: captured.setdefault('cmd', list(cmd))
+    cfg.default_interpreter = lambda: interp_info
+    try:
+        ctrl = hc.HubController.__new__(hc.HubController)
+        ctrl.msg = ""
+        ctrl.msg_level = 'ok'
+        ctrl.set_msg = lambda m, lvl='ok': setattr(ctrl, 'msg', m)
+        ctrl.open_project({'scene': scene})
+    finally:
+        hc.subprocess.Popen = old_pop
+        cfg.default_interpreter = old_interp
+    return captured.get('cmd') or []
+
+
 def t_launch_command(monkey_env=None):
     with tempfile.TemporaryDirectory() as tmp:
         old = cfg.default_python
@@ -306,7 +333,12 @@ def t_launch_command(monkey_env=None):
                   "path": os.path.join(tmp, "Loom.py")}
             exe = {"name": "Loom", "version": "1.0.0", "kind": "exe",
                    "path": os.path.join(tmp, "Loom.exe")}
-            scene = "D:\\s\\a.json"
+            scene_file = os.path.join(tmp, "a.json")
+            open(scene_file, 'w', encoding='utf-8').write("{}")
+            scene = scene_file
+            # 2026-11-08 D3=A 人类裁决: build_launch_command 恢复**纯拼装**，
+            # --agent 由调用方(hub_controller.open_project)追加。因此这里仍断言
+            # "命令里没有 --agent"，同时下面单独断言调用方恰好加一次。
             check(".py 用系统默认 python + --open",
                   cfg.build_launch_command(py, scene, 'open') ==
                   ["python", py['path'], "--open", scene])
@@ -318,10 +350,204 @@ def t_launch_command(monkey_env=None):
             check(".exe 直接运行 + --open",
                   cfg.build_launch_command(exe, scene, 'open') ==
                   [exe['path'], "--open", scene])
+            check("纯拼装: 任何 mode 都不自带 --agent",
+                  all('--agent' not in cmd for cmd in (
+                      cfg.build_launch_command(py, scene, 'open'),
+                      cfg.build_launch_command(py, scene, 'run'),
+                      cfg.build_launch_command(py, None),
+                      cfg.build_launch_command(exe, scene, 'open'))),
+                  [cfg.build_launch_command(py, scene, 'open')])
+            check("打开项目: 调用方恰好追加一个 --agent (D3=A)",
+                  _open_project_cmd(py, scene).count('--agent') == 1,
+                  _open_project_cmd(py, scene))
             check("default_python 返回字符串",
                   isinstance(cfg.default_python(), str))
         finally:
             cfg.default_python = old
+
+
+def t_hub_settings_userdir():
+    """契约 2026-11-08 §2/§4/§7: Hub 设置落用户目录、只存 delta、模板只读。"""
+    import json as _json
+    with tempfile.TemporaryDirectory() as tmp:
+        old = os.environ.get('LOOM_USER_ROOT')
+        os.environ['LOOM_USER_ROOT'] = tmp
+        try:
+            tpl = cfg.hub_settings_template()
+            tpl_before = open(tpl, 'rb').read() if os.path.isfile(tpl) else None
+            p = cfg.hub_settings_file()
+            check("hub 设置路径落在用户根下（不再写安装目录）",
+                  os.path.abspath(p).startswith(os.path.abspath(tmp)), p)
+            merged = cfg.load_hub_settings()
+            check("读设置 = 默认+模板合并（gui/open_py 都有）",
+                  'gui' in merged and 'open_py' in merged, merged)
+            cfg.save_hub_settings(dict(merged, open_py=False))
+            raw = _json.load(open(p, encoding='utf-8'))
+            check("用户层是新格式 {schema,values}",
+                  raw.get('schema') == 1 and isinstance(raw.get('values'), dict), raw)
+            check("只写 delta: 改过的键进 values",
+                  raw['values'].get('open_py') is False, raw.get('values'))
+            check("模板层负责的键不进 delta",
+                  'gui' not in raw['values'], raw.get('values'))
+            check("读回: 用户 delta 覆盖模板层",
+                  cfg.load_hub_settings().get('open_py') is False)
+            tpl_after = open(tpl, 'rb').read() if os.path.isfile(tpl) else None
+            check("模板文件字节未变（运行时永不写模板）", tpl_before == tpl_after)
+        finally:
+            if old is None:
+                os.environ.pop('LOOM_USER_ROOT', None)
+            else:
+                os.environ['LOOM_USER_ROOT'] = old
+        check("撤掉 LOOM_USER_ROOT 后路径回到系统用户目录",
+              not os.path.abspath(cfg.hub_settings_file()).startswith(
+                  os.path.abspath(tmp)), cfg.hub_settings_file())
+
+
+# ---------------- 用户目录（2026-11-08 契约 §2/§4/§7；第 5b 批） ----------------
+def t_hub_settings_readonly_program_dir():
+    """验收 1: 程序目录（模板层）不可写时，Hub 仍能把设置存进用户层。"""
+    import stat
+    with tempfile.TemporaryDirectory() as prog, tempfile.TemporaryDirectory() as user:
+        tpl = os.path.join(prog, '设置.json')
+        with open(tpl, 'w', encoding='utf-8') as f:
+            f.write('{"gui": "TkHubView", "open_py": true}')
+        os.chmod(tpl, stat.S_IREAD)          # 模拟"程序目录只读"
+        old_tpl = cfg.hub_settings_template
+        old_root = os.environ.get('LOOM_USER_ROOT')
+        cfg.hub_settings_template = lambda: tpl
+        os.environ['LOOM_USER_ROOT'] = user
+        try:
+            before = sorted(os.listdir(prog))
+            cfg.save_hub_settings({'gui': 'TkHubView', 'open_py': False})
+            upath = cfg.hub_settings_file()
+            check("程序目录只读时保存不抛异常且落用户层", os.path.isfile(upath), upath)
+            check("用户层路径在用户根下",
+                  os.path.abspath(upath).startswith(os.path.abspath(user)), upath)
+            raw = json.load(open(upath, encoding='utf-8'))
+            check("只写 delta（只有改过的 open_py）",
+                  raw.get('values') == {'open_py': False}, raw.get('values'))
+            check("只读模板内容未被改写",
+                  open(tpl, encoding='utf-8').read() == '{"gui": "TkHubView", "open_py": true}')
+            check("程序目录没有多出/少掉文件",
+                  sorted(os.listdir(prog)) == before, os.listdir(prog))
+            check("读回生效（用户 delta 覆盖模板）",
+                  cfg.load_hub_settings().get('open_py') is False)
+        finally:
+            cfg.hub_settings_template = old_tpl
+            if old_root is None:
+                os.environ.pop('LOOM_USER_ROOT', None)
+            else:
+                os.environ['LOOM_USER_ROOT'] = old_root
+            try:
+                os.chmod(tpl, stat.S_IWRITE)
+            except OSError:
+                pass
+
+
+def t_hub_settings_write_failure_raises():
+    """契约 §7: 用户层写失败必须上抛，不得静默丢设置。"""
+    import hub_userpaths
+    with tempfile.TemporaryDirectory() as tmp:
+        blocker = os.path.join(tmp, 'blocker')
+        open(blocker, 'w').close()           # 用"文件"占住路径 -> makedirs 必失败
+        old_root_fn = hub_userpaths.user_root
+        old_root = os.environ.get('LOOM_USER_ROOT')
+        os.environ.pop('LOOM_USER_ROOT', None)
+        hub_userpaths.user_root = lambda: os.path.join(blocker, 'root')
+        try:
+            raised = False
+            try:
+                cfg.save_hub_settings({'open_py': False})
+            except Exception:
+                raised = True
+            check("用户层写失败 -> 上抛（不静默）", raised)
+        finally:
+            hub_userpaths.user_root = old_root_fn
+            if old_root is not None:
+                os.environ['LOOM_USER_ROOT'] = old_root
+
+
+def t_hub_ledger_migration():
+    """验收 2: 程序目录旧台账首次运行迁移进用户目录（条目数一致、旧文件不动）。"""
+    with tempfile.TemporaryDirectory() as prog, tempfile.TemporaryDirectory() as user:
+        leg_i = os.path.join(prog, 'interpreters.json')
+        leg_p = os.path.join(prog, 'projects.json')
+        interps = [{"name": "Loom", "version": "0.1.0.beta4", "kind": "py",
+                    "dir": "D:/a", "main": "Loom.py", "path": "D:/a/Loom.py"},
+                   {"name": "Loom", "version": "0.1.0.beta3", "kind": "py",
+                    "dir": "D:/b", "main": "Loom.py", "path": "D:/b/Loom.py"}]
+        projects = [{"name": "游戏A", "scene": "D:/s/a.json"}]
+        with open(leg_i, 'w', encoding='utf-8') as f:
+            json.dump({"interpreters": interps}, f, ensure_ascii=False)
+        with open(leg_p, 'w', encoding='utf-8') as f:
+            json.dump({"projects": projects}, f, ensure_ascii=False)
+        before_i = open(leg_i, 'rb').read()
+        before_p = open(leg_p, 'rb').read()
+        old = (cfg.INTERPRETERS_FILE, cfg.PROJECTS_FILE,
+               cfg.LEGACY_INTERPRETERS_FILE, cfg.LEGACY_PROJECTS_FILE,
+               os.environ.get('LOOM_USER_ROOT'))
+        os.environ['LOOM_USER_ROOT'] = user
+        cfg.LEGACY_INTERPRETERS_FILE = leg_i
+        cfg.LEGACY_PROJECTS_FILE = leg_p
+        cfg.INTERPRETERS_FILE = cfg.default_interpreters_file()
+        cfg.PROJECTS_FILE = cfg.default_projects_file()
+        try:
+            check("解释器台账默认落点改到用户目录",
+                  os.path.abspath(cfg.INTERPRETERS_FILE).startswith(os.path.abspath(user)),
+                  cfg.INTERPRETERS_FILE)
+            lst = cfg.load_interpreters()
+            check("首次运行迁移解释器台账（条目数一致）", len(lst) == 2, lst)
+            check("用户层台账文件已创建", os.path.isfile(cfg.INTERPRETERS_FILE),
+                  cfg.INTERPRETERS_FILE)
+            prj = cfg.load_projects()
+            check("首次运行迁移项目台账（条目数一致）", len(prj) == 1, prj)
+            check("旧台账文件保持不动（不删用户文件）",
+                  open(leg_i, 'rb').read() == before_i
+                  and open(leg_p, 'rb').read() == before_p)
+            cfg.add_interpreter({"name": "Loom", "version": "0.1.0.beta9", "kind": "py",
+                                 "dir": "D:/n", "main": "Loom.py", "path": "D:/n/Loom.py"})
+            check("迁移后可继续登记且不丢已迁移条目",
+                  len(cfg.load_interpreters()) == 3, cfg.load_interpreters())
+            check("用户层文件是完整台账（不是 delta）",
+                  len(json.load(open(cfg.INTERPRETERS_FILE,
+                                     encoding='utf-8'))['interpreters']) == 3)
+        finally:
+            (cfg.INTERPRETERS_FILE, cfg.PROJECTS_FILE,
+             cfg.LEGACY_INTERPRETERS_FILE, cfg.LEGACY_PROJECTS_FILE,
+             old_root) = old
+            if old_root is None:
+                os.environ.pop('LOOM_USER_ROOT', None)
+            else:
+                os.environ['LOOM_USER_ROOT'] = old_root
+
+
+def t_guiloader_hub_layer():
+    """LoomHub/guiloader 对 loomhub 已委派到用户层；base= 保持旧语义（测试隔离）。"""
+    import guiloader
+    with tempfile.TemporaryDirectory() as user, tempfile.TemporaryDirectory() as base_dir:
+        old_root = os.environ.get('LOOM_USER_ROOT')
+        os.environ['LOOM_USER_ROOT'] = user
+        try:
+            s = guiloader.load_settings('loomhub')
+            check("guiloader 读 Hub 设置带回默认键",
+                  bool(s.get('gui')) and 'open_py' in s, s)
+            guiloader.save_settings('loomhub', dict(s, open_py=False))
+            upath = os.path.join(user, 'hub', 'settings.json')
+            check("guiloader 写 Hub 设置落用户层（不再写程序目录）",
+                  os.path.isfile(upath), upath)
+            check("guiloader 读回用户 delta 生效",
+                  guiloader.load_settings('loomhub').get('open_py') is False)
+            guiloader.save_settings('loomhub', {'gui': 'TkHubView', 'open_py': False},
+                                    base=base_dir)
+            check("base= 保持旧语义（整份写该目录）",
+                  os.path.isfile(os.path.join(base_dir, '设置.json')))
+            check("base= 读回一致",
+                  guiloader.load_settings('loomhub', base=base_dir).get('open_py') is False)
+        finally:
+            if old_root is None:
+                os.environ.pop('LOOM_USER_ROOT', None)
+            else:
+                os.environ['LOOM_USER_ROOT'] = old_root
 
 
 def t_python_version_error():
@@ -557,6 +783,11 @@ if __name__ == "__main__":
     t_add_default_remove()
     t_projects_crud()
     t_launch_command()
+    t_hub_settings_userdir()
+    t_hub_settings_readonly_program_dir()
+    t_hub_settings_write_failure_raises()
+    t_hub_ledger_migration()
+    t_guiloader_hub_layer()
     t_python_version_error()
     t_install_zip()
     t_install_errors()

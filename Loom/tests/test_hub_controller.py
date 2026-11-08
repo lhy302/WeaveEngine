@@ -69,6 +69,12 @@ import hub_config as cfg
 import hub_controller as hc
 from hub_controller import HubController
 
+# 2026-11-08 第 5b 批: Hub 设置/台账已迁到用户目录（%LOCALAPPDATA%\Loom\hub）。
+# 本文件部分用例走"默认台账路径"，必须把用户根重定向到临时目录，否则会把开发机
+# 真实用户配置写脏（本轮实测发生过一次，已清理）。
+os.environ.setdefault('LOOM_USER_ROOT',
+                      tempfile.mkdtemp(prefix='loomhub_ctrl_test_'))
+
 _FAILS = []
 
 

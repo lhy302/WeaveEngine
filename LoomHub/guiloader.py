@@ -98,29 +98,80 @@ def gui_folder(program, base=None):
 
 
 def settings_path(program, base=None):
+    r"""**模板/旧位置**路径: <程序目录>/设置.json。
+
+    2026-11-08 第 5b 批: 安装形态下程序目录是 Program Files（Users=RX），
+    引擎/Hub 的运行时可写层统一在 %LOCALAPPDATA%Loomhubsettings.json
+    （见 hub_config.load_hub_settings / save_hub_settings）。本函数只用于
+    "模板层/旧文件迁移源"与 base= 显式注入的测试隔离语义。
+    """
     return os.path.join(program_dir(program, base), '设置.json')
 
 
-def load_settings(program, base=None):
-    """读 设置.json, 坏文件/缺文件回默认. 保留文件里的全部键 (向后兼容)."""
-    s = dict(DEFAULT_SETTINGS[program])
+def _hub_layer(program, base):
+    """loomhub 且未显式给 base 时返回 hub_config 模块（用户层 + 模板层 + 迁移）。
+
+    非 loomhub、或调用方给了 base（测试隔离）时返回 None —— 走旧的单文件语义。
+    """
+    if base is not None or program != 'loomhub':
+        return None
     try:
-        with open(settings_path(program, base), 'r', encoding='utf-8') as f:
+        import hub_config
+        return hub_config
+    except Exception as e:      # 单文件分发等极端情况: 出声后回退，不静默
+        print('[设置] 用户层不可用 (%r)，回退程序目录 设置.json' % (e,))
+        return None
+
+
+def load_settings(program, base=None):
+    """读设置。
+
+    2026-11-08 第 5b 批: loomhub 走 hub_config 的分层读取 ——
+    默认 <- 安装目录模板(只读) <- %LOCALAPPDATA%\Loom\hub 的用户层 delta，
+    并会把旧的 <程序目录>\设置.json 自动迁移进用户层（旧文件保留）。
+    base= 显式给出时保持旧语义；坏文件回默认并打印原因（不静默）。
+    """
+    layer = _hub_layer(program, base)
+    if layer is not None:
+        return layer.load_hub_settings()
+    s = dict(DEFAULT_SETTINGS[program])
+    path = settings_path(program, base)
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
             d = json.load(f)
         if isinstance(d, dict):
             s.update(d)
-    except Exception:
+    except FileNotFoundError:
         pass
+    except Exception as e:
+        print('[设置] 读取失败 (%r): %s -> 按默认' % (e, path))
     return s
 
 
 def save_settings(program, settings, base=None):
-    """原子写 设置.json (tmp + os.replace)."""
+    """原子写设置。
+
+    loomhub 且未给 base: 写用户层（只存与"默认+模板"不同的 delta），
+    失败**上抛**给调用方（契约 §7，不再静默丢设置）。
+    base 显式给出: 保持旧语义（整份写该目录的 设置.json，测试隔离用）。
+    """
+    layer = _hub_layer(program, base)
+    if layer is not None:
+        return layer.save_hub_settings(settings)
     path = settings_path(program, base)
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     tmp = path + '.tmp'
-    with open(tmp, 'w', encoding='utf-8') as f:
-        json.dump(settings, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, path)
+    try:
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(settings, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+    return path
 
 
 def _suffix_ok(program, fname):

@@ -94,6 +94,9 @@ def _patch_dispatch(_hc):
 _TEST_CFG_DIR = tempfile.mkdtemp(prefix='hub_eai_cfg_')
 cfg.INTERPRETERS_FILE = os.path.join(_TEST_CFG_DIR, 'interpreters.json')
 cfg.PROJECTS_FILE = os.path.join(_TEST_CFG_DIR, 'projects.json')
+# 2026-11-08 第 5b 批: Hub 设置已迁到用户目录；本文件会真的 save_settings('loomhub')，
+# 必须把用户根重定向到临时目录（否则开发机真实设置被测试改写）。
+os.environ.setdefault('LOOM_USER_ROOT', _TEST_CFG_DIR)
 _patch_dispatch(hc)
 
 _FAILS = []

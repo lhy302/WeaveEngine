@@ -3,7 +3,7 @@
 
 产物：tools/dist/Loom-<version>.zip
 内容：Loom/ 运行时文件 + 嵌入式 Python 3.12 + 解释器.json
-用法：py -3.12 tools/package_engine.py [--version X.Y.Z]
+用法：py -3.12 tools/package_engine.py [--version X.Y.Z] [--allow-missing-runtime]
 """
 import argparse
 import json
@@ -31,6 +31,50 @@ def load_version(override=None):
         return override
     with open(META_PATH, 'r', encoding='utf-8') as f:
         return json.load(f)['version']
+
+
+def _hub_config():
+    """借用 LoomHub 的元数据判据（契约: 发版自检与导入侧共用同一判据）。
+
+    beta4 / P-05-06: 以前 producer 侧完全没有校验，--version 的非法值会被原样
+    写进包内 解释器.json，产出一个 LoomHub 直接拒装的 zip。这里强制走同一份
+    hub_config.validate_meta，找不到就直接失败（本脚本是仓库内发版工具）。
+    """
+    hub_dir = os.path.join(ROOT, 'LoomHub')
+    if hub_dir not in sys.path:
+        sys.path.insert(0, hub_dir)
+    try:
+        import hub_config
+        return hub_config
+    except Exception as e:
+        raise SystemExit(
+            '[错误] 找不到 LoomHub/hub_config.py（%r）：发版自检必须与 LoomHub 导入侧'
+            '共用同一判据，请在仓库根目录运行本脚本。' % (e,))
+
+
+def check_version(version):
+    """版本号白名单（x.y.z 或 x.y.z.betaN）。非法则立即失败，不产出任何包。"""
+    hc = _hub_config()
+    reason = hc.validate_meta({'version': version, 'main': 'Loom.py'}, version)
+    if reason is not None:
+        raise SystemExit('[错误] --version 非法: %r（%s）' % (version, reason))
+    return version
+
+
+def _runtime_dist(dir_path):
+    """从一个候选目录里找"可用运行时 dist"（含 MyGame.exe）。
+
+    beta4 / P-05-10/11: 默认入口与 --runtime 入口共用本函数，避免"同一份磁盘
+    布局，默认分支平铺、--runtime 分支多套一层"的语义分裂。
+    """
+    if not dir_path or not os.path.isdir(dir_path):
+        return None
+    if os.path.isfile(os.path.join(dir_path, 'MyGame.exe')):
+        return dir_path                      # 老布局: 直接在 player_runtime 下
+    sub = os.path.join(dir_path, 'game_player.dist')
+    if os.path.isfile(os.path.join(sub, 'MyGame.exe')):
+        return sub                           # 新布局: 下钻一层
+    return None
 
 
 def collect_files(src_dir):
@@ -111,7 +155,7 @@ def write_launcher(out_dir):
         f.write(bat)
 
 
-def write_meta_readme(out_dir, version):
+def write_meta_readme(out_dir, version, slim=False):
     readme = ('Loom 引擎 %s\n================\n'
               '嵌入式 Python 运行时已内置，双击 Loom.bat 启动。\n\n'
               '目录结构:\n'
@@ -120,6 +164,11 @@ def write_meta_readme(out_dir, version):
               '  Loom/             <- 引擎源码\n'
               '    Loom.py         <- 主程序\n'
               '    解释器.json     <- LoomHub 识别元数据\n') % version
+    if slim:
+        readme += ('\n【精简包 / 无预置运行时】\n'
+                   '本包**没有**预置播放器运行时（Loom/player_runtime/game_player.dist）。\n'
+                   '打包游戏需要本机具备 Nuitka + MSVC，先跑 build_game.py --build-runtime；\n'
+                   '或用 --runtime 指定一份已有的 dist 目录。正式发布包不应是精简包。\n')
     with open(os.path.join(out_dir, 'README.txt'), 'w', encoding='utf-8') as f:
         f.write(readme)
 
@@ -136,12 +185,13 @@ def _dir_size(path):
     return total
 
 
-def make_zip(version):
+def make_zip(version, allow_missing_runtime=False):
     os.makedirs(DIST_DIR, exist_ok=True)
     tmp_dir = os.path.join(DIST_DIR, '_Loom_%s_tmp' % version)
     if os.path.isdir(tmp_dir):
         shutil.rmtree(tmp_dir)
     os.makedirs(tmp_dir)
+    key = {}        # 本包的附加标记 (slim = 精简包/无预置运行时)
     print('[打包] 收集引擎文件...')
     engine_files = collect_files(ENGINE_DIR)
     print('[打包] 引擎文件数: %d' % len(engine_files))
@@ -154,13 +204,15 @@ def make_zip(version):
     # Nuitka+MSVC 编 (无编译器的机器直接失败)。这里打包时把开发机上已编好的
     # player_runtime/game_player.dist 一起塞进引擎包的 Loom/player_runtime/，
     # 之后 build_game.py 直接复用 -> 游戏开发机零编译器。
-    _pr_src = os.path.join(ENGINE_DIR, 'player_runtime', 'game_player.dist')
-    _pr_dst = os.path.join(tmp_dir, 'Loom', 'player_runtime', 'game_player.dist')
-    if os.path.isdir(_pr_src) and os.path.isfile(os.path.join(_pr_src, 'MyGame.exe')):
+    _pr_root = os.path.join(ENGINE_DIR, 'player_runtime')
+    _pr_src = _runtime_dist(_pr_root)
+    key['slim'] = False
+    if _pr_src is not None:
+        _pr_dst = os.path.join(tmp_dir, 'Loom', 'player_runtime', 'game_player.dist')
         _t = time.time()
         shutil.copytree(_pr_src, _pr_dst, dirs_exist_ok=True)
-        print('[打包] 预置播放器运行时: %.1f MB (%.1fs)'
-              % (_dir_size(_pr_src) / 1048576.0, time.time() - _t))
+        print('[打包] 预置播放器运行时: %.1f MB (%.1fs)  (%s)'
+              % (_dir_size(_pr_src) / 1048576.0, time.time() - _t, _pr_src))
         try:
             with open(os.path.join(tmp_dir, 'Loom', 'player_runtime', '运行时.json'),
                       'w', encoding='utf-8') as _f:
@@ -168,11 +220,25 @@ def make_zip(version):
                            'note': '预编译播放器运行时 (Unity UnityPlayer 同角色); '
                                    'build_game.py 直接复用, 游戏开发机无需编译器'}, _f,
                           ensure_ascii=False, indent=1)
-        except Exception:
-            pass
+        except Exception as _e:
+            # 契约 §7: 写失败必须可判定，不再 except: pass
+            raise SystemExit('[错误] 写 运行时.json 失败: %r' % (_e,))
+    elif allow_missing_runtime:
+        key['slim'] = True
+        print('[打包] 警告: 未找到预置播放器运行时 (%s)——按 --allow-missing-runtime '
+              '产出【精简包】: 包内元数据与 README 会显式标记"无预置运行时"。' % _pr_root)
     else:
-        print('[打包] 警告: 未找到预置播放器运行时 (player_runtime/game_player.dist)，'
-              '游戏开发机将需要 --build-runtime (需 Nuitka+MSVC)')
+        # beta4 / P-05-04: 缺运行时是"发布包少掉头号特性"，默认必须失败而不是警告
+        raise SystemExit(
+            '[错误] 缺少预置播放器运行时，拒绝产出发布包。\n'
+            '  期望: %s\ngame_player.dist\\MyGame.exe\n'
+            '  两种成因: (1) player_runtime 目录不存在（该目录不入库，'
+            '全新 clone 天然没有）；(2) 目录在但没有 game_player.dist\\MyGame.exe'
+            '（--build-runtime 中途失败或只拷了一半）。\n'
+            '  处理: 在带 Nuitka+MSVC 的引擎开发机跑 build_game.py --build-runtime，'
+            '或从已有安装包/上次构建拷一份 game_player.dist 过来；\n'
+            '  若确实要产出不带走时器的调试瘦包，显式加 --allow-missing-runtime。'
+            % _pr_root)
     print('[打包] 复制嵌入式 Python...')
     tmp_py = build_embed_pyzip(version, tmp_dir)
     target_py = os.path.join(tmp_dir, 'python')
@@ -180,18 +246,28 @@ def make_zip(version):
     # 2026-11-07 修复: --version 只改 zip 文件名, 包内 解释器.json 仍是旧版本 ->
     # LoomHub 按元数据登记会装成旧版本 (实测 beta3 包被登记成 beta2)。
     # 这里把请求的 version 写回包内元数据, 保证"文件名/元数据/安装目录"三者一致。
+    # beta4 / P-05-05: 回写失败以前只打一行警告就继续出包, 结果是"打包完成"但
+    # LoomHub 报"不是有效的 Loom 解释器包"。契约 §7 要求写失败可判定 -> 直接失败。
+    _meta_dst = os.path.join(tmp_dir, 'Loom', os.path.basename(META_PATH))
     try:
-        _meta_dst = os.path.join(tmp_dir, 'Loom', os.path.basename(META_PATH))
         with open(_meta_dst, 'r', encoding='utf-8') as _f:
             _meta = json.load(_f)
-        _meta['version'] = version
+    except Exception as _e:
+        raise SystemExit('[错误] 读不到/解析不了源元数据 %s: %r '
+                         '（先修复该文件再打包）' % (_meta_dst, _e))
+    _meta['version'] = version
+    if key.get('slim'):
+        _meta['distribution'] = 'slim'
+        _meta['player_runtime'] = 'absent'
+    try:
         with open(_meta_dst, 'w', encoding='utf-8') as _f:
             json.dump(_meta, _f, ensure_ascii=False, indent=2)
-        print('[打包] 元数据版本 -> %s' % version)
     except Exception as _e:
-        print('[打包] 警告: 元数据版本回写失败: %r' % _e)
+        raise SystemExit('[错误] 元数据回写失败 %s: %r' % (_meta_dst, _e))
+    print('[打包] 元数据版本 -> %s%s'
+          % (version, '  (精简包: 无预置运行时)' if key.get('slim') else ''))
     write_launcher(tmp_dir)
-    write_meta_readme(tmp_dir, version)
+    write_meta_readme(tmp_dir, version, slim=bool(key.get('slim')))
     zip_path = os.path.join(DIST_DIR, 'Loom-%s.zip' % version)
     print('[打包] 写 zip: %s' % zip_path)
     if os.path.exists(zip_path):
@@ -202,6 +278,10 @@ def make_zip(version):
                 abs_p = os.path.join(dirpath, fn)
                 rel_p = os.path.relpath(abs_p, tmp_dir).replace('\\', '/')
                 zf.write(abs_p, rel_p)
+    # beta4 / P-05-05/06: 收尾自检 —— 从**已写好的 zip** 里读回元数据，交给
+    # LoomHub 的同一份判据验一遍；同时验"包名版本 == 元数据版本"与运行时到位性。
+    # 任何一项不过：删掉这个坏包并失败退出（绝不把装不上的包留在 dist 里）。
+    _verify_zip(zip_path, version, slim=bool(key.get('slim')))
     # Windows 下 DLL 可能仍被占用，忽略清理失败（不影响 zip 产物）
     try:
         shutil.rmtree(tmp_dir, ignore_errors=True)
@@ -212,19 +292,75 @@ def make_zip(version):
     return zip_path
 
 
+def _verify_zip(zip_path, version, slim=False):
+    """对已写好的 zip 做发版自检（包名 / 元数据 / 运行时三者一致）。"""
+    _bad = []
+
+    def _fail(msg):
+        print('[打包][自检失败] %s' % msg)
+        _bad.append(msg)
+
+    base = os.path.basename(zip_path)
+    if base != 'Loom-%s.zip' % version:
+        _fail('包名与版本不一致: %r != %r' % (base, 'Loom-%s.zip' % version))
+    try:
+        with zipfile.ZipFile(zip_path) as zf:
+            names = set(zf.namelist())
+            try:
+                _meta = json.loads(zf.read('Loom/解释器.json').decode('utf-8'))
+            except Exception as e:
+                _meta = None
+                _fail('包内 解释器.json 读不回来/不是合法 JSON: %r' % (e,))
+            if _meta is not None:
+                hc = _hub_config()
+                reason = hc.validate_meta(_meta, _meta.get('version'))
+                if reason is not None:
+                    _fail('包内元数据不合 LoomHub 判据: %s' % reason)
+                if str(_meta.get('version')) != version:
+                    _fail('包内元数据版本 %r != 请求版本 %r'
+                          % (_meta.get('version'), version))
+                want = 'slim' if slim else None
+                got = _meta.get('distribution')
+                if want != got:
+                    _fail('精简标记不一致: 期望 %r 实际 %r' % (want, got))
+            exe_key = 'Loom/player_runtime/game_player.dist/MyGame.exe'
+            has_exe = exe_key in names
+            if slim and has_exe:
+                _fail('标称精简包却打进了预置运行时')
+            if not slim and not has_exe:
+                _fail('正式包缺少预置运行时 (%s)' % exe_key)
+    except SystemExit:
+        raise
+    except Exception as e:
+        _fail('无法打开刚写出的 zip: %r' % (e,))
+    if _bad:
+        try:
+            os.remove(zip_path)
+        except OSError:
+            pass
+        raise SystemExit('[错误] 发版自检未通过（已删除坏包）: %d 项 -> %s'
+                         % (len(_bad), _bad))
+    print('[打包] 自检通过: 包名/元数据/运行时一致（版本 %s%s）'
+          % (version, ', 精简包' if slim else ''))
+
+
 def main():
     parser = argparse.ArgumentParser(description='Loom 引擎发布包打包器')
     parser.add_argument('--version', help='覆盖版本号（默认读 Loom/解释器.json）')
+    parser.add_argument('--allow-missing-runtime', action='store_true',
+                        help='允许产出【精简包】(无预置播放器运行时)；默认缺运行时即失败')
     args = parser.parse_args()
-    version = load_version(args.version)
+    version = check_version(load_version(args.version))
     print('=' * 60)
     print('Loom 引擎打包 — 版本 %s' % version)
     print('=' * 60)
-    zip_path = make_zip(version)
+    zip_path = make_zip(version, allow_missing_runtime=args.allow_missing_runtime)
     print()
     print('下一步:')
     print('  1) 测试: 解压 %s' % os.path.basename(zip_path))
     print('  2) 上传: GitHub Releases -> tag engine-v%s -> 上传 zip' % version)
+    print('     或: set LOOM_ENGINE_VERSION=%s && python tools\\release_github.py engine'
+          % version)
 
 
 if __name__ == '__main__':

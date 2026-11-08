@@ -82,6 +82,10 @@ sys.path.insert(0, ROOT)
 os.chdir(ROOT)
 # 多核守卫: 测试确定性 (不建脚本线程/不设进程亲和性), 与 test_integration 一致
 os.environ['LOOM_NO_PARALLEL'] = '1'
+# 2026-11-08 (审计 N2): 本文件会真的 guiloader.save_settings('loom', ...) -> 会写
+# 用户层 engine\settings.json。不隔离就会污染真实 %LOCALAPPDATA%\Loom (实测)。
+import tempfile as _tf_iso
+os.environ.setdefault('LOOM_USER_ROOT', _tf_iso.mkdtemp(prefix='loom_test_eai_'))
 
 import editor
 # 2026-11-06: 测试不得改动仓库内的 保存/ 目录 —— EditorApp.__init__ 首次运行会把
@@ -861,6 +865,37 @@ def t_api_coverage_fill():
     res("set_layer", {"name": target, "layer": 2})   # 复位, 不影响后续断言
 
 
+# ============ 13.6 渲染后端 / 键位 / 投影 (2026-11-08 第 5 批 D4=A) ============
+def t_render_keys_proj():
+    """render_api / key_binding / camera_proj 三条命令进"真编辑器"链路。
+
+    它们此前只存在于命令表里、没有任何测试执行过，导致覆盖率闸门常红
+    （第 5 批 D4=A 裁决：补进清单并真跑）。三条都按**查询语义**跑，不写配置，
+    避免测试污染用户层/游戏设置。
+    """
+    r = res('render_api')
+    check("render_api 查询返回 current/saved",
+          'current' in r and 'saved' in r, str(r)[:90])
+    r = res('key_binding')
+    check("key_binding 查询返回键位表", isinstance(r.get('bindings'), dict),
+          str(r)[:90])
+    r = res('key_binding', {'action': '解锁鼠标'})
+    check("key_binding 按动作查询可执行",
+          r.get('action') == '解锁鼠标', str(r)[:90])
+    old_ortho = bool(getattr(ED, 'ortho', False))
+    old_size = float(getattr(ED, 'ortho_size', 12.0))
+    try:
+        r = res('camera_proj', {'ortho': True, 'size': 9.5})
+        check("camera_proj 切正交并回读 size",
+              r.get('ortho') is True and abs(float(r.get('size', 0)) - 9.5) < 1e-9,
+              str(r)[:90])
+        r = res('camera_proj', {'ortho': False})
+        check("camera_proj 切回透视", r.get('ortho') is False, str(r)[:90])
+    finally:
+        ED.ortho = old_ortho
+        ED.ortho_size = old_size
+
+
 # ============ 14. 覆盖率闸门 ============
 def t_coverage():
     table = set(ac.command_names())
@@ -888,6 +923,7 @@ if __name__ == "__main__":
     t_console_layer()
     t_api_contract()
     t_api_coverage_fill()
+    t_render_keys_proj()
     t_coverage()
     if _FAILS:
         print("总结果: FAIL ❌", _FAILS)

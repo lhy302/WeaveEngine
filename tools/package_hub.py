@@ -17,18 +17,37 @@ DIST_DIR = os.path.join(ROOT, 'tools', 'dist')
 BUILD_DIR = os.path.join(ROOT, 'tools', 'build_hub')
 VERSION_FILE = os.path.join(HUB_DIR, '版本.json')
 ISS_FILE = os.path.join(ROOT, 'tools', 'installer.iss')
-DEFAULT_VERSION = '0.1.0'
 
 
 def load_version(override=None):
+    """LoomHub 版本号 = LoomHub/版本.json（**唯一真源**，人类裁决 2026-11-08 · N5=A）。
+
+    为什么删掉原来的 DEFAULT_VERSION 静默回落：
+      · 旧实现在 版本.json 缺失时会**回写** {version: '0.1.0'} 并返回它，而
+        release_github 的缺省 HUB_VERSION 是 0.1.2 -> 两条链各说一个版本号，
+        独立验收实测能产出版本号互不匹配的产物（N5 事实源漏口）。
+      · 打包动作隐式改源码文件本身不可审计：发出去的版本号会取决于上一次构建的副作用。
+    现在：缺文件 / 缺字段 / 坏 JSON 一律**明确报错退出**（非 0），绝不猜、也绝不回写。
+    """
     if override:
-        return override
-    if os.path.isfile(VERSION_FILE):
+        return str(override).strip()
+    if not os.path.isfile(VERSION_FILE):
+        raise SystemExit(
+            '[错误] 缺少版本真源: %s\n'
+            '  该文件是 LoomHub 版本号的唯一来源 —— release_github 的缺省 '
+            'HUB_VERSION 与 installer.iss 的 MyAppVersion 都必须与它相等。\n'
+            '  修复: 新建该文件并写入 {"version": "0.1.2"}\n'
+            '        或显式传 --version <x.y.z>（本次不写回该文件）。' % VERSION_FILE)
+    try:
         with open(VERSION_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f).get('version', DEFAULT_VERSION)
-    with open(VERSION_FILE, 'w', encoding='utf-8') as f:
-        json.dump({'version': DEFAULT_VERSION}, f, ensure_ascii=False, indent=2)
-    return DEFAULT_VERSION
+            data = json.load(f)
+    except (OSError, ValueError) as e:      # 权限/IO + JSON/编码错误；其余照常上抛
+        raise SystemExit('[错误] 版本真源不可读/不是合法 JSON: %r (%s)'
+                         % (e, VERSION_FILE))
+    v = str(data.get('version') or '').strip() if isinstance(data, dict) else ''
+    if not v:
+        raise SystemExit('[错误] 版本真源缺少 version 字段: %s' % VERSION_FILE)
+    return v
 
 
 def find_iscc():

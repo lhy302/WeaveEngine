@@ -456,6 +456,11 @@ class HubController:
         except Exception:
             prefer = None
         cmd = cfg.build_launch_command(interp, scene, mode='open', prefer=prefer)
+        # 2026-11-08 D3=A: "打开编辑器就带 Agent 桥"是**调用方**的业务决定
+        # （build_launch_command 保持纯拼装）。恰好追加一次；--agent 让引擎侧
+        # Loom/ui/loom_gui.py 起本地命令桥并写 .agent_port.json。
+        if '--agent' not in cmd:
+            cmd.append('--agent')
         env = dict(os.environ)
         # 2026-10-19 启动日志: LoomHub 启动的引擎静默（用户拍板）
         # 命令行直接启动 Loom.py 时无此环境变量，保留完整启动信息

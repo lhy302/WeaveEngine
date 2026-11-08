@@ -19,6 +19,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 
 APP_NAME = "Loom"          # 解释器名 = 项目名
 HUB_NAME = "LoomHub"       # 项目管理器名 = 解释器名 + "Hub"
@@ -50,8 +51,55 @@ def resolve_runtime_path(p):
         return p
 
 
-INTERPRETERS_FILE = os.path.join(HUB_DIR, "interpreters.json")
-PROJECTS_FILE = os.path.join(HUB_DIR, "projects.json")
+def _hub_userpaths():
+    """Hub 侧用户目录收口（2026-11-08 契约 §2）。
+
+    hub_userpaths 优先：它在 Hub 自己的目录里，安装版（PyInstaller onedir）一定能导入；
+    Loom 的 userpaths 只在源码工作区可用，所以在安装版里它救不了场（以前就是这样
+    静默退化成"写程序目录"）。两个都拿不到才返回 None（极端降级，保持旧行为）。
+    """
+    try:
+        import hub_userpaths
+        return hub_userpaths
+    except Exception:
+        pass
+    try:
+        import userpaths
+        return userpaths
+    except Exception:
+        return None
+
+
+def default_interpreters_file():
+    """解释器台账的用户层落点（拿不到 userpaths 时退回程序目录旧语义）。"""
+    up = _hub_userpaths()
+    try:
+        if up is not None and hasattr(up, 'interpreters'):
+            return up.interpreters()
+    except Exception:
+        pass
+    return os.path.join(HUB_DIR, "interpreters.json")
+
+
+def default_projects_file():
+    """项目台账的用户层落点（同上）。"""
+    up = _hub_userpaths()
+    try:
+        if up is not None and hasattr(up, 'projects'):
+            return up.projects()
+    except Exception:
+        pass
+    return os.path.join(HUB_DIR, "projects.json")
+
+
+# 用户层路径（可写）。测试仍可直接改这两个模块常量做隔离。
+INTERPRETERS_FILE = default_interpreters_file()
+PROJECTS_FILE = default_projects_file()
+# 旧位置（程序目录）。首次运行会把它们迁移进用户层，但**不删用户的文件**。
+LEGACY_INTERPRETERS_FILE = os.path.join(HUB_DIR, "interpreters.json")
+LEGACY_PROJECTS_FILE = os.path.join(HUB_DIR, "projects.json")
+# 旧设置文件（程序目录里的 设置.json = 既当"随版本下发的默认模板"又当旧用户设置）
+LEGACY_SETTINGS_FILE = os.path.join(HUB_DIR, "设置.json")
 PROGRAM_FILES = os.environ.get("ProgramFiles", r"C:\Program Files")
 DEFAULT_INSTALL_ROOT = os.path.join(PROGRAM_FILES, APP_NAME)   # C:\Program Files\Loom
 META_NAME = "解释器.json"   # 解释器元数据文件名 (每个版本目录内)
@@ -59,7 +107,13 @@ META_NAME = "解释器.json"   # 解释器元数据文件名 (每个版本目录
 
 # ---------------- 通用 JSON 读写 ----------------
 def save_json_atomic(path, data):
-    """原子写 JSON: 先写临时文件再 os.replace, 防中途断电损坏."""
+    """原子写 JSON: 先写临时文件再 os.replace, 防中途断电损坏.
+
+    写失败**不吞**（契约 §7）: 磁盘满/权限不足一律上抛给调用方。
+    注意: 本函数**不**替你建父目录（保持"父目录不存在即失败"的旧语义，
+    Loom/tests/test_hub_controller.py 的"坏路径 -> err 不崩"就是靠这条）。
+    需要建目录的调用方（各级台账）自己先 ensure_parent。
+    """
     tmp = path + ".tmp"
     with open(tmp, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
@@ -172,12 +226,61 @@ def scan_install_root(root=DEFAULT_INSTALL_ROOT):
 
 
 # ---------------- 解释器配置 (interpreters.json) ----------------
+def _ensure_parent(path):
+    """台账写前建父目录（用户层目录可能首次不存在）；失败上抛（不静默）。"""
+    up = _hub_userpaths()
+    if up is not None and hasattr(up, 'ensure_parent'):
+        up.ensure_parent(path)
+    else:
+        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+
+
+def _is_default_path(path, default_fn):
+    try:
+        return os.path.abspath(path) == os.path.abspath(default_fn())
+    except Exception:
+        return False
+
+
+def _maybe_migrate_ledger(path, legacy_path, key):
+    """首次运行: 把程序目录里的旧台账搬进用户目录（保留旧文件，条目全带）。
+
+    只在 path 就是"默认用户层路径"时生效 —— 测试把 INTERPRETERS_FILE 指到临时目录时
+    不应发生迁移（否则用例之间会互相污染）。
+    """
+    default_fn = (default_interpreters_file if key == 'interpreters'
+                  else default_projects_file)
+    if not _is_default_path(path, default_fn):
+        return
+    if os.path.exists(path) or not legacy_path or not os.path.isfile(legacy_path):
+        return
+    try:
+        with open(legacy_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+    except Exception as e:
+        print('[台账] 旧文件解析失败，跳过迁移 (%r): %s' % (e, legacy_path))
+        return
+    if not isinstance(data, dict):
+        print('[台账] 旧文件格式不符，跳过迁移: %s' % legacy_path)
+        return
+    try:
+        _ensure_parent(path)
+        save_json_atomic(path, data)
+        print('[台账] 已把旧文件迁移到用户目录: %s -> %s（%d 条）'
+              % (legacy_path, path, len(data.get(key) or [])))
+    except Exception as e:
+        # 迁移失败不致命: 本次以空台账启动，旧文件原样留着，下次可再迁
+        print('[台账] 迁移失败（本次以空台账启动，旧文件保持不动）: %r' % (e,))
+
+
 def load_interpreters():
+    _maybe_migrate_ledger(INTERPRETERS_FILE, LEGACY_INTERPRETERS_FILE, 'interpreters')
     data = load_json(INTERPRETERS_FILE)
     return data.get('interpreters', []) if data else []
 
 
 def save_interpreters(interpreters):
+    _ensure_parent(INTERPRETERS_FILE)
     save_json_atomic(INTERPRETERS_FILE, {"interpreters": interpreters})
 
 
@@ -228,11 +331,13 @@ def sanitize_name(name):
 
 # ---------------- 项目配置 (projects.json) ----------------
 def load_projects():
+    _maybe_migrate_ledger(PROJECTS_FILE, LEGACY_PROJECTS_FILE, 'projects')
     data = load_json(PROJECTS_FILE)
     return data.get('projects', []) if data else []
 
 
 def save_projects(projects):
+    _ensure_parent(PROJECTS_FILE)
     save_json_atomic(PROJECTS_FILE, {"projects": projects})
 
 
@@ -461,9 +566,154 @@ def build_launch_command(info, scene_path=None, mode='open', prefer=None):
         cmd = [py_exe, main_path]
     if scene_path:
         cmd += ['--open' if mode == 'open' else '--run', scene_path]
-    # 2026-11-07 修复: 编辑器模式追加 --agent —— 否则 LoomHub 打开的编辑器没有
-    # EAI 命令桥 (无 .agent_port.json), 外部 Agent/MCP 无法连接, 与"打开引擎后
-    # Agent 接上"的设计目标不符。玩家运行 (--run) 不加, 避免玩家进程开端口。
-    if mode == 'open' and '--agent' not in cmd:
-        cmd.append('--agent')
+    # 2026-11-08 D3=A 人类裁决: 本函数**只做纯命令拼装**，不再在此追加 --agent。
+    # 原因: 它是被单测逐元素断言其返回值的纯函数，"打开编辑器就带 Agent 桥"属于
+    # 调用方的业务决定（hub_controller.open_project 负责追加），塞在这里会让
+    # "纯拼装"契约与"编辑器要带 Agent"契约在同一个返回值上打架。
     return cmd
+
+
+# ---------------- Hub 设置（用户层收口, 契约 2026-11-08 §2/§4/§7） ----------------
+# 为什么不能继续写"程序目录\设置.json"：LoomHub 默认装到 {autopf}\LoomHub，
+# 普通用户对安装目录只有读权限（契约 §0）。旧实现 load 静默回落、save 抛异常，
+# 表现为"设置面板改了没保存/一重启就丢"。
+# 分层：默认 <- 模板(安装目录里的 设置.json, 只读) <- 用户层 delta。
+HUB_SETTINGS_NAME = "设置.json"
+DEFAULT_HUB_SETTINGS = {"gui": "TkHubView", "open_py": True}
+
+
+def _userpaths():
+    """用户目录收口模块；不可用时返回 None（磁盘异常等极端情况）。
+
+    2026-11-08 第 5b 批: 改为优先 hub_userpaths（见本文件顶部的 _hub_userpaths）。
+    以前只认 Loom 的 userpaths，而它不在 LoomHub 安装包的可导入路径上 -> 安装版里
+    静默退化成"写程序目录"，这就是"设置改了没保存"的真因。
+    """
+    return _hub_userpaths()
+
+
+def hub_settings_template():
+    r"""模板层（只读）: <LoomHub 程序目录>\设置.json（随安装包更新）。"""
+    return os.path.join(HUB_DIR, HUB_SETTINGS_NAME)
+
+
+def hub_settings_file():
+    r"""用户层（可写）: %LOCALAPPDATA%\Loom\hub\settings.json。"""
+    up = _userpaths()
+    if up is None:
+        return hub_settings_template()   # 降级：保持旧行为，不崩
+    return up.hub_settings()
+
+
+def _settings_values(d):
+    """统一"新格式 {schema,values}"与"旧格式 plain dict"。"""
+    if not isinstance(d, dict):
+        return {}
+    if "schema" in d and isinstance(d.get("values"), dict):
+        return dict(d["values"])
+    return dict(d)
+
+
+def _read_settings_layer(path, what):
+    """读一层设置：缺文件 -> {}；坏 JSON -> 备份 + {}（出声，不静默）。"""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return _settings_values(json.load(f))
+    except FileNotFoundError:
+        return {}
+    except Exception as e:
+        print("[设置] %s 损坏 (%r): %s -> 备份后按默认" % (what, e, path))
+        up = _userpaths()
+        try:
+            dst = up.backup_path(path) if up is not None else path + ".bak"
+            os.replace(path, dst)
+        except Exception as e2:
+            print("[设置] 备份失败 (%r)，继续按默认运行" % (e2,))
+        return {}
+
+
+def _hub_settings_base():
+    """默认 + 模板层 = "用户没改过"的基线（delta 判定用）。"""
+    base = dict(DEFAULT_HUB_SETTINGS)
+    base.update(_read_settings_layer(hub_settings_template(), "模板 设置.json"))
+    return base
+
+
+def hub_settings_delta(settings):
+    """算出应写进用户层的 delta（只存用户真正改过的键）。"""
+    base = _hub_settings_base()
+    return {k: v for k, v in dict(settings or {}).items()
+            if k not in base or base[k] != v}
+
+
+def _maybe_migrate_legacy_settings():
+    """首次运行: 把程序目录里的旧 设置.json 的"非默认键"搬进用户层。
+
+    旧文件**保留不动**（可能是随版本下发的模板，也可能是老版本写进去的用户设置）。
+    迁移失败只打印，不阻断启动（用户层随后仍可正常保存）。
+    """
+    tpl = hub_settings_template()
+    upath = hub_settings_file()
+    if os.path.abspath(upath) == os.path.abspath(tpl):
+        return            # 降级路径：只有一份文件，没什么可搬
+    if os.path.exists(upath):
+        return            # 用户层已存在 -> 以用户层为准
+    legacy_path = LEGACY_SETTINGS_FILE
+    if not legacy_path or not os.path.isfile(legacy_path):
+        return
+    legacy = _read_settings_layer(legacy_path, '旧 设置.json')
+    delta = {k: v for k, v in legacy.items()
+             if k not in DEFAULT_HUB_SETTINGS or DEFAULT_HUB_SETTINGS[k] != v}
+    if not delta:
+        return
+    try:
+        save_hub_settings(dict(DEFAULT_HUB_SETTINGS, **legacy))
+        print('[设置] 已把旧设置迁移到用户目录: %s -> %s（%s）'
+              % (legacy_path, upath, sorted(delta)))
+    except Exception as e:
+        print('[设置] 旧设置迁移失败（不影响本次启动，用户层可随后保存）: %r' % (e,))
+
+
+def load_hub_settings():
+    """读 Hub 设置 = 默认 <- 模板 <- 用户层 delta（契约 §4 合并规则）。
+
+    旧位置（安装目录里的 设置.json）本身就是"模板层"，仍然被读取，所以老值继续
+    生效、无需搬迁；用户之后改的键写进用户层 delta，优先级高于模板（升级换模板
+    也不会覆盖用户的选择）。
+    """
+    _maybe_migrate_legacy_settings()
+    merged = _hub_settings_base()
+    upath = hub_settings_file()
+    if os.path.abspath(upath) == os.path.abspath(hub_settings_template()):
+        return merged            # 降级路径：只有一份文件，已合并
+    merged.update(_read_settings_layer(upath, "用户 设置.json"))
+    return merged
+
+
+def save_hub_settings(settings):
+    """写 Hub 设置：只写 delta，tmp + os.replace 原子写；失败**上抛**（契约 §7）。"""
+    path = hub_settings_file()
+    up = _userpaths()
+    payload = {
+        "schema": 1,
+        "app": "loomhub",
+        "updated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "values": hub_settings_delta(settings),
+    }
+    parent = os.path.dirname(os.path.abspath(path))
+    if up is not None:
+        up.ensure_dir(parent)
+    else:
+        os.makedirs(parent, exist_ok=True)
+    tmp = path + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+    return path
