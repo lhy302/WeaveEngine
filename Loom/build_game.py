@@ -33,7 +33,26 @@ import game_pack
 import plugin_loader
 import sceneio
 
-BIN_DIR = os.path.dirname(os.path.abspath(__file__))
+def _bin_dir():
+    """引擎"数据根目录"（scripts/ player_runtime/ core_components/ ckernels/ 所在处）。
+
+    2026-11-08 (编译版支持): Nuitka **onefile** 下 `__file__` 指向临时解包目录，
+    那里没有随引擎分发的数据目录 —— 直接用它会导致:
+      · "[2/5] 游戏脚本: 0 个"（找不到 scripts/）
+      · "缺少玩家运行时 (需要含 MyGame.exe 的 game_player.dist)"
+    所以优先用**程序目录**(sys.argv[0] 的目录)，只有它没有数据目录时才回退 `__file__`。
+    源码运行 (`python build_game.py`) 时 argv[0] 就是本文件 → 两者相同，行为不变。
+    """
+    exe_dir = os.path.dirname(os.path.abspath(sys.argv[0] or '')) if sys.argv else ''
+    here = os.path.dirname(os.path.abspath(__file__))
+    for cand in (exe_dir, here):
+        if cand and (os.path.isdir(os.path.join(cand, 'player_runtime'))
+                     or os.path.isdir(os.path.join(cand, 'scripts'))):
+            return cand
+    return here
+
+
+BIN_DIR = _bin_dir()
 # 注意: Nuitka 输出目录不支持中文路径 (实测 --build-runtime 中文目录名
 # 打包 exit 1; 纯 ASCII rt_test 成功) —— 运行库目录用 ASCII.
 DEFAULT_RUNTIME_DIR = os.path.join(BIN_DIR, 'player_runtime')
