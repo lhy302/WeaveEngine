@@ -256,6 +256,65 @@ def t_unlock_delegation():
           (first, second, d4.mouse_locked))
 
 
+# ============ 4c) 鼠标锁定语义重构（人类裁决 2026-11-08: 默认不锁） ============
+def t_lock_policy():
+    print('---- 4c) 鼠标锁定策略: 默认不锁 / allowed 门禁 / 脚本显式开关 ----')
+    import io
+    import contextlib
+    import game_settings
+
+    # 1) 默认不锁（修前 allowed=True/locked=True -> 打包吃豆人被锁死）
+    d = _driver()
+    check('driver 默认不锁 (allowed=False, locked=False)',
+          d.mouse_lock_allowed is False and d.mouse_locked is False,
+          (d.mouse_lock_allowed, d.mouse_locked))
+    # 2) allowed=False 时 set_mouse_locked(True) 无效 + 只告警一次
+    calls = []
+    d.on_mouse_lock_changed = lambda locked: calls.append(locked)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        d.set_mouse_locked(True)
+        d.set_mouse_locked(True)
+    out = buf.getvalue()
+    check('allowed=False -> set_mouse_locked(True) 无效', d.mouse_locked is False,
+          d.mouse_locked)
+    check('allowed=False -> 一次性告警（只 1 条，不刷屏）',
+          out.count('不允许锁定鼠标') == 1, out.strip().splitlines()[:2])
+    check('回调按"有效状态"转发（仍为 False，后端不会误锁）',
+          calls == [False, False], calls)
+    # 3) 脚本显式允许后可以锁（能力②：某场景/某时刻锁不锁）
+    d.set_mouse_lock_allowed(True)
+    d.set_mouse_locked(True)
+    check('set_mouse_lock_allowed(True) -> 可锁', d.mouse_locked is True, d.mouse_locked)
+    # 4) 撤回允许必须立刻解锁（否则玩家永久锁死）
+    d.set_mouse_lock_allowed(False)
+    check('set_mouse_lock_allowed(False) 时立即解锁', d.mouse_locked is False,
+          d.mouse_locked)
+    # 5) allowed=True 时暂停态 Tab 仍可解（P-03-07 回归）
+    d2 = _driver()
+    d2.set_mouse_lock_allowed(True)
+    d2.set_mouse_locked(True)
+    d2.set_logic_paused(True)
+    d2.key_state['Tab'] = True
+    d2.advance_logic(1.0 / 60.0)
+    check('allowed=True 时暂停态 Tab 仍可解锁（P-03-07）',
+          d2.mouse_locked is False and d2.mouse_unlock_requested is True,
+          (d2.mouse_locked, d2.mouse_unlock_requested))
+    # 6) 只读配置的显式值才生效（缺省仍是不锁）
+    game_settings.set_value('mouse_lock_allowed', True)
+    game_settings.set_value('mouse_locked', True)
+    try:
+        d3 = _driver()
+        check('显式 mouse_lock_allowed=true/mouse_locked=true -> 启动即锁（能力①）',
+              d3.mouse_lock_allowed is True and d3.mouse_locked is True,
+              (d3.mouse_lock_allowed, d3.mouse_locked))
+    finally:
+        game_settings.set_value('mouse_lock_allowed', False)
+        game_settings.set_value('mouse_locked', False)
+    d4 = _driver()
+    check('配置改回 false -> 新 driver 不锁', d4.mouse_locked is False, d4.mouse_locked)
+
+
 # ============ 5) P-03-08/09: UI 事件派发不静默 ============
 class _Comp(object):
     def __init__(self, sid, inst):
@@ -528,6 +587,7 @@ def main():
     t_sceneio_roundtrip()
     t_paused_unlock()
     t_unlock_delegation()
+    t_lock_policy()
     t_ui_dispatch()
     t_editor_projection_dirty_undo()
     t_editor_load_without_camera_resets()

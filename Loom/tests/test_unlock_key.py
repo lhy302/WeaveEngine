@@ -60,6 +60,8 @@ class Stub(LI.InputMixin):
     def __init__(self):
         self.actions = dict(LI.DEFAULT_ACTIONS)
         self.script_keys = {}
+        # 2026-11-08 裁决: 引擎默认不允许锁鼠标；本文件测"允许锁"的游戏
+        self.mouse_lock_allowed = True
         self.mouse_locked = True
         self.mouse_unlock_requested = False
         self._ui_capture_mouse = False
@@ -287,6 +289,8 @@ def t_n3_missing_actions_once():
         """刻意不给 actions/script_keys —— 复刻"桩缺属性"的假绿现场。"""
 
         def __init__(self):
+            # 允许锁 + **缺 actions/script_keys** —— 复刻 N3"轮询其实没跑"的假绿现场
+            self.mouse_lock_allowed = True
             self.mouse_locked = True
             self.mouse_unlock_requested = False
             self._ui_capture_mouse = False
@@ -320,6 +324,87 @@ def t_n3_missing_actions_once():
           log2.strip()[:120])
 
 
+# ============ I. 默认不锁 + allowed=False 彻底不锁（2026-11-08 人类裁决） ============
+def t_default_no_lock(tmp):
+    print("=== I. 默认不锁 / allowed=False 彻底不锁 / set_mouse_lock_allowed ===")
+    with Sandbox(tmp):
+        check("game_settings 默认 allowed=False", GS.mouse_lock_allowed() is False,
+              GS.mouse_lock_allowed())
+        check("game_settings 默认 initial=False", GS.mouse_lock_initial() is False,
+              GS.mouse_lock_initial())
+
+        class _LockStub(LI.InputMixin):
+            """默认态引擎桩（不读配置 -> 走代码默认值）。"""
+
+            def __init__(self):
+                self.mouse_locked = False
+                self.mouse_unlock_requested = False
+                self._ui_capture_mouse = False
+                self._external_ctx = True
+                self.view = None
+                self.actions = dict(LI.DEFAULT_ACTIONS)
+                self.script_keys = {}
+
+            def is_key(self, name):
+                return bool(self.script_keys.get(name, False))
+
+            def get_action(self, name):
+                for k in self.actions.get(name, (name,)):
+                    if self.script_keys.get(k, False):
+                        return True
+                return False
+
+        _LockStub._poll_mouse_unlock_key = E.GLEngine._poll_mouse_unlock_key
+        _LockStub.poll_unlock = E.GLEngine.poll_unlock
+
+        e = _LockStub()
+        check("引擎默认 mouse_lock_allowed=False (类属性)",
+              LI.InputMixin.mouse_lock_allowed is False)
+        out, log = capture(lambda: e.set_mouse_locked(True))
+        check("allowed=False: set_mouse_locked(True) 无效",
+              e.mouse_locked is False and out is False, (e.mouse_locked, out))
+        check("allowed=False: 明确告警(说明本游戏不允许锁鼠标)",
+              '不允许锁鼠标' in log, log.strip()[:110])
+        _o2, log2 = capture(lambda: e.set_mouse_locked(True))
+        check("再次请求锁定不刷屏 (每进程一次)",
+              '不允许锁鼠标' not in log2, log2.strip()[:80])
+
+        e.script_keys = {'Tab': True}
+        toggled = capture(lambda: e.poll_unlock())[0]
+        check("allowed=False: 按 Tab 不翻转",
+              toggled is False and e.mouse_locked is False, (toggled, e.mouse_locked))
+        _o3, log3 = capture(lambda: e.poll_unlock())
+        check("allowed=False: 按 Tab 不打印'切换鼠标锁定'",
+              '切换鼠标锁定' not in log3, log3.strip()[:80])
+        tog = capture(lambda: e.toggle_mouse_locked())[0]
+        check("allowed=False: toggle_mouse_locked 完全不响应",
+              tog is False and e.mouse_unlock_requested is False)
+        e.set_ui_capture_mouse(True)
+        check("allowed=False: 特殊场景 API 也不会把锁打开",
+              e.mouse_locked is False, e.mouse_locked)
+        e.set_ui_capture_mouse(False)
+
+        # 打开 allowed -> 立即按意图应用；Tab 随之生效
+        e.set_mouse_lock_allowed(True)
+        check("set_mouse_lock_allowed(True) 后立即锁定",
+              e.mouse_locked is True, e.mouse_locked)
+        e.script_keys = {}
+        e.poll_unlock()                      # 松开帧
+        e.script_keys = {'Tab': True}
+        check("打开 allowed 后按 Tab 生效(解锁)",
+              e.poll_unlock() is True and e.mouse_locked is False,
+              e.mouse_locked)
+
+        # 关掉 allowed -> 立刻释放（锁不能被脚本留着）
+        e.mouse_unlock_requested = False
+        e.set_mouse_locked(True)             # 此时 allowed=True, 可以锁
+        check("回锁成功(前置)", e.mouse_locked is True, e.mouse_locked)
+        e.set_mouse_lock_allowed(False)
+        check("set_mouse_lock_allowed(False) 立即释放",
+              e.mouse_locked is False and e.mouse_unlock_requested is False,
+              e.mouse_locked)
+
+
 if __name__ == "__main__":
     print("========== 解锁键归属 / 冲突拒绝 定向测试 ==========")
     t_declared()
@@ -334,6 +419,8 @@ if __name__ == "__main__":
     with tempfile.TemporaryDirectory() as t4:
         t_rebind_ok(t4)
     t_n3_missing_actions_once()
+    with tempfile.TemporaryDirectory() as t5:
+        t_default_no_lock(t5)
     print("=" * 50)
     if _fails:
         print("总结果: %d 项失败 ❌" % len(_fails))

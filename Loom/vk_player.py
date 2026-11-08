@@ -130,6 +130,48 @@ def _wheel_taken_by_scrollview(ui, pos):
         return True
 
 
+def apply_startup_mouse_lock(driver):
+    """启动时的鼠标策略（2026-11-08 人类裁决: **默认不锁**）。
+
+    返回 (allowed, initial)。语义三件套:
+      ① 整局是否允许锁 = allowed（未配置 = False, 由 runtime.read_mouse_lock_policy 统一读）;
+      ② 启动是否锁 = initial（allowed=False 时恒 False）;
+      ③ 解锁键 = 动作 解锁鼠标（引擎独占, 见 poll_unlock_frame）。
+    allowed=False 时在本 driver 上装一次性守卫: 之后**任何** set_mouse_locked(True)
+    （脚本/宿主）都不生效 —— 只报一次原因，不静默。
+    """
+    from runtime import read_mouse_lock_policy        # 与 GL 播放器同一份读取（不复制语义）
+    allowed, initial = read_mouse_lock_policy()
+    driver.mouse_lock_allowed = bool(allowed)
+    if not allowed:
+        driver.mouse_unlock_requested = False
+    _install_lock_policy_guard(driver)
+    driver.set_mouse_locked(bool(initial))
+    print('[鼠标] 策略: allowed=%s initial=%s -> 启动%s'
+          % (allowed, initial, '锁定' if getattr(driver, 'mouse_locked', False) else '不锁'))
+    return allowed, initial
+
+
+def _install_lock_policy_guard(driver):
+    """allowed=False 时把'锁'请求挡在驱动层之前（脚本/宿主一律锁不住）。"""
+    if getattr(driver, '_lock_policy_guard', False):
+        return
+    orig = getattr(driver, 'set_mouse_locked', None)
+    if not callable(orig):
+        return
+
+    def guarded(locked):
+        if locked and not getattr(driver, 'mouse_lock_allowed', False):
+            if not getattr(driver, '_lock_denied_logged', False):
+                driver._lock_denied_logged = True
+                print('[鼠标] mouse_lock_allowed=False -> 忽略 set_mouse_locked(True) (本局只报一次)')
+            driver.mouse_locked = False
+            return
+        return orig(locked)
+
+    driver.set_mouse_locked = guarded
+    driver._lock_policy_guard = True
+
 def _unlock_poll_fn(driver):
     """解析一次"解锁键采样实现"（不复制语义, 每个 driver 只解析一次）。
 
@@ -432,29 +474,22 @@ def run_vk(scene=None, frames_n=None, keep=False, mini=False, no_shadow=False,
                 try:
                     x, y = glfw.get_cursor_pos(win)
                     ui_bridge.on_cursor(x, y)
-                except Exception:
-                    pass
+                except Exception as e:
+                    _warn_once(driver, 'cursor_pos', '取光标位置失败 (%r)' % (e,))
+                # 2026-11-08 人类裁决: 后端落地不能只翻一个 glfw 模式就完事 ——
+                # 统一走 runtime.apply_mouse_lock_backend（回读校验 + Win32 兜底 + 日志），
+                # 与 GL 播放器同一份实现（不复制）。
                 try:
-                    glfw.set_input_mode(
-                        win, glfw.CURSOR,
-                        glfw.CURSOR_DISABLED if locked else glfw.CURSOR_NORMAL)
-                except Exception:
-                    pass
+                    from runtime import apply_mouse_lock_backend
+                    apply_mouse_lock_backend(win, bool(locked), tag='VK 播放器')
+                except Exception as e:
+                    _warn_once(driver, 'cursor_apply', '光标模式应用失败 (%r)' % (e,))
 
             driver.on_mouse_lock_changed = _apply_cursor_mode
-            # 与 runtime.PlayerApp 一致: 播放期是否锁定由**游戏配置**决定
-            # (mouse_lock_allowed / mouse_locked; 默认沿用旧行为 = 允许且锁定)。
-            # 2026-11-08 更新: 解锁键已归**引擎独占** (D6=A) —— 由输入层
-            # GLEngine._poll_mouse_unlock_key / poll_unlock() 统一处理"解锁鼠标"
-            # 动作 (默认 Tab, 可在 游戏设置.json 的 key_bindings 改键);
-            # first/third_person 脚本**不再**自行 toggle, 此处也不要再补脚本级切换。
-            try:
-                import game_settings as _gs
-                driver.mouse_lock_allowed = bool(_gs.mouse_lock_allowed())
-                _lock0 = bool(_gs.mouse_lock_initial())
-            except Exception:
-                driver.mouse_lock_allowed, _lock0 = True, True
-            driver.set_mouse_locked(_lock0)
+            # 与 runtime.PlayerApp 一致: 启动策略 = 人类裁决 2026-11-08 的"默认不锁"。
+            # 解锁键归**引擎独占** (D6=A) —— GLEngine._poll_mouse_unlock_key / poll_unlock()
+            # 统一处理 解锁鼠标 动作（默认 Tab，可改键）；脚本不自行 toggle。
+            apply_startup_mouse_lock(driver)
             _keys_registered[0] = True
         except Exception as e:
             # 失败原因交给重试预算 (限次 + 限打印), 不再每帧一行

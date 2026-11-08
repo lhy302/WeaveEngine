@@ -83,6 +83,9 @@ class FakeEngine:
         self.orbit_mode = True
         self.mouse_rel = (0, 0)
         # M39 鼠标锁定桩
+        # 2026-11-08 裁决: 引擎默认**不允许**锁鼠标 (mouse_lock_allowed=False)。
+        # 本文件的 M39 段测的是"允许锁"的游戏, 显式打开。
+        self.mouse_lock_allowed = True
         self.mouse_locked = True
     def set_mouse_locked(self, locked):
         self.mouse_locked = bool(locked)
@@ -279,6 +282,8 @@ check("M39: 回锁后鼠标转动视角", abs(s.yaw) > 0, "yaw=%.3f" % s.yaw)
 
 # ---- M39 真实引擎解锁回锁逻辑 (特殊场景强制回锁, 退出正常回锁) ----
 eg2 = E.GLEngine.__new__(E.GLEngine)
+# 2026-11-08 裁决: 引擎默认不允许锁鼠标；本段测"允许锁"的游戏解锁状态机
+eg2.mouse_lock_allowed = True
 eg2.mouse_locked = False
 eg2.mouse_unlock_requested = False
 eg2._ui_capture_mouse = False

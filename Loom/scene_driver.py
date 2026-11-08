@@ -482,15 +482,30 @@ class SceneDriver:
             print('[输入] 键位加载失败 (%r) -> 用默认键位' % (e,))
             self.actions = dict(DEFAULT_ACTIONS)
         self.mouse_rel = (0, 0)                  # 本帧鼠标增量 (像素, 同 engine.mouse_rel)
-        # 2026-11-07: 初始锁定状态由游戏配置决定 (vk_player 也会设一次; 这里兜底,
-        # 保证任何入口 (含测试/工具) 都遵守 mouse_lock_allowed / mouse_locked)
+        # 2026-11-08 人类裁决（鼠标锁定语义重构）: **默认不锁** —— 没人要求就不锁。
+        # 规则:
+        #   · 只有游戏配置里**显式**写了 mouse_lock_allowed / mouse_locked 才生效；
+        #     缺省 = allowed False / locked False（旧实现缺省 True/True，打包吃豆人因此被锁死）；
+        #   · game_settings 的模块常量仍是旧默认（第 0 批负责改），所以这里按"显式键"判定，
+        #     裁决落地不依赖别的批次；配置读不出来时同样按"不锁"处理（并出声）。
         try:
-            import game_settings as _gs
-            self.mouse_lock_allowed = bool(_gs.mouse_lock_allowed())
-            self.mouse_locked = bool(_gs.mouse_lock_initial())
+            # 与 GL 播放器**同一份**策略读取（第 3 批在 runtime 提供单点
+            # read_mouse_lock_policy: 未配置 = False/False, initial 受 allowed 门控）。
+            from runtime import read_mouse_lock_policy as _lock_policy
+            self.mouse_lock_allowed, self.mouse_locked = _lock_policy()
         except Exception:
-            self.mouse_lock_allowed = True
-            self.mouse_locked = False
+            # runtime 不可用（裁剪包/单测桩）时用同一条规则直读配置：
+            # read_bool 缺省 False —— 与 game_settings.mouse_lock_allowed() 在
+            # 第 0 批把模块默认改成 False 后完全等价。
+            try:
+                import game_settings as _gs
+                self.mouse_lock_allowed = bool(_gs.read_bool('mouse_lock_allowed', False))
+                self.mouse_locked = (bool(_gs.read_bool('mouse_locked', False))
+                                     if self.mouse_lock_allowed else False)
+            except Exception as e:
+                print('[输入] 鼠标锁定策略读取失败 (%r) -> 本游戏不锁鼠标' % (e,))
+                self.mouse_lock_allowed = False
+                self.mouse_locked = False
         self.mouse_unlock_requested = False      # 玩家解锁意图 (同 engine.mouse_unlock_requested)
         self._ui_capture_mouse = False           # 特殊场景 (UI 菜单) 强制解锁 (同 engine)
         self.mouse_buttons = (False, False, False)   # (左, 中, 右) 同 pygame 顺序
@@ -1236,16 +1251,42 @@ class SceneDriver:
         return False
 
     # ---- 鼠标 (与 loom_input.InputMixin 同语义: 锁定状态机 + 指针增量) ----
+    def set_mouse_lock_allowed(self, allowed):
+        """游戏级开关: 本游戏**是否允许**锁定鼠标（人类裁决 2026-11-08, 默认 False）.
+
+        能力②的实现点: 脚本可以在某场景/某时刻显式开关（例如进 FPS 关卡才允许锁）。
+        allowed 变 False 时若当前处于锁定态 -> 立即解锁（否则玩家会被永久锁死、
+        光标出不来，这正是打包版吃豆人的现场）。返回生效后的 allowed。
+        """
+        self.mouse_lock_allowed = bool(allowed)
+        if not self.mouse_lock_allowed and getattr(self, 'mouse_locked', False):
+            self.set_mouse_locked(False)
+        return self.mouse_lock_allowed
+
     def set_mouse_locked(self, locked):
         """锁定/释放鼠标 (True=隐藏+捕获, False=显示+释放) — 同 engine.set_mouse_locked.
-        后端若挂 on_mouse_lock_changed 回调则转发 (GL 侧走 glfw.set_input_mode)."""
-        self.mouse_locked = bool(locked)
+
+        2026-11-08 人类裁决: `mouse_lock_allowed=False` 时 **True 无效**（一次性告警），
+        只允许解锁方向；这样"没人要求就不锁"是硬保证，脚本误调也锁不上。
+        后端光标副作用只经 `on_mouse_lock_changed` 回调转发（不在这里碰 GLFW），
+        与 GL 侧 set_mouse_locked -> view/glfw 的分工保持一致。
+        """
+        want = bool(locked)
+        if want and not bool(getattr(self, 'mouse_lock_allowed', False)):
+            self._warn_once('lock_not_allowed',
+                            '[输入] 本游戏不允许锁定鼠标 (mouse_lock_allowed=False): '
+                            'set_mouse_locked(True) 被忽略; 需要锁定时先调 '
+                            'set_mouse_lock_allowed(True) / 在 游戏设置.json 写 '
+                            'mouse_lock_allowed=true')
+            want = False
+        self.mouse_locked = want
         cb = self.on_mouse_lock_changed
         if cb is not None:
             try:
-                cb(bool(locked))
-            except Exception:
-                pass
+                cb(want)
+            except Exception as e:
+                self._warn_once('mouse_lock_cb',
+                                '[输入] 鼠标锁定回调异常 (%r) -> 后端光标可能不同步' % (e,))
 
     def _apply_mouse_lock(self):
         """按 [特殊场景标志 | 玩家解锁意图] 计算实际锁定 — 同 InputMixin._apply_mouse_lock."""
@@ -1253,7 +1294,16 @@ class SceneDriver:
 
     def toggle_mouse_locked(self):
         """Tab 切换玩家解锁意图 — 同 InputMixin.toggle_mouse_locked
-        (特殊场景下强制清零, 退出特殊场景后鼠标自动回锁)."""
+        (特殊场景下强制清零, 退出特殊场景后鼠标自动回锁).
+
+        不允许锁定鼠标的游戏里这个是空操作（意图保持 False，不会"解锁一个本来就没锁的光标"）。
+        """
+        if not bool(getattr(self, 'mouse_lock_allowed', False)):
+            self._warn_once('toggle_not_allowed',
+                            '[输入] 本游戏不允许锁定鼠标 -> 解锁键无效果'
+                            ' (mouse_lock_allowed=False)')
+            self.mouse_unlock_requested = False
+            return
         if self._ui_capture_mouse:
             self.mouse_unlock_requested = False
         else:

@@ -138,6 +138,9 @@ def gl_vp(e):
 
 def vk_driver(data):
     d = SD.SceneDriver()
+    # 2026-11-08 裁决: 引擎/驱动默认**不允许**锁鼠标 (game_settings 默认 allowed=False)。
+    # 本文件测的是"允许锁鼠标"的游戏(第一人称 + Tab 解锁), 显式打开。
+    d.mouse_lock_allowed = True
     d._bridge_disabled = True                     # 只比相机, 不建物理桥 (快 + 无日志)
     d.load_from_data(copy.deepcopy(data))
     return d
@@ -336,6 +339,8 @@ def t_multi_camera():
 def t_mouse_lock():
     calls = []
     d = vk_driver(scene())
+    # 2026-11-08 人类裁决: 鼠标锁定默认**不锁**(allowed=False) -> 本例显式允许
+    d.set_mouse_lock_allowed(True)
     d.on_mouse_lock_changed = lambda locked: calls.append(locked)
 
     d.set_mouse_locked(True)
@@ -362,6 +367,7 @@ def t_mouse_lock():
 # ============ 7) 鼠标: 光标增量只在锁定态累积 ============
 def t_mouse_rel():
     d = vk_driver(scene())
+    d.set_mouse_lock_allowed(True)     # 新裁决默认不锁 -> 本例显式允许
     d.set_mouse_locked(False)
     d.feed_mouse_rel(30, 0)
     d.consume_mouse_input()
@@ -427,7 +433,8 @@ def t_mouse_wheel():
 def t_mouse_look():
     d = vk_driver(scene(camera={"target": [0, 0, 0], "distance": 10.0,
                                 "yaw": 0.0, "pitch": 0.0}))
-    d.set_mouse_locked(True)                      # 播放期默认锁定 (增量才累积)
+    d.set_mouse_lock_allowed(True)                # 新裁决默认不锁 -> 本例显式允许
+    d.set_mouse_locked(True)                      # 播放期锁定 (增量才累积)
     d.feed_mouse_rel(100, -50)                    # 无按键 -> 不转视角
     d.consume_mouse_input()
     d.apply_dev_camera_mouse()
@@ -461,6 +468,7 @@ def t_player_script():
                            "visible": True,
                            "scripts": [{"id": "first_person", "vars": {}}]}])
     d = vk_driver(data)
+    d.set_mouse_lock_allowed(True)     # 新裁决默认不锁 -> 本例允许脚本锁定
     check("10 俯仰限制 = 激活相机 pitch_lock",
           d.player_pitch_limits() == (math.radians(-40.0), math.radians(50.0)),
           d.player_pitch_limits())

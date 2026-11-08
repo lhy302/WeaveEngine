@@ -15,6 +15,89 @@ from engine import GLEngine, gc_play_enter, gc_play_exit, engine_gc_frozen
 import sceneio
 
 
+# ==================== 2026-11-08 鼠标锁定语义重构（人类裁决）====================
+# 裁决要点: ①默认**不锁**（没人要求就不锁）; ②**不做**"检测到 UI 就自动解锁"（交给
+# 游戏开发者用 set_ui_capture_mouse 显式判断）; ③三件能力齐: 整局是否锁 / 某时刻锁不锁
+# / 哪个键解锁（动作 解锁鼠标，默认 Tab，可改、冲突拒绝 —— 后者在 loom_input 侧）。
+_LOCK_BACKEND_LAST = {}          # (id(win), locked) -> 已记录，防每次调用刷日志
+
+
+def read_mouse_lock_policy():
+    """读本局鼠标策略 -> (allowed, initial)。
+
+    新默认（人类裁决 2026-11-08）: **未配置 = 不锁**（False/False）。
+    显式配置照读；initial 在 allowed=False 时恒为 False（不允许锁就别谈初始锁）。
+    """
+    try:
+        import game_settings as _gs
+    except Exception as e:
+        print('[鼠标] 读游戏配置失败 (%r) -> 按默认不锁' % (e,))
+        return False, False
+    allowed = bool(_gs.read_bool('mouse_lock_allowed', False))
+    if not allowed:
+        return False, False
+    return True, bool(_gs.read_bool('mouse_locked', False))
+
+
+def apply_mouse_lock_backend(win, locked, tag='player'):
+    """把"锁定/解锁鼠标"真正落到窗口后端: GLFW 模式 + **回读校验** + Win32 兜底 + 日志。
+
+    2026-11-08 人类裁决（实测病灶）: 旧实现只翻一个 `glfw CURSOR` 模式且包在
+    `except: pass` 里 —— 失败没人知道, 玩家表现为"按了键光标出来了但动不了"。
+    这里三段式: ①设模式 -> ②回读实际模式校验 -> ③不符/失败用 Win32 兜底并告警。
+    返回 True = 已确认生效（GLFW 回读一致, 或 Win32 兜底已执行）。
+    """
+    locked = bool(locked)
+    ok = False
+    detail = '无窗口句柄'
+    if win is not None:
+        try:
+            import glfw
+            want = glfw.CURSOR_DISABLED if locked else glfw.CURSOR_NORMAL
+            glfw.set_input_mode(win, glfw.CURSOR, want)
+            got = glfw.get_input_mode(win, glfw.CURSOR)
+            ok = (got == want)
+            detail = 'glfw 回读=%s' % ('一致' if ok else '不一致(%r)' % (got,),)
+        except Exception as e:
+            detail = 'glfw 失败 (%r)' % (e,)
+    if not ok:
+        try:
+            import ctypes
+            from ctypes import wintypes
+            u = ctypes.windll.user32
+            if locked:
+                hwnd = 0
+                try:
+                    import glfw
+                    hwnd = glfw.get_win32_window(win)
+                except Exception:
+                    hwnd = 0
+                if hwnd:
+                    class _R(ctypes.Structure):
+                        _fields_ = [('left', wintypes.LONG), ('top', wintypes.LONG),
+                                    ('right', wintypes.LONG), ('bottom', wintypes.LONG)]
+                    r = _R()
+                    u.GetClientRect(hwnd, ctypes.byref(r))
+                    pt = wintypes.POINT(0, 0)
+                    u.ClientToScreen(hwnd, ctypes.byref(pt))
+                    r.left += pt.x; r.right += pt.x
+                    r.top += pt.y; r.bottom += pt.y
+                    u.ClipCursor(ctypes.byref(r))
+                u.ShowCursor(False)
+                detail += ' | Win32 兜底: ClipCursor+ShowCursor(F)'
+            else:
+                u.ClipCursor(None)
+                u.ShowCursor(True)
+                detail += ' | Win32 兜底: ClipCursor(None)+ShowCursor(T)'
+            ok = True
+        except Exception as e:
+            detail += ' | Win32 兜底失败 (%r)' % (e,)
+    key = (id(win), locked)
+    if _LOCK_BACKEND_LAST.get(key) != ok:
+        _LOCK_BACKEND_LAST[key] = ok
+        print('[鼠标] %s: %s (%s)' % (tag, '锁定' if locked else '解锁', detail))
+    return ok
+
 class PlayerApp(GLEngine):
     """只读场景播放器: 无编辑器 UI, 轨道相机 + 默认引擎键位.
 
@@ -72,16 +155,16 @@ class PlayerApp(GLEngine):
         else:
             self.orbit_mode = True
             self.apply_orbit_camera()
-        # 2026-11-07: 鼠标锁定改为**游戏配置驱动** (吃豆人这类不需要锁的游戏不能被锁死)。
-        #   游戏设置.json: mouse_lock_allowed (是否允许锁) / mouse_locked (启动是否锁)
-        #   解锁键归**引擎独占** (D6=A): GLEngine._poll_mouse_unlock_key / poll_unlock()
-        #   统一处理 解锁鼠标 动作 (默认 Tab, 可改键), 不依赖游戏脚本。
-        try:
-            import game_settings as _gs
-            self.mouse_lock_allowed = bool(_gs.mouse_lock_allowed())
-            _lock0 = bool(_gs.mouse_lock_initial())
-        except Exception:
-            self.mouse_lock_allowed, _lock0 = True, True
+        # 2026-11-08 鼠标锁定语义重构（人类裁决）:
+        #   ① 默认**不锁**（未配置 = allowed False / initial False）—— 打包吃豆人被默认
+        #      锁死、Tab 后光标出现但动不了的实测病灶就在旧默认 (True/True);
+        #   ② 引擎**不猜**入"弹 UI 就自动解锁"（反例: 界面有常驻可点 UI 但仍需锁鼠标），
+        #      解锁时机由游戏脚本显式 set_mouse_locked / set_ui_capture_mouse 决定;
+        #   ③ 解锁键归引擎独占 (D6=A): GLEngine._poll_mouse_unlock_key / poll_unlock()
+        #      统一处理 解锁鼠标 动作（默认 Tab，可改键，冲突在 loom_input 侧拒绝）。
+        self.mouse_lock_allowed, _lock0 = read_mouse_lock_policy()
+        print('[鼠标] 策略: allowed=%s initial=%s (来源: 游戏设置.json; 未配置=不锁)'
+              % (self.mouse_lock_allowed, _lock0))
         self.set_mouse_locked(_lock0)
         # 分离批2: 首帧快照对齐 (加载位姿=curr, 首渲染帧不插值)
         if getattr(self, '_interp', None) is not None:
@@ -120,6 +203,36 @@ class PlayerApp(GLEngine):
     # 语义与两端对齐: 回调只缓存 -> 帧首一次 dispatch_mouse -> 未被消费再 update_hover_only
     # (UIManager.dispatch_mouse 是唯一入口; 每帧最多一次, pressed/released 由
     #  GlfwWindowMixin._handle_events 每帧清空)。**不引入任何编辑器交互**。
+    # ---- 2026-11-08 鼠标锁定语义重构: 播放器侧的 锁不锁 执行点 ----
+    def set_mouse_locked(self, locked):
+        """锁定/解锁鼠标（播放器语义）.
+
+        与旧实现的差别（人类裁决 2026-11-08）:
+          ① `allowed=False` 时**任何**锁请求都不生效（脚本调 set_mouse_locked(True)
+             也锁不住玩家），并只报一次原因；
+          ② 后端落地统一走 apply_mouse_lock_backend（GLFW 模式 + 回读校验 +
+             Win32 兜底 + 一行日志），不再 `except: pass` 静默失败。
+        """
+        locked = bool(locked)
+        if locked and not getattr(self, 'mouse_lock_allowed', False):
+            if not getattr(self, '_lock_denied_logged', False):
+                self._lock_denied_logged = True
+                print('[鼠标] mouse_lock_allowed=False -> 忽略 set_mouse_locked(True) (本局只报一次)')
+            self.mouse_locked = False
+            return
+        self.mouse_locked = locked
+        if getattr(self, '_external_ctx', False):
+            view = getattr(self, 'view', None)
+            if view is not None and hasattr(view, 'set_mouse_locked'):
+                try:
+                    view.set_mouse_locked(locked)
+                except Exception as e:
+                    if not getattr(self, '_lock_view_err_logged', False):
+                        self._lock_view_err_logged = True
+                        print('[鼠标] 宿主视图 set_mouse_locked 失败 (%r), 本局不再报' % (e,))
+            return
+        apply_mouse_lock_backend(getattr(self, '_glfw_win', None), locked,
+                                 tag='GL 播放器')
     def _dispatch_ui_mouse(self):
         """把本帧新按下/松开 + 光标位置 + 滚轮交给 UI。返回 consumed。
 

@@ -203,6 +203,92 @@ def t_precedence():
             run_player.resolve_backend = old_resolve
 
 
+# ============ B6. 鼠标锁定语义（人类裁决 2026-11-08） ============
+def t_mouse_lock_policy():
+    """默认不锁 / allowed=False 锁不住 / allowed+initial 启动即锁且 Tab 可解.
+
+    基准: 人类裁决 2026-11-08 —— ①默认不锁; ②不做"检测到 UI 自动解锁";
+    ③三件能力齐（整局是否锁 / 某时刻锁不锁 / 哪个键解锁）。
+    """
+    import json
+    import tempfile
+    import runtime
+    import scene_driver
+    import vk_player
+
+    old_env = {k: os.environ.get(k)
+               for k in ('LOOM_GAME_DIR', 'LOOM_USER_ROOT')}
+    old_base = run_player._SETTINGS_BASE
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            os.environ['LOOM_GAME_DIR'] = tmp
+            os.environ['LOOM_USER_ROOT'] = os.path.join(tmp, 'userroot')
+            # ---- ① 默认（无配置）: 不锁 ----
+            allowed, initial = runtime.read_mouse_lock_policy()
+            check('默认策略 = 不锁 (allowed=False/initial=False)',
+                  allowed is False and initial is False, (allowed, initial))
+            d = scene_driver.SceneDriver()
+            got = vk_player.apply_startup_mouse_lock(d)
+            check('VK 默认启动不锁', got == (False, False) and d.mouse_locked is False,
+                  (got, d.mouse_locked))
+            d.set_mouse_locked(True)          # 脚本试图锁
+            check('VK: allowed=False 时脚本 set_mouse_locked(True) 不生效',
+                  d.mouse_locked is False, d.mouse_locked)
+            # ---- ② 显式 allowed+initial -> 启动即锁, Tab 可解 ----
+            with open(os.path.join(tmp, '游戏设置.json'), 'w', encoding='utf-8') as f:
+                json.dump({'mouse_lock_allowed': True, 'mouse_locked': True}, f)
+            allowed2, initial2 = runtime.read_mouse_lock_policy()
+            check('显式配置: allowed=True/initial=True',
+                  allowed2 is True and initial2 is True, (allowed2, initial2))
+            d2 = scene_driver.SceneDriver()
+            got2 = vk_player.apply_startup_mouse_lock(d2)
+            check('VK 启动即锁 (allowed=True+initial=True)',
+                  got2 == (True, True) and d2.mouse_locked is True,
+                  (got2, d2.mouse_locked))
+            d2.key_state['Tab'] = True        # 解锁键（引擎独占动作 解锁鼠标）
+            vk_player.poll_unlock_frame(d2)
+            check('Tab 可解锁 (允许锁的游戏)',
+                  d2.mouse_locked is False and d2.mouse_unlock_requested is True,
+                  (d2.mouse_locked, d2.mouse_unlock_requested))
+            d2.key_state['Tab'] = False
+            vk_player.poll_unlock_frame(d2)
+            d2.key_state['Tab'] = True
+            vk_player.poll_unlock_frame(d2)
+            check('再按 Tab 回锁', d2.mouse_locked is True, d2.mouse_locked)
+
+        # ---- ③ GL 播放器 (真实 PlayerApp): 默认不锁 + 锁不住 + 后端回读工具 ----
+        os.environ.pop('LOOM_GAME_DIR', None)
+        os.environ['LOOM_USER_ROOT'] = os.path.join(_tempfile_gate.mkdtemp(
+            prefix='loom_test_lock_'), 'userroot')
+        from runtime import PlayerApp
+        app = PlayerApp(None, 160, 120, scene_data={'version': 10, 'objects': [],
+                                                    'lights': [], 'ui': None})
+        try:
+            check('GL 默认启动不锁 (mouse_locked=False)', app.mouse_locked is False,
+                  app.mouse_locked)
+            check('GL 默认 mouse_lock_allowed=False',
+                  app.mouse_lock_allowed is False, app.mouse_lock_allowed)
+            app.set_mouse_locked(True)
+            check('GL: allowed=False 时脚本锁不住', app.mouse_locked is False,
+                  app.mouse_locked)
+        finally:
+            try:
+                app.set_mouse_locked(False)
+            except Exception as e:
+                print('GL 收尾解锁失败 (忽略): %r' % (e,))
+        check('GL/VK 共用同一份后端落地工具 (回读+Win32 兜底)',
+              callable(getattr(runtime, 'apply_mouse_lock_backend', None)))
+        vk_src = open(os.path.join(ROOT, 'vk_player.py'), encoding='utf-8').read()
+        check('VK 侧调用共享后端工具而非自写 except:pass',
+              'apply_mouse_lock_backend' in vk_src)
+    finally:
+        run_player._SETTINGS_BASE = old_base
+        for k, v in old_env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
 # ============ B4. 解锁键采样等价 (N4) ============
 def t_unlock_sampling_parity():
     """解锁键必须**每渲染帧**采样（短按 < 1 逻辑步也能解锁），且两后端同一实现.
@@ -452,6 +538,7 @@ if __name__ == "__main__":
     t_precedence()
     t_legacy_config_migration()
     t_unlock_sampling_parity()
+    t_mouse_lock_policy()
     t_run_player_entry_identity()
     t_backend_parity()
     t_editor_invariant()

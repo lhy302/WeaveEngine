@@ -142,6 +142,75 @@ KEY_BINDINGS = {
 # ============================================================
 
 
+# ============ 鼠标锁定: 告警闸门 + Win32 兜底 (2026-11-08 缺陷③) ============
+_MOUSE_WARNED = set()
+
+
+def _mouse_warn_once(tag, msg):
+    """同一类问题每进程只告警一次（避免每帧刷屏，又不像 except:pass 那样静默）。"""
+    if tag in _MOUSE_WARNED:
+        return False
+    _MOUSE_WARNED.add(tag)
+    print('[鼠标] %s' % (msg,))
+    return True
+
+
+def _win32_clip_cursor(win, locked):
+    """Win32 兜底: 锁定 -> 把光标夹在窗口客户区; 解锁 -> ClipCursor(NULL)。
+
+    返回 'clipped' / 'free' / 'n/a'（无窗口或非 Windows） / 'err'（失败，只告警一次）。
+    为什么要兜底: 只翻 GLFW CURSOR 模式在部分驱动/Alt+Tab 抢焦点后会失效 ——
+    "光标出现但动不了"正是捕获流在 Win32 层残留的表现。
+    """
+    try:
+        import ctypes
+        from ctypes import wintypes
+        user32 = ctypes.windll.user32
+    except (AttributeError, ImportError, OSError) as e:
+        _mouse_warn_once('win32-import', 'Win32 光标兜底不可用 (%r)' % (e,))
+        return 'n/a'
+    if not locked:
+        try:
+            user32.ClipCursor(None)
+            return 'free'
+        except (AttributeError, OSError) as e:
+            _mouse_warn_once('win32-clip-free', 'ClipCursor(NULL) 失败 (%r)' % (e,))
+            return 'err'
+    if win is None:
+        return 'n/a'
+    try:
+        import glfw
+        get_native = getattr(glfw, 'get_win32_window', None)
+        if get_native is None:
+            return 'n/a'
+        hwnd = get_native(win)
+        if not hwnd:
+            return 'n/a'
+        r = wintypes.RECT()
+        if not user32.GetClientRect(hwnd, ctypes.byref(r)):
+            return 'err'
+        pt = wintypes.POINT(0, 0)
+        user32.ClientToScreen(hwnd, ctypes.byref(pt))
+        rect = wintypes.RECT(pt.x, pt.y, pt.x + r.right, pt.y + r.bottom)
+        if not user32.ClipCursor(ctypes.byref(rect)):
+            return 'err'
+        return 'clipped'
+    except (AttributeError, OSError, ValueError) as e:
+        _mouse_warn_once('win32-clip-lock', 'ClipCursor(窗口矩形) 失败 (%r)' % (e,))
+        return 'err'
+
+
+def _win32_show_cursor(show):
+    """Win32 兜底: ShowCursor(TRUE/FALSE)。返回 True/False；失败 None（告警一次）。"""
+    try:
+        import ctypes
+        ctypes.windll.user32.ShowCursor(1 if show else 0)
+        return bool(show)
+    except (AttributeError, ImportError, OSError) as e:
+        _mouse_warn_once('win32-show', 'ShowCursor 兜底失败 (%r)' % (e,))
+        return None
+
+
 class InputMixin:
     """输入子系统 (从 GLEngine 抽出): 按键快照 / 输入动作层 / 鼠标锁定 / 键位配置.
 
@@ -150,6 +219,13 @@ class InputMixin:
       self._external_ctx / self.view / self._ui_capture_mouse /
       self.mouse_unlock_requested
     mixin 只通过 self 按需访问 (语义与拆分前逐位一致)."""
+
+    # 2026-11-08 人类裁决: **默认不锁鼠标**。需要锁的游戏/脚本显式
+    # set_mouse_lock_allowed(True)（或 游戏设置.json mouse_lock_allowed=true）。
+    mouse_lock_allowed = False
+    mouse_locked = False
+    mouse_unlock_requested = False
+    _ui_capture_mouse = False
 
     def _key_pressed(self):
         """按键快照 (每帧): 供 _update_camera 等按键查询.
@@ -256,44 +332,145 @@ class InputMixin:
                            % (name, k0, who0))
         return True, ''
 
+    def set_mouse_lock_allowed(self, allowed):
+        """脚本 API（2026-11-08 裁决 ③①）: 运行期开关"**整个游戏**是否允许锁鼠标"。
+
+        切换后立即按新状态应用（不是等下一帧）:
+          · True  -> 按 [特殊场景 | 玩家解锁意图] 重新计算并应用；
+          · False -> 清解锁意图 + 立刻释放鼠标（锁不能再被任何脚本强行打开）。
+
+        典型用法（由**游戏开发者**显式决定，引擎不替游戏猜）:
+          · FPS/第三人称视角需要转视角: engine.set_mouse_lock_allowed(True)
+          · 切到纯 UI 关卡/结算页: engine.set_mouse_lock_allowed(False)
+        返回: 切换后的布尔值。
+        """
+        self.mouse_lock_allowed = bool(allowed)
+        if self.mouse_lock_allowed:
+            self._apply_mouse_lock()
+        else:
+            self.mouse_unlock_requested = False
+            self.set_mouse_locked(False)
+        return self.mouse_lock_allowed
+
     def set_mouse_locked(self, locked):
-        """M39 底层: 直接设鼠标锁定状态 (True=隐藏+捕获居中, False=显示+释放).
-        嵌入式模式 (Qt 宿主) 转给视图实现 (QOpenGLWidget 光标/捕获), 不碰 pygame."""
-        self.mouse_locked = bool(locked)
+        """设置鼠标锁定状态 (True=隐藏+捕获居中, False=显示+释放)。
+
+        2026-11-08 裁决（默认不锁 + 缺陷③）:
+          · \`mouse_lock_allowed\` 为 False 时 **锁定请求无效**（每进程告警一次）——
+            内置 first/third_person 的 on_start 无条件调用也不会把玩家鼠标锁死；
+          · 每次**状态变化**打一行 \`[鼠标] locked=... (glfw_mode=..., clip=..., showing=...)\`；
+          · GLFW 设置后**回读校验**，不符/失败都告警（不再 except: pass 静默）；
+          · 解锁补 Win32 \`ClipCursor(NULL)\` + \`ShowCursor(TRUE)\`，锁定补
+            \`ClipCursor(窗口客户区)\`（ctypes，失败只告警一次）。
+        嵌入式模式（Qt 宿主）转给视图实现，不碰 GLFW/Win32 光标。
+        返回: True=已应用（或已解锁）; False=因"不允许锁"被拒绝。
+        """
+        locked = bool(locked)
+        if locked and not getattr(self, 'mouse_lock_allowed', False):
+            _mouse_warn_once(
+                'denied:%s' % type(self).__name__,
+                '本游戏不允许锁鼠标 (mouse_lock_allowed=False)，'
+                'set_mouse_locked(True) 被忽略；需要锁定请先 '
+                'set_mouse_lock_allowed(True) 或在 游戏设置.json 里打开')
+            if getattr(self, 'mouse_locked', False):
+                self.set_mouse_locked(False)
+            return False
+        prev = getattr(self, 'mouse_locked', None)
+        self.mouse_locked = locked
+        mode, clip, showing = 'n/a', 'n/a', 'n/a'
         if self._external_ctx:
             view = getattr(self, 'view', None)
             if view is not None and hasattr(view, 'set_mouse_locked'):
                 view.set_mouse_locked(locked)
-            return
-        # 2026-10-18 A2: GLFW 光标模式（原 pygame.event.set_grab + mouse.set_visible）
-        # CURSOR_DISABLED = 锁定 + 隐藏（玩家控制器转视角用）
-        # CURSOR_NORMAL   = 正常显示（解锁）
+            mode = 'host'
+        else:
+            mode, clip, showing = self._apply_cursor_backend(locked)
+        if prev is not locked:
+            print('[鼠标] locked=%s (glfw_mode=%s, clip=%s, showing=%s)'
+                  % (locked, mode, clip, showing))
+        return True
+
+    def _apply_cursor_backend(self, locked):
+        """真正改光标: GLFW 光标模式 + 回读校验 + Win32 兜底。
+
+        返回 (glfw_mode, clip, showing) 供调用方打证据行:
+          glfw_mode: 'disabled' / 'normal' / 'no-window' / 'error'
+          clip:      'clipped' / 'free' / 'n/a' / 'err'
+          showing:   True / False / None
+        """
+        mode, clip, showing = 'n/a', 'n/a', 'n/a'
         try:
             import glfw
-            win = getattr(self, '_glfw_win', None)
-            if win is not None:
-                mode = glfw.CURSOR_DISABLED if locked else glfw.CURSOR_NORMAL
-                glfw.set_input_mode(win, glfw.CURSOR, mode)
-        except Exception:
-            pass
+        except (ImportError, AttributeError) as e:
+            _mouse_warn_once('glfw-import', 'GLFW 不可用 (%r)，无法切换光标模式' % (e,))
+            glfw = None
+        win = getattr(self, '_glfw_win', None)
+        if glfw is None:
+            return mode, clip, showing
+        if win is None:
+            return 'no-window', clip, showing
+        want = glfw.CURSOR_DISABLED if locked else glfw.CURSOR_NORMAL
+        try:
+            glfw.set_input_mode(win, glfw.CURSOR, want)
+            got = glfw.get_input_mode(win, glfw.CURSOR)      # 缺陷③: 回读校验
+            if got == glfw.CURSOR_DISABLED:
+                mode = 'disabled'
+            elif got == glfw.CURSOR_NORMAL:
+                mode = 'normal'
+            else:
+                mode = 'unknown(%r)' % (got,)
+            if got != want:
+                _mouse_warn_once('glfw-mode-readback',
+                                 'GLFW 光标模式回读不符: 期望 %r 实际 %r (窗口可能已失去焦点)'
+                                 % (want, got))
+        except (AttributeError, TypeError, RuntimeError) as e:
+            _mouse_warn_once('glfw-mode-set',
+                             'GLFW 光标模式切换失败 (%r)，改走 Win32 兜底' % (e,))
+            mode = 'error'
+        clip = _win32_clip_cursor(win, locked)
+        showing = _win32_show_cursor(not locked)
+        return mode, clip, showing
 
     def _apply_mouse_lock(self):
-        """M39: 按 [特殊场景标志 | 玩家解锁意图] 计算实际鼠标锁定.
-        locked = not (ui_capture_mouse or unlock_requested)."""
+        """按 [是否允许锁 | 特殊场景标志 | 玩家解锁意图] 计算实际锁定。
+
+        2026-11-08: allowed=False 时锁恒为关 —— 不允许锁的游戏连"意图"都不保留。
+        """
+        if not getattr(self, 'mouse_lock_allowed', False):
+            self.mouse_unlock_requested = False
+            self.set_mouse_locked(False)
+            return False
         self.set_mouse_locked(not (self._ui_capture_mouse or self.mouse_unlock_requested))
+        return bool(getattr(self, 'mouse_locked', False))
 
     def toggle_mouse_locked(self):
-        """M39: Tab 切换玩家解锁意图 (非特殊场景). 特殊场景下强制置为未解锁."""
+        """切换玩家解锁意图（非特殊场景；特殊场景下强制置为未解锁并回锁）。
+
+        2026-11-08 裁决: \`mouse_lock_allowed=False\` 时**完全不响应** ——
+        不发任何"切换鼠标锁定"日志（玩家按 Tab 不该看到引擎在自说自话）。
+        返回: True=有响应; False=因不允许锁而被忽略。
+        """
+        if not getattr(self, 'mouse_lock_allowed', False):
+            return False
         if self._ui_capture_mouse:
             self.mouse_unlock_requested = False     # 特殊场景: 玩家解锁意图强制清零
         else:
             self.mouse_unlock_requested = not self.mouse_unlock_requested
         self._apply_mouse_lock()
+        return True
 
     def set_ui_capture_mouse(self, capture):
-        """M39: 特殊场景 (UI 菜单/暂停等需要鼠标操作) 强制显示鼠标, 并清玩家解锁意图.
-        退出特殊场景时解锁意图仍为"未解锁" -> 鼠标正常回锁 (FPS 通用解锁回锁机制):
-        非特殊场景解锁 -> 进特殊场景强制回锁 -> 退出特殊场景鼠标回锁, 需再按 Tab 才解锁."""
+        """**开发者显式 API**（2026-11-08 裁决 ②：引擎不做"检测到 UI 就自动解锁"）。
+
+        什么时候该调用（由游戏逻辑自己判断，引擎不猜）:
+          · 打开背包/菜单/暂停面板/结算页等**需要玩家点鼠标**的特殊场景 -> True；
+          · 这些界面关闭、回到游戏操作 -> False。
+        语义: True = 强制显示鼠标 + 清零玩家解锁意图（临时覆盖锁定）；
+              False = 回到"按 mouse_lock_allowed + 玩家解锁意图"计算的状态。
+        反例提醒（人类裁决原文）: 燕云十六声这类界面有常驻可点 UI 但平时仍锁鼠标，
+        因此**不能**用"有 UI 元素"当自动解锁条件 —— 只有游戏自己的状态机知道该不该解锁。
+        注意: mouse_lock_allowed=False 时本调用不产生锁定（锁恒为关）。
+        """
         self._ui_capture_mouse = bool(capture)
         if capture:
             self.mouse_unlock_requested = False

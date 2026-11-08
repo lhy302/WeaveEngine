@@ -928,7 +928,9 @@ class GLEngine(ShadowMixin, FrameComponentMixin, PhysicsMixin, InputMixin, HudMi
 
         返回: True = 本帧发生了 锁定<->解锁 翻转; False = 无变化 / 无法轮询。
         """
-        if not getattr(self, 'mouse_lock_allowed', True):
+        # 2026-11-08 裁决: mouse_lock_allowed 默认 **False**（没人要求就不锁）。
+        # 不允许锁时解锁键**完全不响应**（不打任何"切换鼠标锁定"日志）。
+        if not getattr(self, 'mouse_lock_allowed', False):
             if getattr(self, 'mouse_locked', False):
                 self.set_mouse_locked(False)
             self._unlock_key_prev = False

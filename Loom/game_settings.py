@@ -24,8 +24,13 @@ LEGACY_FILE_NAME = "游戏配置.json"
 SCHEMA = 1
 
 UNLOCK_ACTION = "解锁鼠标"      # 引擎保留动作名 (可在 key_bindings 里改键)
-MOUSE_LOCK_ALLOWED_DEFAULT = True
-MOUSE_LOCK_INITIAL_DEFAULT = True
+# 2026-11-08 人类裁决: **默认不锁鼠标** —— 没人要求就不锁。
+#   allowed=False 时引擎完全不触发锁定（脚本调 set_mouse_locked(True) 也无效）；
+#   initial 仅在 allowed=True 时才有意义（默认 False）。
+# 需要锁鼠标的游戏在 游戏设置.json 写 {"mouse_lock_allowed": true, "mouse_locked": true}，
+# 或在脚本里显式 engine.set_mouse_lock_allowed(True)。
+MOUSE_LOCK_ALLOWED_DEFAULT = False
+MOUSE_LOCK_INITIAL_DEFAULT = False
 
 
 # ---------------- 路径与标识 ----------------
