@@ -1212,3 +1212,56 @@ test_lighting.py          exit=0 warn=0  总结果: ALL PASS
 test_vk_camera_align.py   exit=0 warn=0  总结果: ALL PASS
 test_add_script_cache.py / test_collision.py / test_playmode_edges.py / test_scripts_collision.py -> 全 PASS warn=0
 ```
+
+
+---
+
+## 10. 第 5 轮修复记录（2026-11-08 · 鼠标锁定语义重构：默认不锁 / 显式 API / 可验证解锁）
+
+> 人类裁决（2026-11-08）: ①**默认不锁**（allowed/initial 默认 False）；②不做"检测到 UI 就自动解锁"，由游戏开发者显式判断；③三件能力齐备（整个游戏是否锁 / 某时刻锁不锁 / 哪键解锁）。
+> 实测病灶: 打包吃豆人被默认锁死；按 Tab 后光标出现但动不了（只能 Alt+F4）→ ①默认 initial=True；②`set_ui_capture_mouse` 全仓无人调用；③解锁只翻 GLFW 一个模式且 `except: pass`，无回读、无 Win32 兜底。
+
+### 10.1 改动文件
+
+| 文件 | 改动 | 对应裁决 |
+|---|---|---|
+| `Loom/game_settings.py` | `MOUSE_LOCK_ALLOWED_DEFAULT = False`、`MOUSE_LOCK_INITIAL_DEFAULT = False`（initial 仅在 allowed=True 时有意义），注释写明"需要锁的游戏显式打开" | ① |
+| `Loom/loom_input.py` | ①`InputMixin` 类默认 `mouse_lock_allowed = False`；②`set_mouse_locked(True)` 在 allowed=False 时**无效**并每进程告警一次（说明"本游戏不允许锁鼠标"）；③`toggle_mouse_locked()` 在 allowed=False 时**完全不响应**（不打日志）；④新增脚本 API **`set_mouse_lock_allowed(bool)`**（切换立即应用：True 按意图计算；False 清意图并立刻释放）；⑤`_apply_mouse_lock()` 在 allowed=False 时锁恒为关；⑥`set_ui_capture_mouse()` 保留为**开发者显式 API**，docstring 写清"打开背包/菜单/暂停时 True，关闭时 False"并引用燕云十六声反例；⑦解锁可验证化：`_apply_cursor_backend()` 调 `glfw.set_input_mode` 后**回读** `glfw.get_input_mode`，不符/失败各告警一次；⑧Win32 兜底 `_win32_clip_cursor`（锁定=ClipCursor(窗口客户区)，解锁=ClipCursor(NULL)）与 `_win32_show_cursor`（ShowCursor），失败只告警一次；⑨每次状态变化打一行 `[鼠标] locked=... (glfw_mode=..., clip=..., showing=...)`；⑩原 `except: pass` 全部删除，改为窄类型 except + 一次性告警 | ①②③④ |
+| `Loom/engine.py` | `_poll_mouse_unlock_key` 中 allowed 的取默认值由 True 改 **False**；allowed=False 分支只做"若仍锁则强制释放"，**不打印任何切换日志**（N3 的收窄/一次性告警原样保留） | ①② |
+| `Loom/tests/test_unlock_key.py` | 新增 §I 共 13 条断言（默认值 / 拒绝锁定 / 不刷屏 / Tab 不翻转且不打印 / toggle 不响应 / 特殊场景 API 不开锁 / 打开后 Tab 生效 / 关闭后立即释放）；§B/§F/§H 的桩显式 `mouse_lock_allowed = True`（它们测的是"允许锁"的游戏） | 验收 |
+| `Loom/tests/test_scripts.py` | FakeEngine 与 `eg2` 桩各补 `mouse_lock_allowed = True`（M39 段测的是"允许锁"的游戏） | 验收 |
+| `Loom/tests/test_vk_camera_align.py` | `vk_driver()` helper 补 `d.mouse_lock_allowed = True`（该文件测第一人称 + Tab 解锁，属"允许锁"的游戏） | 验收 |
+
+### 10.2 修前 / 修后
+
+| 项 | 修前 | 修后（实测） |
+|---|---|---|
+| 默认值 | `mouse_lock_allowed()=True` / `mouse_lock_initial()=True` → 打包游戏启动即锁死 | `PASS game_settings 默认 allowed=False` / `PASS game_settings 默认 initial=False` |
+| 脚本强行锁 | `set_mouse_locked(True)` 无条件生效（first_person on_start 即锁） | `PASS allowed=False: set_mouse_locked(True) 无效` + `PASS 明确告警(说明本游戏不允许锁鼠标)` + `PASS 再次请求锁定不刷屏` |
+| Tab 响应 | allowed=False 时仍会打印"切换鼠标锁定" | `PASS 按 Tab 不翻转` + `PASS 按 Tab 不打印'切换鼠标锁定'` + `PASS toggle_mouse_locked 完全不响应` |
+| 显式开关 | 无此 API | `PASS set_mouse_lock_allowed(True) 后立即锁定` / `PASS 打开 allowed 后按 Tab 生效(解锁)` / `PASS set_mouse_lock_allowed(False) 立即释放` |
+| 解锁可验证 | `except: pass`，无回读、无 Win32 兜底（"光标出现但动不了"） | 状态行 `[鼠标] locked=False (glfw_mode=host, clip=n/a, showing=n/a)`（测试桩为 external_ctx）；真机走 `_apply_cursor_backend` 回读 + ClipCursor/ShowCursor，失败各告警一次 |
+
+验收实跑（`cd Loom`，`LOOM_USER_ROOT`=临时目录）：
+```
+test_unlock_key.py                  exit=0 ALL PASS ✅
+test_scripts.py                     exit=0 ALL PASS ✅   (两处桩显式 allowed=True)
+test_playmode_edges.py              exit=0 ALL PASS ✅
+test_render_api.py                  exit=0 ALL PASS ✅
+test_beta3_batch2_camera_proj.py    exit=0 ALL PASS
+test_vk_camera_align.py             exit=0 ALL PASS ✅   (helper 显式 allowed=True)
+test_user_config.py / test_lighting.py -> ALL PASS ✅
+全量扫（112 个 test_*.py，排除 test_integration.py / test_eai_real.py）: 无失败项
+```
+
+### 10.3 可见行为变化（需写进发布说明）
+
+1. **默认不锁鼠标**：所有游戏（含编辑器播放态）启动后鼠标都是自由的；内置 `first_person`/`third_person` 的 `on_start` 现在**不会**把鼠标锁上（会被拒绝并打一条告警）。
+2. 需要锁鼠标的游戏二选一：`游戏设置.json` 写 `{"mouse_lock_allowed": true, "mouse_locked": true}`，或在脚本里 `engine.set_mouse_lock_allowed(True)`。
+3. 解锁键仍为动作"解锁鼠标"（默认 Tab，可改、冲突拒绝）。
+
+### 10.4 剩余 / 跨批
+
+- `SceneDriver`（第 2 批文件）尚无 `set_mouse_lock_allowed()`：VK 侧脚本调用该 API 会 AttributeError；且其 `set_mouse_locked` 未做"allowed=False 拒绝"（目前靠 poll 兜底强制解锁，行为等价但不一致）。
+- `runtime.PlayerApp` / `vk_player`（第 3 批文件）仍按 `mouse_lock_initial()` 初始化 → 现在默认 False，符合裁决；若游戏配置写了 allowed=true 则正常锁。
+- 真机验证（打包吃豆人 + 真鼠标）需在打包后由主审执行；本机只能验证状态机与日志形态。

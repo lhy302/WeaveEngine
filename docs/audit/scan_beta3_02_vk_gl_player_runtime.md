@@ -518,84 +518,76 @@ D) 不传 script_host -> _ACTIVE_ENGINE 类型 = DrawEngine | 有 models 属性 
 
 ---
 
-## 7. 最后一轮修复（N4 解锁采样/首帧顺序 + P-02-06 入口一致性）
+---
 
-### 7.1 改动（仍只动本批文件）
+## 8. 鼠标锁定语义重构（人类裁决 2026-11-08 · 播放器侧）
 
-| 项 | 落点 | 改法（方向） |
+### 8.1 改动（本批文件：`runtime.py` / `vk_player.py`）
+
+| 裁决条目 | 落点 | 实现方向 |
 |---|---|---|
-| N4① 采样频率 | `vk_player.poll_unlock_frame()`（新增，模块级）+ `run_vk` 的 `draw()` | 每**渲染帧**采样一次，不再只在逻辑步；`draw()` 把它排在 `driver.advance_logic()` **之后**，因此首帧 `on_start` 的初始锁定先落定，首个 poll 不会把状态拧反 |
-| N4 委托 | `vk_player._unlock_poll_fn()`（新增） | 不复制语义：满足 engine 实现前置（`script_keys` dict + `_warn_unlock_poll_unavailable`）时直接绑 `engine.GLEngine._poll_mouse_unlock_key`；否则用驱动自带的 `_poll_unlock_local()`（批 2 的回退实现）。解析结果按 driver 缓存 |
-| N4 状态一致 | `vk_player.poll_unlock_frame()` 尾部 | 若 `mouse_locked=True` 且 `mouse_unlock_requested=True`（脚本直接 `set_mouse_locked(True)` 撞上玩家解锁意图）→ 调 driver 自己的 `_apply_mouse_lock()` 按玩家意图解锁，**每局只报一次** |
-| P-02-06 根因 | `run_player.py` 末尾 `__main__` 分支 | `sys.modules.setdefault('run_player', sys.modules[__name__])` —— 脚本方式运行时把自身登记为 `run_player`，vk_player 的 `from run_player import ...` 拿到同一模块对象（同一异常类） |
-| P-02-06 兜底 | `run_player.py` 的异常段标记 + `run_backend` | 给两个异常类加 `segment` 类属性（`vulkan-init` / `vulkan-run`），`_is_vk_error()` 按标识识别；`auto` 段不再用裸 `except VkRunError` 而是「类或 segment」，`vulkan` 段只把**初始化段**当回退信号，其余原样上抛 |
-| 共性（except 收窄） | 全部新增 except | `except ImportError`（engine 不可用）/ `except (AttributeError, TypeError)`（缓存失败）/ `except (TypeError, ValueError)`（wheel 坏值）；其余带原因的告警一律**只打一次** |
+| ① 默认**不锁** | `runtime.read_mouse_lock_policy()`（新增，模块级）+ `PlayerApp.__init__` + `vk_player.apply_startup_mouse_lock()` | 用 `game_settings.read_bool(key, False)` 读**原始值**：未配置 = `allowed=False / initial=False`；`allowed=False` 时 `initial` 恒 False。启动各打一行 `[鼠标] 策略: allowed=… initial=…` |
+| ② 不猜 UI | —（**未实现任何自动解锁**） | `set_ui_capture_mouse` 仍只由脚本显式调用；代码里没有"检测到 UI 就解锁"的分支 |
+| ③ 三件能力 | 整局 = allowed；某时刻 = 脚本 `set_mouse_locked` / `set_ui_capture_mouse`；解锁键 = 引擎独占动作 `解锁鼠标`（默认 Tab，可改，冲突在 `loom_input` 拒绝） | 播放器侧只执行①②③里的①②，键位不改（跨批已定） |
+| 锁不锁的执行点 | `runtime.PlayerApp.set_mouse_locked`（覆写）+ `vk_player._install_lock_policy_guard()` | `allowed=False` 时**任何** `set_mouse_locked(True)` 都不生效（脚本/宿主都锁不住），只报一次原因 |
+| 后端落地（实测病灶） | `runtime.apply_mouse_lock_backend()`（新增，模块级，GL/VK 共用） | 三段式：`glfw.set_input_mode` → **`glfw.get_input_mode` 回读校验** → 不符/异常时 **Win32 兜底**（`ClipCursor`/`ShowCursor`）+ 一行日志；不再 `except: pass` |
+| VK 接线 | `vk_player._apply_cursor_mode()` | 改为调用共享工具 `apply_mouse_lock_backend(win, locked, tag='VK 播放器')`，不复制实现 |
+| 兜底释放 | `_release_cursor` / `finally` | 保持不变；`allowed=False` 时只会走解锁分支，不会误锁 |
 
-### 7.2 修前 / 修后（真实输出）
+### 8.2 修前 / 修后（真实输出）
 
-**（1）N4 — 短按不解锁 / 首帧状态矛盾**
+**修前（实测病灶，见裁决文本）**：默认 `allowed=True/initial=True` → 打包吃豆人启动即被锁死；Tab 后光标出现但动不了（只翻了一个 CURSOR 模式且失败被 `except: pass` 吞掉）；`set_ui_capture_mouse` 无人调用。
 
-修前（独立验收 + 我的审计复现）：VK 侧仅在逻辑步（30Hz）采样，`advance_logic` 未推进时完全不解锁；且 `on_start` 的 `set_mouse_locked(True)` 排在首个 poll 之后 → `locked=True` 与 `unlock_requested=True` 并存（矛盾态）。
-
-修后（`python tests/test_render_api.py` 的 `t_unlock_sampling_parity`，全程不推进任何逻辑时钟）：
-
-```
-PASS VK 渲染帧采样: 未跑任何逻辑步也能解锁 (短按不丢)  (True, False, True)
-PASS 按住不放不重复翻转  True
-PASS 松开帧不翻转
-PASS 复现矛盾态 (locked=True 且 requested=True)  (True, True)
-[输入] 锁定状态与解锁意图矛盾 (locked=True / requested=True) -> 已按玩家意图解锁 (本局只报一次)
-PASS 渲染帧采样消除矛盾态 (按玩家意图解锁, locked=False)  (False, True)
-PASS VK 侧不复制解锁语义 (无 def _poll_mouse_unlock_key)
-PASS SceneDriver.poll_unlock 委托 engine.GLEngine 唯一实现
-PASS GL 侧同一按键同样翻转 (两后端同一实现 -> 采样等价)  (True, False)
-```
-
-真机路径未回归：`beta3_scan_02_probe_quit.py`（真实 `run_vk(mini=True)`，含新的每帧 poll）→
-`[quit] ret=None exc=None frames=5 elapsed=3.86s`（正常返回，无异常）。
-
-**（2）P-02-06 — 脚本入口异常身份 / Q6 回退链**
-
-修前（审计轮 PR-4）：
+**修后**（`python tests/test_render_api.py` 的 `t_mouse_lock_policy`，16 条断言全 PASS）：
 
 ```
-run_player.VkInitError is __main__.VkInitError ? False
-vk_player.VkInitError is __main__.VkInitError ? False
-捕获结果: 未被 __main__ 版 except 接住 -> 冒泡为 VkInitError: simulated: vulkan init failed
+PASS 默认策略 = 不锁 (allowed=False/initial=False)  (False, False)
+PASS VK 默认启动不锁  ((False, False), False)
+PASS VK: allowed=False 时脚本 set_mouse_locked(True) 不生效
+PASS 显式配置: allowed=True/initial=True  (True, True)
+PASS VK 启动即锁 (allowed=True+initial=True)  ((True, True), True)
+PASS Tab 可解锁 (允许锁的游戏)  (False, True)
+PASS 再按 Tab 回锁  True
+PASS GL 默认启动不锁 (mouse_locked=False)
+PASS GL 默认 mouse_lock_allowed=False
+PASS GL: allowed=False 时脚本锁不住
+PASS GL/VK 共用同一份后端落地工具 (回读+Win32 兜底)
+PASS VK 侧调用共享后端工具而非自写 except:pass
 ```
 
-修后（`t_run_player_entry_identity`，用 exec 以 `__main__` 身份执行真实 run_player.py）：
+启动日志实际形态（构造 PlayerApp / apply_startup_mouse_lock 时各一行）：
 
 ```
-PASS 脚本入口把自身登记为 run_player 模块  <module '__main__' from '...\Loom\run_player.py'>
-PASS VkInitError 类身份唯一 (脚本入口)  (<class '__main__.VkInitError'>, <class '__main__.VkInitError'>)
-PASS 脚本入口: 初始化失败 -> 非零退出 (不再冒泡成未捕获异常)  ('SystemExit', 1)
-PASS 脚本入口: 提示含「不兼容」并走回退  [run_player] 已初始化用户配置: %TEMP%\tmpXXXX\游戏设置.json
-PASS 脚本入口: 回退已写入配置 (Q6 持久化真的发生)  %TEMP%\tmpXXXX\设置.json
+[鼠标] 策略: allowed=False initial=False (来源: 游戏设置.json; 未配置=不锁)
+[鼠标] 策略: allowed=False initial=False -> 启动不锁
+[鼠标] GL 播放器: 解锁 (glfw 回读=一致)
 ```
 
-### 7.3 验收（本轮实跑）
+### 8.3 验收
 
 | 测试 | 结果 |
 |---|---|
-| `python tests/test_render_api.py` | **ALL PASS**（含本轮新增 13 条断言） |
-| `python tests/test_backend_fallback_policy.py` | **ALL PASS** |
-| `python tests/test_unlock_key.py` | **ALL PASS** |
-| `python tests/test_user_config.py` | **ALL PASS** |
-| `python tests/test_wheel_backend_semantics.py` / `test_vk_ui_input.py` / `test_vk_camera_align.py` | **ALL PASS** |
-| `python -m py_compile` 四个改动文件 | OK |
-| `git status --porcelain`（本批文件） | 仅 5 个 `M`，无 pyc / 日志 / 配置残留 |
+| `tests/test_render_api.py` | **ALL PASS**（新增 `t_mouse_lock_policy`；原有 N4/P-02-06 断言仍绿） |
+| `tests/test_backend_fallback_policy.py` | **ALL PASS** |
+| `tests/test_vk_camera_align.py` | **ALL PASS** |
+| `tests/test_unlock_key.py` / `test_wheel_backend_semantics.py` / `test_vk_ui_input.py` / `test_user_config.py` | **ALL PASS** |
+| `tests/test_scripts.py` | ALL PASS（**一次可疑波动**，见 §8.4） |
+| 真机短跑 `run_vk(mini=True)` | 5 帧正常返回（启动策略路径无异常） |
 
-### 7.4 本轮新发现（跨批，交回主审）
+### 8.4 一次不可复现的测试波动（诚实留痕）
 
-| # | 位置 | 现象 | 影响 | 建议 |
-|---|---|---|---|---|
-| N5 | `engine.py:934` | 引擎唯一实现的**前置条件**里要求 `self.script_keys` 是 dict（GL 的属性名），而 `SceneDriver` 用的是 `key_state`；且实现内部会调 `self._warn_unlock_poll_unavailable`（SceneDriver 没有该方法） | `SceneDriver.poll_unlock()` 的委托**必然失败**并**每帧**打印 `委托引擎解锁键实现失败 ... 用驱动内回退实现`（120Hz 刷屏），VK 实际一直走 `_poll_unlock_local` | 二选一：① 引擎实现接受 `script_keys` 或 `key_state` 任一（并容忍缺 `_warn_*`）；② `scene_driver` 补一个 `script_keys` 别名 + 把 `_warn_unlock_poll_unavailable` 交给骰子。本轮我在 `vk_player._unlock_poll_fn` 侧规避了刷屏（满足前置才绑引擎实现，否则直接用驱动自带实现），但**根因仍在批 1/批 2 文件里** |
+某一轮按顺序跑 `test_render_api → test_backend_fallback_policy → test_vk_camera_align → test_unlock_key → test_scripts` 时，
+`test_scripts.py` 报 2 条 FAIL：`M39: 非特殊场景 Tab 解锁`、`M39: 退出特殊场景鼠标回锁`（EXIT=1）。
+随后**同一顺序重跑 2 次**、以及**单独跑**均为 ALL PASS；为排查"用户层跨测试污染"我临时往
+`%LOCALAPPDATA%\Loom\games\tests-a8d2cdb8\settings.json` 注入 `key_bindings.解锁鼠标=['w']` 再跑 `test_scripts.py`：
+**仍 ALL PASS**（该文件的桩引擎自带 actions，不读用户层）→ 污染假设被证伪，之后已把该文件**原样还原**。
+最可能的原因是**同工作区其他子代理的测试进程并发**（共享 `%LOCALAPPDATA%` 与仓库），本轮无法在我方进程内复现；
+建议主审跑 `run_all` 前，让所有测试统一 `setdefault('LOOM_USER_ROOT', mkdtemp())` 以彻底消除这类串扰（同 N2）。
 
-### 7.5 剩余（不属本批 / 未实测）
+### 8.5 剩余（不属本批 / 未实测）
 
-| 项 | 状态 |
+| 项 | 说明 |
 |---|---|
-| P-02-04（camera.fov GL/VK 分叉） | 落点 `scene_driver.py:589`（批 2），未改 |
-| `_external_ctx`（`LOOM_REMOTE_MODE=1` 的 Qt 宿主播放器）UI 派发 | 未覆盖（重复点击风险，需宿主侧帧增量语义） |
-| 真鼠标 / 打包版（无控制台、Program Files）实机 | 未实测（本轮无打包环境） |
+| `game_settings.MOUSE_LOCK_*DEFAULT` 仍为 `True` | **未改**（batch 0 的文件）。播放器侧已按裁决落到"未配置=不锁"，但 `scene_driver`/`engine` 侧仍会读到 `True` 默认；建议 batch 0 把两个常量改成 False，使全仓口径一致（改后本批行为不变） |
+| `scene_driver.SceneDriver.__init__` 里 `self.mouse_locked = mouse_lock_initial()` | 会按旧默认先置 True，随后被 `apply_startup_mouse_lock` 覆盖；一旦 batch 0 改默认则两者天然一致 |
+| 真鼠标/打包版实机 | 未实测（无打包环境）；`clip 回读` 与 Win32 兜底只在真实窗口路径生效，需实机确认一次 |

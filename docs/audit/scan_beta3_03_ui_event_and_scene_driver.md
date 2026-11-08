@@ -962,6 +962,53 @@ $ python tests\test_unlock_key.py              -> exit=0  ALL PASS ✅
 $ python tests\test_playmode_edges.py          -> exit=0  ALL PASS ✅
 ```
 
+### 6.4.3 鼠标锁定语义重构（人类裁决 2026-11-08，驱动层 03 号）
+
+**病灶（实测）**：打包吃豆人被默认锁死；按 Tab 光标出现但动不了（只能 Alt+F4）。三条根因：①`mouse_lock_initial` 默认 True；
+②`set_ui_capture_mouse` 全仓无人调用；③解锁只翻一个 glfw CURSOR 模式且包在 `except: pass` 里。
+
+**裁决**：①默认**不锁**（allowed/initial 均 False）；②**不做**"检测到 UI 就自动解锁"（引擎只提供显式 API，判断权归游戏开发者）；
+③三件能力必须齐：整局是否锁 / 某时刻锁不锁（脚本显式调用）/ 哪个键解锁（动作"解锁鼠标"，默认 Tab、可改、冲突拒绝）。
+
+**本批（驱动层）落地 —— 只改 `Loom/scene_driver.py`**：
+1. `__init__`：锁定策略改调 **`runtime.read_mouse_lock_policy()`**（第 3 批提供的单点：未配置 = False/False；initial 受 allowed 门控）；
+   runtime 不可用时按同一条规则直读 `game_settings.read_bool(..., False)`；再失败则"不锁"并出声。
+   ——**不再**调用 `mouse_lock_allowed()/mouse_lock_initial()`（它们仍带旧的模块默认 True，属第 0 批待改）。
+2. `set_mouse_locked(True)` 在 `mouse_lock_allowed=False` 时**无效 + 一次性告警**（每进程一条），只允许解锁方向；
+   回调 `on_mouse_lock_changed` 按**有效状态**转发（本层不碰 GLFW，副作用留给后端）。
+3. 新增 `set_mouse_lock_allowed(bool)`（能力②）：置 False 时若正锁定 → **立即解锁**（防永久锁死）。
+4. `toggle_mouse_locked()` 在 allowed=False 时空操作 + 一次性告警（不让玩家"解锁一个本来就没锁的光标"）。
+5. 委托关系不变：`script_keys` → `key_state`，`engine.GLEngine._poll_mouse_unlock_key` 直接吃 driver 的同名属性；
+   allowed 语义与 engine/loom_input/runtime 一致（三处都按"未配置 = False"）。
+
+**证据（实跑，`tests/test_beta3_batch2_camera_proj.py` 第 4c 组）**：
+```
+PASS driver 默认不锁 (allowed=False, locked=False)                    # 修前 True/True
+PASS allowed=False -> set_mouse_locked(True) 无效
+PASS allowed=False -> 一次性告警（只 1 条，不刷屏）
+PASS 回调按"有效状态"转发（仍为 False，后端不会误锁）  [False, False]
+PASS set_mouse_lock_allowed(True) -> 可锁
+PASS set_mouse_lock_allowed(False) 时立即解锁
+PASS allowed=True 时暂停态 Tab 仍可解锁（P-03-07）  (False, True)
+PASS 显式 mouse_lock_allowed=true/mouse_locked=true -> 启动即锁（能力①）
+PASS 配置改回 false -> 新 driver 不锁
+```
+
+**因默认值变化而必须同步的既有测试（契约更新，非产品代码）**：`Loom/tests/test_vk_camera_align.py` 的 §6/§7/§9/§10
+四处 fixture 追加 `d.set_mouse_lock_allowed(True)`（这些用例测的是"允许锁"的游戏，原本靠旧默认 True 才成立）。
+```
+$ python tests\test_vk_camera_align.py          -> exit=0  ALL PASS ✅
+$ python tests\test_beta3_batch2_camera_proj.py -> exit=0  ALL PASS
+$ python tests\test_render_api.py              -> exit=0  ALL PASS ✅
+$ python tests\test_playmode_edges.py          -> exit=0  ALL PASS ✅
+$ python tests\test_vk_ui_input.py             -> exit=0  ALL PASS
+```
+
+**并行批次导致的既红测试（非本批文件，未修）**：`tests\\test_unlock_key.py`（9 项）与 `tests\\test_scripts.py`（2 项"非特殊场景 Tab 解锁/
+退出特殊场景回锁"）——两个文件**均不引用 SceneDriver**（`Select-String 'SceneDriver'` 无命中），失败点是第 1 批 `loom_input`
+新增的 `mouse_lock_allowed` 门禁（默认 False）撞上测试桩未声明该属性（`eg2 = GLEngine.__new__` 无 `mouse_lock_allowed`）。
+属第 1 批收尾范围。
+
 ### 6.5 明确未做（避免越界）
 
 1. `vk_renderer.draw_frame/draw_ui` 的 `engine=None` **默认值本身**未改（文件属 02 批）；我在 `loom_ui.draw_all` 侧加了"宿主缺失必须出声一次"的兜底告警，使该缺陷不再静默。
