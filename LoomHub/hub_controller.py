@@ -54,6 +54,10 @@ class HubController:
         self.py_ver = cfg.python_version()            # 系统默认 python 版本 (UI 提醒)
         # 2026-08-15 空闲 CPU: 默认解释器缓存 (UI 每帧读 default_interpreter, 别每帧读磁盘 JSON)
         self._default_interp = cfg.default_interpreter()
+        # 2026-11-09: 「当前引擎」内存缓存（不落盘）。Tk Listbox 的 exportselection
+        # 会让两个列表互相清空选中，所以"同时选中引擎+项目"物理上不可行 ——
+        # 交互改为：左侧「选为当前引擎」记到内存，右侧「用当前引擎打开」读缓存。
+        self.current_interp = None
         self._auto_scan_save_dir()                    # 启动默认扫描解释器保存目录
 
     # ---------------- 通用 ----------------
@@ -65,6 +69,9 @@ class HubController:
             self.interpreters = cfg.load_interpreters()
         self.projects = cfg.load_projects()
         self._default_interp = cfg.default_interpreter()
+        # 当前引擎缓存按 dir 续命；条目被移除/失效则清空（避免 UI 显示一个不存在的引擎）
+        if getattr(self, 'current_interp', None) and self.current_interp_cached() is None:
+            self.current_interp = None
 
     def set_msg(self, text, level='ok'):
         self.msg = text
@@ -436,6 +443,35 @@ class HubController:
         except Exception:
             pass
 
+    # ---------------- 当前引擎（内存缓存，2026-11-09） ----------------
+    def set_current_interp(self, interp):
+        """设为「当前引擎」（仅内存，不落盘；不影响 default 标记）。"""
+        if not interp:
+            self.current_interp = None
+            self.set_msg("已清除当前引擎（将用默认引擎）", 'dim')
+            return None
+        self.current_interp = dict(interp)
+        self.set_msg("当前引擎: %s v%s (%s)"
+                     % (interp.get('name'), interp.get('version'), interp.get('kind')))
+        return self.current_interp
+
+    def current_interp_cached(self):
+        """缓存的当前引擎（仍登记且未失效才返回；否则 None）。不回落默认。"""
+        c = getattr(self, 'current_interp', None)
+        if not c:
+            return None
+        want = os.path.normcase(os.path.abspath(c.get('dir') or ''))
+        for it in (self.interpreters or cfg.load_interpreters()):
+            if it.get('stale'):
+                continue
+            if os.path.normcase(os.path.abspath(it.get('dir') or '')) == want:
+                return it            # 用粉丝带里的最新信息（kind/main 可能被重识别过）
+        return None
+
+    def current_interp_or_default(self):
+        """缓存的当前引擎，没有就回退默认（UI 显示/其他调用点用）。"""
+        return self.current_interp_cached() or cfg.default_interpreter()
+
     def interp_for_project(self, project):
         """为项目挑解释器（Bug2 修复）：显式 > 项目归属引擎 > 默认。
 
@@ -470,14 +506,19 @@ class HubController:
     def open_project(self, project, interp=None):
         """启动编辑器打开项目场景 (subprocess, 不阻塞).
 
-        interp 显式传入就用传入的（UI「用选中引擎打开项目」走这条）；
-        未传时按 interp_for_project()：项目 engine_dir 命中的已登记解释器 > 默认。
+        打开优先级（2026-11-09 人类口径，顺序不许改）：
+          1) 显式传入的 interp（UI「用当前引擎打开」传缓存的当前引擎）
+          2) 内存缓存的「当前引擎」（set_current_interp / current_interp_cached）
+          3) 项目 engine_dir 归属命中的已登记解释器
+          4) 默认引擎（★）
         """
         if not project:
             self.set_msg("请先选一个项目", 'err')
             return
         if interp is None:
-            interp = self.interp_for_project(project)
+            interp = self.current_interp_cached()      # ②
+        if interp is None:
+            interp = self.interp_for_project(project)  # ③ + ④
         if interp is None:
             self.set_msg("还没有解释器: 请先扫描/导入/安装一个", 'err')
             return

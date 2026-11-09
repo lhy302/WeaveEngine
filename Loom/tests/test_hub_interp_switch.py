@@ -225,8 +225,10 @@ def t_ui_entry_exists():
                        ('NovaHubGUI', os.path.join(REPO, 'LoomHub', 'GUI',
                                                     'NovaHubGUI.py'))):
         src = open(path, encoding='utf-8').read()
-        check("%s 有「用选中引擎打开项目」入口" % name,
-              '用选中引擎打开项目' in src and '_open_project_with_interp' in src)
+        # 2026-11-09 交互重做：入口改为「选为当前引擎」（左）+「用当前引擎打开」（右）
+        check("%s 有「选为当前引擎」与「用当前引擎打开」入口" % name,
+              '选为当前引擎' in src and '用当前引擎打开' in src
+              and '_open_project_with_current' in src)
     src = open(os.path.join(REPO, 'LoomHub', 'hub_controller.py'),
                encoding='utf-8').read()
     check("controller.open_project 支持 interp 参数",

@@ -67,7 +67,9 @@ class TkHubView(IHubView):
         # 列表 + 原生滚动条 (标准配对: listbox.yscrollcommand=sb.set, sb.command=listbox.yview)
         frame = tk.Frame(left)
         frame.pack(fill="both", expand=True)
-        self.interp_list = tk.Listbox(frame, height=13)
+        # 2026-11-09: exportselection=False —— Tk 默认会在另一个 Listbox 选中时
+        # 清掉本列表的选中，导致"引擎+项目同时选中"物理上不可能（人类实测踩到）。
+        self.interp_list = tk.Listbox(frame, height=13, exportselection=False)
         self.interp_list.pack(side="left", fill="both", expand=True)
         sb = tk.Scrollbar(frame, command=self.interp_list.yview)
         sb.pack(side="right", fill="y")
@@ -78,9 +80,12 @@ class TkHubView(IHubView):
                              ("从 GitHub 安装", self._github_install)])
         self._btn_row(left, [("设为默认", self._set_default),
                              ("移除", self._remove_interp)])
-        # 2026-11-09 Bug2: 用"选中的解释器"打开"选中的项目"（多版本并存必需入口）。
-        # 双击项目仍按 controller 的归属规则（engine_dir > 默认）。
-        self._btn_row(left, [("用选中引擎打开项目", self._open_project_with_interp)])
+        # 2026-11-09: 「当前引擎」= 内存缓存（不落盘），与 ★ 默认引擎是两件事。
+        # 先在这里选一次，之后在右侧项目区按「用当前引擎打开」即可（不再要求同时选中）。
+        self._btn_row(left, [("选为当前引擎", self._set_current_interp)])
+        self.current_label = tk.Label(
+            left, text="当前引擎: 未选（将用默认）", anchor="w", fg="#666")
+        self.current_label.pack(fill="x")
         # 2026-10-19 D1: 双击解释器 = 切换（自动扫描该引擎项目目录）
         self.interp_list.bind('<Double-Button-1>', self._on_interp_dblclick)
 
@@ -97,7 +102,7 @@ class TkHubView(IHubView):
             command=lambda: self._refresh_lists(force=True)).pack(side="left")
         frame = tk.Frame(right)
         frame.pack(fill="both", expand=True)
-        self.proj_list = tk.Listbox(frame, height=13)
+        self.proj_list = tk.Listbox(frame, height=13, exportselection=False)
         self.proj_list.pack(side="left", fill="both", expand=True)
         sb = tk.Scrollbar(frame, command=self.proj_list.yview)
         sb.pack(side="right", fill="y")
@@ -111,6 +116,8 @@ class TkHubView(IHubView):
         self._btn_row(right, [("移除", self._remove_project),
                               ("扫描", self.ctrl.scan_save_dir_projects),
                               ("检查更新", self._check_update)])
+        # 2026-11-09: 用「当前引擎」（左侧缓存）+ 本列表选中的项目打开。
+        self._btn_row(right, [("用当前引擎打开", self._open_project_with_current)])
 
         # 底部设置行: 界面切换 + 打开项目 .py/.exe
         import guiloader
@@ -219,17 +226,37 @@ class TkHubView(IHubView):
     def _open_project(self):
         self.ctrl.open_project(self._selected(self.proj_list))
 
-    def _open_project_with_interp(self):
-        """用选中的解释器打开选中的项目（Bug2 的 UI 入口）。"""
+    def _set_current_interp(self):
+        """把左侧选中的解释器记为「当前引擎」（内存缓存，不落盘）。"""
         interp = self._selected(self.interp_list)
-        proj = self._selected(self.proj_list)
         if not interp:
-            self.ctrl.set_msg("请先在左侧选择一个解释器", 'dim')
+            self.ctrl.set_msg("请先在解释器列表里选一个版本", 'dim')
             return
+        self.ctrl.set_current_interp(interp)
+        self._update_current_label()
+
+    def _open_project_with_current(self):
+        """用「当前引擎」（缓存）+ 右侧选中的项目打开（不再要求同时选中）。"""
+        proj = self._selected(self.proj_list)
         if not proj:
             self.ctrl.set_msg("请先在右侧选择一个项目", 'dim')
             return
+        interp = self.ctrl.current_interp_cached()
+        if interp is None:
+            self.ctrl.set_msg("请先在左侧『选为当前引擎』"
+                              "（或直接双击项目按归属/默认引擎打开）", 'err')
+            return
         self.ctrl.open_project(proj, interp=interp)
+
+    def _update_current_label(self):
+        """刷新「当前引擎」状态行（_refresh_lists 每次轮询也会调）。"""
+        cur = self.ctrl.current_interp_cached()
+        if cur:
+            self.current_label.config(
+                text="当前引擎: %s v%s (%s)"
+                     % (cur['name'], cur['version'], cur['kind']), fg="#222")
+        else:
+            self.current_label.config(text="当前引擎: 未选（将用默认）", fg="#666")
 
     def _remove_project(self):
         self.ctrl.remove_project(self._selected(self.proj_list))
@@ -348,6 +375,10 @@ class TkHubView(IHubView):
                     else ('#b06a00' if row_tag == 'external' else '#999')})
         # 安装根 / 默认解释器 状态 (pygame 视图也实时显示, 保持一致)
         self.root_label.config(text="默认安装根: %s" % self.ctrl.install_root)
+        try:
+            self._update_current_label()      # 当前引擎状态行随刷新保持
+        except AttributeError:
+            pass                              # 构建早期 label 还没创建（唯一可接受的时序窗）
         if dflt:
             self.interp_status.config(
                 text="默认解释器: %s v%s (%s)" % (dflt['name'], dflt['version'],

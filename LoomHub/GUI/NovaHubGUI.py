@@ -196,8 +196,13 @@ class NovaHubView(IHubView):
         self._btn_row(card, [("设为默认", self._set_default),
                              ("移除", self._remove_interp),
                              ("改安装根", self._change_root)])
-        # 2026-11-09 Bug2: 多版本并存时用"选中的解释器"打开"选中的项目"
-        self._btn_row(card, [("用选中引擎打开项目", self._open_project_with_interp)])
+        # 2026-11-09: 「当前引擎」= 内存缓存（与 ★ 默认引擎是两件事）。
+        # Tk Listbox 在另一列表选中时会清空本列表选中，故不要求"同时选中"。
+        self._btn_row(card, [("选为当前引擎", self._set_current_interp)])
+        self.current_label = tk.Label(card, text="当前引擎: 未选（将用默认）",
+                                      bg=C['panel'], fg=C['text'], anchor='w',
+                                      font=self.f_body)
+        self.current_label.pack(fill='x', padx=12)
         self._note(card, "说明: .zip 解压到安装根/<版本号>; 版本目录下须含 解释器.json")
 
     def _build_card_project(self, parent):
@@ -210,8 +215,9 @@ class NovaHubView(IHubView):
                              ("扫描", self.ctrl.scan_save_dir_projects)])
         self.proj_list, _ = self._list_area(card)
         self._hint(card, 'project')
+        self._btn_row(card, [("用当前引擎打开", self._open_project_with_current)])
         self.proj_list.bind('<Double-Button-1>', self._on_project_double)
-        self._note(card, "打开项目 = 用项目归属引擎启动编辑器；归属不明时用默认引擎 (--open)")
+        self._note(card, "双击项目 = 归属引擎(不明则默认)；「用当前引擎打开」= 左侧选定的当前引擎 (--open)")
 
     def _build_footer(self):
         """底栏: 界面切换 + open_py + 默认解释器状态 / 消息 + python 版本提示."""
@@ -291,17 +297,36 @@ class NovaHubView(IHubView):
     def _open_project(self):
         self.ctrl.open_project(self._selected(self.proj_list))
 
-    def _open_project_with_interp(self):
-        """Bug2 的 UI 入口：用选中的解释器打开选中的项目。"""
+    def _set_current_interp(self):
+        """把选中的解释器记为「当前引擎」（内存缓存，不落盘）。"""
         interp = self._selected(self.interp_list)
-        proj = self._selected(self.proj_list)
         if not interp:
-            self.ctrl.set_msg("请先在左侧选择一个解释器", 'dim')
+            self.ctrl.set_msg("请先在解释器列表里选一个版本", 'dim')
             return
+        self.ctrl.set_current_interp(interp)
+        self._update_current_label()
+
+    def _open_project_with_current(self):
+        """用「当前引擎」（缓存）+ 选中的项目打开；缓存为空时明确提示先选。"""
+        proj = self._selected(self.proj_list)
         if not proj:
-            self.ctrl.set_msg("请先在右侧选择一个项目", 'dim')
+            self.ctrl.set_msg("请先选择一个项目", 'dim')
+            return
+        interp = self.ctrl.current_interp_cached()
+        if interp is None:
+            self.ctrl.set_msg("请先在左侧『选为当前引擎』（或双击项目按归属/默认引擎打开）",
+                              'err')
             return
         self.ctrl.open_project(proj, interp=interp)
+
+    def _update_current_label(self):
+        cur = self.ctrl.current_interp_cached()
+        if cur:
+            self.current_label.config(text="当前引擎: %s v%s (%s)"
+                                      % (cur['name'], cur['version'], cur['kind']),
+                                      fg=C['text'])
+        else:
+            self.current_label.config(text="当前引擎: 未选（将用默认）", fg=C['text'])
 
     def _remove_project(self):
         self.ctrl.remove_project(self._selected(self.proj_list))
@@ -362,6 +387,10 @@ class NovaHubView(IHubView):
             self.interp_hint.config(text="★ = 默认解释器 · 滚轮可滚动")
         else:
             self.interp_hint.config(text="还没有解释器 — 扫描 / 导入目录 / 安装 .zip")
+        try:
+            self._update_current_label()      # 当前引擎状态行随刷新保持
+        except AttributeError:
+            pass                              # 构建早期 label 还没创建
         if self.ctrl.projects:
             self.proj_hint.config(text="双击项目行 = 直接打开")
         else:
