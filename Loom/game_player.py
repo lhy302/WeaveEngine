@@ -203,20 +203,22 @@ def _run_backend_safe(backend, scene=None, explicit=False, **kw):
     # 只观测实际调用 (不改行为), 结束后恢复; 最后被调用的就是实际后端。
     used = []
     orig_vk = run_player._run_vulkan
-    orig_gl = run_player._run_opengl
+    # 2026-11-09 A-01: GL 侧的实际入口是 _open_opengl（构建成功才算「实际生效」）；
+    # _run_opengl 只是它的「构建+运行」包装，VK 回退路径不再经过 _run_opengl。
+    orig_open = run_player._open_opengl
 
     def _track_vk(*a, **k):
         ret = orig_vk(*a, **k)      # 只有真正跑完的后端才算"实际生效"
         used.append('vulkan')
         return ret
 
-    def _track_gl(*a, **k):
-        ret = orig_gl(*a, **k)
+    def _track_open(*a, **k):
+        eng = orig_open(*a, **k)
         used.append('opengl')
-        return ret
+        return eng
 
     run_player._run_vulkan = _track_vk
-    run_player._run_opengl = _track_gl
+    run_player._open_opengl = _track_open
     try:
         try:
             run_player.run_backend(backend, scene, explicit=explicit, **kw)
@@ -228,7 +230,7 @@ def _run_backend_safe(backend, scene=None, explicit=False, **kw):
             run_player.run_backend("opengl", scene, **kw)
     finally:
         run_player._run_vulkan = orig_vk
-        run_player._run_opengl = orig_gl
+        run_player._open_opengl = orig_open
     return used[-1] if used else backend
 
 

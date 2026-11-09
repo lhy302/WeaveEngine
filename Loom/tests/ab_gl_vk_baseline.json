@@ -3,124 +3,156 @@
     "mae_abs": 0.0002,
     "mae_drift": 5e-05,
     "max_abs": 0.2,
-    "ncc_drift": 0.0001
+    "ncc_drift": 0.0001,
+    "ui_mae_abs": 0.005,
+    "ui_mae_drift": 0.002
   },
-  "generated": "2026-11-09",
-  "note": "GL 4.3 vs VK 逐像素基线; 由 test_ab_gl_vk.py --update-baseline 生成",
+  "generated_at": "2026-11-09T23:31:47",
+  "reference_dir": "ab_scenes_ref",
   "resolution": [
     480,
     320
   ],
+  "scene_count": 22,
   "scenes": {
     "ab_c_dir+point.json": {
       "mae": 2e-08,
       "max": 0.003922,
-      "ncc": 0.99998689
+      "ncc": 1.0,
+      "ref_sha256": "f8e9dc2a25464d7f81027a6cc57c3351b1a12c40719c28a18fcd3bd462157f71"
     },
     "ab_c_dir_only.json": {
       "mae": 2e-08,
       "max": 0.003922,
-      "ncc": 1.00000107
+      "ncc": 1.0,
+      "ref_sha256": "776e95d8931dd6748445a1b34f7e12bacb180fcd975a24ab71a4e084f8af32bb"
     },
     "ab_c_dir_shadow.json": {
       "mae": 7.084e-05,
       "max": 0.078431,
-      "ncc": 0.99988639
+      "ncc": 0.99987928,
+      "ref_sha256": "a2421f434d42b43143a0bebc668b25fed2bfc41f86892fd0eebbb76dc738f0fe"
     },
     "ab_c_point_only.json": {
       "mae": 3e-08,
       "max": 0.003922,
-      "ncc": 0.99999303
+      "ncc": 0.99999999,
+      "ref_sha256": "adfe8d5e38a4f98874a41ee58136c39c7bb88fb92975b42a33ce54d8ad2c5833"
     },
     "ab_c_spot_only.json": {
       "mae": 0.0,
       "max": 0.0,
-      "ncc": 0.99998832
+      "ncc": 1.0,
+      "ref_sha256": "871ce290b9ffa271c037bbb3a11b3b997f0d83bcedd0db90bd7180c58941e530"
     },
     "ab_cube.json": {
       "mae": 0.0,
       "max": 0.0,
-      "ncc": 0.99994552
+      "ncc": 1.0,
+      "ref_sha256": "eaf3008a0b0ffdea904071f2f9dbfe2b7e7b51f471cee5dcb7156aa4cada07a1"
     },
     "ab_env.json": {
       "mae": 5.4e-07,
       "max": 0.003922,
-      "ncc": 1.00000131
+      "ncc": 0.99999941,
+      "ref_sha256": "2f7db422fe95011e7b780e4c52e8ac868c377a3a084a9cb6ada4feb00fee6118"
     },
     "ab_env_off.json": {
       "mae": 2e-08,
       "max": 0.003922,
-      "ncc": 1.00005174
+      "ncc": 1.0,
+      "ref_sha256": "85a85857e8071587916954e7b983d8e3c04a16ff2f349761dfa889dd591ca554"
     },
     "ab_nrm.json": {
       "mae": 2e-08,
       "max": 0.003922,
-      "ncc": 1.0000155
+      "ncc": 1.0,
+      "ref_sha256": "6b6d5464e403e4d7f2d3ab583d67c120e4f3cf91945498e473a265dddaf383a5"
     },
     "ab_nrm_off.json": {
       "mae": 0.0,
       "max": 0.0,
-      "ncc": 0.99995083
+      "ncc": 1.0,
+      "ref_sha256": "311328903ef89909721dc7d81784676081fcd5900e1e7b34cfffcee73badb23f"
     },
     "ab_pbr.json": {
       "mae": 3e-08,
       "max": 0.003922,
-      "ncc": 1.0000025
+      "ncc": 1.0,
+      "ref_sha256": "cc42ecbcf329c3cd66bb5273d1a8ea1085a515077649e59ddd9ad3364a6d01ca"
     },
     "ab_plane.json": {
       "mae": 1e-08,
       "max": 0.003922,
-      "ncc": 0.99999738
+      "ncc": 1.0,
+      "ref_sha256": "a7cfff258be231421621a5d203b2c649e52a966a35f71e77e7b5087f8eb4c6ee"
     },
     "ab_plane_cube.json": {
       "mae": 1.896e-05,
       "max": 0.058824,
-      "ncc": 0.99997002
+      "ncc": 0.99996473,
+      "ref_sha256": "498b5c4914e80fa801ad3c801b62fa05f416ded8dfc79fd55692c4ac51a4380c"
     },
     "ab_plane_cube_sun_pt.json": {
       "mae": 1.751e-05,
       "max": 0.054902,
-      "ncc": 0.99996817
+      "ncc": 0.99997643,
+      "ref_sha256": "750b7974acfa68d1afa3e98653a386902b954c1c4974b85436bef03624b63b5a"
     },
     "ab_plane_shfalse.json": {
       "mae": 1e-08,
       "max": 0.003922,
-      "ncc": 0.99999738
+      "ncc": 1.0,
+      "ref_sha256": "a7cfff258be231421621a5d203b2c649e52a966a35f71e77e7b5087f8eb4c6ee"
     },
     "ab_plane_shtrue.json": {
       "mae": 1e-08,
       "max": 0.003922,
-      "ncc": 0.99999738
+      "ncc": 1.0,
+      "ref_sha256": "a7cfff258be231421621a5d203b2c649e52a966a35f71e77e7b5087f8eb4c6ee"
     },
     "ab_plane_sphere.json": {
       "mae": 5.189e-05,
       "max": 0.078431,
-      "ncc": 0.99990857
+      "ncc": 0.9999033,
+      "ref_sha256": "2b885da0cfa4520e75d6dfd07c24d8e506f0b3d67e96f66db788e17513654f86"
     },
     "ab_point_shadow.json": {
       "mae": 6.264e-05,
       "max": 0.12549,
-      "ncc": 0.99938345
+      "ncc": 0.99938845,
+      "ref_sha256": "0857254be6ec5e57f013aa691d9a760f1ac9259828382d7173095a43945a4b51"
     },
     "ab_scene.json": {
       "mae": 6.846e-05,
       "max": 0.07451,
-      "ncc": 0.99991035
+      "ncc": 0.99991061,
+      "ref_sha256": "cdb1193ed462302d177a3fe3ecee5a9c8228f0b25e942d5be8896e8355804f98"
     },
     "ab_sky.json": {
       "mae": 1.745e-05,
       "max": 0.05098,
-      "ncc": 0.99995881
+      "ncc": 0.99996869,
+      "ref_sha256": "0e0512f0c5a7fb7de6749e2023489029839f73eb14373928720fcd9755c90977"
     },
     "ab_tex.json": {
       "mae": 0.0,
       "max": 0.0,
-      "ncc": 0.99997413
+      "ncc": 1.0,
+      "ref_sha256": "1335a2da87c758bf9341ff2433b90c8b8296105facbeacdc0d490eee496020a9"
     },
     "ab_ui_scene.json": {
       "mae": 8.229e-05,
       "max": 0.098039,
-      "ncc": 0.9992761
+      "ncc": 0.99928167,
+      "ref_sha256": "323d11302e9a2053857539b79ca731f8512b57bbab088bd2a2afa1f7713219d8",
+      "ui": {
+        "mae": 9e-08,
+        "max": 0.003922,
+        "ncc": 0.99999999,
+        "ref_sha256": "edbbd8c2f4ba902027c67fa89bbef06971bd5e5121ba6018467e52ea917ef81c"
+      }
     }
-  }
+  },
+  "schema": 2
 }

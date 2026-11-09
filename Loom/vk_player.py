@@ -34,8 +34,8 @@ from vk_ui import UIInputBridge      # 2026-11-06 R3: 窗口事件 -> driver.ui
 # 只能打印原因后非零退出 (原来一律 os._exit, 发布链的兜底也只覆盖 init)。
 from run_player import VkInitError, VkRunError
 # 2026-11-09 批次 A/阶段1: VK 地板（1.1）+ 可读诊断（单点实现见 loom_backend_guard）
-from loom_backend_guard import (VkBackendInitError, require_vulkan_api,
-                                vk_diag_text, vulkan_api_text)
+from loom_backend_guard import (VkBackendInitError, adapter_info_dict,
+                                require_vulkan_api, vk_diag_text, vulkan_api_text)
 
 
 # ==================== 2026-11-07: 输入注册/回调链 小工具 ====================
@@ -291,6 +291,20 @@ def _warn_once(driver, tag, msg):
     _WARN_ONCE_SEEN.add(key)
     print('[输入] %s (本局只报一次)' % (msg,))
 
+def _close_canvas(canvas):
+    """初始化失败时销毁已建的 GLFW 窗口（P2-2: 否则切 GL 后残留一个空 VK 窗）。"""
+    if canvas is None:
+        return
+    for name in ('close', 'destroy'):
+        fn = getattr(canvas, name, None)
+        if callable(fn):
+            try:
+                fn()
+            except Exception as e:
+                print('[vk] 关闭初始化失败的窗口出错 (%r)' % (e,))
+            return
+
+
 def run_vk(scene=None, frames_n=None, keep=False, mini=False, no_shadow=False,
            stage='p4', width=1280, height=800, title="Loom (Vulkan)",
            scene_data=None):
@@ -330,6 +344,7 @@ def run_vk(scene=None, frames_n=None, keep=False, mini=False, no_shadow=False,
     # 干净地改走 OpenGL (VkInitError); 之前任何异常都直接冒泡, 由 Loom.py 的
     # except Exception 变成"无法启动渲染引擎", 发布链的 auto 回退覆盖不到细节。
     _dev_info = None
+    canvas = None
     try:
         # 2026-11-09 批次 A/阶段1: API 地板 1.1（wgpu-native 要求）。低于地板在这里就
         # 干净地失败（带 apiVersion + 驱动诊断），由 run_player 同进程改走 GL 4.3。
@@ -340,13 +355,15 @@ def run_vk(scene=None, frames_n=None, keep=False, mini=False, no_shadow=False,
             canvas=canvas, power_preference='high-performance')
         if adapter is None:
             raise RuntimeError('无可用 Vulkan 适配器 (request_adapter_sync 返回 None)')
-        _dev_info = dict(getattr(adapter, 'info', None) or {})
+        _dev_info = adapter_info_dict(adapter)      # P2-1: 0.32/0.33 字段名都吃
         device = adapter.request_device_sync()
         ctx = canvas.get_wgpu_context()
         fmt = ctx.get_preferred_format(adapter)
     except VkBackendInitError:
+        _close_canvas(canvas)       # P2-2: 建窗失败不留可见空窗
         raise                       # 已是可读诊断（含 apiVersion），不再套壳
     except BaseException as _ie:
+        _close_canvas(canvas)       # P2-2: 同上（含 adapter is None / 设备创建失败）
         if isinstance(_ie, (KeyboardInterrupt, SystemExit)):
             raise
         raise VkInitError("Vulkan 初始化失败 (%s): %r\n%s"
@@ -374,6 +391,7 @@ def run_vk(scene=None, frames_n=None, keep=False, mini=False, no_shadow=False,
         renderer = VkRenderer(device, fmt, stage=stage)
         _LAST_RENDERER[0] = renderer    # C5: 供 present_health()/should_fallback_remote() 查询
     except BaseException as _ie:      # 初始化段 (交换链/shader/pipeline) —— 可回退
+        _close_canvas(canvas)         # P2-2: 这一段失败同样不能留窗
         if isinstance(_ie, (KeyboardInterrupt, SystemExit)):
             raise
         raise VkInitError("Vulkan 交换链/渲染器初始化失败 (%s): %r\n%s"

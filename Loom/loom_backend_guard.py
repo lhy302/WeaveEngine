@@ -75,15 +75,52 @@ def vulkan_api_text():
     return '%d.%d.%d' % v
 
 
+# 诊断字段的候选键：wgpu 0.32 用 device/driver/backend/device_type，
+# wgpu 0.33 改名为 description/driver_description/backend_type/adapter_type（P2-1）。
+_DIAG_KEYS = (
+    ('device', ('device', 'description')),
+    ('driver', ('driver', 'driver_description', 'driver_info')),
+    ('backend', ('backend', 'backend_type')),
+    ('adapter_type', ('device_type', 'adapter_type')),
+    ('vendor', ('vendor',)),
+)
+
+
+def _pick(info, names):
+    """按候选键取第一个非空值；缺失一律 'n/a'（不写「未知」冒充有值，P2-1）。"""
+    for n in names:
+        v = info.get(n)
+        if v:
+            return str(v)
+    return 'n/a'
+
+
+def adapter_info_dict(adapter):
+    """把 wgpu AdapterInfo（dict 或对象）归一成普通 dict；读不到返回 {}。"""
+    info = getattr(adapter, 'info', None)
+    if info is None:
+        return {}
+    try:
+        return dict(info)
+    except Exception:
+        out = {}
+        for _name, keys in _DIAG_KEYS:
+            for k in keys:
+                v = getattr(info, k, None)
+                if v is not None:
+                    out[k] = v
+        return out
+
+
 def vk_diag_text(adapter_info=None, stage='init', extra=None):
-    """多行诊断：打印与弹窗共用同一段文本。"""
+    """多行诊断：打印与弹窗共用同一段文本（字段缺失写 n/a）。"""
     info = dict(adapter_info or {})
     lines = [
-        '[VK] 设备: %s' % (info.get('device') or '未知'),
-        '[VK] 驱动: %s (%s)' % (info.get('driver') or '未知',
-                               info.get('driver_info') or '版本未知'),
-        '[VK] 后端/类型: %s / %s' % (info.get('backend') or 'vulkan',
-                                    info.get('device_type') or '未知'),
+        '[VK] 设备: %s' % _pick(info, ('device', 'description')),
+        '[VK] 驱动: %s (%s)' % (_pick(info, ('driver', 'driver_description', 'driver_info')),
+                               _pick(info, ('driver_info', 'driver_version', 'driver_description'))),
+        '[VK] 后端/类型: %s / %s' % (_pick(info, ('backend', 'backend_type')),
+                                    _pick(info, ('device_type', 'adapter_type'))),
         '[VK] Vulkan API: %s（地板: %d.%d）' % (vulkan_api_text(),
                                                 VK_MIN_API_MAJOR, VK_MIN_API_MINOR),
     ]
@@ -139,8 +176,9 @@ def show_blocking_dialog(title, text):
         fn.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint]
         fn.restype = ctypes.c_int
         MB_OK, MB_ICONERROR, MB_TOPMOST, MB_SETFOREGROUND = 0x0, 0x10, 0x40000, 0x10000
-        fn(None, text, title, MB_OK | MB_ICONERROR | MB_TOPMOST | MB_SETFOREGROUND)
-        return True
+        rez = fn(None, text, title, MB_OK | MB_ICONERROR | MB_TOPMOST | MB_SETFOREGROUND)
+        # P3②: MessageBoxW 返回 0 表示没弹出来（无桌面/被拒绝）—— 不能谎报已弹。
+        return bool(rez)
     except Exception as e:
         print('[backend] 弹窗失败 (%r) —— 仅打印原因，不阻断回退' % (e,))
         return False

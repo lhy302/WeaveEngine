@@ -106,9 +106,18 @@ def t_resolve():
 
 
 # ============ B. 分发与回退语义 ============
+class _FakeEng:
+    """GL 播放器替身（_open_opengl 只构建不阻塞）。"""
+    models = []
+
+    def run(self):
+        return None
+
+
 def t_dispatch():
     calls = []
     orig_vk, orig_gl = run_player._run_vulkan, run_player._run_opengl
+    orig_open = run_player._open_opengl
     try:
         def fake_vk(scene, **kw):
             calls.append("vk")
@@ -120,15 +129,21 @@ def t_dispatch():
             calls.append("gl")
             return "gl"
 
+        def fake_open(scene, **kw):
+            calls.append("gl")
+            return _FakeEng()
+
         run_player._run_vulkan = fake_vk
-        run_player._run_opengl = fake_gl
+        run_player._run_opengl = fake_gl          # 兼容旧调用面
+        run_player._open_opengl = fake_open       # 2026-11-09: GL 真实入口（构建不阻塞）
 
         calls.clear()
         check("vulkan 分发到 Vk", run_player.run_backend("vulkan", "s.json") == "vk"
               and calls == ["vk"], calls)
 
         calls.clear()
-        check("opengl 分发到 GL", run_player.run_backend("opengl", "s.json") == "gl"
+        check("opengl 分发到 GL（_open_opengl 被调用）",
+              run_player.run_backend("opengl", "s.json") is None
               and calls == ["gl"], calls)
 
         # auto: Vk 成功 -> 不回落
@@ -144,7 +159,7 @@ def t_dispatch():
             raise RuntimeError("no vulkan device")
         run_player._run_vulkan = vk_boom
         got = run_player.run_backend("auto", "s.json")
-        check("auto: Vk 失败自动回退 GL", got == "gl" and calls == ["vk", "gl"], calls)
+        check("auto: Vk 失败自动回退 GL", got is None and calls == ["vk", "gl"], calls)
 
         # 显式 vulkan: 失败必须抛出 (不静默改道 —— 否则用户以为在用 Vk)
         calls.clear()
@@ -153,10 +168,13 @@ def t_dispatch():
             run_player.run_backend("vulkan", "s.json")
         except RuntimeError as e:
             raised = e
-        check("显式 vulkan 失败不静默回退 (如实抛错)", raised is not None
+        # 注意: 只有**初始化段**错误才可回退（裁决 A）；这里是普通 RuntimeError，
+        # 不是 VkInitError/segment=vulkan-init，所以必须如实抛出、不改道。
+        check("显式 vulkan 非初始化错误如实抛错 (不静默改道)", raised is not None
               and calls == ["vk"], calls)
     finally:
         run_player._run_vulkan, run_player._run_opengl = orig_vk, orig_gl
+        run_player._open_opengl = orig_open
 
 
 # ============ B2. 选择优先级 (--backend > 游戏配置.json > 设置) ============
@@ -399,8 +417,15 @@ def t_run_player_entry_identity():
                 raise vk_player.VkInitError('模拟: 无 Vulkan 设备')
             mod._run_vulkan = _boom
             # 2026-11-09 裁决 A: 初始化失败后**同进程**改走 GL（旧「崩一次」已废止），
-            # 这里桩掉 GL 入口，只验证「不退出 + 落配置 + 可见诊断」。
-            mod._run_opengl = lambda scene=None, **kw: 'GL-OK'
+            # 这里桩掉 GL 入口（真实入口是 _open_opengl：只构建不阻塞），
+            # 只验证「不退出 + 落用户层配置 + 可见诊断」。
+            class _FakeEng:
+                models = []
+
+                def run(self):
+                    return None
+
+            mod._open_opengl = lambda scene=None, **kw: _FakeEng()
             mod._SETTINGS_BASE = tmp
             mod._BOOTSTRAP_KEY[0] = None
             import contextlib
@@ -415,17 +440,18 @@ def t_run_player_entry_identity():
                     exc = e
             out = buf.getvalue()
             check('脚本入口: 初始化失败 -> 当场改走 GL (不再崩一次)',
-                  exc is None and ret == 'GL-OK',
+                  exc is None and ret is None,
                   (type(exc).__name__, getattr(exc, 'code', None), ret))
-            check('脚本入口: 提示含「自动切换为 OpenGL」',
-                  '自动切换为 OpenGL' in out, out.strip()[:160])
-            setting = os.path.join(tmp, '设置.json')
+            check('脚本入口: 提示改为「本次进程改走 OpenGL」',
+                  '本次进程改走 OpenGL' in out, out.strip()[:160])
+            # Q2: 只写用户层 游戏设置.json（引擎层 设置.json 不动）
+            setting = os.path.join(tmp, '游戏设置.json')
             wrote = os.path.isfile(setting)
-            check('脚本入口: 回退已写入配置 (持久化真的发生)', wrote, setting)
+            check('脚本入口: 回退已写入用户层 游戏设置.json', wrote, setting)
             # 双后端都不可用 -> 必须非零退出且两条原因都可见（不再伪装成功）
             def _gl_boom(scene=None, **kw):
                 raise RuntimeError('模拟: GL 4.3 不可用')
-            mod._run_opengl = _gl_boom
+            mod._open_opengl = _gl_boom
             buf2 = io.StringIO()
             exc2 = None
             with contextlib.redirect_stdout(buf2):

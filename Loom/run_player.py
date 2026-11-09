@@ -182,7 +182,10 @@ def _write_engine_layer(api):
 
 
 def _persist_backend(api):
-    """把 render_api 写进配置，并**复核**下次启动是否真的会读到它。
+    """把 render_api 写进**用户层 游戏设置.json**，并**复核**下次启动是否真的会读到它。
+
+    2026-11-09 裁决 Q2：**只写游戏层 delta，不动引擎层 设置.json** —— 后者是编辑器/
+    开发环境的默认后端，改它超出「自动回退」的授权范围（会把编辑器也带偏）。
 
     返回 True = 复核通过（`resolve_backend(None)` 得到 api）。
 
@@ -192,12 +195,8 @@ def _persist_backend(api):
     失败原因一律如实打印（契约 §7 禁止 `or True` / 假成功）。
     """
     ok_game, err_game = _write_game_layer(api)
-    ok_engine, err_engine = _write_engine_layer(api)
     if not ok_game:
-        print("[run_player] 写 游戏设置.json 失败: %s" % (err_game,))
-    if not ok_engine:
-        print("[run_player] 写 引擎 设置.json 失败: %s" % (err_engine,))
-    if not (ok_game or ok_engine):
+        print("[run_player] 写 游戏设置.json（用户层）失败: %s" % (err_game,))
         return False
     try:
         got = resolve_backend(None)
@@ -205,9 +204,8 @@ def _persist_backend(api):
         print("[run_player] 回退复核失败 (%r)" % (e,))
         return False
     if got != api:
-        print("[run_player] 回退未生效: 解析链下次仍得到 %r（游戏层=%s / 引擎层=%s）"
-              % (got, '已写' if ok_game else '写失败',
-                 '已写' if ok_engine else '写失败'))
+        print("[run_player] 回退未生效: 解析链下次仍得到 %r（用户层已写=%s）"
+              % (got, ok_game))
         return False
     return True
 
@@ -225,48 +223,94 @@ def _handle_vk_init_failure(exc, explicit):
     与旧 Q6「崩一次」的差异：人类改判为「当场降级 + 落配置」，因为崩一次会让用户
     看到窗口闪退且下次仍要重试；现在一次启动内完成切换，下次直接走 GL。
     """
-    reason = str(exc) or repr(exc)
+    reason = _reason_with_tag('[VK]', exc)
     src = _SOURCE_TEXT.get(_LAST_SOURCE, _LAST_SOURCE)
     # 手选判定必须在 _persist_backend 之前取 —— 它内部会 resolve 一次并把 _LAST_SOURCE
     # 改成 'game'，否则每次回退都会被误判成「用户手选」。
     was_hand_picked = (_LAST_SOURCE == 'game')
-    print("[run_player] Vulkan 后端不可用 —— 自动切换为 OpenGL（需要 4.3 core）")
+    print("[run_player] Vulkan 后端不可用 —— 本次进程改走 OpenGL（需要 4.3 core）")
     print(reason)
-    shown = show_blocking_dialog(
-        '[VK] Vulkan 驱动不兼容（需要 1.1+）',
-        '你的 Vulkan 驱动不兼容（需要 1.1+），建议升级显卡驱动。\n'
-        '已自动切换为 OpenGL（需要 4.3 core）。\n\n' + reason)
+    if explicit:
+        # 裁决 Q1: 显式 --backend vulkan 是用户明确选择 —— 不改写配置，只在本次降级。
+        print("[run_player] 本次是显式 --backend vulkan：**不改写用户配置**（尊重显式选择）")
+        return reason, False
     ok = _persist_backend('opengl')
     if ok:
-        print("[run_player] 已把 render_api 回退为 opengl（写用户层 游戏设置.json），"
+        print("[run_player] 已把 render_api 回退为 opengl（只写用户层 游戏设置.json），"
               "下次启动直接走 OpenGL（本次后端来自: %s）" % src)
     else:
         print("[run_player] 回退**未能持久化** —— 下次启动仍会尝试 Vulkan；"
               "本次已切 GL，可用 --backend opengl 固定（本次后端来自: %s）" % src)
-    if explicit or was_hand_picked:
-        print("[run_player] 注意: 本次 vulkan 是用户手选（%s）；已按裁决改写为 opengl，"
-              "可在设置面板 / 游戏设置.json 随时改回" % src)
-    if not shown:
-        print("[run_player] (未弹窗: 无 GUI 或 LOOM_NO_DIALOG=1 —— 原因见上面的 [VK] 行)")
-    return ok
+    if was_hand_picked:
+        print("[run_player] 注意: 配置里的 vulkan 是用户手选（游戏设置.json）；"
+              "已按裁决改写为 opengl，可在设置面板随时改回")
+    return reason, ok
 
 
-def _run_gl_or_double_fault(vk_exc, scene, **kw):
-    """VK 初始化失败后**同进程**改走 GL 4.3；GL 也失败 -> 报两条原因并退出。
+def _reason_with_tag(tag, exc):
+    """异常原因统一加前缀；已带同一前缀就不重复（P3③: 不出现 [VK] [VK]）。"""
+    s = str(exc) or repr(exc)
+    return s if s.startswith(tag) else ('%s %s' % (tag, s))
 
-    两条后端各自的地板不同（VK 1.1 / GL 4.3），所以不允许「VK 失败就当 GL 能用」。
+
+def _open_opengl(scene, **kw):
+    """**只构建** GL 播放器（不进入阻塞循环）。失败会抛（GLVersionError 等）。"""
+    from runtime import PlayerApp
+    if kw.get('scene_data') is not None:
+        return PlayerApp(None, kw.get('width', 1280), kw.get('height', 800),
+                         scene_data=kw['scene_data'], title=kw.get('title'))
+    return PlayerApp(scene, kw.get('width', 1280), kw.get('height', 800),
+                     title=kw.get('title'))
+
+
+def _report_gl_started(scene, eng):
+    print("GL 播放器已启动: %s (%d 个对象)" % (scene or '<数据>', len(eng.models)))
+
+
+def _run_gl_visible(scene, **kw):
+    """只走 GL 时的可见失败（P1: 发布档无控制台 -> 必须弹窗 + 非 0 退出）。"""
+    try:
+        eng = _open_opengl(scene, **kw)
+    except BaseException as e:
+        if isinstance(e, (KeyboardInterrupt, SystemExit)):
+            raise
+        msg = 'OpenGL 后端无法启动（需要 4.3 core）。\n\n' + _reason_with_tag('[GL]', e)
+        print('[backend] ' + msg)
+        show_blocking_dialog('无法启动渲染（OpenGL 不可用）', msg)
+        raise SystemExit(1)
+    _report_gl_started(scene, eng)
+    eng.run()
+    return None
+
+
+def _run_gl_or_double_fault(vk_reason, scene, **kw):
+    """VK 初始化失败后**同进程**改走 GL 4.3；三条结局都可见，且**只弹一次**窗。
+
+    先只构建 GL（不进入阻塞循环）再决定弹哪个窗：
+      · GL 构建失败 -> 一个「两条后端都不可用」弹窗 + SystemExit(1)；
+      · GL 构建成功 -> 一个「已切换 OpenGL」弹窗，然后才开始跑（否则弹窗要等游戏退出）。
+    两条后端地板不同（VK 1.1 / GL 4.3），所以不允许「VK 失败就当 GL 能用」。
     """
     try:
-        return _run_opengl(scene, **kw)
+        eng = _open_opengl(scene, **kw)
     except BaseException as gl_exc:
         if isinstance(gl_exc, (KeyboardInterrupt, SystemExit)):
             raise
-        msg = ("[backend] 两条后端都不可用（Vulkan 与 OpenGL 均启动失败）:\n"
-               "[VK] %s\n"
-               "[GL] %s" % (vk_exc, gl_exc))
-        print(msg)
+        msg = ('两条后端都不可用（Vulkan 与 OpenGL 均启动失败）:\n\n'
+               + vk_reason + '\n\n' + _reason_with_tag('[GL]', gl_exc))
+        print('[backend] ' + msg)
         show_blocking_dialog('无法启动渲染（Vulkan 与 OpenGL 均不可用）', msg)
         raise SystemExit(1)
+    msg = ('Vulkan 后端不可用，已自动切换为 OpenGL（需要 4.3 core）。\n\n'
+           '你的 Vulkan 驱动可能不兼容（需要 1.1+），建议升级显卡驱动。\n\n'
+           + vk_reason)
+    print('[backend] Vulkan 不可用 -> 本次已切换 OpenGL')
+    shown = show_blocking_dialog('[VK] Vulkan 驱动不兼容（需要 1.1+）', msg)
+    if not shown:
+        print('[backend] (未弹窗: 无 GUI 或 LOOM_NO_DIALOG=1 —— 原因见上面的 [VK] 行)')
+    _report_gl_started(scene, eng)
+    eng.run()
+    return None
 
 
 def _maybe_remote_fallback(scene):
@@ -303,11 +347,12 @@ def run_backend(api, scene=None, explicit=False, **kw):
             if isinstance(e, VkRunError) or _is_vk_error(e, _VK_SEG_RUN):
                 raise                   # 运行期失败: 不回退, 如实失败
             if isinstance(e, VkInitError) or _is_vk_error(e, _VK_SEG_INIT):
-                # 2026-11-09 裁决 A: 初始化失败 -> 诊断+弹窗+落配置, 然后同进程走 GL
-                _handle_vk_init_failure(e, explicit)
+                # 2026-11-09 裁决 A: 初始化失败 -> 诊断+落配置, 然后同进程走 GL（弹窗只弹一次）
+                reason, _ok = _handle_vk_init_failure(e, explicit)
             else:
+                reason = _reason_with_tag('[VK]', e)
                 print("[run_player] Vulkan 不可用 (%s), 回退 OpenGL" % e)
-            return _run_gl_or_double_fault(e, scene, **kw)
+            return _run_gl_or_double_fault(reason, scene, **kw)
     if api == 'vulkan':
         try:
             _ret = _run_vulkan(scene, **kw)
@@ -316,10 +361,11 @@ def run_backend(api, scene=None, explicit=False, **kw):
         except Exception as e:
             # 只把**初始化段**当可回退信号（VkRunError / 其它异常原样上抛）
             if isinstance(e, VkInitError) or _is_vk_error(e, _VK_SEG_INIT):
-                _handle_vk_init_failure(e, explicit)     # 不再 SystemExit: 当场降级
-                return _run_gl_or_double_fault(e, scene, **kw)
+                reason, _ok = _handle_vk_init_failure(e, explicit)   # 不再 SystemExit: 当场降级
+                return _run_gl_or_double_fault(reason, scene, **kw)
             raise
-    return _run_opengl(scene, **kw)
+    # 只走 GL：失败同样必须可见（P1: 发布档无控制台时不能零反馈闪退）
+    return _run_gl_visible(scene, **kw)
 
 
 def _run_vulkan(scene, **kw):
@@ -328,14 +374,9 @@ def _run_vulkan(scene, **kw):
 
 
 def _run_opengl(scene, **kw):
-    from runtime import PlayerApp
-    if kw.get('scene_data') is not None:
-        eng = PlayerApp(None, kw.get('width', 1280), kw.get('height', 800),
-                        scene_data=kw['scene_data'], title=kw.get('title'))
-    else:
-        eng = PlayerApp(scene, kw.get('width', 1280), kw.get('height', 800),
-                        title=kw.get('title'))
-    print("GL 播放器已启动: %s (%d 个对象)" % (scene or '<数据>', len(eng.models)))
+    """兼容旧调用面：构建 + 报告 + 阻塞运行（失败原样抛出）。"""
+    eng = _open_opengl(scene, **kw)
+    _report_gl_started(scene, eng)
     eng.run()
     return None
 

@@ -1,29 +1,36 @@
 # -*- coding: utf-8 -*-
-# test_ab_gl_vk.py — GL / Vulkan 双后端**逐像素** A/B（受跟踪，2026-11-09 批次 A/阶段1）
+# test_ab_gl_vk.py — GL / Vulkan 逐像素 A/B（受跟踪，2026-11-09 批次 A）
 #
-# 来历: 从 tests/_tmp/ab_gl_vk.py（2026-11-06 起沿用至今的"唯一验收口径"）提升而来。
-# 原探针在 gitignore 里 -> 干净 clone 无法复现"逐像素等价"的证据（R01 报告 R8）。
+# 承诺（人类裁决）: **渲染画面不回归**（不只是两端等价）。因此基线存两类证据：
+#   · tests/ab_scenes_ref/*.png   —— GL 参考图（480x320）；
+#   · tests/ab_gl_vk_baseline.json —— 每场景三指标 + 参考图 sha256 + 门限。
+# 判定（每场景全部要过）:
+#   ① GL vs 参考 <= mae_abs   ② VK vs 参考 <= mae_abs   ③ GL vs VK <= mae_abs
+#   ④ 相对基线不漂移: MAE <= 基线 + mae_drift 且 NCC >= 基线 - ncc_drift（float64 累加）
+#   ⑤ MAX <= max(max_abs, 基线MAX+0.03)（只在灾难性边缘破坏时触发）
+#   ⑥ UI 场景（有 canvas 的）额外比 UI 三路（阈值 ui_mae_abs，契约见 vk_ui.py:48-60）
+#
+# 为什么 ① ② 必须有: 只比 GL/VK 时，两端**同时**回归（例如投影矩阵一起改）会让端间
+# 差异反而变小 -> 闸门 PASS。实测: fov 两端同 +15% 时端间 MAE 从 6.8e-5 降到 4.9e-5。
 #
 # 用法:
-#   py tests/test_ab_gl_vk.py                  # 全部场景, 与基线比对
-#   py tests/test_ab_gl_vk.py --update-baseline # 重写基线快照（只在有意变更时用）
-#   LOOM_AB_SCENES=ab_sky.json,ab_scene.json   # 只跑指定场景
-#   LOOM_AB_MAE_ABS=0                          # 收紧阈值（用于验证闸门真的会 FAIL）
+#   py tests/test_ab_gl_vk.py                    # 全场景对基线（失败即 rc=1）
+#   py tests/test_ab_gl_vk.py --update-baseline  # 重建参考图+基线（有 FAIL 不写）
+#   py tests/test_ab_gl_vk.py --update-baseline --force   # 允许场景数变少
+#   py tests/test_ab_gl_vk.py --self-test        # 自检：反例必须让闸门变红
+#   LOOM_AB_SCENES=a.json,b.json                 # 只跑子集（对基线，不改基线）
+#   LOOM_AB_ALLOW_NO_VK=1                        # 显式允许"本机没有 Vulkan"（否则 FAIL）
+#   LOOM_AB_MAE_ABS=0                            # 收紧阈值（验证闸门真会红）
 #
-# 判据（三指标全部打印, 闸门见 DEFAULT_GATE）:
-#   · MAE  <= mae_abs(2e-4): 相机/几何/着色/投影的对齐口径（沿用 ab_active_gl_vk 门槛）
-#   · MAE  <= 基线 + mae_drift(5e-5) 且 NCC >= 基线 - ncc_drift(1e-4): 防回归
-#   · MAX  <= max(max_abs(0.20), 基线MAX + 0.03): 只在灾难性边缘破坏时触发
-#     （MAX 天然被抗锯齿/描边边缘影响, 实测常态 0.05~0.13, 不做逐像素判据）
-#
-# 环境: 无 GPU / 无 Vulkan 时打印 SKIP 并以 0 退出（不把"没装 wgpu"当成渲染回归）。
-#
-# 覆盖边界（与历史口径一致, 不得悄悄扩大）: 3D 部分（几何/着色/光照/阴影/天空/贴图）。
-# UI 不在本闸门内 —— GL 侧跑 EditorApp.render（不画 UI），UI 等价由 ab_gl_vk_ui.py 单独覆盖。
+# 覆盖: 3D（几何/着色/光照/阴影/天空/贴图）+ UI（有 canvas 的场景）。
 import glob
+import hashlib
 import json
 import os
+import shutil
 import sys
+import tempfile
+import time
 
 import numpy as np
 
@@ -36,16 +43,19 @@ os.environ['LOOM_NO_SAVE_MIGRATE'] = '1'
 os.environ.setdefault('LOOM_NO_DIALOG', '1')
 
 W, H = 480, 320
-FOV = 60.0
 SCENES_DIR = os.path.join(HERE, 'ab_scenes')
 ASSETS_DIR = os.path.join(SCENES_DIR, 'assets')
+REF_DIR = os.path.join(HERE, 'ab_scenes_ref')
 BASELINE_PATH = os.path.join(HERE, 'ab_gl_vk_baseline.json')
+SCHEMA = 2
 
 DEFAULT_GATE = {
     'mae_abs': 0.0002,
     'mae_drift': 0.00005,
     'ncc_drift': 0.0001,
     'max_abs': 0.20,
+    'ui_mae_abs': 0.005,
+    'ui_mae_drift': 0.002,
 }
 
 _fails = []
@@ -71,10 +81,7 @@ def _gate():
 
 
 def _rebase_paths(obj):
-    """场景里的贴图绝对路径（原探针写死 _tmp）-> 仓库内 assets 同名文件。
-
-    只改"指向的文件不存在"的项；文件存在时原样保留（保持与历史基线同一份数据）。
-    """
+    """场景里的贴图绝对路径（原探针写死 _tmp）-> 仓库内 assets 同名文件。"""
     if isinstance(obj, dict):
         p = obj.get('path')
         if isinstance(p, str) and p and not os.path.exists(p):
@@ -89,6 +96,11 @@ def _rebase_paths(obj):
     return obj
 
 
+def has_ui(data):
+    ui = (data or {}).get('ui') or {}
+    return bool(ui.get('canvases'))
+
+
 def _scene_files():
     sel = (os.environ.get('LOOM_AB_SCENES') or '').strip()
     if sel:
@@ -98,7 +110,7 @@ def _scene_files():
 
 
 class _NullView:
-    """空视图: 只满足 IEditorView 契约, 不画任何编辑器叠层（保证纯净 3D 画面）。"""
+    """空视图: 只满足 IEditorView 契约, 不画编辑器叠层（保证纯净 3D 画面）。"""
 
     def attach(self, ctl):
         self.ctl = ctl
@@ -118,15 +130,12 @@ class _NullView:
         pass
 
 
-def render_gl(data):
-    """GL 侧: 独立上下文 + 离屏 FBO（与编辑器同一条渲染路径, 不画叠层）。"""
+def render_gl(data, with_ui=False):
+    """GL 侧: 独立上下文 + 离屏 FBO（编辑器同一条渲染路径）。with_ui 时补画 UI 层。"""
     import moderngl
     import editor as editor_mod
     import sceneio
-    try:
-        ctx = moderngl.create_standalone_context(require=430)
-    except Exception as e:
-        raise RuntimeError('GL 4.3 上下文不可用: %r' % (e,))
+    ctx = moderngl.create_standalone_context(require=430)
     rb = ctx.renderbuffer((W, H), components=4)
     depth_rb = ctx.depth_renderbuffer((W, H))
     fbo = ctx.framebuffer(color_attachments=[rb], depth_attachment=depth_rb)
@@ -152,9 +161,18 @@ def render_gl(data):
     ed.apply_orbit_camera()
     for _ in range(3):
         ed.render(1 / 60.0)
+    if with_ui:
+        ui = getattr(ed, 'ui', None)
+        if ui is not None:
+            ui.draw_all(ed)          # 画进 ed._screen_fb() = 我们的 fbo
     raw = fbo.read(components=3)
     img = np.frombuffer(raw, dtype='u1').reshape(H, W, 3).astype(np.float32) / 255.0
-    return np.flipud(img)
+    out = np.flipud(img)
+    try:
+        ctx.release()
+    except Exception:
+        pass
+    return out
 
 
 _VK = {}
@@ -172,7 +190,7 @@ def _vk_device():
     return _VK['device']
 
 
-def render_vk(data):
+def render_vk(data, with_ui=False):
     """VK 侧: VkRenderer 直接对离屏纹理渲染（绕过 GLFW 窗口）。"""
     import wgpu
     import scene_driver as sd
@@ -193,11 +211,11 @@ def render_vk(data):
     drv.load_from_data(data)
     r = vr.VkRenderer(device, fmt)
     vp, cam_pos = drv.render_pose(aspect=W / H)
-    # 口径与历史 ab_gl_vk.py 逐位一致：**不传 ui**。GL 侧走 EditorApp.render（不画 UI），
-    # 单传 ui 会让 VK 多画一层 UI -> 假差异（实测 MAE 0.33）。UI 等价不在本闸门内，
-    # 由 tests/_tmp/ab_gl_vk_ui.py 单独覆盖（契约: vk_ui.py:48-60 非逐像素等价）。
+    kw = {}
+    if with_ui:
+        kw['ui'] = getattr(drv, 'ui', None)
     r.draw_frame(Ctx(), drv.models, drv.lights, vp, cam_pos, interp=None,
-                 sky=getattr(drv, 'skybox', None))
+                 sky=getattr(drv, 'skybox', None), **kw)
     bpr = (W * 4 + 255) // 256 * 256
     buf = device.create_buffer(size=bpr * H,
                                usage=wgpu.BufferUsage.COPY_DST | wgpu.BufferUsage.MAP_READ)
@@ -209,7 +227,6 @@ def render_vk(data):
     device.queue.submit([enc.finish()])
     buf.map_sync(wgpu.MapMode.READ)
     arr = np.frombuffer(buf.read_mapped(), dtype='u1').reshape(H, bpr // 4, 4)
-    # wgpu 纹理原点在左上, 与 GL 的 fbo.read(flipud) 对齐 -> 这里不再翻转
     img = arr[:, :W, :3].astype(np.float32) / 255.0
     try:
         tex.destroy()
@@ -219,97 +236,458 @@ def render_vk(data):
 
 
 def metrics(a, b):
-    d = np.abs(a - b)
+    """MAE / MAX / NCC。**float64 累加**（float32 会把 NCC 算到 >1）。"""
+    d = np.abs(a.astype(np.float64) - b.astype(np.float64))
     mae = float(d.mean())
     mx = float(d.max())
-    la = a.mean(axis=2).ravel()
-    lb = b.mean(axis=2).ravel()
+    la = a.astype(np.float64).mean(axis=2).ravel()
+    lb = b.astype(np.float64).mean(axis=2).ravel()
     la = la - la.mean()
     lb = lb - lb.mean()
-    ncc = float((la * lb).sum() / (np.linalg.norm(la) * np.linalg.norm(lb) + 1e-9))
+    ncc = float((la * lb).sum() / (np.linalg.norm(la) * np.linalg.norm(lb) + 1e-12))
     return mae, mx, ncc
 
 
-def load_baseline():
+def _sha(path):
+    h = hashlib.sha256()
+    with open(path, 'rb') as f:
+        for chunk in iter(lambda: f.read(1 << 16), b''):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _save_png(img, path):
+    from PIL import Image
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    Image.fromarray((np.clip(img, 0, 1) * 255 + 0.5).astype('uint8')).save(path)
+
+
+def _load_png(path):
+    from PIL import Image
+    a = np.asarray(Image.open(path).convert('RGB'))
+    return a.astype(np.float32) / 255.0
+
+def _baseline_load(path=None):
+    """读基线；返回 (data, error)。error 非空 = 基线不可用（调用方按 FAIL 处理, 不是 PASS）。"""
+    p = path or BASELINE_PATH
+    if not os.path.isfile(p):
+        return None, '基线文件缺失: %s（需先 --update-baseline）' % p
     try:
-        with open(BASELINE_PATH, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except Exception:
-        return {}
+        with open(p, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+    except Exception as e:
+        return None, '基线文件损坏: %r' % (e,)
+    if not isinstance(data, dict):
+        return None, '基线结构非法（不是对象）'
+    if data.get('schema') != SCHEMA:
+        return None, '基线 schema=%r != %d（需重建）' % (data.get('schema'), SCHEMA)
+    if list(data.get('resolution') or []) != [W, H]:
+        return None, '基线分辨率=%r != %r' % (data.get('resolution'), [W, H])
+    scenes = data.get('scenes')
+    if not isinstance(scenes, dict) or not scenes:
+        return None, '基线没有场景条目'
+    if int(data.get('scene_count') or 0) != len(scenes):
+        return None, '基线 scene_count=%r 与条目数 %d 不一致' % (data.get('scene_count'), len(scenes))
+    return data, None
 
 
-def save_baseline(gate, rows):
-    data = {
-        'generated': '2026-11-09',
-        'note': 'GL 4.3 vs VK 逐像素基线; 由 test_ab_gl_vk.py --update-baseline 生成',
-        'resolution': [W, H],
-        'gate': gate,
-        'scenes': rows,
-    }
-    with open(BASELINE_PATH, 'w', encoding='utf-8') as f:
-        json.dump(data, f, ensure_ascii=False, indent=2, sort_keys=True)
-        f.write('\n')
-    print('[基线] 已写入 %s (%d 场景)' % (BASELINE_PATH, len(rows)))
+def _ref_path(name, ui=False, ref_dir=None):
+    stem = os.path.splitext(name)[0]
+    return os.path.join(ref_dir or REF_DIR, stem + ('__ui' if ui else '') + '.png')
 
 
-def main(argv):
-    import sceneio
-    update = '--update-baseline' in argv
-    gate = _gate()
-    files = _scene_files()
+def _fmt3(t):
+    return '%.6f/%.6f/%.6f' % (t[0], t[1], t[2])
+
+
+def _check_scene(name, g, v, base, ref_dir, gate):
+    """返回 (ok, reasons, line)。三路（GL/参考、VK/参考、GL/VK）+ 漂移 + MAX + UI。"""
+    reasons = []
+    rp = _ref_path(name, False, ref_dir)
+    if not os.path.isfile(rp):
+        reasons.append('参考图缺失: %s' % rp)
+        ref = None
+    else:
+        ref = _load_png(rp)
+    if base is None:
+        reasons.append('基线缺本场景条目（新场景需 --update-baseline）')
+    else:
+        want_sha = base.get('ref_sha256')
+        if not want_sha:
+            reasons.append('基线缺 ref_sha256 字段')
+        elif ref is not None:
+            got = _sha(rp)
+            if got != want_sha:
+                reasons.append('参考图哈希不符（被改过/重建未同步）')
+    mgr = mvr = None
+    if ref is not None:
+        mgr = metrics(g, ref)
+        mvr = metrics(v, ref)
+        if mgr[0] > gate['mae_abs']:
+            reasons.append('GL vs 参考 MAE=%.6f > %.6f（共享回归）' % (mgr[0], gate['mae_abs']))
+        if mvr[0] > gate['mae_abs']:
+            reasons.append('VK vs 参考 MAE=%.6f > %.6f' % (mvr[0], gate['mae_abs']))
+    mgv = metrics(g, v)
+    if mgv[0] > gate['mae_abs']:
+        reasons.append('GL vs VK MAE=%.6f > %.6f' % (mgv[0], gate['mae_abs']))
+    if base is not None:
+        if mgv[0] > float(base.get('mae', 0.0)) + gate['mae_drift']:
+            reasons.append('MAE 漂移 %.6f > 基线 %.6f + %.6f'
+                           % (mgv[0], float(base.get('mae', 0.0)), gate['mae_drift']))
+        if mgv[2] < float(base.get('ncc', 1.0)) - gate['ncc_drift']:
+            reasons.append('NCC 劣化 %.6f < 基线 %.6f - %.6f'
+                           % (mgv[2], float(base.get('ncc', 1.0)), gate['ncc_drift']))
+        mx_cap = max(gate['max_abs'], float(base.get('max', 0.0)) + 0.03)
+        if mgv[1] > mx_cap:
+            reasons.append('MAX %.4f > 上限 %.4f' % (mgv[1], mx_cap))
+    else:
+        mx_cap = gate['max_abs']
+    line = format_line(mgr, mvr, mgv, base)
+    return (not reasons), reasons, line
+
+
+def format_line(mgr, mvr, mgv, base):
+    parts = []
+    if mgr is not None and mvr is not None:
+        parts.append('MAE(gl/ref,vk/ref,gl/vk)=%s/%s/%s'
+                     % (format_mae(mgr[0]), format_mae(mvr[0]), format_mae(mgv[0])))
+    else:
+        parts.append('MAE(gl/vk)=%s' % format_mae(mgv[0]))
+    parts.append('MAX=%.4f' % mgv[1])
+    parts.append('NCC=%.6f' % mgv[2])
+    if base is not None:
+        parts.append('基线 %.6f' % float(base.get('mae', 0.0)))
+    return '  '.join(parts)
+
+
+def format_mae(x):
+    return '%.6f' % x
+
+
+def _ui_check(name, g_ui, v_ui, base, ref_dir, gate):
+    """UI 三路（GL/参考、VK/参考、GL/VK）。基线没有 ui 段 -> 视为基线不完整（FAIL）。"""
+    reasons = []
+    rp = _ref_path(name, True, ref_dir)
+    ref = _load_png(rp) if os.path.isfile(rp) else None
+    base_ui = (base or {}).get('ui') if base else None
+    if ref is None:
+        reasons.append('UI 参考图缺失: %s' % rp)
+    if not isinstance(base_ui, dict):
+        reasons.append('基线缺 UI 段（--update-baseline 需重跑）')
+    if ref is not None:
+        mgr = metrics(g_ui, ref)
+        mvr = metrics(v_ui, ref)
+        if mgr[0] > gate['ui_mae_abs']:
+            reasons.append('UI GL vs 参考 MAE=%.6f > %.6f' % (mgr[0], gate['ui_mae_abs']))
+        if mvr[0] > gate['ui_mae_abs']:
+            reasons.append('UI VK vs 参考 MAE=%.6f > %.6f' % (mvr[0], gate['ui_mae_abs']))
+    mgv = metrics(g_ui, v_ui)
+    if mgv[0] > gate['ui_mae_abs']:
+        reasons.append('UI GL vs VK MAE=%.6f > %.6f（契约上限）' % (mgv[0], gate['ui_mae_abs']))
+    if isinstance(base_ui, dict):
+        if mgv[0] > float(base_ui.get('mae', 0.0)) + gate['ui_mae_drift']:
+            reasons.append('UI MAE 漂移 %.6f > 基线 %.6f + %.6f'
+                           % (mgv[0], float(base_ui.get('mae', 0.0)), gate['ui_mae_drift']))
+    line = format_ui_line(mgv, base_ui)
+    return (not reasons), reasons, line
+
+
+def format_ui_line(mgv, base_ui):
+    s = 'UI MAE(gl/vk)=%.6f MAX=%.4f NCC=%.6f' % (mgv[0], mgv[1], mgv[2])
+    if isinstance(base_ui, dict):
+        s += ' 基线 %.6f' % float(base_ui.get('mae', 0.0))
+    return s
+
+
+def run_gate(files, baseline_path=None, ref_dir=None, gate=None, allow_no_vk=None):
+    """对基线跑闸门；返回 rc。基线缺失/损坏/场景无条目一律 FAIL（P1-2）。"""
+    gate = gate or _gate()
+    if allow_no_vk is None:
+        allow_no_vk = (os.environ.get('LOOM_AB_ALLOW_NO_VK') == '1')
     if not files:
-        print('SKIP 没有场景文件 (%s)' % SCENES_DIR)
-        return 0
+        # P2④: 空场景集必须是失败（否则「跑了个寂寞」也算绿）
+        print('[ab] 错误: 场景集为空（tests/ab_scenes 无 ab_*.json, 或 LOOM_AB_SCENES 解析为空）')
+        return 1
+    data, err = _baseline_load(baseline_path)
     print('=== GL vs VK 逐像素 A/B: %d 场景 @ %dx%d ===' % (len(files), W, H))
-    print('闸门: MAE<=%g 且 MAE<=基线+%g 且 NCC>=基线-%g 且 MAX<=%g'
-          % (gate['mae_abs'], gate['mae_drift'], gate['ncc_drift'], gate['max_abs']))
-    base = load_baseline()
-    base_rows = base.get('scenes', {}) if isinstance(base, dict) else {}
-    rows = {}
+    print('闸门: MAE<=%g（GL/参考 + VK/参考 + GL/VK 三路）且 <=基线+%g, NCC>=基线-%g, MAX<=%g, UI MAE<=%g'
+          % (gate['mae_abs'], gate['mae_drift'], gate['ncc_drift'],
+             gate['max_abs'], gate['ui_mae_abs']))
+    if err:
+        check('基线可用', False, err)
+        print('--- 场景 %d, 失败 %d, 跳过 %d ---' % (len(files), len(_fails), len(_skips)))
+        return 1
+    base_rows = data.get('scenes', {})
+    vk_broken = False
     for path in files:
         name = os.path.basename(path)
-        data = sceneio.load_scene_data(path)
-        if not isinstance(data, dict):
-            check(name + ' 场景可读', False, 'load_scene_data 返回 %r' % (type(data),))
+        data_s = _load_scene(path)
+        if data_s is None:
+            check(name + ' 场景可读', False, '读取/解析失败')
             continue
-        _rebase_paths(data)
         try:
-            g = render_gl(data)
+            g = render_gl(data_s)
         except Exception as e:
             check(name + ' GL 渲染', False, repr(e))
             continue
+        v = None
         try:
-            v = render_vk(data)
+            v = render_vk(data_s)
         except Exception as e:
-            _skips.append(name)
-            print('SKIP %s VK 不可用: %r' % (name, e))
+            vk_broken = True
+            if allow_no_vk:
+                _skips.append(name)
+                print('SKIP %s VK 不可用（已显式允许 LOOM_AB_ALLOW_NO_VK=1）: %r' % (name, e))
+            else:
+                check(name + ' VK 渲染', False, repr(e))
+        ref = _load_png(_ref_path(name, False, ref_dir)) \
+            if os.path.isfile(_ref_path(name, False, ref_dir)) else None
+        if v is None:
+            if ref is None:
+                continue
+            mgr = metrics(g, ref)
+            ok = mgr[0] <= gate['mae_abs']
+            check('%-16s GL vs 参考 MAE=%.6f（VK 已跳过）' % (name, mgr[0]), ok)
             continue
-        mae, mx, ncc = metrics(g, v)
-        rows[name] = {
-            'mae': round(mae, 8),
-            'max': round(mx, 6),
-            'ncc': round(ncc, 8),
-        }
-        if update:
-            print('BASE %-24s MAE=%.6f MAX=%.4f NCC=%.6f' % (name, mae, mx, ncc))
-            continue
-        b = base_rows.get(name)
-        ok_abs = mae <= gate['mae_abs']
-        ok_drift = (b is None) or (mae <= b.get('mae', 0.0) + gate['mae_drift']
-                                  and ncc >= b.get('ncc', 1.0) - gate['ncc_drift'])
-        ok_max = mx <= max(gate['max_abs'], (b or {}).get('max', 0.0) + 0.03)
-        detail = 'MAE=%.6f MAX=%.4f NCC=%.6f' % (mae, mx, ncc)
-        if b is not None:
-            detail += ' (基线 %.6f)' % b.get('mae', 0.0)
-        check('%-24s %s' % (name, detail), ok_abs and ok_drift and ok_max,
-              '' if (ok_abs and ok_drift and ok_max) else
-              'mae_abs=%s drift=%s max=%s' % (ok_abs, ok_drift, ok_max))
-    if update:
-        save_baseline(gate, rows)
-        return 0
+        ok, reasons, line = _check_scene(name, g, v, base_rows.get(name), ref_dir, gate)
+        check('%-24s %s' % (name, line), ok, '; '.join(reasons))
+        if has_ui(data_s):
+            try:
+                g_ui = render_gl(data_s, with_ui=True)
+                v_ui = render_vk(data_s, with_ui=True)
+                ok2, reasons2, line2 = _ui_check(name, g_ui, v_ui,
+                                                 base_rows.get(name), ref_dir, gate)
+                check('%-24s %s' % (name + ' [UI]', line2), ok2, '; '.join(reasons2))
+            except Exception as e:
+                check(name + ' [UI] 渲染', False, repr(e))
     print('--- 场景 %d, 失败 %d, 跳过 %d ---' % (len(files), len(_fails), len(_skips)))
     return 0 if not _fails else 1
+def _load_scene(path):
+    """读场景 dict 并把历史绝对贴图路径重定位到仓库内 assets。"""
+    import sceneio
+    data = sceneio.load_scene_data(path)
+    if not isinstance(data, dict):
+        return None
+    return _rebase_paths(data)
+
+
+def run_update(files, baseline_path=None, ref_dir=None, gate=None, force=False):
+    """重建参考图 + 基线。任何渲染失败 -> **不写**、rc=1（P1-4）。"""
+    gate = gate or _gate()
+    bp = baseline_path or BASELINE_PATH
+    rd = ref_dir or REF_DIR
+    if not files:
+        print('[基线] 拒绝写入: 场景集为空（先确认 tests/ab_scenes 或 LOOM_AB_SCENES）')
+        return 1
+    rows = {}
+    failures = []
+    for path in files:
+        name = os.path.basename(path)
+        data = _load_scene(path)
+        if data is None:
+            failures.append('%s: 场景读取失败' % name)
+            continue
+        try:
+            g = render_gl(data)
+            v = render_vk(data)
+        except Exception as e:
+            failures.append('%s: 渲染失败 %r' % (name, e))
+            continue
+        rp = _ref_path(name, False, rd)
+        _save_png(g, rp)
+        mgv = metrics(g, v)
+        row = {
+            'mae': round(mgv[0], 8),
+            'max': round(mgv[1], 6),
+            'ncc': round(mgv[2], 8),
+            'ref_sha256': _sha(rp),
+        }
+        if has_ui(data):
+            try:
+                g_ui = render_gl(data, with_ui=True)
+                v_ui = render_vk(data, with_ui=True)
+                urp = _ref_path(name, True, rd)
+                _save_png(g_ui, urp)
+                mu = metrics(g_ui, v_ui)
+                row['ui'] = {'mae': round(mu[0], 8), 'max': round(mu[1], 6),
+                             'ncc': round(mu[2], 8), 'ref_sha256': _sha(urp)}
+            except Exception as e:
+                failures.append('%s: UI 渲染失败 %r' % (name, e))
+                continue
+        rows[name] = row
+        print('BASE %-24s MAE=%.6f MAX=%.4f NCC=%.6f' % (name, mgv[0], mgv[1], mgv[2]))
+    if failures:
+        print('[基线] 拒绝写入: 有 %d 个场景失败' % len(failures))
+        for f in failures:
+            print('  失败:', f)
+        return 1
+    old, _err = _baseline_load(bp)
+    if old is not None and not force:
+        old_n = int(old.get('scene_count') or 0)
+        if len(rows) < old_n:
+            print('[基线] 拒绝覆盖: 本次 %d 场景 < 已有 %d 场景（防误删锚点；确需如此请加 --force）'
+                  % (len(rows), old_n))
+            return 1
+    payload = {
+        'schema': SCHEMA,
+        'generated_at': time.strftime('%Y-%m-%dT%H:%M:%S'),
+        'resolution': [W, H],
+        'scene_count': len(rows),
+        'reference_dir': os.path.basename(rd),
+        'gate': gate,
+        'scenes': rows,
+    }
+    os.makedirs(os.path.dirname(bp), exist_ok=True)
+    tmpw = bp + '.tmp'
+    with open(tmpw, 'w', encoding='utf-8') as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2, sort_keys=True)
+        f.write('\n')
+    os.replace(tmpw, bp)
+    if force:
+        keep = set()
+        for n in rows:
+            keep.add(os.path.basename(_ref_path(n, False, rd)))
+            keep.add(os.path.basename(_ref_path(n, True, rd)))
+        for p in glob.glob(os.path.join(rd, '*.png')):
+            if os.path.basename(p) not in keep:
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
+    print('[基线] 已写入 %s（%d 场景, 参考图目录 %s）' % (bp, len(rows), rd))
+    return 0
+def _capture(fn):
+    """跑 fn 并捕获 stdout，同时把其内部 FAIL 从全局计数里隔离出去。"""
+    import contextlib
+    import io
+    saved = list(_fails)
+    _fails.clear()
+    buf = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buf):
+            rc = fn()
+    finally:
+        _fails.clear()
+        _fails.extend(saved)
+    return buf.getvalue(), rc
+
+
+def _patch_perspective(factor):
+    """把所有模块里**已绑定**的 mat4_perspective 一起换掉（模拟两端同时回归）。
+
+    注意: 必须先把渲染模块 import 进来再打补丁 —— 否则它们在补丁窗口内才 import，
+    会把补丁函数绑进模块全局并在还原后继续泄漏（实测导致后续用例假红）。
+    """
+    import editor  # noqa: F401  （渲染链入口，必须先加载）
+    import loom_render  # noqa: F401
+    import scene_driver  # noqa: F401
+    import vk_renderer  # noqa: F401
+    import matlib
+    orig = matlib.mat4_perspective
+
+    def patched(np_mod, fov, aspect, near, far, *a, **k):
+        return orig(np_mod, fov * factor, aspect, near, far, *a, **k)
+
+    for mod in list(sys.modules.values()):
+        try:
+            if getattr(mod, 'mat4_perspective', None) is orig:
+                mod.mat4_perspective = patched
+        except Exception:
+            pass
+    return orig, patched
+
+
+def _unpatch_perspective(orig, patched):
+    """按**函数对象身份**还原（不依赖 touched 列表，防补丁窗口内新 import 的泄漏）。"""
+    for mod in list(sys.modules.values()):
+        try:
+            if getattr(mod, 'mat4_perspective', None) is patched:
+                mod.mat4_perspective = orig
+        except Exception:
+            pass
+
+
+def self_test():
+    """反例自检: 闸门必须能对 ①共享回归 ②缺基线 ③VK 坏 ④update 有 FAIL 变红。"""
+    print('=== 自检: 闸门反向验证 ===')
+    gate = _gate()
+    scene_one = os.path.join(SCENES_DIR, 'ab_sky.json')
+    tmp = tempfile.mkdtemp(prefix='loom_ab_self_')
+    try:
+        # 1) 两端同时 fov+15%: 端间差异会变小, 但两边都偏离参考 -> 必须红
+        orig, patched = _patch_perspective(1.15)
+        try:
+            out, rc = _capture(lambda: run_gate(
+                [scene_one], BASELINE_PATH, REF_DIR, gate))
+        finally:
+            _unpatch_perspective(orig, patched)
+        check('自检1 共享回归（两端 fov+15%）-> 闸门红',
+              rc == 1 and '共享回归' in out, 'rc=%r' % (rc,))
+        # 2) 基线缺失 -> 红（不是 PASS）
+        miss = os.path.join(tmp, 'nope.json')
+        out, rc = _capture(lambda: run_gate(
+            [scene_one], miss, REF_DIR, gate))
+        check('自检2 基线缺失 -> 闸门红',
+              rc == 1 and '基线文件缺失' in out, 'rc=%r' % (rc,))
+        # 3) VK 坏（模拟 wgpu API 改名）: 默认红; 显式白名单才 SKIP
+        saved_dev = globals()['_vk_device']
+
+        def _boom_vk():
+            raise RuntimeError('模拟: wgpu 升级后 API 改名')
+
+        globals()['_vk_device'] = _boom_vk
+        try:
+            os.environ.pop('LOOM_AB_ALLOW_NO_VK', None)
+            out, rc = _capture(lambda: run_gate(
+                [scene_one], BASELINE_PATH, REF_DIR, gate, allow_no_vk=False))
+            check('自检3 VK 坏 -> 默认闸门红（不再静默 SKIP）',
+                  rc == 1 and 'VK 渲染' in out, 'rc=%r' % (rc,))
+            out, rc = _capture(lambda: run_gate(
+                [scene_one], BASELINE_PATH, REF_DIR, gate, allow_no_vk=True))
+            check('自检3b 显式允许后才 SKIP 且仍比 GL/参考',
+                  rc == 0 and '已显式允许' in out, 'rc=%r' % (rc,))
+        finally:
+            globals()['_vk_device'] = saved_dev
+        # 4) --update-baseline 有 FAIL -> 不写、rc=1
+        saved_gl = globals()['render_gl']
+
+        def _boom_gl(*a, **k):
+            raise RuntimeError('模拟: GL 渲染失败')
+
+        globals()['render_gl'] = _boom_gl
+        try:
+            bl = os.path.join(tmp, 'bl.json')
+            rd = os.path.join(tmp, 'ref')
+            rc = run_update([scene_one], bl, rd, gate)
+            check('自检4 --update-baseline 有 FAIL -> 不写且 rc=1',
+                  rc == 1 and not os.path.isfile(bl), (rc, os.path.isfile(bl)))
+        finally:
+            globals()['render_gl'] = saved_gl
+        # 5) 空场景集 -> rc=1
+        out, rc = _capture(lambda: run_gate([], BASELINE_PATH, REF_DIR, gate))
+        check('自检5 空场景集 -> rc=1', rc == 1, 'rc=%r' % (rc,))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    print('--- 自检失败 %d 项 ---' % len(_fails))
+    return 0 if not _fails else 1
+
+
+def main(argv):
+    files = _scene_files()
+    if '--self-test' in argv:
+        return self_test()
+    update = '--update-baseline' in argv
+    if not files:
+        print('错误: 场景集为空（tests/ab_scenes 无 ab_*.json, 或 LOOM_AB_SCENES 解析为空）')
+        return 1
+    if update:
+        return run_update(files, BASELINE_PATH, REF_DIR, _gate(),
+                          force=('--force' in argv))
+    return run_gate(files, BASELINE_PATH, REF_DIR, _gate())
 
 
 if __name__ == '__main__':
     sys.exit(main(sys.argv[1:]))
+
+
+
