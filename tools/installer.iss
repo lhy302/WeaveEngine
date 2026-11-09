@@ -1,6 +1,6 @@
 ; installer.iss — LoomHub 安装程序（由 package_hub.py 自动生成）
 #define MyAppName "LoomHub"
-#define MyAppVersion "0.1.2"
+#define MyAppVersion "0.1.3"
 #define MyAppPublisher "lhy302"
 #define MyAppURL "https://github.com/lhy302/WeaveEngine"
 #define MyAppExeName "LoomHub.exe"

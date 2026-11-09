@@ -2,11 +2,13 @@
 """
 test_release_version.py — 打包/发布链的"版本一致性"定向断言 (2026-11-08 第 5 批 D1=A)
 
-版本号策略（2026-11-09 人类裁决）: **开发期版本号不动**——所有中间开发都算「当前已发布版本的中间版本」，
-只有**真正发包**时才跳一次（引擎 0.1.0.beta4 -> beta5、LoomHub 0.1.2 -> 0.1.3）。
+版本号策略（2026-11-09 人类裁决）:
+    代码里的版本号 = **正在开发的版本号**（当前：引擎 0.1.0.beta5 / LoomHub 0.1.3）。
+    开发期间内部代号一直不变，**该版本线真正发包之后**才跳到下一个号（引擎 beta5 -> beta6、Hub 0.1.3 -> 0.1.4）。
+    两条线独立：引擎发包只跳引擎的号，Hub 发包只跳 Hub 的号。
 包名 = 包内元数据 = tag = Loom/解释器.json = release_github 缺省；
-当前已发布: 引擎 0.1.0.beta4 / LoomHub 0.1.2（版本.json = installer.iss = release_github 缺省）。
-下次发包时才改为 beta5 / 0.1.3。
+当前在开发: 引擎 0.1.0.beta5 / LoomHub 0.1.3（版本.json = installer.iss = release_github 缺省）。
+该版本线发包之后才跳到下一号。
 
 对应审计项: P-05-06（--version 无白名单）、P-05-07（两个工具缺省版本互相矛盾）、
 P-05-13/P-05-14（无版本单一事实源：源码元数据 / Hub 版本.json 从不被回写）。
@@ -76,10 +78,10 @@ import release_github as rg       # noqa: E402
 import hub_config as hcfg         # noqa: E402
 import package_hub as ph          # noqa: E402   (tools/package_hub.py: LoomHub 打包器)
 
-# 2026-11-09 版本号策略: 开发期不跳版本；这两个值 = **当前已发布版本**。发包时才改。
+# 2026-11-09 版本号策略: 这两个值 = **正在开发的版本号**（当前 beta5 / 0.1.3）。该线发包后才跳下一号。
 # 下次升版只改这两行（其余断言全部由它们派生）。
-EXPECT_ENGINE = '0.1.0.beta4'
-EXPECT_HUB = '0.1.2'
+EXPECT_ENGINE = '0.1.0.beta5'
+EXPECT_HUB = '0.1.3'
 
 _FAILS = []
 
@@ -99,7 +101,7 @@ def t_engine_version_consistency():
     """Loom/解释器.json（打包工具缺省来源）== release_github 缺省 == 包名/tag 派生值。"""
     meta = _read_json(os.path.join(ROOT, '解释器.json'))
     src = str(meta.get('version'))
-    check("源码元数据版本 = %s（= 当前已发布版本；开发期不跳）" % EXPECT_ENGINE,
+    check("源码元数据版本 = %s（= 正在开发的版本号）" % EXPECT_ENGINE,
           src == EXPECT_ENGINE, src)
     check("package_engine.load_version() 缺省 = 源码元数据版本",
           pe.load_version() == src, pe.load_version())
@@ -119,7 +121,7 @@ def t_engine_version_consistency():
 def t_hub_version_consistency():
     """LoomHub/版本.json == release_github 缺省 == installer.iss 的 #define。"""
     hub_ver = str(_read_json(os.path.join(REPO, 'LoomHub', '版本.json')).get('version'))
-    check("LoomHub 版本.json = %s（= 当前已发布版本）" % EXPECT_HUB,
+    check("LoomHub 版本.json = %s（= 正在开发的版本号）" % EXPECT_HUB,
           hub_ver == EXPECT_HUB, hub_ver)
     check("release_github 缺省 Hub 版本 = 版本.json",
           rg.HUB_VERSION == hub_ver, rg.HUB_VERSION)
