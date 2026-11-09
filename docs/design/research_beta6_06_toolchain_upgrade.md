@@ -468,6 +468,8 @@ embeddable 是隔离模式（`python3xx._pth` 禁 site、且**脚本目录不进
 | 版本不一致 | exit 1（见上） |
 | 测试 | `test_release_version` + 6 个 `test_hub*` 打包相关测试全绿 |
 
-**遗留**：① 源码包与编译包默认写同一个 `tools/dist/Loom-<version>.zip`，会互相覆盖（本批源码包另存 `C:\loom_build\source_pkg_beta6.zip`；建议后续加 `--kind source|compiled` 后缀）；② 源码包 `requirements.txt` 未含 `culverin`/`game-audio`（源码版物理/音频降级，编译版不受影响），是否补进 requirements 待裁决。
+**已修（2026-11-10 Q-PKG-4）**：源码包/编译包加 `--kind source|compiled`（默认各自脚本自动取），产物名 `Loom-<ver>-source.zip` / `Loom-<ver>-compiled.zip`，不再互相覆盖；`package_engine._verify_zip` 与 `release_github.engine_zip()`（优先 compiled → source → 旧名）同步；`test_release_version` 的包名断言更新。实测：compiled 129.70MB、source 346.60MB 并存。
+
+**遗留**：① （已修，见上）；② 源码包 `requirements.txt` 未含 `culverin`/`game-audio`（源码版物理/音频降级，编译版不受影响），是否补进 requirements 待裁决。
 
 

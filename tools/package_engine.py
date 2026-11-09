@@ -384,7 +384,7 @@ def _dir_size(path):
     return total
 
 
-def make_zip(version, allow_missing_runtime=False):
+def make_zip(version, allow_missing_runtime=False, kind='source'):
     os.makedirs(DIST_DIR, exist_ok=True)
     tmp_dir = os.path.join(DIST_DIR, '_Loom_%s_tmp' % version)
     if os.path.isdir(tmp_dir):
@@ -487,7 +487,7 @@ def make_zip(version, allow_missing_runtime=False):
     write_launcher(tmp_dir)
     write_meta_readme(tmp_dir, version, slim=bool(key.get('slim')),
                       python_version=_py_actual)
-    zip_path = os.path.join(DIST_DIR, 'Loom-%s.zip' % version)
+    zip_path = os.path.join(DIST_DIR, 'Loom-%s-%s.zip' % (version, kind))
     print('[打包] 写 zip: %s' % zip_path)
     if os.path.exists(zip_path):
         os.remove(zip_path)
@@ -520,8 +520,13 @@ def _verify_zip(zip_path, version, slim=False):
         _bad.append(msg)
 
     base = os.path.basename(zip_path)
-    if base != 'Loom-%s.zip' % version:
-        _fail('包名与版本不一致: %r != %r' % (base, 'Loom-%s.zip' % version))
+    # 2026-11-10 Q-PKG-4: 源码包/编译包分开命名（-source / -compiled），
+    # 自检接受三种合法名（旧名保留兼容）。
+    _allowed = {'Loom-%s.zip' % version,
+                'Loom-%s-source.zip' % version,
+                'Loom-%s-compiled.zip' % version}
+    if base not in _allowed:
+        _fail('包名与版本不一致: %r 不在 %r' % (base, sorted(_allowed)))
     try:
         with zipfile.ZipFile(zip_path) as zf:
             names = set(zf.namelist())
@@ -566,6 +571,9 @@ def _verify_zip(zip_path, version, slim=False):
 def main():
     parser = argparse.ArgumentParser(description='Loom 引擎发布包打包器')
     parser.add_argument('--version', help='覆盖版本号（默认读 Loom/解释器.json）')
+    parser.add_argument('--kind', choices=('source', 'compiled'), default='source',
+                        help='产物类型（默认 source）: 产物名 Loom-<ver>-<kind>.zip；'
+                             '与编译包分开，避免互相覆盖')
     parser.add_argument('--allow-missing-runtime', action='store_true',
                         help='允许产出【精简包】(无预置播放器运行时)；默认缺运行时即失败')
     args = parser.parse_args()
@@ -573,7 +581,8 @@ def main():
     print('=' * 60)
     print('Loom 引擎打包 — 版本 %s' % version)
     print('=' * 60)
-    zip_path = make_zip(version, allow_missing_runtime=args.allow_missing_runtime)
+    zip_path = make_zip(version, allow_missing_runtime=args.allow_missing_runtime,
+                        kind=args.kind)
     print()
     print('下一步:')
     print('  1) 测试: 解压 %s' % os.path.basename(zip_path))

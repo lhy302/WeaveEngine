@@ -107,8 +107,14 @@ def t_engine_version_consistency():
           pe.load_version() == src, pe.load_version())
     check("release_github 缺省引擎版本 = 源码元数据版本",
           rg.ENGINE_VERSION == src, rg.ENGINE_VERSION)
-    check("zip 包名 = Loom-<version>.zip",
-          os.path.basename(rg.engine_zip()) == 'Loom-%s.zip' % src,
+    # 2026-11-10 Q-PKG-4: 源码包/编译包分开命名，不再同名覆盖
+    _engine_zip_names = {
+        'Loom-%s.zip' % src,
+        'Loom-%s-source.zip' % src,
+        'Loom-%s-compiled.zip' % src,
+    }
+    check("zip 包名 = Loom-<version>[-source|-compiled].zip",
+          os.path.basename(rg.engine_zip()) in _engine_zip_names,
           os.path.basename(rg.engine_zip()))
     check("release tag 由同一版本派生 (engine-v<version>)",
           'engine-v%s' % rg.ENGINE_VERSION == 'engine-v%s' % src,

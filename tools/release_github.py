@@ -66,8 +66,17 @@ HUB_VERSION = resolve_version('LOOM_HUB_VERSION',
 
 
 def engine_zip():
-    return os.path.join(ROOT, 'tools', 'dist',
-                        'Loom-%s.zip' % ENGINE_VERSION)
+    """引擎发布资产: 优先编译包（主发布物），其次源码包，最后兼容历史命名。
+
+    2026-11-10 Q-PKG-4: 两种包改成 Loom-<ver>-compiled.zip / Loom-<ver>-source.zip，
+    不再互相覆盖；发布按这个顺序找，找不到再回退旧名（旧包仍可发）。
+    """
+    dist = os.path.join(ROOT, 'tools', 'dist')
+    for kind in ('compiled', 'source'):
+        p = os.path.join(dist, 'Loom-%s-%s.zip' % (ENGINE_VERSION, kind))
+        if os.path.isfile(p):
+            return p
+    return os.path.join(dist, 'Loom-%s.zip' % ENGINE_VERSION)
 
 
 def hub_setup():
@@ -314,7 +323,7 @@ ENGINE_BODY = """## Loom 引擎 {version}
 LoomHub -> 解释器面板 -> 「从 GitHub 安装」-> 选 {version} -> 下载并安装
 
 **方式 2：LoomHub 离线安装**
-下载下方 Loom-{version}.zip -> LoomHub -> 「安装 .zip」-> 选 zip
+下载下方 {artifact} -> LoomHub -> 「安装 .zip」-> 选 zip
 
 **方式 3：手动解压**
 下载 zip -> 解压到任意目录 -> 双击 `Loom.bat` 启动
@@ -429,6 +438,7 @@ def update_notes(token):
             _compiled = _facts['build_mode'] == 'compiled'
             body = ENGINE_BODY.format(
                 version=version,
+                artifact=os.path.basename(ENGINE_ZIP),
                 runtime_line=(_RUNTIME_LINE_COMPILED if _compiled
                               else _RUNTIME_LINE_SOURCE.format(pyver=_facts['python_version'] or '3.13')),
                 python_note=(_PYTHON_NOTE_COMPILED if _compiled else _PYTHON_NOTE_SOURCE),
@@ -458,6 +468,7 @@ def publish_engine(token):
     _compiled = _facts['build_mode'] == 'compiled'
     body = ENGINE_BODY.format(
         version=ENGINE_VERSION,
+        artifact=os.path.basename(ENGINE_ZIP),
         runtime_line=(_RUNTIME_LINE_COMPILED if _compiled
                       else _RUNTIME_LINE_SOURCE.format(pyver=_facts['python_version'] or '3.13')),
         python_note=(_PYTHON_NOTE_COMPILED if _compiled else _PYTHON_NOTE_SOURCE),

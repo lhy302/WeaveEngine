@@ -446,6 +446,9 @@ LoomHub = 项目管理器 ("解释器名 + Hub", 类似 Unity -> Unity Hub)。
     工具还会把 ckernels / core_components / scripts / GUI / assets / 设置.json 一并
     塞进 dist（--include-data-dir + 构建后补拷 *.dll），保证**裸 dist 自洽**：手敲
     上面命令漏了这些，编译版 `--bench` 会 "loom_kernels.dll 未找到" 直接退出。
+    产物名（2026-11-10）：源码包 = tools/dist/Loom-<版本>-source.zip，
+    编译包 = tools/dist/Loom-<版本>-compiled.zip（两包不再同名互相覆盖；
+    release_github 发布引擎时优先取 compiled，其次 source，最后兼容旧名）。
     `--bench` 失败约定（2026-11-09）：traceback 打 stderr + 退出码 2 +
     详情写 %LOCALAPPDATA%\Loom\bench\bench_error.txt（release 无控制台也能查）。
 

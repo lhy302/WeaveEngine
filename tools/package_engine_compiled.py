@@ -63,6 +63,9 @@ def main():
     ap.add_argument('--version', help='覆盖版本号（默认读 Loom/解释器.json）')
     ap.add_argument('--editor-dist', required=True, help='Nuitka 编辑器 dist 目录（内含 Loom.exe）')
     ap.add_argument('--builder-exe', required=True, help='Nuitka onefile 构建器 exe')
+    ap.add_argument('--kind', choices=('compiled', 'source'), default='compiled',
+                    help='产物类型（默认 compiled）: Loom-<ver>-compiled.zip，'
+                         '与源码包分开避免互相覆盖')
     ap.add_argument('--allow-missing-runtime', action='store_true')
     args = ap.parse_args()
 
@@ -187,7 +190,7 @@ def main():
     PE.write_launcher(tmp)
     PE.write_meta_readme(tmp, version, slim=slim, compiled=True)
 
-    zip_path = os.path.join(DIST_DIR, 'Loom-%s.zip' % version)
+    zip_path = os.path.join(DIST_DIR, 'Loom-%s-%s.zip' % (version, args.kind))
     print('[编译包] 写 zip: %s' % zip_path)
     with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
         for dp, dns, fns in os.walk(tmp):
