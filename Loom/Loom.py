@@ -90,29 +90,126 @@ def _cli_backend(argv):
     return None
 
 
+# ==================== E2: 远程模式三态 (2026-11-09 beta5) ====================
+# LOOM_REMOTE_MODE 取值 (Hub 默认**不注入** = off, 见版本计划 E2):
+#   off(未设) / 0  -> 原生 present (旧行为, 不变)
+#   on  / 1        -> 强制离屏回读 + Qt 窗口 (旧行为, 不变)
+#   auto           -> **先试原生**; 引擎判"上屏连续失败 >= 阈值"时降级为 on 等价路径
+#                     **只重启一次**(防死循环), 并打印一行明确原因。
+# 判据只接 loom_render.should_fallback_remote(n) (引擎自己数 consecutive failures),
+# 本层不复制阈值/不猜, 也不改进程形态之外的行为。
+_REMOTE_ON_VALUES = ('1', 'on', 'true', 'yes', 'remote')
+
+
+def _remote_mode():
+    """归一 LOOM_REMOTE_MODE -> 'off' | 'on' | 'auto'（未知值按 off，保持旧语义）。"""
+    v = (os.environ.get('LOOM_REMOTE_MODE') or '').strip().lower()
+    if v == 'auto':
+        return 'auto'
+    if v in _REMOTE_ON_VALUES:
+        return 'on'
+    return 'off'
+
+
+def _install_present_watch(threshold=3):
+    """auto 模式: 装一个上屏健康监视，命中引擎判据后让原生循环退出。
+
+    为什么包在 PlayerApp.run 上: 原生播放是**阻塞**调用 (run_backend -> eng.run())，
+    入口层拿不到引擎实例；而 present 健康是引擎实例态 (loom_render.present_health /
+    should_fallback_remote)。这里只做"观测 + 请求退出"——判据、阈值、计数全在引擎，
+    本函数不复制。返回 state dict，调用方据此决定是否重启为 remote。
+    """
+    state = {'fallback': False, 'streak': 0, 'last_error': None}
+    try:
+        import threading
+        from runtime import PlayerApp
+    except Exception as e:
+        print('[remote] auto: 无法安装上屏健康监视 (%r) -> 按原生模式运行' % (e,))
+        return state
+    if getattr(PlayerApp, '_loom_present_watch_installed', False):
+        return state
+    orig_run = PlayerApp.run
+
+    def run(self, *a, **k):
+        stop = threading.Event()
+
+        def _watch():
+            while not stop.is_set():
+                try:
+                    if self.should_fallback_remote(threshold):
+                        h = self.present_health()
+                        state['fallback'] = True
+                        state['streak'] = h.get('fail_streak')
+                        state['last_error'] = h.get('last_error')
+                        # 结束原生渲染循环 -> 回到入口层做一次 remote 重启。
+                        # 先等循环真正起来（run() 开头会 self._running=True），
+                        # 否则起跑竞态里这一下会被覆盖，窗口就再也收不掉。
+                        while not stop.is_set():
+                            try:
+                                if getattr(self, '_running', False):
+                                    self._running = False
+                                    return
+                            except Exception:
+                                return
+                            stop.wait(0.02)
+                        return
+                except Exception:
+                    return          # 引擎不支持下屏健康 (无 _present_*) -> 不监视
+                stop.wait(0.1)   # 上屏失败后尽快收口 (白屏停留 <=100ms 级)
+
+        threading.Thread(target=_watch, name='loom-present-watch',
+                         daemon=True).start()
+        try:
+            return orig_run(self, *a, **k)
+        finally:
+            stop.set()
+
+    PlayerApp.run = run
+    PlayerApp._loom_present_watch_installed = True
+    return state
+
+
+def _launch_native(scene, width=1280, height=800):
+    """原生 present 启动（--backend > 设置 render_api > 默认）。"""
+    from run_player import resolve_backend, run_backend
+    cli = _cli_backend(sys.argv)
+    run_backend(resolve_backend(cli), scene, width=width, height=height,
+                explicit=(cli is not None))
+
+
 def _launch_player(scene, width=1280, height=800):
     """按 --backend > 设置 render_api > 默认 的统一策略启动播放器.
 
-    LOOM_REMOTE_MODE=1 (离屏 GL + Qt 窗口白屏兜底) 强制 GL —— 该模式本身就是
-    "GL 不可见时改走离屏读回", 与 Vulkan 无关, 必须优先。
-
-    2026-11-07 (scan_11 P-07 修复): 这条优先规则**在本函数体里实现**, 不再只靠
-    --run 分支调用前的提前 return。原因是游戏配置.json 分支 (打包游戏双击启动)
-    也走本函数, 那条路径原先完全没有远程模式兜底 —— 远程/虚拟显示环境双击游戏
-    仍会命中 P0-1 白屏。(选择"实现分支"而不是删 docstring: 白屏兜底是真需求。)
+    LOOM_REMOTE_MODE:
+      · on/1  (离屏 GL + Qt 窗口白屏兜底) 强制 GL —— 该模式本身就是"GL 不可见时
+        改走离屏读回", 与 Vulkan 无关, 必须优先（2026-11-07 scan_11 P-07: 该优先
+        规则必须在**本函数体**里实现, 否则"游戏配置.json 双击启动"那条路径没有兜底）。
+      · auto  (2026-11-09 E2): 先按原生 present 启动; 若引擎判 should_fallback_remote(3)
+        为真（连续上屏失败），**重启一次**为 on 等价路径并打印原因。
+      · off/0 (默认): 原生启动, 旧行为。
 
     显式 --backend 由 _cli_backend 判定, 交给 run_player 的后端策略
     (Q6: 显式 vulkan 失败只报错不改写设置; 设置/默认走到 vulkan 失败则把
     设置回退成 opengl 并崩一次)。
     """
-    if os.environ.get('LOOM_REMOTE_MODE') == '1':
+    mode = _remote_mode()
+    if mode == 'on':
         from loom_player_window import run_player_window
         run_player_window(scene, width=width, height=height)
         return
-    from run_player import resolve_backend, run_backend
-    cli = _cli_backend(sys.argv)
-    run_backend(resolve_backend(cli), scene, width=width, height=height,
-                explicit=(cli is not None))
+    if mode != 'auto':
+        _launch_native(scene, width, height)
+        return
+    # ---- auto: 原生优先, 只在引擎判定失败后降级一次 ----
+    state = _install_present_watch(3)
+    _launch_native(scene, width, height)
+    if not state.get('fallback'):
+        return
+    print('[remote] 原生上屏连续失败 %s 次 (最近错误: %r) -> 自动降级为离屏回读'
+          ' (等价于 LOOM_REMOTE_MODE=1), 本次只重启一次'
+          % (state.get('streak'), state.get('last_error')))
+    from loom_player_window import run_player_window
+    run_player_window(scene, width=width, height=height)
 
 def _benchmark_math(n_tri=5000, n_iter=100):
     """
@@ -309,12 +406,10 @@ if __name__ == "__main__":
     try:
         if run_scene is not None:
             # Player 模式 (运行时, 无编辑器)
-            # 2026-10-20 P0-1 白屏修复：远程/虚拟显示环境下 GLFW native present 失败，
-            # 用离屏 GL + Qt 窗口显示绕过（见 loom_player_window.py）。LOOM_REMOTE_MODE=1 时启用。
-            if os.environ.get('LOOM_REMOTE_MODE') == '1':
-                from loom_player_window import run_player_window
-                run_player_window(run_scene, width=1280, height=800)
-                sys.exit(0)
+            # 2026-10-20 P0-1 白屏修复 + 2026-11-09 E2(auto):
+            # 远程模式三态**统一在 _launch_player 里收口**（on/1 = 离屏回读强制;
+            # auto = 先原生、引擎判上屏连续失败才降级一次; off = 原生）。
+            # 这里不再单独判断 LOOM_REMOTE_MODE，避免两条入口口径分叉。
             # 2026-11-06 R-04: 走统一后端选择 (--backend > 设置 render_api > 默认)
             _launch_player(run_scene)
             sys.exit(0)

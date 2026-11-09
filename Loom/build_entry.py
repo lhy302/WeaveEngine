@@ -206,8 +206,16 @@ def _bench_scene(scene_path, n_frames=300):
     eng = runtime.PlayerApp(scene_path, 1024, 768)
     eng.set_mouse_locked(False)                  # 探针不锁鼠标 (与 stress_probe 同)
 
+    # 2026-11-09 E1 (beta5): dt 口径 = **实测帧间隔**。
+    # 旧实现固定 1.0/120 而实跑 60~100FPS: render(dt) 会把 dt 直接送进
+    # engine._clock_advance, 于是"基准认为的时间"远小于真实墙钟 -> FPS 偏高、
+    # 逻辑时钟被欠账 (TPS 低估)。这里每帧取 perf_counter 差, 与渲染循环同口径。
+    _prev = time.perf_counter()
     for _ in range(40):                          # 预热 (脚本实例/阴影贴图/缓存就位)
-        eng.render(1.0 / 120.0)
+        _w0 = time.perf_counter()
+        _dt = min(max(_w0 - _prev, 1e-4), 0.1)
+        _prev = _w0
+        eng.render(_dt)
 
     from engine import gc_play_enter             # 与 stress_probe 同款叠加冻结
     gc_play_enter()
@@ -215,9 +223,12 @@ def _bench_scene(scene_path, n_frames=300):
     eng._stage_times.clear()
     dts = []
     t0 = time.perf_counter()
+    _prev = time.perf_counter()
     for _ in range(n_frames):
         _f0 = time.perf_counter()
-        eng.render(1.0 / 120.0)
+        _dt = min(max(_f0 - _prev, 1e-4), 0.1)    # 实测帧间隔 (同渲染循环)
+        _prev = _f0
+        eng.render(_dt)
         dts.append(time.perf_counter() - _f0)
     wall = time.perf_counter() - t0
 
@@ -226,6 +237,18 @@ def _bench_scene(scene_path, n_frames=300):
     lines.append("========== 场景基准 %s (%d 帧, 墙钟 %.2fs) =========="
                  % (os.path.basename(scene_path), n_frames, wall))
     lines.append("FPS: %.1f  (平均帧时间 %.3f ms)" % (fps, 1000.0 / fps))
+    # 2026-11-09 E1 体检口: TPS + "逻辑时钟拿到的时间/墙钟" 比值
+    # ratio≈1 = dt 口径没问题(缺口在每逻辑帧成本); ratio<1 = 时钟被欠账。
+    try:
+        _tps = float(eng.get_tps() or 0.0)
+    except Exception as _e:
+        _tps = -1.0
+    try:
+        _ratio = eng.get_logic_time_ratio()
+    except Exception:
+        _ratio = None
+    lines.append("TPS: %.2f  (logic dt/墙钟 ratio=%s)"
+                 % (_tps, ('%.4f' % _ratio) if _ratio is not None else 'n/a'))
     dms = sorted(d * 1000.0 for d in dts)
     p50 = dms[int(0.50 * len(dms))]
     p99 = dms[min(int(0.99 * len(dms)), len(dms) - 1)]
