@@ -19,6 +19,11 @@
 | `脚本系统对齐设计.md` | 脚本系统补 Unity 差距 | 现状/差距对照 + 三批补齐计划（生命周期/触发器/协程） |
 | `稳定性与启动自检设计.md` | 官方件出厂必稳 | 内嵌哈希基准 + 启动自检流程 + 失败分级 + 开发模式 |
 | `逃生门退役设计.md` | 移除开发期回退 | 250+ 逃生门三分类 + 分组件退役顺序 + git 锚点纪律 |
+| [`research_beta6_01_render_pass.md`](research_beta6_01_render_pass.md) | 渲染 Pass 抽象调研（beta6） | 帧阶段实测 + FramePlan + PassSpec 6 项 + 迁移序 + 后处理挂点 + 3 个新 bug |
+| [`research_beta6_02_asset_guid.md`](research_beta6_02_asset_guid.md) | 资产导入与 guid 管线调研（beta6） | 三套基址并存 + 打包不带 assets + guid 去重缺失 + Assets/assets.json 方案 |
+| [`research_beta6_03_animation.md`](research_beta6_03_animation.md) | 动画系统底座调研（beta6） | 现状 4 个 bug + SoA 68x + 蒙皮延后 beta7 + 状态机/事件分批 |
+| [`research_beta6_04_python_hotspots.md`](research_beta6_04_python_hotspots.md) | Python 热点下沉研判（beta6） | pipe_wait 真凶=装配层 63% + buckets 残差 + 争用 44x + AVX2 逐位验证 |
+| [`research_beta6_05_python_upgrade.md`](research_beta6_05_python_upgrade.md) | Python 版本迁移预研（beta6） | 3.13 实测可迁(−8%~−19% 纯 Python) + 3.14 仅 pygame 卡 + free-threading 不可行 |
 
 ---
 

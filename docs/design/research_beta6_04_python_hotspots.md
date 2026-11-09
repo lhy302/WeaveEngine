@@ -1,0 +1,425 @@
+# 调研报告 04：Python 热点下沉 C/C++ 研判（beta6）
+
+> 编号：04／beta6
+> 状态：**调研（只读）**，不含实现代码；接口与数据结构为草案。
+> 仓库根：D:\my-project - 副本\Loom(py源代码-工作区)，本文行号以本次实测工作树为准。
+> 口径：**能跑的一律跑**。所有"ms/帧"都注明测量宿主（编辑器 Loom.py --agent / 播放器 `runtime.PlayerApp`）与采样窗口。
+> 复现命令见附录 A（探针全部落在 gitignore 的 Loom/tests/_tmp/research_04_*.py，未改任何受跟踪文件）。
+
+---
+
+## 0. 一句话结论
+
+beta5 遗留的四个"每帧成本"里，**只有一个是真正的 Python 热点、且值得下沉**：
+
+| beta5 说法 | 本次实测 | 下沉价值 |
+|---|---|---|
+| `buckets` 2.3 ms | 编辑器 **2.65 ms/帧**（播放器 1.45） | **值得**：成本不是 GL 上传（仅 0.10），是 **~250–350 次小数组 numpy 调用**（逐桶花式索引）。单次花式索引在 2/4/6 线程争用下从 2.5 µs 膨胀到 20/58/110 µs（8x/23x/44x） |
+| `mt_mp_draws` 1.4 ms | 编辑器 **1.51 ms/帧**；同一段代码在播放器 **0.26 ms/帧** | **暂不值得**：35 次 `vao.render` 实测仅 **0.045 ms/帧（1.3 µs/次）**，多绘间接天花板≈2% 帧时间；且编辑器 1.5 vs 播放器 0.26 有 1.25 ms **归因未闭合**（见 附录 B） |
+| `aabbs` 2.1 ms | 编辑器 **2.24 ms/帧**（= 6.48 ms/逻辑帧） | **C 内核已存在**：C 调用本身 1.38 ms/帧，Python 组装 0.47–0.86 ms/帧。**下沉 Python 段收益小，但 C 内核 SIMD 化实测 2.2–2.4x 且逐位一致** |
+| `pipe_wait` 3.6 ms | 编辑器 **3.99 ms/帧**（每次等待 11.6 ms） | **真正的头号成本，但根因不在"Python 慢"**：物理线程每逻辑帧干 ~9.5 ms Python 活（`_dirty_mask_batch` 2.18 ms × 3 子步），Jolt step 只占 0.2 ms。**下沉脏检测装配层**可同时省主线程等待 |
+
+**最大单项收益**：把物理桥"逐体属性抓取 + 拼数组"的装配段换成"引擎已有 SoA 平面 → 一次 C 调用"，
+预估主线程 **−2.0 ms/帧**（`pipe_wait` 3.99 → ~2.0），且顺带削掉一个持 GIL 大户。
+
+---
+
+## ① 现状（证据）
+
+### 1.1 现有"原生面"盘点（先纠正规模）
+
+| 资产 | 规模 | 事实 |
+|---|---|---|
+| Loom/`ckernels`/`loom_kernels.c` | 18 321 B → `loom_kernels.dll` 16 896 B | 导出 3 个数值内核 + 7 个 `loom_module_*` 契约导出：`loom_aabbs_minmax` / _par（C:68、C:100）、`loom_collide_pairs`（C:236） |
+| Loom/`core_components`/*.dll | 5 个官方组件 | 不是"样例"：`pipeline.dll`（光源 VP/AABB 归约/世界矩阵/**脏检测**/插值世界矩阵）、`physics.dll`（`pre_step`/`post_step`/`substep_loop`）、`script.dll`、`module_ref.dll` 都在**生产路径**上（`pipeline_glue.dirty_mask` 被 `physics_bridge.py`:1057 调用；interp_state.py:259 调 pg.`interp_world`；`physics_bridge.py`:1295 调 `_phys_glue`.`pre_step` 做摩擦+残速） |
+| 编译方式 | `ckernels`/`build_ckernels.bat` | cl /O2 /Brepro /LD /MD，**禁 /fp:fast**（保求和序），可复现构建 |
+
+结论：**"手写 C 很少"是误判**。真实情况是"数值内核已 C 化，**装配/派发/同步**这层留在 Python"。
+因此本报告的议题不是"再写多少 C"，而是"**Python 侧的装配层还要不要继续下沉**"。
+
+### 1.2 一次完整分段测量（编辑器，压测500混合，87.3 FPS）
+
+命令（本次实跑，产物 Loom/tests/_tmp/`mt_profile_on_r04.json`）：
+
+    cd 'D:\my-project - 副本\Loom(py源代码-工作区)\Loom'
+    py -3.12 tests/_tmp/`mt_profile_check.py` --scene 压测500混合.json --secs 6 --suffix _r04
+
+窗口：播放态稳态 6.00 s / 524 渲染帧 / 501 模型 / **35 桶**（16×20 + 18×10 + 1 实例 = 501）/ 35 draw/帧 / TPS 30.06。
+
+| 段 | ms/帧 | 调用/帧 | µs/调用 | 备注 |
+|---|---:|---:|---:|---|
+| **`pipe_wait`** | **3.994** | 0.35 | 11 562 | 主线程阻塞等物理线程（S1 同步点） |
+| **`buckets`** | **2.648** | 1.00 | 2 648 | 桶重排 + 实例缓冲打包上传（`loom_render.py`:914-915） |
+| **aabbs** | **2.239** | 0.345 | 6 481 | `loom_lighting.py`:248-442 |
+| ├ `aabbs_inner` | 2.216 | 0.345 | — | 同上（内层计时，与外层同源） |
+| ├ `mt_aabb_minmax` | 1.379 | 2.07 | 665 | **C 内核** `fastpath.aabbs_minmax` |
+| ├ `mt_aabb_out` | 0.359 | 2.07 | 173 | 行表写回（numpy 散写） |
+| └ 组装/分组/去重残差 | ≈0.47 | — | — | 501 行属性 + 分组 + 唯一行表 |
+| **`mt_main_pass`** | 1.868 | 1.00 | 1 868 | 含下两项 + 相机 + 天空盒 |
+| **`mt_mp_draws`** | **1.513** | 1.00 | 1 513 | `_draw_main_buckets`（`editor.py`:2337-2339） |
+| **`collide_pairs`** | **1.116** | 0.34 | 3 250 | **C 内核** `loom_collide_pairs` |
+| **interp** | **0.910** | 0.99 | 919 | `mt_interp_world_dll` 0.897 → **C（`pipeline.dll`）** |
+| `mt_shadow_maps` | 0.883 | 1.00 | 883 | 阴影 pass 35×sha_vao.render |
+| **`world_matrices`** | **0.713** | 0.35 | 2 064 | numpy 批量（父链分层 matmul） |
+| **`mt_dispatch`** | **0.552** | 0.34 | 1 607 | 碰撞事件派发（`engine.py`:1249-1252） |
+| **`mt_scripts`** | **0.430** | 0.34 | 1 251 | 脚本回调 |
+| lod | 0.295 | 1.00 | 295 | |
+| `shadow_bounds` | 0.250 | 0.35 | 725 | |
+| `mt_qt_tick` / `mt_fixed_update` / `mt_editor_view` | 0.200 / 0.177 / 0.166 | — | — | Qt 胶水 / FixedUpdate / 编辑器 UI |
+| `mt_mp_uniforms` | 0.110 | 1.00 | 110 | VP + 灯光整块上传 |
+
+> 闭合校验：`mt_paint_total` 7.175 = `mt_paint_advance` + `mt_paint_render` (7.138) + 胶水 0.037，OK（探针 closure.ok=true）。
+
+### 1.3 物理线程的真实账本（`LOOM_PROFILE` 看不到的部分）
+
+`LOOM_PROFILE` 的 `phys_bridge_pre/post/step` 只覆盖**串行降级路径**（engine.update_physics）；
+播放态走 `physics_pipe.PhysicsPipeThread`（`physics_pipe.py`:63-84），**这三段在物理线程上，无插桩**。
+用 perf_counter 包 `PhysicsBridge` 方法实测（播放器，501 模型，120 帧，75 FPS）：
+
+| 物理线程函数 | ms/帧 | 次/帧 | ms/次 | 说明 |
+|---|---:|---:|---:|---|
+| `pre_step` | 2.401 | 0.83 | **2.88** | 含下一行 |
+| ├ `_dirty_mask_batch` | 1.815 | 0.83 | **2.18** | `physics_bridge.py`:988-1071 |
+| ├ 其余（逐脏体 set_position/rotation + 速度策略） | 0.586 | — | — | |
+| `ensure_models` | 0.453 | 0.42 | 1.09 | `physics_bridge.py`:920-972 |
+| **step（Jolt C）** | **0.202** | 0.83 | 0.24 | Jolt 本身极便宜 |
+| `post_step` | 0.056 | 0.83 | 0.07 | 摩擦/残速已下沉 C（`physics_bridge.py`:1295） |
+| `_refresh_free` | 0.037 | 0.42 | 0.09 | |
+| （主线程）pipe.`wait_pending` | 3.22 | 0.42 | **7.7** | 主线程阻塞 |
+
+**归因**：主线程 `pipe_wait` ≈ 物理线程 Python 装配时间 + GIL 交接延迟。
+编辑器 30 TPS、3 子步/逻辑帧时，物理线程每逻辑帧 ≈ 3 × (2.88 + 0.24) + 1.09 ≈ **10.4 ms**，
+与实测"每次 wait 11.6 ms"吻合；而其中 ** `_dirty_mask_batch` 占 6.5 ms（≈63%）**。
+
+同时它解释了 `_dirty_mask_batch` 为什么慢：它是**纯 Python 对象风暴**——
+501 节点各取 m.position（新建 Point3D）、m.rotation（Quat）、getattr(m,'parent')、
+self.`_last_sync`.get(id(m))，再拼 5 个 list、2 个 numpy 数组、3 个 dict（`physics_bridge.py`:1013-1071）。
+而 C 侧真正的比较内核 `pipeline_glue.dirty_mask`（n=501）实测只要 **0.020 ms**（见 §1.5）。
+
+### 1.4 `buckets`：钱花在哪（A/B 实测，非推断）
+
+方法：在探针进程内把 `_bucket_inst`[key]['main'/'sha'] 换成计时代理（真写）→ 再换成 no-op；
+把 `_bucket_geo`[key]['vao'] 换成代理（真 draw）→ 再 no-op。同一场景、同一 60 帧窗口（`research_04_ab_split.py`）。
+
+| 项目 | 播放器实测 | 说明 |
+|---|---:|---|
+| `_prepare_bucket_frame` 全量 | **1.45 ms/帧** | 编辑器同函数 **2.65** |
+| ├ `buffer.write` 合计 | **0.103 ms/帧** | 70 次/帧（35 桶 × main+sha），**1.5 µs/次** |
+| ├ `vao.render` 合计 | **0.045 ms/帧** | 35 次/帧，**1.3 µs/次** |
+| ├ 全局 gather `fw32[order]` | 0.0125 ms | 501 行一次性 gather（2026-11-09 Q8=A 已改） |
+| ├ 35 桶 staging 逐桶打包 | 0.050 ms | `st[:k,0:16]` = ... |
+| └ **残差（逐桶 numpy/python 调度）** | **≈1.25 ms** | 见下 |
+
+残差来源可直接从源码数出来（`loom_render.py`:682-742）：视锥剔除默认开启（`engine.py`:536），
+于是**每个桶**都要走 `keep.sum()` / `np.where(keep)[0]` / `g[:k][sel]` / `sat_k[sel]` / `col_k[sel]`
++ 3 次 staging 赋值 + 2 次 write —— 每桶 7–9 次小数组 numpy 调用，**35 桶 ≈ 250–350 次/帧**。
+按实测单次成本（§1.6）就是 0.6–1.2 ms。**不是 Python for 循环体慢，是 numpy 每次调用的固定开销 + 花式索引。**
+
+### 1.5 内核级微基准（真实形状）
+
+| 测量 | 结果 | 来源 |
+|---|---:|---|
+| `fastpath.aabbs_minmax`（出厂 DLL） | **173–180 Mvert/s**（V=1617/2035/2501/3015，n=90） | `research_04_kernels_micro.py` |
+| 同上 V=24 / V=4 | 47 / 0.3 Mvert/s | 小网格被行开销支配 |
+| `pipeline_glue.dirty_mask`（n=501） | **0.020 ms/次** | 同上 |
+| 501 次属性链抓取（position/rotation/parent） | **0.369 ms（0.74 µs/模型）** | 同上 |
+| 同上但直接写 numpy 行 | 0.666 ms | 更慢（逐元素 setitem） |
+| `fw32[order]` 501 行 gather | 0.0125 ms | 同上 |
+| 单次 concatenate 打包 501×16 f4 | 0.038 ms | 对比逐桶 0.050 ms |
+
+出厂内核 173 Mvert/s ≈ 5.8 ns/顶点 ≈ 20+ 周期/顶点（4 GHz），**说明标量循环没有向量化**
+（内层是 if (x<mn) ... else if (x>mx) 依赖链，C:47-65）。
+
+### 1.6 争用敏感性：为什么同一段代码在两个宿主差 2 倍
+
+`research_04_contention.py`（同一进程，只改后台线程压力，6 条 numpy+纯 Python 线程）：
+
+| 阶段 | 无压力 | 6 线程压力 | 放大 |
+|---|---:|---:|---:|
+| 帧墙钟 | 12.17 ms | 64.02 ms | 5.26x |
+| `_prepare_bucket_frame`（`buckets`） | 1.454 ms | 10.512 ms | **7.23x** |
+| `_draw_main_buckets`（draw） | 0.259 ms | 0.261 ms | **1.01x** |
+
+`research_04_numpy_gil3.py` 把放大源钉到具体算子（单次 µs，随争用线程数）：
+
+| 算子 | 0 线程 | 1 | 2 | 3 | 4 | 6 | 最大放大 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| **花式索引 `w16[idx20]`** | 2.48 | 7.08 | 20.03 | 32.52 | 58.17 | 109.6 | **44x** |
+| `np.take`(..., out=, mode='clip') | 1.75 | 4.07 | 15.42 | 40.5 | 59.3 | 96.8 | 55x |
+| 切片赋值 `a[:20,:16]=b[:20]` | 1.24 | 1.28 | 1.30 | — | — | 1.29 | 1.04x |
+| `np.empty` / copy / `np.where` | 0.78–1.01 | — | — | — | — | 0.81–1.02 | ~1x |
+| moderngl `uniform.value=` | 0.796 | — | — | — | — | 0.787 | 0.99x |
+| moderngl `buffer.write`(1.4KB) | 1.121 | — | — | — | — | 0.839 | 0.75x |
+
+即：**被放大的是"按索引取数"这一类 numpy 路径（内部走缓冲迭代器/分配），不是全部 numpy，
+也不是 GL 调用**。这精确解释了 `buckets` 的 2.65（编辑器，有 2–3 条忙线程）vs 1.45（播放器），
+也说明"把 35 桶的花式索引合并成 1 次全局 gather + 1 次 C 打包"在**争用环境下收益会翻倍**。
+
+### 1.7 多绘间接（Q4 的可行性前沿）
+
+本机实测（`research_04_indirect_probe3.py`，NVIDIA GTX 1050 Ti / 驱动 582.78）：
+
+| 检查项 | 结果 |
+|---|---|
+| moderngl 5.12 是否有间接绘制 | **有**：`VertexArray.render_indirect`(buffer, mode, count, first)（`moderngl/__init__.py:1370-1378`） |
+| 索引缓冲（→ `glMultiDrawElementsIndirect`） | **可用**：命令缓冲 [`count, instanceCount, firstIndex, baseVertex, baseInstance`] 5×int32，**回读像素验证真的画出来了** |
+| 无索引缓冲（数组间接） | **可用**（同样像素验证通过） |
+| 3.3 上下文是否可用 | **可用**（`GL 3.3`/4.3/4.6 三种上下文均成功；NVIDIA 驱动在 3.3 core 下仍解析 4.3 入口） |
+| `gl_DrawID`（4.6/ARB_shader_draw_parameters） | 仅 4.6 上下文可编译；引擎请求的是 **3.3 core**（`loom_glfw_window.py`:123-126） |
+| 一次 indirect 能跨几个 VAO | **只能 1 个**：moderngl 无 multi-VAO 间接；35 桶是 35 个 VAO（`loom_model_gpu.py`:218-229） |
+| wgpu（VK 后端） | 有 `draw_indirect` / `draw_indexed_indirect`（`wgpu/_classes.py:1894/1928`），**没有 multi-draw**；VK 侧现在就是每桶一次 rp.draw(...)（vk_renderer.py:1942/1984/2053） |
+
+**结论**：GL 侧要用上多绘间接，必须先把 35 个桶**合并成一个 VAO**（合并 VBO + baseVertex，
+实例数据进同一缓冲，材质参数进 per-instance 字段或按 `gl_DrawID` 查表 → 要 4.6 上下文），
+且**贴图**（albedo/normal/env 每桶不同）需要 texture array / bindless。
+而可省的 CPU 开销上界 = 35 × 1.3 µs + 每桶 6 次 uniform（≈0.21 ms）≈ **0.26 ms/帧（约占帧时间 2%）**。
+
+---
+
+## ② 目标设计（含数据/接口草案）
+
+### 2.1 设计原则
+
+1. **先问"该不该在 Python 里"，再问"该不该在 C 里"。** 本次证据显示：C 内核本身不慢，慢的是
+   ①逐体属性抓取装配 ②逐桶小数组调度 ③跨线程 GIL 交接。
+2. **不新增第 6 个 DLL。** 全部候选塞进既有 `ckernels`（`loom_kernels.c`）或既有官方组件，
+   复用 `loom_module.h` 契约 + `registry.json` 声明，避免打包/自检面扩大。
+3. **逐位一致是硬约束**（现有对拍基线 `aabb_par_check.py` / `pipeline_val_check.py` / snap 对拍）。
+   C 侧禁用 FMA 折叠与求和重排；跨顶点向量的 SIMD 是安全的（每个顶点的表达式顺序不变，min/max 精确）。
+4. **GIL 只在"进 C 前取一次、出 C 后放一次"。** 目标是把每帧 ~300 次 GIL 进出压到 2–3 次。
+
+### 2.2 候选内核 A：桶打包（`loom_bucket_pack`）
+
+把 `loom_render.py`:664-742 的"全局 gather → 逐桶切 → 视锥剔除 → staging 交错 → 写缓冲"合成一次 C 调用。
+
+    /* 输入: 纯数值平面, 全部 caller-owned / C 连续 (与 `loom_collide_pairs` 同风格) */
+    /* w32   : (n,16) f32  世界矩阵 (已 f32 化, 逐行)
+     * order : (n,) i64    全局 gather 顺序 (桶拼接序)
+     * offs  : (K+1,) i64  每桶在 order 中的区间
+     * planes: (6,4) f64   视锥 6 平面 (已归一; NULL = 不剔除)
+     * rad   : (n,) f64    逐实例剔除半径
+     * sat   : (n,) f32 ; col : (n,4) f32
+     * OUT main_inst (n,24) f32 = world16 + sat + pad + col
+     *     sha_inst  (n,16) f32 = world16
+     *     main_n    (K,) i32 每桶主 pass 实例数 (剔除后已重排到桶段前部) */
+    int `loom_bucket_pack`(const float *w32, int64_t n, const int64_t *order,
+                         const int64_t *offs, int32_t K, const double *planes,
+                         const double *rad, const float *sat, const float *col,
+                         float *main_inst, float *sha_inst, int32_t *main_n);
+    /* rc: 0 成功; 1 参数非法; 2 容量不足 (调用方扩容重试, 语义同 `collide_pairs`) */
+
+Python 侧只剩 3 步（伪代码）：
+
+    G = `fw32[order]`                       # 1 次 numpy gather (0.0125 ms)
+    `loom_bucket_pack`(G, order, offs, planes, rad, sat, col, main_buf, sha_buf, main_n)
+    for k in `buckets`: main_buf.write(main_view[k]); sha_buf.write(sha_view[k])   # 70 次, 0.10 ms
+
+**验收口径**：与现行 Python 路径**逐字节相同**（main_inst/sha_inst 直接做 `bytes` 比较，
+不要只比渲染图）；并保持"相机静止 + 结构不变时命中脏闸整段跳过"（`loom_render.py`:540-541）不变。
+
+### 2.3 候选内核 B：物理桥脏检测装配（`loom_pose_sync`）
+
+现状：`_dirty_mask_batch` 每逻辑帧 2.18 ms，其中 >90% 是 Python 对象抓取与容器构造（§1.3）。
+引擎**已经有 SoA 平面**：`_transform_snapshot` 产出 pos/rot/scl（`loom_transform.py`:62-118），
+父链索引由 `_render_parent_depth` 提供（`loom_transform.py`:141）。
+
+    /* cur_rows : (n,6) f64  pos(xyz)+rot(xyz), 可直接来自 `_soa_snap` 的 pos/rot 平面
+     * old_rows : (n,6) f64  桥自持的 SoA 同步基线平面 (替换 dict[int,list])
+     * pidx     : (n,) i64   父行下标 (-1 = 无父)
+     * out_mask : (n,) u8
+     * 语义与 `pipeline_glue.dirty_mask` 完全一致 (它就是现成内核); 新增的只是把
+     * "祖先传播 + sync 平面推进"也放进 C, 免去 Python 侧 n 次 round-trip。 */
+    int `loom_pose_sync`(const double *cur_rows, double *old_rows, const int64_t *pidx,
+                       int64_t n, uint8_t *out_mask);   /* 原地推进 old_rows */
+
+配套数据结构改动（草案）：
+
+    # 现在: self.`_last_sync`: dict[int(id), [tuple3, tuple3, tuple3]]   (`physics_bridge.py`:975-982)
+    # 目标: self._sync_rows: (cap,6) f64 + self._row_of_id: dict[int,int] (仅结构变更时重建)
+    #        + self._sync_ids: (cap,) i64 (身份校验, 复用现有 `_entry_signature` 失效面)
+
+**语义红线**：`_last_sync` 现在的键是 id(m)，注释写明"id 复用后会让新体被误判未动"
+（`physics_bridge.py`:933-935、966-971）。换行下标必须保留**同一失效面**（结构 stamp + 对象 id 快照），
+否则会复活 P2-⑧ 的 bug。
+
+### 2.4 候选内核 C：AABB 内核 SIMD 化（既有 C 的优化，不是下沉）
+
+已在研究版 DLL 中实测（`research_04_simd_bench.c` + `research_04_simd_run.py`）：
+
+| 形态 | 出厂标量 | AVX2（4 顶点/轮，无 FMA） | 加速 | 逐位 |
+|---|---:|---:|---:|---|
+| V=2035, n=90 | 1.057 ms (173 Mvert/s) | 0.462 ms (396 Mvert/s) | **2.29x** | **一致** |
+| V=1617, n=90 | 0.807 | 0.366 | 2.20x | 一致 |
+| V=24, n=501 | 0.130 | 0.054 | 2.40x | 一致 |
+| V=4, n=501 | 0.032 | 0.032 | 1.00x | 一致 |
+
+实现要点：**只做跨顶点并行**（同一顶点的 x=((a*m00+b*m10)+c*m20)+d*m30 顺序一字不改），
+min/max 用 `_mm256_min_pd/max_pd`（精确、与顺序无关）→ 天然逐位一致。
+需要 **CPUID 运行时分派**（出厂 DLL 要跑在无 AVX2 的机器上），并保留标量回退路径。
+
+---
+
+## ③ 分步落地计划（每步可验收、含测试点）
+
+> 排序 = 收益/成本比。每步单独可回滚（都是"新导出 + 开关"形态，开关默认关 → 灰度 → 默认开）。
+
+### 步骤 0（P0，先做）：把 `pipe_wait` / `mt_mp_draws` 变成"可观测"
+
+- **做什么**：①给物理线程三段加插桩（`LOOM_PROFILE` 门控），落到 `pt_pre_step` / `pt_dirty` / `pt_step` / `pt_post` / `pt_ensure`；②把 `_draw_main_buckets` 拆成 `mt_mp_draws_uniform` / _tex / _render 三段。
+  依据：目前 phys_bridge_* 只覆盖串行降级路径（§1.3），且 draw 段 1.5 vs 0.26 未闭合（附录 B）。
+- **验收**：编辑器播放态 `sum(pt_*)` ≈ `pipe_wait`（误差 < 20%）；三 draw 子段之和 ≈ `mt_mp_draws`（误差 < 10%）；关 `LOOM_PROFILE` 零开销。
+- **测试点**：`research_04_bridge_glue.py` 改造成回归探针；tests/`test_physics_pipe_errors.py` 全绿。
+- **成本**：1.0 人天。
+
+### 步骤 1（P0）：`loom_bucket_pack`（候选 A）
+
+- **做什么**：加 C 导出 + fastpath ctypes 包装，默认 `LOOM_BUCKET_PACK`=0，A/B 用；视锥剔除与 staging 交错一次算完；main_n 回传，Python 侧不再逐桶 `np.where`/sel。
+- **验收**：①main_inst/sha_inst 与旧路径 **`bytes` 逐字节相同**（501 实例、剔除开/关两档）；②`buckets` 段：编辑器 2.65 → **≤1.0 ms/帧**（播放器 1.45 → ≤0.5）；③争用档（`research_04_contention.py` B 相）不出现 >2x 放大。
+- **测试点**：新增 tests/`test_bucket_pack_bitexact.py`（纯 numpy 桩，不需要 GL：喂合成 w32/order/offs/planes 对比 Python 参考实现的输出字节）；渲染等价用既有 tests/`test_vk_bucket_order.py` + GL/VK 截图 A/B。
+- **成本**：2.5–3.5 人天。
+
+### 步骤 2（P1）：物理桥 SoA 通道 + `loom_pose_sync`（候选 B）
+
+- **做什么**：桥改吃 (n,6) 位姿平面（来自 `_soa_snap`）+ 父下标；`_last_sync` 改 SoA 行表（保留 id 失效面）。
+- **验收**：①脏集合与现行实现**逐位一致**（同一帧对拍 `_dirty_mask_batch` 返回值）；②物理线程每逻辑帧 Python 时间 ≤4 ms（现 ~10.4）；③编辑器 `pipe_wait` 3.99 → **≤2.0 ms/帧**，TPS 不下降。
+- **测试点**：tests/`test_physics_bridge.py`（23 KB，覆盖祖先传播/挂父/重建）+ 新增 tests/`test_physics_dirty_soa.py`（id 复用、reparent preserve_world、增删体三类回归）。
+- **成本**：3–4 人天（含失效面复核）。
+
+### 步骤 3（P2）：AABB 内核 SIMD（候选 C）
+
+- **做什么**：`_aabb_one_row` 的跨顶点向量化 + 运行时分派；`fastpath.aabbs_minmax` 签名不变。
+- **验收**：`mt_aabb_minmax` 1.38 → **≤0.7 ms/帧**；与旧 DLL 输出**逐位一致**（全场景 5 万行对拍）；无 AVX2 时自动走标量（`LOOM_NO_SIMD`=1 模拟验证）。
+- **测试点**：tests/_tmp/`aabb_par_check.py`（现有对拍）+ 新增"逐位"断言；pipeline_val_check 不受影响。
+- **成本**：1–1.5 人天。
+
+### 步骤 4（P3，观察项）：`mt_dispatch` 与 `_aabbs_batched` 组装段
+
+- **做什么**：先只加子段插桩（事件派发里"筛选/去重" vs "脚本回调"），再决定是否把筛选向量化。
+- **验收**：给出 1.6 ms/逻辑帧的内部切分；若回调占比 >60% 则**明确不优化**。
+- **成本**：0.5 人天（只测量）。
+
+---
+
+## ④ 风险与回滚
+
+| 风险 | 具体形态 | 缓解 | 回滚 |
+|---|---|---|---|
+| **逐位不一致**（最高） | C 打包/SIMD 改变字节 → 阴影/主 pass 像素差 | 对拍用 `bytes` 而非图像；C 禁 /fp:fast、禁 FMA 折叠；SIMD 只跨顶点 | 开关 LOOM_* 回旧 Python 路径（保留旧实现一版） |
+| 失效面重写引入幽灵 | 物理桥 id→行下标改造复活 P2-⑧（id 复用误判"未动"） | 保留 `_entry_signature` + 结构 stamp + id 快照三重判据；专门回归用例 | 桥保留 `_last_sync` dict 作为影子，双写比对一版 |
+| 出厂 DLL 哈希/自检失败 | `ckernels` 在 `registry.json` 有 provides + sha256，`official_manifest.py`:20-23 钉死；`diag_check_dll_integrity` 会报 modified | 重编后跑 tests/_tmp/`gen_official_manifest.py` 重生成基准；开发期 `LOOM_DEV`=1 跳过校验 | 还原 DLL + registry + manifest 三件（版本库内） |
+| 打包漏带 | `package_engine_compiled.py`:42 的 DATA_DIRS 已含 `ckernels`；`build_game.py`:235-236 同 | 发版前 compiled_verify / boot_check | 无（只增导出，不改路径） |
+| 调度抖动 | 打包改成 C 后单帧 2 ms 的 C 段若放主线程，可能形成新长段 | 保持现有"每帧一次"粒度；必要时按桶分段（K 很小） | 开关 |
+| 过度优化错靶 | 若编辑器 `mt_mp_draws` 1.5 ms 实为 GPU 背压，则任何 CPU 侧改动都无效 | **步骤 0 先闭合测量**，再决定是否动 draw 路径 | 不投入即无风险 |
+
+---
+
+## ⑤ 工作量估计（人天 / 会话数）
+
+| 步骤 | 内容 | 人天 | 会话数 | 风险等级 |
+|---|---|---:|---:|---|
+| 0 | 物理线程插桩 + draw 三分插桩（闭合本报告两个未闭合项） | 1.0 | 1–2 | 低 |
+| 1 | `loom_bucket_pack`（C + ctypes + 逐字节对拍 + 开关） | 3.0 | 3–4 | 中 |
+| 2 | 物理桥 SoA + `loom_pose_sync`（含失效面复核与回归） | 3.5 | 4 | **中高** |
+| 3 | AABB SIMD + 运行时分派 | 1.2 | 1–2 | 低 |
+| 4 | 发版配套（manifest/registry/打包/编译版验证） | 1.0 | 1 | 低 |
+| — | **合计（不含多绘间接）** | **≈9.7 人天** | **10–13 会话** | |
+| ✗ | （不推荐）多绘间接：合并几何 + 材质表 + 纹理数组 + GL4.6 + VK 分支 | 10–15 | — | 高 |
+
+预期收益汇总（编辑器口径，帧 11.5 ms / 主线程 7.17 ms）：
+
+    `buckets`   2.65 → ~0.8   (−1.85 ms/帧, 争用下更明显)
+    `pipe_wait` 3.99 → ~2.0   (−2.0  ms/帧, 依赖步骤 2)
+    aabbs     2.24 → ~1.45  (−0.79 ms/帧, 步骤 3)
+    ────────────────────────────────────
+    合计 ≈ −4.6 ms/帧 的主线程/同步开销 → 87 FPS 场景有 ~40% 余量可换成 GPU 侧效果
+
+---
+
+## ⑥ 与现有代码的兼容边界
+
+| 边界 | 现状（证据） | 本设计如何不破坏 |
+|---|---|---|
+| `ckernels` ABI 契约 | `loom_module.h` 七导出 + provides（`registry.json`: `ckernels`.aabbs / `ckernels`.collide） | **只追加**导出，不动既有签名/求和序（与 `pipeline.dll` 追加 `dirty_mask` 的做法一致，registry note 已写明"末尾无侵入追加"） |
+| fastpath 硬加载 | B1 退役后 DLL 缺失 = 模块级 raise（`fastpath.py`:84-87） | 新导出必须与 DLL 同批发布；旧 DLL + 新 Python 会 AttributeError → 用 `hasattr` 探测 + 明确错误信息 |
+| 出厂哈希 | `official_manifest.py`:20-23 钉 `ckernels` sha256；`LOOM_DEV`=1 跳过 | 每次重编跑 `gen_official_manifest.py`，与 DLL 同 commit |
+| 打包链 | `package_engine_compiled.py`:42（DATA_DIRS 含 `ckernels`）、`build_game.py`:235-236 | 无需改动；发版需重跑 `compiled_verify.py` |
+| 逐位基线 | aabb_par_check / `aabb_assembly_check` / pipeline_val_check / snap 对拍（`loom_render.py`:604-609 注释里的"逐位同一字节"） | 新内核以"字节相等"为验收，不以"看起来一样" |
+| 测试面 | 121 个 tests/test_*.py；相关：`test_physics_bridge.py`(23KB)、`test_physics_pipe_errors.py`、`test_vk_bucket_order.py`、`test_render_api.py` | 每步先跑对应测试文件，再跑全量 |
+| 脏闸语义 | `_bucket_frame_sig` 四维（stamp/keys/pose/cam，`loom_render.py`:520-541） | 打包内核只在"闸开"时调用，闸判不动 |
+| 视锥剔除开关 | `_frustum_cull` 默认 True（`engine.py`:536） | 内核必须同时支持 planes=NULL（不剔除）两档 |
+| GIL 假设 | 引擎把 switch interval 调到 1 ms（`loom_logic_thread.py`:41-45），注释记录了"渲染段慢 2x" | 新 C 段天然不持 GIL，与 1 ms 间隔互补，不冲突 |
+
+---
+
+## ⑦ 需要人类裁决的封闭问题
+
+| # | 问题 | 选项 | 主审倾向（基于实测） |
+|---|---|---|---|
+| Q1 | beta6 是否**动 C 内核**（会重编 DLL + 改出厂哈希 + 需编译版复验）？ | A 不动，只做 Python 侧 / B 只做 AABB SIMD（最小面）/ C 做 `buckets`+物理桥（收益最大） | **C**（−4.6 ms/帧，回滚成本低） |
+| Q2 | 物理桥 SoA 改造（唯一"中高"风险项）是否本版做？ | A 做 / B 先只做步骤 0 插桩，观察一版再定 | **B**（先用一版数据确认 `pipe_wait` 构成，再动语义面） |
+| Q3 | `buckets` 打包内核放 `ckernels`（数学内核目录）还是 `pipeline.dll`（逻辑帧 prep 组件）？ | A `ckernels` / B pipeline | **B**（语义贴 pipeline：都是"每帧数据准备"，也避免 `ckernels` 变杂物间） |
+| Q4 | 多绘间接：**本轮明确不做**，是否接受？ | A 接受，写入"不必要下沉清单" / B 仍要预研 GL 侧原型 | **A**（上界 0.26 ms/帧，VK 无 multi-draw，必然后端分叉） |
+| Q5 | 是否允许把"SIMD 运行时分派"引入出厂 DLL（增加 CPU 判定分支）？ | A 允许（AVX2+标量两路）/ B 只允许 SSE2（x64 基线，约 2x）/ C 不 SIMD | **A**（2.3x，逐位已验证；无 AVX2 自动回退） |
+| Q6 | 验收是否统一改为"**字节级相等**"（而非阈值/截图）？ | A 是，写入 beta6 验收口径 / B 沿用图像 A/B | **A**（代码注释里已多处承诺"逐位同一字节"，只是没测试固化） |
+| Q7 | 若步骤 0 测出 `mt_mp_draws` 的 1.25 ms 差额是 **GPU 背压**，是否放弃 draw 侧优化整条线？ | A 放弃 / B 转去做"减少 GL 状态切换" | **A**（那就不是语言问题，是管线/带宽问题） |
+
+---
+
+## 附录 A：可复现证据索引（探针均 gitignore，未改受跟踪文件）
+
+    cd 'D:\my-project - 副本\Loom(py源代码-工作区)\Loom'
+
+    # A. 编辑器分段（权威口径, 产物 tests/_tmp/`mt_profile_on_r04.json`）
+    py -3.12 tests/_tmp/`mt_profile_check.py` --scene 压测500混合.json --secs 6 --suffix _r04
+
+    # B. 物理桥 Python 粘连层真实耗时（物理线程, 计时包装）
+    py -3.12 tests/_tmp/`research_04_bridge_glue.py` 120          # -> research_04_bridge_glue.json
+
+    # C. `buckets` / draws A/B 切分（write 代理 vs no-op, draw 代理 vs no-op）
+    py -3.12 tests/_tmp/`research_04_ab_split.py`                 # -> research_04_ab_split.json
+
+    # D. 争用放大（同进程只改后台线程压力）
+    py -3.12 tests/_tmp/`research_04_contention.py`               # -> research_04_contention.json
+    py -3.12 tests/_tmp/`research_04_numpy_gil3.py`               # 花式索引随线程数 2.5->110 us
+
+    # E. 函数级 cProfile（会跨线程采样, 数字被放大, 只用相对排序）
+    py -3.12 tests/_tmp/`research_04_cprofile.py` 60              # -> research_04_cprofile.json
+
+    # F. 内核微基准 + SIMD 对照（需 MSVC; dll 已在 tests/_tmp）
+    py -3.12 tests/_tmp/`research_04_kernels_micro.py`            # 出厂内核吞吐 / `dirty_mask` / 属性抓取
+    py -3.12 tests/_tmp/`research_04_simd_run.py`                 # 标量 vs AVX2 逐位对拍
+
+    # G. 多绘间接可行性（回读像素验证）
+    py -3.12 tests/_tmp/`research_04_indirect_probe3.py`
+
+| 结论 | 证据文件 | 关键行 |
+|---|---|---|
+| 桶打包循环 | Loom/`loom_render.py` | 682-742 |
+| 桶绘制循环（每桶 uniform+draw） | Loom/`loom_render.py` | 744-805 |
+| `mt_mp_draws` 插桩点 | Loom/`editor.py` | 2337-2339 |
+| `pipe_wait` 插桩点 | Loom/`engine.py` | 1226-1227 |
+| 逻辑帧 prep | Loom/`engine.py` | 1232-1234 |
+| 脏检测装配 | Loom/`physics_bridge.py` | 988-1071 |
+| `pre_step` | Loom/`physics_bridge.py` | 1079-1106 |
+| 物理线程主循环 | Loom/`physics_pipe.py` | 63-84 |
+| AABB 公共层 + 记忆化 | Loom/`loom_lighting.py` | 248-442 |
+| AABB 批量化/分组 | Loom/`loom_lighting.py` | 444-473+ |
+| AABB C 内核（标量内层） | Loom/`ckernels`/`loom_kernels.c` | 47-79 |
+| C ABI 包装 | Loom/`fastpath.py` | 68-80 |
+| 桶 VAO/实例缓冲格式 | Loom/`loom_model_gpu.py` | 186-229 |
+| `GL 3.3` core 上下文 | Loom/`loom_glfw_window.py` | 123-126 |
+| 出厂哈希钉扎 | Loom/`core_components`/`official_manifest.py` | 20-23 |
+| 组件声明 | Loom/`core_components`/`registry.json` | `ckernels` 条目 |
+| 打包目录 | tools/`package_engine_compiled.py` | 42 |
+| DLL 编译参数 | Loom/`ckernels`/`build_ckernels.bat` | 全文件 |
+| GIL 切换间隔处理 | Loom/`loom_logic_thread.py` / Loom/`engine.py` | 41-45 / 519-527 |
+
+## 附录 B：本次测量未能闭合的两点（诚实登记）
+
+1. **编辑器 `mt_mp_draws` 1.51 ms vs 播放器同函数 0.26 ms（5.8x）**：
+   已排除：Python 逐桶 uniform 赋值（6×35 次，实测 0.99 µs/次）、`vao.render`（1.3 µs/次）、
+   `buffer.write`、GIL 争用（draw 循环在 6 线程压力下 1.01x 不变）。
+   **未排除**：Qt paintGL 目标 FBO 的驱动状态/背压、编辑器 program 的 sampler 集合差异。
+   解法 = 步骤 0 的三分插桩。
+2. **`pipe_wait` 11.6 ms vs 物理线程可归因 ~10.4 ms**：残差 1–2 ms 疑为线程唤醒/交接延迟，
+   需步骤 0 的物理线程插桩在同一窗口内闭合。
