@@ -230,3 +230,23 @@ GL 主 pass 是否永远 HDR、阴影编码是否统一、点光 6 面是否合�
 - **内部开发：编「带控制台」版本**（`--windows-console-mode=force`）——错误、bench 退出码、异常栈都能看见，避免静默失败。
 - **发布：编「不带控制台」版本**（`--windows-console-mode=disable`）。
 - 两条命令落成工具 `tools/build_engine.py --mode dev|release`，不靠记忆；**发布产物必须来自 release 档**，dev 产物明确标注不可发布。
+
+
+### 9.6 3.13 物理路径退化：定位结论（R04，2026-11-09）
+
+**结论：不是 specializing interpreter/类型不稳定，而是跨线程 GIL 交接成本 +83% 在我们这种高频交接架构上的复利。**
+
+判据（探针 `tests/_tmp/research_04e_*.py` 可复跑）：
+1. **单线程下 3.13 更快**（m.position 223→131µs、m.scale 334→134、id 107→36）→ 早前"访问器慢 4-7x"是争用污染的墙钟，已作废。
+2. **两线程 Event 乒乓 51.25 → 93.56 µs（+83%）**。
+3. `LOOM_LOGIC_SYNC=1`（去掉逻辑线程）后缺口从 **−15% 收窄到 −3.2%**（3.12 85.3 / 3.13 82.6）。
+4. 全进程 CPU/帧 12.66→14.45ms（1.08→1.17 核；物理线程 +16%、池线程 +48% CPU）→ **不是干等，是多烧 CPU**。
+5. 无效项已排除：switchinterval 1/2/5/10ms 无趋势；逻辑线程轮询睡眠 1→4ms 落在噪声内。
+
+函数级 top（µs/次）：`update_animations` +145%、`_transform_snapshot` +39.5%、`_refresh_free` +38%、`compute_world_matrices` +36.3%、`_run_scripts` +19%、`_dispatch_fixed_update` +19%、`br.pre_step` +11.7%、`br._dirty_mask_batch` +10.1%、`pipe.wait_pending` +7.9%、`_prepare_bucket_frame` +4.5%。
+无退化对照：`_aabbs_batched` +1.4%、`_logic_prep` +0.1%、Jolt step +0.4%、`collide_pairs` +3.5%。
+
+**处置（人类已选①，本结论不改裁决）**：
+- **不为 3.13 单独打补丁**；根治 = 批次 D 的物理桥/逻辑帧装配层 SoA 化（`loom_pose_sync`），一次改动两边收益。
+- `LOOM_LOGIC_SYNC=1` 只作**测量口径**（73.4→82.6 FPS），**不改默认**（历史记录异步在其它场景更快）。
+- 批次 D 验收门槛追加：**满载 FPS ≥ 85**，且需给出"跨线程交接次数"的前后对比（这是本次退化的直接机制）。

@@ -30,8 +30,8 @@ beta5 遗留的四个"每帧成本"里，**只有一个是真正的 Python 热�
 
 | 资产 | 规模 | 事实 |
 |---|---|---|
-| Loom/`ckernels`/`loom_kernels.c` | 18 321 B → `loom_kernels.dll` 16 896 B | 导出 3 个数值内核 + 7 个 `loom_module_*` 契约导出：`loom_aabbs_minmax` / _par（C:68、C:100）、`loom_collide_pairs`（C:236） |
-| Loom/`core_components`/*.dll | 5 个官方组件 | 不是"样例"：`pipeline.dll`（光源 VP/AABB 归约/世界矩阵/**脏检测**/插值世界矩阵）、`physics.dll`（`pre_step`/`post_step`/`substep_loop`）、`script.dll`、`module_ref.dll` 都在**生产路径**上（`pipeline_glue.dirty_mask` 被 `physics_bridge.py`:1057 调用；interp_state.py:259 调 pg.`interp_world`；`physics_bridge.py`:1295 调 `_phys_glue`.`pre_step` 做摩擦+残速） |
+| `Loom/ckernels/loom_kernels.c` | 18 321 B → `loom_kernels.dll` 16 896 B | 导出 3 个数值内核 + 7 个 `loom_module_*` 契约导出：`loom_aabbs_minmax` / _par（C:68、C:100）、`loom_collide_pairs`（C:236） |
+| `Loom/core_components`/*.dll | 5 个官方组件 | 不是"样例"：`pipeline.dll`（光源 VP/AABB 归约/世界矩阵/**脏检测**/插值世界矩阵）、`physics.dll`（`pre_step`/`post_step`/`substep_loop`）、`script.dll`、`module_ref.dll` 都在**生产路径**上（`pipeline_glue.dirty_mask` 被 `physics_bridge.py`:1057 调用；interp_state.py:259 调 pg.`interp_world`；`physics_bridge.py`:1295 调 `_phys_glue`.`pre_step` 做摩擦+残速） |
 | 编译方式 | `ckernels`/`build_ckernels.bat` | cl /O2 /Brepro /LD /MD，**禁 /fp:fast**（保求和序），可复现构建 |
 
 结论：**"手写 C 很少"是误判**。真实情况是"数值内核已 C 化，**装配/派发/同步**这层留在 Python"。
@@ -394,25 +394,25 @@ min/max 用 `_mm256_min_pd/max_pd`（精确、与顺序无关）→ 天然逐位
 
 | 结论 | 证据文件 | 关键行 |
 |---|---|---|
-| 桶打包循环 | Loom/`loom_render.py` | 682-742 |
-| 桶绘制循环（每桶 uniform+draw） | Loom/`loom_render.py` | 744-805 |
-| `mt_mp_draws` 插桩点 | Loom/`editor.py` | 2337-2339 |
-| `pipe_wait` 插桩点 | Loom/`engine.py` | 1226-1227 |
-| 逻辑帧 prep | Loom/`engine.py` | 1232-1234 |
-| 脏检测装配 | Loom/`physics_bridge.py` | 988-1071 |
-| `pre_step` | Loom/`physics_bridge.py` | 1079-1106 |
-| 物理线程主循环 | Loom/`physics_pipe.py` | 63-84 |
-| AABB 公共层 + 记忆化 | Loom/`loom_lighting.py` | 248-442 |
-| AABB 批量化/分组 | Loom/`loom_lighting.py` | 444-473+ |
-| AABB C 内核（标量内层） | Loom/`ckernels`/`loom_kernels.c` | 47-79 |
-| C ABI 包装 | Loom/`fastpath.py` | 68-80 |
-| 桶 VAO/实例缓冲格式 | Loom/`loom_model_gpu.py` | 186-229 |
-| `GL 3.3` core 上下文 | Loom/`loom_glfw_window.py` | 123-126 |
-| 出厂哈希钉扎 | Loom/`core_components`/`official_manifest.py` | 20-23 |
-| 组件声明 | Loom/`core_components`/`registry.json` | `ckernels` 条目 |
-| 打包目录 | tools/`package_engine_compiled.py` | 42 |
-| DLL 编译参数 | Loom/`ckernels`/`build_ckernels.bat` | 全文件 |
-| GIL 切换间隔处理 | Loom/`loom_logic_thread.py` / Loom/`engine.py` | 41-45 / 519-527 |
+| 桶打包循环 | `Loom/loom_render.py` | 682-742 |
+| 桶绘制循环（每桶 uniform+draw） | `Loom/loom_render.py` | 744-805 |
+| `mt_mp_draws` 插桩点 | `Loom/editor.py` | 2337-2339 |
+| `pipe_wait` 插桩点 | `Loom/engine.py` | 1226-1227 |
+| 逻辑帧 prep | `Loom/engine.py` | 1232-1234 |
+| 脏检测装配 | `Loom/physics_bridge.py` | 988-1071 |
+| `pre_step` | `Loom/physics_bridge.py` | 1079-1106 |
+| 物理线程主循环 | `Loom/physics_pipe.py` | 63-84 |
+| AABB 公共层 + 记忆化 | `Loom/loom_lighting.py` | 248-442 |
+| AABB 批量化/分组 | `Loom/loom_lighting.py` | 444-473+ |
+| AABB C 内核（标量内层） | `Loom/ckernels/loom_kernels.c` | 47-79 |
+| C ABI 包装 | `Loom/fastpath.py` | 68-80 |
+| 桶 VAO/实例缓冲格式 | `Loom/loom_model_gpu.py` | 186-229 |
+| GL 3.3 core 上下文 | `Loom/loom_glfw_window.py` | 123-126 |
+| 出厂哈希钉扎 | `Loom/core_components/official_manifest.py` | 20-23 |
+| 组件声明 | `Loom/core_components/registry.json` | `ckernels` 条目 |
+| 打包目录 | `tools/package_engine_compiled.py` | 42 |
+| DLL 编译参数 | `Loom/ckernels/build_ckernels.bat` | 全文件 |
+| GIL 切换间隔处理 | `Loom/loom_logic_thread.py` / `Loom/engine.py` | 41-45 / 519-527 |
 
 ## 附录 B：本次测量未能闭合的两点（诚实登记）
 
@@ -423,3 +423,96 @@ min/max 用 `_mm256_min_pd/max_pd`（精确、与顺序无关）→ 天然逐位
    解法 = 步骤 0 的三分插桩。
 2. **`pipe_wait` 11.6 ms vs 物理线程可归因 ~10.4 ms**：残差 1–2 ms 疑为线程唤醒/交接延迟，
    需步骤 0 的物理线程插桩在同一窗口内闭合。
+
+---
+
+## 附录 E：3.13 下物理路径 FPS 退化的定位（2026-11-09，1 会话，只定位不修）
+
+> 触发：R06 实测 3.12→3.13 后满载 FPS 84.2~88.8 → 79.5~80.3，logic_step / pipe_wait 同时变大。
+> 本附录记录**同机同场景**的复现、函数级定位，以及"是什么 / 不是什么"的判据。探针同属 gitignore。
+
+### E.1 复现（本机，压测500混合，300 帧，与 build_entry._bench_scene 同口径）
+
+| 版本 | FPS | 帧时间 | logic_step | pipe_wait | aabbs | world_matrices | buckets | collide_pairs |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| 3.12.10 | **86.5** | 11.56 ms | 3.82 | 2.56 | 0.81 | 0.54 | 1.32 | 1.42 |
+| 3.13.15 | **73.4** | 13.63 ms | 5.23 | 3.66 | 1.02 | 0.84 | 1.38 | 1.47 |
+
+方向与 R06 一致（本机跌幅更大；多次运行落在 -5% ~ -15%，说明对调度状态敏感）。
+**C 侧不背锅**：`collide_pairs`（C）+3.5%、`br.step`（Jolt）+0.4%、`interp`（C DLL）甚至 -11%；
+`buckets` / `_draw_main_buckets`（只在主线程）+4.5% / +2.9%。**退化集中在逻辑线程/物理线程上的 Python 代码。**
+
+### E.2 函数级差异 top 10（perf_counter 计时包装，非 cProfile；µs/次，同场景同帧数）
+
+| # | 函数 | 3.12 | 3.13 | Δ | 所在线程 | 性质 |
+|---|---|---:|---:|---:|---|---|
+| 1 | `update_animations` | 17.3 | 42.3 | **+145%** | 逻辑 | 纯 Python 循环（绝对值小） |
+| 2 | `_transform_snapshot` | 526.6 | 734.6 | **+39.5%** | 逻辑 | 501×属性链 + 逐元素 SoA 写 |
+| 3 | `_refresh_free` | 84.7 | 117.2 | **+38%** | 物理 | [m for m in models if ...] |
+| 4 | `compute_world_matrices` | 593.8 | 809.6 | **+36.3%** | 逻辑 | numpy 批量 + 上述快照 |
+| 5 | `_run_scripts` | 876.9 | 1044.6 | +19.1% | 逻辑 | 脚本回调 |
+| 6 | `_dispatch_fixed_update` | 127.5 | 151.5 | +18.8% | 逻辑 | 事件派发 |
+| 7 | `br.pre_step` | 3252.8 | 3632.3 | +11.7% | 物理 | 脏检测装配（§1.3 那段） |
+| 8 | `br._dirty_mask_batch` | 2568.6 | 2828.2 | +10.1% | 物理 | 501×属性链抓取 |
+| 9 | `pipe.wait_pending` | 8395 | 9055 | +7.9% | 主线程 | 等物理（GIL 交接的直接账单） |
+| 10 | `_prepare_bucket_frame` | 1347.4 | 1407.4 | +4.5% | 主线程 | 纯主线程，几乎不受影响 |
+
+对照组（**没有**退化）：`_aabbs_batched` +1.4%、`_logic_prep` +0.1%、`_model_aabbs_par` +1.4%、
+`br.ensure_models` +3.1%、`br.post_step` -5.7%。它们要么是 numpy 主循环、要么是 C 调用。
+
+### E.3 关键否证：**不是** specializing interpreter / 类型不稳定
+
+三条独立证据都指向"单线程下 3.13 更快"：
+
+1. **停掉全部引擎线程、关 GC 后，同批访问器 3.13 全部更快**（research_04e_bisect.py，501 模型）：
+   m.position（2 跳 property）223.3 → **130.8 µs**；m.transform.position 104.8 → 67.6；
+   m.position.x（property+namedtuple 字段）207.3 → 145.3；m.scale 333.9 → **133.9**；id(m) 106.7 → 35.6。
+2. **合成属性链基准**（research_04e_propchain.py，同形态 2 跳 property + namedtuple）：
+   3.12 191.0 µs → 3.13 **174.6 µs**（更快）。
+3. **namedtuple 字段访问没有退化**：两版本 Point3D.x 都是 C 层 collections._tuplegetter
+   （实测 30.1 → 25.3 µs），排除"3.13 把 tuplegetter 改成 Python 实现"这条常见猜测。
+4. 微基准全家桶（属性 / dict / getattr / 循环 / numpy 花式索引 / ctypes 空调用）3.13 一律持平或更快
+   （属性 -11%、循环 -9%、list.append -13%；numpy 花式索引 2.55→2.66 µs，切片 0.32 vs 0.32）。
+
+⇒ 早前"真实访问器慢 4~7x"的观测是**线程争用污染的墙钟**，不是代码退化；已作废并在此登记。
+
+### E.4 真正的机制：**跨线程 GIL 交接变贵**（本报告最有价值的结论）
+
+| 判据 | 3.12 | 3.13 | 说明 |
+|---|---:|---:|---|
+| 两线程 Event 乒乓（research_04e_gil.py，2 万轮） | **51.25 µs/次** | **93.56 µs/次** | **+83%**，同机同脚本 |
+| 纯 Python 互抢放大 | 1.79x | 1.56x | GIL 公平性没变差 |
+| 关掉逻辑线程（`LOOM_LOGIC_SYNC=1`）后 FPS | 85.3 | **82.6** | 缺口从 **-15% 收窄到 -3.2%** |
+| 全进程 CPU/帧（research_04e_cpu.py，GetThreadTimes） | 12.66 ms（1.08 核） | **14.45 ms（1.17 核）** | 不是干等，是**多烧 14% CPU** |
+| 同上分线程：MainThread / loom-physics / 8 池 | 7.27 / 2.50 / 1.16 | 7.66 / **2.89** / **1.72** | 物理线程 +16%、池线程 **+48%** CPU |
+
+即：3.13 每次 GIL 交接/唤醒更贵，而引擎恰好是"主线程 + 逻辑线程 + 物理线程 + 8 池"的高频交接结构
+（逻辑线程 1 ms 轮询 loom_logic_thread.py:100-128；物理线程每子步 post→wait），
+账单一层层叠在 pipe_wait 与逻辑帧装配段上——这解释了"变慢的全是 Python 密集段"。
+
+**试过但无效（登记，别重复尝试）**：
+- 切换间隔扫描 1/2/5/10 ms（research_04e_switch.py；3.13：75.3/75.0/76.4/73.2 FPS）——无趋势。
+  说明代价在 **acquire/wake 路径**，不在时间片长度。
+- 逻辑线程轮询睡眠 1 ms → 4 ms（research_04e_fix_ab.py；3.13 76.5→78.0→72.3）——落在噪声内；
+  3.12 同档 88.6/88.4/89.7 证明探针稳定，是 3.13 侧方差大。
+
+### E.5 最小修法评估（均无需改业务代码即可先验证）
+
+| 方案 | 代价 | 预期 / 实测 | 判定 |
+|---|---|---|---|
+| A. 运行时 `LOOM_LOGIC_SYNC=1`（已有开关） | 零代码 | 3.13：73.4 → **82.6**（≈3.12 的 97%）；3.12：86.5 → 85.3 | **可作 3.13 的临时口径**；但 M3-N3 记录过异步在别的场景更快（134→155 FPS），需按场景复核，不建议改默认 |
+| B. 降交接频次：缩短物理线程 Python 段（R04 §③ 步骤 2 的 `loom_pose_sync` / SoA） | 3.5 人天 | pre_step 2.9 ms → ~0.4 ms，交接窗口同缩；预计 pipe_wait 3.66 → ~2.6、logic_step 回 ~3.8 | **正解，属批次 D**——本报告确认它同时是 3.13 的最优解 |
+| C. 逻辑帧装配段（`_transform_snapshot` / `compute_world_matrices`）也改吃 SoA 平面 | 1.5 人天 | 逻辑线程 Python 时间 -30~40%，交接次数不变但每次窗口更短 | 可与 B 合并 |
+| D. 调 switchinterval / 加大轮询睡眠 | — | 实测无效（E.4） | **不做** |
+| E. 等 CPython 侧（3.14 free-threading / GIL 优化） | 外部 | 3.14 才有 free-threading 正式版 | 记入"版本升级预研"清单 |
+
+### E.6 结论（一句话）
+
+**3.13 的退化不是某个函数被去优化，而是跨线程 GIL 交接成本 +83% 在"高频交接架构"上的复利**；
+函数级"变慢"是墙钟表象（单线程实测 3.13 更快）。可低成本缓解的只有运行时开关
+（`LOOM_LOGIC_SYNC=1`，实测回收 ~9 个 FPS）；**根治要等批次 D 把物理桥/逻辑帧装配层改成 SoA + 单次 C 调用**
+（与 R04 的 P1/P2 是同一件事，做一次两边都赚）。在此之前**不建议**为 3.13 单独打补丁。
+
+> 环境说明（诚实登记）：本机 3.12 为 numpy 2.2.5 / moderngl 5.12.0，3.13 为 numpy 2.5.4 / moderngl 5.13.0
+> （人类侧核实为版本一致）。为排除该混淆：E.3 第 4 条的 numpy 微基准显示两版本算子耗时差 <5%，
+> 且 E.4 的三条主证据（乒乓、LOGIC_SYNC A/B、线程 CPU 分解）都不依赖 numpy 版本。
