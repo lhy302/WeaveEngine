@@ -1265,3 +1265,125 @@ test_user_config.py / test_lighting.py -> ALL PASS ✅
 - `SceneDriver`（第 2 批文件）尚无 `set_mouse_lock_allowed()`：VK 侧脚本调用该 API 会 AttributeError；且其 `set_mouse_locked` 未做"allowed=False 拒绝"（目前靠 poll 兜底强制解锁，行为等价但不一致）。
 - `runtime.PlayerApp` / `vk_player`（第 3 批文件）仍按 `mouse_lock_initial()` 初始化 → 现在默认 False，符合裁决；若游戏配置写了 allowed=true 则正常锁。
 - 真机验证（打包吃豆人 + 真鼠标）需在打包后由主审执行；本机只能验证状态机与日志形态。
+
+
+---
+
+## 11. beta5 内轮：性能结构优化（Q7=B / Q8=A，只动 AABB 管线）
+
+### 11.1 基线（E1 探针，压测500混合，3 窗口 × 2 s，LOOM_PROFILE=1）
+
+| 窗口 | fps | TPS | ratio | steps/s | 逻辑步墙钟 |
+|---|---|---|---|---|---|
+| 1 | 67 | 26.19 | 1.099 | 23.0 | 38.8 ms |
+| 2 | 64 | 26.31 | 1.097 | 27.5 | 35.4 ms |
+| 3 | 60 | 26.94 | 1.098 | 25.0 | 33.3 ms |
+
+主线程分段（ms/帧，135 帧窗口）：`mt_render_total 9.3~10.3`（`buckets 4.7~5.2`、`mt_main_pass 1.8~2.0`、`mt_mp_draws 1.5`、`mt_shadow_maps 1.0`）；
+逻辑步分段（换算到每步 = 每帧 ÷ 0.43 步/帧）：`aabbs 9.5`、`pipe_wait ~15`、`collide_pairs 3.4`、`world_matrices 2.7`。
+
+### 11.2 改造（`Loom/loom_lighting.py` 的 AABB 管线，数值零改动）
+
+问题（探针 `beta5_p01_pool_gate.py` 实测）：`_model_aabbs_par(visible_only=True)` **不入行级缓存**，每个调用点全量重算 → **15.3 ms/次**（504 物体，且每次走 8-worker 池），而灯光的 shadow_prep / 每盏灯都会各请求一次；`visible_only=False`（prep 路径）已有行级缓存，无此问题。
+
+改造：给 `visible_only=True` 加**同帧记忆化** —— 键 = (`_frame_world` 对象本体, n, struct/appearance stamp, 可见性序列)，命中直接返回上次的 list 本体。播放态同一 `_frame_world` 被多个调用点共享，故后续调用零重算。
+
+### 11.3 对拍（`beta5_p01_aabb_check.py`，真实场景 12 帧）
+
+```
+对拍: 帧数=12 命中调用=36 不一致=0
+首次(未命中) 52.153 ms/次 | 记忆命中 0.349 ms/次
+```
+（含"中途把 1/7 的物体设为不可见"的干扰帧，未出现假命中。）
+
+### 11.4 改后实测（同探针同口径）
+
+| 窗口 | fps | TPS | ratio | steps/s | 逻辑步墙钟 |
+|---|---|---|---|---|---|
+| 1 | 68 | 26.29 | 1.122 | 21.0 | 40.6 ms |
+| 2 | 69 | 26.68 | 1.123 | 30.0 | 33.3 ms |
+
+`mt_paint_event 10.9 → 9.7 ms/帧`，`mt_render_total 10.4 → 9.3~9.9`，fps 60~67 → 68~69；**TPS 仍在 26~27（目标 30），在噪声范围内没有系统性提升**。
+
+### 11.5 TPS 仍上不去的归因（具体到函数与占比，稳态 68 fps 口径）
+
+| 位置 | 线程 | ms/帧 | 占墙钟 | 性质 |
+|---|---|---|---|---|
+| `loom_render.buckets`（桶/实例组装） | 渲染主线程 | 4.3~4.9 | ~30% | **Python 持 GIL**（本轮边界外，禁止改） |
+| `mt_mp_draws`（逐物体 draw 派发） | 渲染主线程 | 1.4 | ~9% | Python 持 GIL（loom_render） |
+| `mt_shadow_maps` | 渲染主线程 | 0.9~1.1 | ~7% | GL 调用为主 |
+| `pipe_wait`（等物理 worker） | 逻辑线程 | 6.2~6.6 | 每步 ~15 ms | **逻辑步最大单项**（物理产出/调度，非渲染） |
+| `aabbs`(`visible_only=False` prep) | 逻辑线程 | 4.1 | 每步 ~9.5 ms | 其中 `mt_aabb_minmax`(C kernel) 2.7 ms/帧 ≈ 6 ms/步 |
+| `world_matrices` | 逻辑线程 | 1.0 | 每步 ~2.3 ms | ctypes→C，已释放 GIL |
+
+结论：渲染端本轮可动的部分（AABB 重复计算）已消除（15.3 → 0.35 ms/次）；剩下真正压住 TPS 的是 ①逻辑步内的 `pipe_wait`（物理 worker 等待，~15 ms/步）与 AABB C kernel（~6 ms/步），②渲染主线程的 `loom_render.buckets`（~30% 墙钟，本轮禁改）。
+
+
+---
+
+## 12. beta5 内轮：桶组装 numpy 化（Q8=A 续，`loom_render.buckets`）
+
+### 12.1 改动（`Loom/loom_render.py` `_prepare_bucket_frame`）
+
+旧：每桶 1 次 `np.take` + 1 次 `pipeline_glue.pack_bucket_instances`（每次 6 个 `ascontiguousarray` + `get_fn`）+ 每桶 1 次 `_frustum_keep`；38 桶实测 4.3~4.9 ms/帧，全在渲染主线程持 GIL。
+
+新：
+1. 按分组 stamp 预生成 **桶计划**：`order`（全部桶 idx 拼接）/ `offs`（每桶偏移）/ `sat_all` / `col_all` / `radius_all`；
+2. 每帧只做一次 `fw32[order]` **全局 gather**，桶内退化为小切片拷贝（删掉 38 次 ctypes pack）；
+3. 视锥测试**一次覆盖全部实例**（`einsum` 求轴缩放 + `_spheres_in_frustum`），桶内只切片；
+4. 保留 `LOOM_BUCKET_LEGACY=1` 强制走旧逐桶路径（A/B 取证用）与"计划失配 -> 逐桶回退"的防御分支。
+
+### 12.2 逐位对拍（`beta5_p01_bucket_snap.py`，真实场景 38 桶，cull on/off 两模式）
+
+对拍内容：每桶 键 / 实例数 / 主 pass 实例数 / `stage` 前 k 行 sha1 / `gather` 前 k 行 sha1。
+
+```
+改前 C:\...\snap_before.json   改后 C:\...\snap_after2.json
+对拍 identical = True
+cull_on 主 pass 实例合计 = 255   cull_off 主 pass 实例合计 = 504   （两者改前改后一致）
+```
+
+### 12.3 口径①：E1 现场探针（真编辑器，3 窗口 × 2 s，压测500混合）
+
+| | fps | TPS | steps/s | 逻辑步墙钟 | ratio |
+|---|---|---|---|---|---|
+| **旧逐桶**（`LOOM_BUCKET_LEGACY=1`） | 71 | 26.42 | 26.0 | 38.25 ms | 1.097 |
+| **新全局** | **90 / 91** | **30.16 / 30.36** | **30.0 / 30.5** | **33.3 ms** | 1.085 |
+
+主线程分段（`ms/帧`）：`buckets 4.223 -> 2.530/2.300`（-44%）、`mt_paint_event 9.252 -> 6.840`、
+`mt_render_total 8.831 -> 6.376`；逻辑步侧一并下降：`pipe_wait 5.734 -> 3.615`、`aabbs 3.831 -> 2.096`、
+`mt_aabb_minmax 2.320 -> 1.372`、`logic_step 13.607 -> 9.044`。
+
+### 12.4 口径②：同场景离线 A/B（`beta5_p01_bucket_paths.py`，含 compute_render_matrices ~2.5 ms）
+
+| 路径 | 改前 | 改后 | 纯 `_prepare_bucket_frame` |
+|---|---|---|---|
+| cull=ON（播放态默认） | 7.717 ms/次 | **3.570 ms/次** | 4.6 -> **约 1.0 ms** |
+| cull=OFF | 7.086 ms/次 | 2.901 ms/次 | 4.6 -> 约 0.4 ms |
+
+⚠ **`--bench` 口径本轮不可用**：`python Loom.py --bench Projects\压测500混合.json 60` 在 90 s 内不退出（240 帧版跑 >10 min 仍无输出，进程被杀）。属 `build_entry._bench_scene` 的既有问题，不在本批文件域，未改。故双口径改用 **E1 现场 + 同场景离线 A/B**。
+
+### 12.5 `pipe_wait` 归因（只诊断，未改物理线程结构）
+
+`beta5_p01_pipe_diag.py`：离线同一场景连推 30 个逻辑帧，交替测两种情况 ——
+
+| 情形 | 单逻辑帧墙钟 |
+|---|---|
+| A 主线程空闲（无渲染、无 GIL 竞争） | **16.4 ms** |
+| B 另起一个纯 Python 线程抢 GIL | **269.5 ms**（16x） |
+| A2 再测空闲 | 16.4 ms |
+
+结论：**物理 worker 与逻辑步对 GIL 高度敏感**（B 情形墙钟 16x），并被 E1 现场印证 —— 桶组装 GIL 占用下降后
+`pipe_wait` 同步从 5.73 → 3.62 ms/帧（-37%）、`logic_step` 13.6 → 9.0 ms/帧。即"渲染端让出 GIL → 逻辑/物理立刻回血"。
+
+### 12.6 剩余缺口分布（稳态 90 fps 口径，ms/帧）
+
+| 段 | ms/帧 | 备注 |
+|---|---|---|
+| `buckets` | 2.3~2.5 | 剩余主要是 38 桶的 GPU buffer 写入（2 次/桶）+ 桶级 Python 开销 |
+| `mt_main_pass` / `mt_mp_draws` | 1.78 / 1.44 | 每桶 draw 派发（moderngl 调用） |
+| `aabbs`（其中 C kernel `mt_aabb_minmax` 1.37） | 2.1 | 逻辑线程；C kernel 已无 GIL |
+| `pipe_wait` | 3.6 | 已随 GIL 下降；物理 worker 实际计算 + 排队 |
+| `mt_shadow_maps` 等 | <1 | — |
+
+**TPS 30.16~30.36 达标（目标 30）**；若继续冲高，下一档是桶级 GPU 写入合并（一次大 write 替 38 次小 write）与 `mt_mp_draws` 的 draw 派发。

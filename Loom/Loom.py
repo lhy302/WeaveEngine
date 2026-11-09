@@ -14,6 +14,7 @@ Loom.py — 入口: 命令行参数 + 数学管线基准 + 启动引擎
   python Loom.py --run <scene.json>       播放场景 (运行时, 无编辑器 UI)
   python Loom.py --open <scene.json>      编辑器打开指定场景 (供项目管理器"打开项目")
   python Loom.py --benchmark [三角形数] [迭代数]  数学管线基准 (不弹窗口)
+  python Loom.py --bench <scene.json> [帧数]     场景基准 (转交 build_entry._bench_scene; 结果写 bench_result.txt)
 """
 import os
 import sys
@@ -379,6 +380,23 @@ def _self_check_sources():
 
 # 主程序入口
 if __name__ == "__main__":
+    # 2026-11-09 修复（beta5）: --bench 只在 build_entry.py 里有实现，Loom.py 之前不解析它 →
+    # `python Loom.py --bench <场景> <帧数>` 会掉进"默认编辑器"分支，表现为**卡住不退出**
+    # （实测 90s 无任何输出）。这里显式转发到同一实现，避免两个入口口径分叉。
+    _argv_bench = sys.argv[1:]
+    if '--bench' in _argv_bench:
+        import build_entry as _be
+        _bi = _argv_bench.index('--bench')
+        _scene = _argv_bench[_bi + 1] if _bi + 1 < len(_argv_bench) else None
+        _frames = 300
+        if _bi + 2 < len(_argv_bench) and _argv_bench[_bi + 2].isdigit():
+            _frames = int(_argv_bench[_bi + 2])
+        if not _scene:
+            print('用法: python Loom.py --bench <scene.json> [帧数]')
+            sys.exit(1)
+        _be._bench_scene(_scene, n_frames=_frames)
+        sys.exit(0)
+
     # 2026-10-19 首行自检：损坏文件明确报错（防 AV 篡改导致神秘崩溃）
     _self_check_sources()
     benchmark, n_tri, n_iter, run_scene, open_scene, editor, ui = _parse_args(sys.argv[1:])

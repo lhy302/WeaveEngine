@@ -580,8 +580,57 @@ class RenderMixin:
                                     else np.zeros(0, dtype='f4'))
             self._bucket_col_all = (np.concatenate(_col) if _col
                                     else np.zeros((0, 4), dtype='f4'))
+            # 剔除半径按实例展开 (供**一次**全局视锥测试; 与 _frustum_keep 逐实例
+            # 同源同算法: 网格最大顶点距 × 该实例最大轴缩放)
+            _mr = getattr(self, '_bucket_radius', None)
+            if _mr is None:
+                _mr = self._bucket_radius = {}
+            _rad = []
+            for key, idxs in self._render_buckets:
+                _r = _mr.get(key)
+                if _r is None:
+                    _mesh = self.models[idxs[0]].mesh
+                    _v = np.asarray(_mesh.vertices, dtype=np.float64)
+                    _r = (float(np.sqrt((_v * _v).sum(axis=1)).max())
+                          if len(_v) else 1.0)
+                    _mr[key] = _r
+                _rad.append(np.full(len(idxs), _r, dtype=np.float64))
+            self._bucket_radius_all = (np.concatenate(_rad) if _rad
+                                       else np.zeros(0, dtype=np.float64))
         mats = getattr(self, '_bucket_mat_cache', None) or {}
-        for key, idxs in self._render_buckets:
+        # 2026-11-09 (01 号 Q8=A): **一次全局 gather 服务全部桶**。
+        # 旧实现每桶一次 np.take + 一次 ctypes pack(6×ascontiguousarray + get_fn);
+        # 38 桶实测 4.3~4.9 ms/帧且全在渲染主线程持 GIL。现在 order/offs/sat_all/
+        # col_all 按分组 stamp 预生成 (见上), 每帧只做 fw32[order] 一次 gather,
+        # 桶内退化为小切片拷贝 —— 字节源完全相同, 故数值逐位一致 (snap 对拍)。
+        order = getattr(self, '_bucket_order', None)
+        offs = getattr(self, '_bucket_offs', None)
+        sat_all = getattr(self, '_bucket_sat_all', None)
+        col_all = getattr(self, '_bucket_col_all', None)
+        if (order is None or offs is None or sat_all is None or col_all is None
+                or len(offs) != len(self._render_buckets) + 1):
+            order = None                        # 计划不可用 -> 逐桶回退 (旧语义)
+        if order is not None and os.environ.get('LOOM_BUCKET_LEGACY') == '1':
+            order = None                        # A/B 取证开关: 强制走旧逐桶路径
+        G_all = fw32[order] if order is not None else None
+        # 2026-11-09 (01 号 Q8=A): 视锥测试**一次覆盖全部实例** (旧实现每桶一次
+        # _frustum_keep; 38 桶时 numpy 逐调用固定开销 ≈ 4 ms/帧, 与实例数无关)。
+        # 算法与逐桶版逐项同源: f64 cast -> 行 3 取中心 -> 各轴缩放取最大 ->
+        # 球心到 6 平面距离 >= -rad; 半径按实例展开 (半径来自桶级缓存 × 实例缩放)。
+        keep_all = None
+        if (G_all is not None and planes is not None
+                and len(self._render_buckets) > 1):
+            _rall = getattr(self, '_bucket_radius_all', None)
+            if _rall is not None and _rall.shape[0] == G_all.shape[0]:
+                G64 = G_all.astype(np.float64)
+                basis = G64[:, :3, :3]
+                s2 = np.einsum('kij,kij->ki', basis, basis).max(axis=1)
+                rad = np.maximum(np.sqrt(s2), 1e-9) * _rall
+                keep_all = self._spheres_in_frustum(G64[:, 3, :3], rad, planes)
+        mbn = getattr(self, '_main_bucket_n', None)
+        if mbn is None:
+            mbn = self._main_bucket_n = {}
+        for bi, (key, idxs) in enumerate(self._render_buckets):
             ent = self._bucket_geo.get(key)
             if ent is None:                    # 防御: 桶资源未建 (attach 路径遗漏)
                 ent = self._build_bucket_geo(key, self.models[idxs[0]])
@@ -598,12 +647,21 @@ class RenderMixin:
                 g = inst['gath'] = np.empty((inst['n'], 4, 4), dtype='f4')
             elif g.shape[0] < k:
                 g = inst['gath'] = np.empty((inst['n'], 4, 4), dtype='f4')
-            # ★M3 DLL 剥离: 优先走 pipeline.dll 原生 C 打包 (消灭 take+切片分配)
-            packed = False
-            _fr_culled = False
+            if order is not None:
+                a, b = offs[bi], offs[bi + 1]
+                g[:k] = G_all[a:b]             # 桶内切片拷贝 (源 = 同一 gather)
+                sat_k = sat_all[a:b]
+                col_k = col_all[a:b]
+            else:
+                np.take(fw32, idxs, axis=0, out=g[:k], mode='clip')
+                mc = mats.get(key)
+                if mc is not None and mc[0].shape[0] == k:
+                    sat_k, col_k = mc[0], mc[1]
+                else:
+                    sat_k = np.zeros(k, dtype='f4')
+                    col_k = np.zeros((k, 4), dtype='f4')
             if planes is not None and k > 1:
                 # 视锥剔除路径: 主 pass 只画视锥内实例 (重排到前部), 阴影全量。
-                np.take(fw32, idxs, axis=0, out=g[:k], mode='clip')
                 mr = getattr(self, '_bucket_radius', None)
                 if mr is None:
                     mr = self._bucket_radius = {}
@@ -613,50 +671,24 @@ class RenderMixin:
                     _v = np.asarray(_mesh.vertices, dtype=np.float64)
                     r = float(np.sqrt((_v * _v).sum(axis=1)).max()) if len(_v) else 1.0
                     mr[key] = r
-                keep = self._frustum_keep(g[:k], planes, r)
+                if keep_all is not None and order is not None:
+                    keep = keep_all[a:b]       # 全局一次算好, 桶内切片
+                else:
+                    keep = self._frustum_keep(g[:k], planes, r)
                 n_main = int(keep.sum())
-                if not hasattr(self, '_main_bucket_n'):
-                    self._main_bucket_n = {}
-                self._main_bucket_n[key] = n_main
+                mbn[key] = n_main
                 inst['sha'].write(g[:k], 0)        # 阴影: 全量实例 (不动)
                 if n_main:
                     sel = np.where(keep)[0]
-                    gm = g[:k][sel]
-                    st[:n_main, 0:16] = gm.reshape(n_main, 16)
-                    mc = mats.get(key)
-                    if mc is not None and mc[0].shape[0] == k:
-                        st[:n_main, 16] = mc[0][sel]
-                        st[:n_main, 20:24] = mc[1][sel]
-                    else:
-                        st[:n_main, 16] = 0.0
-                        st[:n_main, 20:24] = 0.0
+                    st[:n_main, 0:16] = g[:k][sel].reshape(n_main, 16)
+                    st[:n_main, 16] = sat_k[sel]
+                    st[:n_main, 20:24] = col_k[sel]
                     inst['main'].write(st[:n_main], 0)
-                packed = True
-                _fr_culled = True
-            if not packed and not getattr(self, '_no_bucket_pack_dll', False):
-                try:
-                    import pipeline_glue as _pg
-                    mc = mats.get(key)
-                    sat = mc[0] if (mc is not None and mc[0].shape[0] == k) else None
-                    rgba = mc[1] if (mc is not None and mc[1].shape[0] == k) else None
-                    if _pg.pack_bucket_instances(fw32, n, idxs, sat, rgba, st[:k], g[:k]) == 0:
-                        packed = True
-                except Exception:
-                    packed = False
-            if not packed:
-                np.take(fw32, idxs, axis=0, out=g[:k], mode='clip')
+            else:
                 st[:k, 0:16] = g[:k].reshape(k, 16)
-                mc = mats.get(key)
-                if mc is not None and mc[0].shape[0] == k:
-                    st[:k, 16] = mc[0]
-                    st[:k, 20:24] = mc[1]
-                else:
-                    st[:k, 16] = 0.0
-                    st[:k, 20:24] = 0.0                # color=None 的实例留 0 (旧语义)
-            if not _fr_culled:
-                if not hasattr(self, '_main_bucket_n'):
-                    self._main_bucket_n = {}
-                self._main_bucket_n[key] = k
+                st[:k, 16] = sat_k
+                st[:k, 20:24] = col_k                # color=None 的实例留 0 (旧语义)
+                mbn[key] = k
                 inst['main'].write(st[:k], 0)      # moderngl 吃 buffer 协议, 部分写入
                 inst['sha'].write(g[:k], 0)        # 同一 gather 缓冲 = 旧 _fw32[idxs] 同字节
 
