@@ -1,6 +1,8 @@
 
 # 2026-11-06: 输入法(Sogou)在 CWD 下按字面量创建 %SystemDrive%/ProgramData/... 的环境产物
 %SystemDrive%/
+# 2026-11-09: 字面量 ~ 目录（某次命令未展开 HOME）
+~/
 
 # 2026-11-06: tests/_tmp 下这些文件是**测试产物**（每次跑 test_eai_real / test_integration 都会重写）。
 # 之前被误跟踪，导致"跑完测试 git 就脏"。已 git rm --cached 退出索引。
