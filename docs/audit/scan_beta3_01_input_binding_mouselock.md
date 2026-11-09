@@ -1387,3 +1387,34 @@ cull_on 主 pass 实例合计 = 255   cull_off 主 pass 实例合计 = 504   （
 | `mt_shadow_maps` 等 | <1 | — |
 
 **TPS 30.16~30.36 达标（目标 30）**；若继续冲高，下一档是桶级 GPU 写入合并（一次大 write 替 38 次小 write）与 `mt_mp_draws` 的 draw 派发。
+
+---
+
+## 13. beta5 内轮：时钟暂停恢复（P1-A）与逻辑线程启停（P1-B）
+
+### 13.1 改动
+
+| 文件 | 改动 |
+|---|---|
+| Loom/engine.py | P1-A：暂停期**显式重新锚定墙钟** —— `advance_logic` 暂停分支、`toggle_logic_paused` 进入暂停、`set_logic_paused(True)` 三处各加 `self._logic_wall_last = None`（此前只在 `_clock_advance` 内更新，三条暂停早退路径都不碰它 → 恢复首帧 wall_dt = 整段停顿时长，截 0.333s 后一帧连跑 9~10 步）|
+| Loom/loom_render.py | P1-A：`render()` 的暂停分支同样重新锚定（第三处暂停路径）|
+| Loom/loom_logic_thread.py | P1-A：异步线程暂停分支重新锚定；P1-B：①`_stop_logic_thread` 改为**先 `ev.set()` 再清 `self._logic_stop`**；②`_logic_loop(clk, stop_ev=None)` 用**局部 ev** 作退出条件（不再每轮读 `self._logic_stop`）；③`_start_logic_thread` 增加“同实例已有存活线程就复用”守卫；④停不干净时**保留引用并打一条告警**（失败可见，且守卫据此拒绝再起一条）|
+| Loom/tests/test_clock_pause_restart.py | 新增 20 条断言（暂停 0.5s 恢复首帧 ≤1 步 / 恢复后 10 帧无补偿爆发 / `set_logic_paused` 同口径 / stop 100ms 内返回 / alive=False / 孤儿不推时钟 / 再 start 只有 1 个 loom-logic 线程）|
+
+### 13.2 修前 / 修后（同断言；修前 = 重放旧实现 `tests/_tmp/beta5_p01_clock_oldreplay.py`）
+
+| 项 | 修前 | 修后（实测）|
+|---|---|---|
+| 暂停 0.5s 恢复首帧步数 | **9 步**（契约 ≤1）| **≤1 步** |
+| stop 耗时 | **2.001 s**（join 卡满）| **0.011 s** |
+| stop 后线程存活 | **True** | False |
+| stop 后 0.3s 内仍推进 | **9 步** | **0 步** |
+| 再 start 后 loom-logic 线程数 | **2** | **1** |
+
+### 13.3 回归
+
+`test_clock_pause_restart` / `test_core_clock` / `test_frame_pacing` / `test_playmode_edges` / `test_beta3_batch2_camera_proj` / `test_editor_playback_matrix` / `test_ui` / `test_scene_driver_lod` / `test_scene_driver_physics_log` / `test_scripts` / `test_unlock_key` 全绿。
+
+### 13.4 剩余
+
+`scene_driver.py` 的 `logic_paused` 早退（VK 侧）不在本批文件域，但形状相同（暂停不重锚 + 独立时钟实现），建议 02 号核。
