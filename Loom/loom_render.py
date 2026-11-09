@@ -30,6 +30,8 @@ import time
 import numpy as np
 
 from loom_shaders import CLEAR_COLOR_RGBA   # 2026-11-09 Q2=A: 清屏底色唯一来源
+# 2026-11-10 阶段 2A: 帧描述层（编辑器与播放器共用同一份 FramePlan）
+from loom_pass import frame_plan
 # 2026-10-18 A2: import pygame 已删（GLFW 窗口剥离；本文件不再引用 pygame 常量）
 import moderngl
 
@@ -818,6 +820,48 @@ class RenderMixin:
             self._white_tex = None
         return self._white_tex
 
+    # ============ 2026-11-10 阶段 2A: FramePlan 的 prepare / 绘制源 ============
+    def _prepare_main_pass(self):
+        """主 pass 的 CPU 侧准备（相机 / VP / uniform 上传）。
+
+        由 FramePlan 执行器在「清屏之后、主 pass 绘制之前」调用一次 —— 与迁移前
+        「use -> clear -> 算 VP/传 uniform -> enable -> draw」的次序逐位一致。
+        """
+        # MVP: 每帧 CPU 算一次 view_proj, 每模型 model.
+        # uniform 上传: matlib 是行向量约定 v@M (numpy M 存的是标准矩阵的转置),
+        # 要 GLSL 的 u*v 等价 numpy 的 v@M, GPU 需得 M^T = 行主序 M 直接 tobytes (不转置).
+        if self.orbit_mode:
+            self.apply_orbit_camera()
+        V = mat4_view_yaw_pitch(np, (self.camera.x, self.camera.y, self.camera.z),
+                                self.camera_yaw, self.camera_pitch, self.camera_roll)
+        # 2026-11-07 2D: 播放器 (PlayerApp/GL) 也要支持正交投影 (与编辑器播放同源)
+        if getattr(self, 'ortho', False):
+            _h = float(getattr(self, 'ortho_size', 12.0))
+            _asp = self.width / max(1, self.height)
+            P = mat4_ortho(np, -_h * _asp * 0.5, _h * _asp * 0.5,
+                           -_h * 0.5, _h * 0.5, self.near, self.far)
+        else:
+            P = mat4_perspective(np, self._fov, self.width / self.height,
+                                 self.near, self.far)
+        self._vp = V @ P                                      # 供 draw_lines / 射线拾取
+        # 组6件3: u_view_proj / u_view_pos 差分上传 (相机静止帧跳过 GL 调用)
+        vp4 = self._vp.astype('f4').tobytes()
+        if self._u_last.get('u_view_proj') != vp4:
+            self._uniform('u_view_proj').write(vp4)
+            self._u_last['u_view_proj'] = vp4
+        self._upload_lights()
+        campos = (self.camera.x, self.camera.y, self.camera.z)
+        if self._u_last.get('u_view_pos') != campos:
+            self._uniform('u_view_pos').value = campos
+            self._u_last['u_view_pos'] = campos
+
+    def _draw_skybox_guarded(self):
+        """FramePlan 的 skybox 绘制源：异常只告警一次并跳过本帧（迁移前 try/except 同语义）。"""
+        try:
+            self._draw_skybox()
+        except Exception as e:
+            self._sky_warn('loop', '绘制异常 (%r), 本帧跳过' % (e,))
+
     def render(self, delta_time):
         """渲染一帧 (分离批1): 时钟 advance 排 0~N 逻辑步 + 0~M 物理步 ->
         世界矩阵 -> 阴影 pass -> MVP -> GPU 绘制 -> HUD -> 交换缓冲.
@@ -919,47 +963,12 @@ class RenderMixin:
         self._prof_add('mt_shadow_maps', _t)
 
         _t = self._prof_t0()
-        self._screen_fb().use()
-        # 2026-11-09 人类裁决 Q2=A: 清屏底色与编辑器/VK 统一到 loom_shaders.CLEAR_COLOR_RGBA
-        self._clear_main_fbo(*CLEAR_COLOR_RGBA)
-        # MVP: 每帧 CPU 算一次 view_proj, 每模型 model.
-        # uniform 上传: matlib 是行向量约定 v@M (numpy M 存的是标准矩阵的转置),
-        # 要 GLSL 的 u*v 等价 numpy 的 v@M, GPU 需得 M^T = 行主序 M 直接 tobytes (不转置).
-        if self.orbit_mode:
-            self.apply_orbit_camera()
-        V = mat4_view_yaw_pitch(np, (self.camera.x, self.camera.y, self.camera.z),
-                                self.camera_yaw, self.camera_pitch, self.camera_roll)
-        # 2026-11-07 2D: 播放器 (PlayerApp/GL) 也要支持正交投影 (与编辑器播放同源)
-        if getattr(self, 'ortho', False):
-            _h = float(getattr(self, 'ortho_size', 12.0))
-            _asp = self.width / max(1, self.height)
-            P = mat4_ortho(np, -_h * _asp * 0.5, _h * _asp * 0.5,
-                           -_h * 0.5, _h * 0.5, self.near, self.far)
-        else:
-            P = mat4_perspective(np, self._fov, self.width / self.height,
-                                 self.near, self.far)
-        self._vp = V @ P                                      # 供 draw_lines / 射线拾取
-        # 组6件3: u_view_proj / u_view_pos 差分上传 (相机静止帧跳过 GL 调用)
-        vp4 = self._vp.astype('f4').tobytes()
-        if self._u_last.get('u_view_proj') != vp4:
-            self._uniform('u_view_proj').write(vp4)
-            self._u_last['u_view_proj'] = vp4
-        self._upload_lights()
-        campos = (self.camera.x, self.camera.y, self.camera.z)
-        if self._u_last.get('u_view_pos') != campos:
-            self._uniform('u_view_pos').value = campos
-            self._u_last['u_view_pos'] = campos
-
-        self.ctx.enable(moderngl.DEPTH_TEST)
-        self.ctx.enable(moderngl.CULL_FACE)
-        # A2: 主 pass 实例化批绘制 (桶已在 _prepare_bucket_frame 备好)
-        self._draw_main_buckets()
-        # 2026-10-19 第1档序13 天空盒: 几何后、HUD 前（B1 depth==1.0 才画）
-        # 2026-11-09 (P-05): 统一为"告警一次 + 跳过本帧" —— 播放循环不得因此终止。
-        try:
-            self._draw_skybox()
-        except Exception as e:
-            self._sky_warn('loop', '绘制异常 (%r), 本帧跳过' % (e,))
+        # 2026-11-10 阶段 2A（S0-S2）: 主 pass（清屏+几何）与天空收进 FramePlan。
+        # 同一份描述（loom_pass.frame_plan）编辑器与播放器共用；天空仍是
+        # 「几何后画 + LEQUAL 等值通过 + 不剔除」的 GL 语义（loom_pass 模块头写明）。
+        # 清屏底色仍唯一来自 loom_shaders.CLEAR_COLOR_RGBA（2026-11-09 Q2=A）。
+        plan = frame_plan(include_sky=True)
+        self._frame_executor.execute(plan, prepare=self._prepare_main_pass)
         # 2026-10-19 第1档序3阶段4 World Space UI: 天空盒后、HUD 前
         self._draw_world_canvases()
         self._prof_add('mt_main_pass', _t)

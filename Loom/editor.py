@@ -20,6 +20,9 @@ import numpy as np
 import pygame
 import moderngl
 
+# 2026-11-10 阶段 2A: 与播放器共用同一份 FramePlan 描述（S0-S2）
+from loom_pass import frame_plan
+
 from engine import (GLEngine, Point3D, LightState, CameraState, wrap_deg,
                     gc_play_enter, gc_play_exit)
 from matlib import (mat4_perspective, mat4_ortho, mat4_rotation, mat4_scale,
@@ -144,10 +147,20 @@ class _CameraProjCommand(Command):
         self.engine._apply_camera_proj(self.before)
 
 
+def _editor_skybox_provider(engine, cmd):
+    """FramePlan 的 skybox 绘制源（编辑器版）：保持迁移前「失败每帧打印一行」的语义。"""
+    try:
+        engine._draw_skybox()
+    except Exception as _e:
+        print('[渲染] 天空盒绘制失败: %r' % (_e,))
+
+
 class EditorApp(GLEngine):
     def __init__(self, width=1280, height=800, scene_path=None, view=None, ctx=None):
         # ctx 注入 = 嵌入式模式 (Qt 宿主): 见 GLEngine.__init__ 注释 (IME 污染修复)
         super().__init__(width, height, ctx=ctx)
+        # 2026-11-10 阶段 2A: 天空 pass 的绘制源用编辑器版（失败每帧打印, 与迁移前一致）
+        self._frame_executor.draws['skybox'] = _editor_skybox_provider
         self.allow_fullscreen = False   # 编辑器禁 F11 全屏 (只留最大化+自由缩放; 2026-08-17)
         global DEFAULT_SAVE_DIR   # 设置面板改"保存目录"时覆盖模块默认值
         # ================ 编辑器状态 ================
@@ -2231,6 +2244,41 @@ class EditorApp(GLEngine):
         return True
 
     # ================ 渲染 (覆写) ================
+    def _prepare_main_pass(self):
+        """编辑器主 pass 的 CPU 侧准备（相机 / VP / uniform），由 FramePlan 执行器调用。
+
+        迁移前这段在 render() 里手写；现在编辑器与播放器共用同一份 FramePlan，
+        各自的相机策略留在各自的 prepare 里（播放器见 loom_render._prepare_main_pass）。
+        """
+        self._prof_add('mt_mp_fbo', getattr(self, '_t_mp', 0))
+        _t = self._prof_t0()
+        # MVP (轨道相机已由 engine.render 逻辑处理, 但此处复算供 gizmo/拾取用)
+        # M41: "用此相机预览"时每帧重应用该摄像机 (含 roll), 拖 gizmo 实时跟
+        # ★2026-09-06 相机统一 (用户定案): 播放态 = 编辑态同一轨道相机。
+        if self.preview_camera is not None:
+            self.apply_camera(self.preview_camera)
+        elif self.is_playing or self.orbit_mode:
+            self.apply_orbit_camera()
+        V = mat4_view_yaw_pitch(np, (self.camera.x, self.camera.y, self.camera.z),
+                                self.camera_yaw, self.camera_pitch, self.camera_roll)
+        if getattr(self, 'ortho', False):
+            # 2026-11-07 2D: 正交投影 (可见高度 = ortho_size 世界单位)
+            _h = float(getattr(self, 'ortho_size', 12.0))
+            _asp = self.width / max(1, self.height)
+            P = mat4_ortho(np, -_h * _asp * 0.5, _h * _asp * 0.5,
+                           -_h * 0.5, _h * 0.5, self.near, self.far)
+        else:
+            P = mat4_perspective(np, self._fov, self.width / self.height,
+                                 self.near, self.far)
+        self._vp = V @ P
+        self._prof_add('mt_mp_camera', _t)
+        _t = self._prof_t0()
+        self.prog['u_view_proj'].write(np.ascontiguousarray(self._vp, dtype='f4').tobytes())
+        self._upload_lights()                     # M21: 多光源 uniform 整块上传
+        self.prog['u_view_pos'].value = (self.camera.x, self.camera.y, self.camera.z)
+        self._prof_add('mt_mp_uniforms', _t)
+        self._t_mp_draws = self._prof_t0()
+
     def render(self, delta_time):
         # 防御: 上一帧 GUI 若残留 scissor 裁剪, 会框住本帧的 clear/场景 (残影 bug)
         self.ctx.scissor = None
@@ -2296,10 +2344,12 @@ class EditorApp(GLEngine):
         self._prof_add('mt_shadow_maps', _t)
 
         _t_mp = self._prof_t0()
-        _t = _t_mp
-        self._screen_fb().use()
-        self._clear_main_fbo(0.10, 0.12, 0.16, 1.0)
-        self._prof_add('mt_mp_fbo', _t)
+        # 2026-11-10 阶段 2A（S0-S2）: 与播放器**同一份** FramePlan 描述。
+        # 清屏底色从此走 loom_shaders.CLEAR_COLOR_RGBA（值与原字面量完全相同，
+        # 消除第二份来源）；天空门判仍是「生效天空盒」（Q3=A 相机级优先）。
+        plan = frame_plan(include_sky=(self.effective_skybox() is not None))
+        self._t_mp = _t_mp
+        self._frame_executor.execute(plan, prepare=self._prepare_main_pass)
         # MVP (轨道相机已由 engine.render 逻辑处理, 但此处复算供 gizmo/拾取用)
         # M41: "用此相机预览"时每帧重应用该摄像机 (含 roll), 拖 gizmo 实时跟
         # ★2026-09-06 相机统一 (用户定案): 播放态 = 编辑态同一轨道相机 —
@@ -2307,45 +2357,9 @@ class EditorApp(GLEngine):
         # (target, yaw, pitch, distance) 合成。旧播放态三分支 (挂父相机盖回/
         # _dev_cam_moved 保护/开发者轨道接管) 随双轨制一并删除 — 玩家脚本
         # 不再写相机, 无双驱动源, WASD/滚轮/右键语义与编辑态完全一致。
-        _t = self._prof_t0()
-        if self.preview_camera is not None:
-            self.apply_camera(self.preview_camera)
-        elif self.is_playing or self.orbit_mode:
-            self.apply_orbit_camera()
-        V = mat4_view_yaw_pitch(np, (self.camera.x, self.camera.y, self.camera.z),
-                                self.camera_yaw, self.camera_pitch, self.camera_roll)
-        if getattr(self, 'ortho', False):
-            # 2026-11-07 2D: 正交投影 (可见高度 = ortho_size 世界单位)
-            _h = float(getattr(self, 'ortho_size', 12.0))
-            _asp = self.width / max(1, self.height)
-            P = mat4_ortho(np, -_h * _asp * 0.5, _h * _asp * 0.5,
-                           -_h * 0.5, _h * 0.5, self.near, self.far)
-        else:
-            P = mat4_perspective(np, self._fov, self.width / self.height,
-                                 self.near, self.far)
-        self._vp = V @ P
-        self._prof_add('mt_mp_camera', _t)
-        _t = self._prof_t0()
-        self.prog['u_view_proj'].write(np.ascontiguousarray(self._vp, dtype='f4').tobytes())
-        self._upload_lights()                     # M21: 多光源 uniform 整块上传
-        self.prog['u_view_pos'].value = (self.camera.x, self.camera.y, self.camera.z)
-        self._prof_add('mt_mp_uniforms', _t)
-
-        # 场景模型 (A2: 实例化批绘制, 桶已在 _prepare_bucket_frame 备好)
-        self.ctx.enable(moderngl.DEPTH_TEST)
-        self.ctx.enable(moderngl.CULL_FACE)
-        _t = self._prof_t0()
-        self._draw_main_buckets()
-        self._prof_add('mt_mp_draws', _t)
-        # 2026-10-20 Bug B 修复：编辑器主 pass 之前没调 _draw_skybox（只有 PlayerApp
-        # 的 GLEngine.render 调了），所以编辑器里设了天空盒也永远看不到。
-        # 2026-11-09 收尾: 门判**生效天空盒**（Q3=A 相机级优先），否则编辑器里
-        # 相机级天空盒永远画不出来（只有播放器画）。判定单一来源 = engine.effective_skybox()。
-        if self.effective_skybox() is not None:
-            try:
-                self._draw_skybox()
-            except Exception as _e:
-                print('[渲染] 天空盒绘制失败: %r' % (_e,))
+        # 相机/VP/uniform/绘制/天空全部由 FramePlan 执行（见 _prepare_main_pass 与
+        # loom_pass_gl 的绘制源）。这里只补记迁移前同名的阶段耗时。
+        self._prof_add('mt_mp_draws', getattr(self, '_t_mp_draws', _t_mp))
         self._prof_add('mt_main_pass', _t_mp)
 
         # UI 层 (IEditorView): 视口叠加 + 全部面板 + 播放期游戏 HUD. 播放期不画编辑辅助

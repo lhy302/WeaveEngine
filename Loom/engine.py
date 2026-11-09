@@ -301,6 +301,10 @@ class GLEngine(ShadowMixin, FrameComponentMixin, PhysicsMixin, InputMixin, HudMi
         # view 前方 +z 约定 (相机在 -z 看向 +z): 法线朝外的面在屏幕空间绕序是 CW
         # (标准 OpenGL 前方 -z 才是 CCW), 所以 front_face 必须设为 cw, 否则正面被剔除
         self.ctx.front_face = 'cw'
+        # 2026-11-10 阶段 2A: FramePlan 执行器（GL）。编辑器/播放器共用同一份 loom_pass
+        # 描述；VK 仍走 vk_renderer 现有实现（阶段 2B 再迁）。
+        from loom_pass_gl import GLFrameExecutor
+        self._frame_executor = GLFrameExecutor(self)
 
         # 着色器程序
         self.prog = self.ctx.program(vertex_shader=_VERT_SRC, fragment_shader=_FRAG_SRC)
