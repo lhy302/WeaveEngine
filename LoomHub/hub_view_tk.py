@@ -13,8 +13,8 @@ hub_config / hub_install) 完全不动. 功能与 pygame 视图对齐:
   设置  : 界面切换 (gui, 重启生效) / 打开项目用 .py/.exe (open_py)
   状态  : 默认解释器 / 系统 python 版本 / 动作消息
 
-启动: py -3.12 LoomHub.py        (默认本视图)
-      py -3.12 LoomHub.py --ui pygame   (遗留 pygame 视图, 仅参考)
+启动: py -3.13 LoomHub.py        (默认本视图)
+      py -3.13 LoomHub.py --ui pygame   (遗留 pygame 视图, 仅参考)
 
 实现约定 (见 hub_controller.py 的 IHubView 契约):
   - attach(controller): 绑定控制器

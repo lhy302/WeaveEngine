@@ -343,6 +343,7 @@ def cmd_interpreter_default(args):
 # ====================================================================
 # 项目管理 (文件式: 项目 = 场景文件; 命令行版 = 直接指定路径)
 # ====================================================================
+# 版本号在写入时由 cfg.scene_version() 取 sceneio.SCENE_VERSION（单一事实源）
 EMPTY_SCENE = {"version": 10, "objects": [], "lights": [], "cameras": [],
                "camera": {"target": [0, 0, 0], "distance": 10.0,
                           "yaw": 0.6, "pitch": -0.35}}
@@ -400,8 +401,10 @@ def cmd_project_create(args):
         return {'error': 'path 指向目录: %s' % p}
     base = os.path.dirname(p)
     os.makedirs(base, exist_ok=True)
+    scene = dict(EMPTY_SCENE)
+    scene['version'] = cfg.scene_version()      # A-04⑧: 以 sceneio.SCENE_VERSION 为准
     with open(p, 'w', encoding='utf-8') as f:
-        json.dump(EMPTY_SCENE, f, ensure_ascii=False)
+        json.dump(scene, f, ensure_ascii=False)
     name = args.get('name') or os.path.splitext(os.path.basename(p))[0]
     cfg.add_project(name, p)
     return {'created': p, 'name': name}
@@ -457,7 +460,12 @@ def launch_spec(args, info=None):
     """构造启动规格 (cmd/cwd/env/prefer) —— 与 GUI 双击 (hub_controller.
     open_project) **逐字段同构**, 是本命令存在的意义: 用它复现"LoomHub 启动
     的 Loom"环境问题, 任何一处不一致都会让复现结论失真.
-    返回 (spec dict, 错误字符串或 None). 无副作用, 可被测试直接断言."""
+    返回 (spec dict, 错误字符串或 None).
+
+    **注意（2026-11-09 A-04⑥）**: 本函数不是零副作用 —— 源码版引擎声明了
+    python_version 时会解析解释器（最多 2 个子进程，8s/5s 上限，结果缓存并复核），
+    并把结果写进 spec['cmd'] 与 spec['python_note']。理由是「解析必须与本次启动绑定」，
+    不能先发命令再补解析。"""
     info = info or cfg.default_interpreter()
     if info is None:
         return None, '无默认解释器 (先 interpreter_add 或 interpreter_default)'
@@ -522,8 +530,20 @@ def cmd_launch_engine(args):
             cmd_to_run[0] = pyw
     p = subprocess.Popen(cmd_to_run, cwd=spec['cwd'], env=spec['env'])
     _LAUNCHED[p.pid] = (p, info)
+    # A-04⑤: 启动后短窗口查存活（进程立刻退出时 Popen 不报错）
+    if hasattr(p, 'poll'):            # 桩对象没有 poll -> 不探（测试友好）
+        alive, exit_code = cfg.probe_started(p)
+    else:
+        alive, exit_code = True, None
     out = {'pid': p.pid, 'command': ' '.join(cmd_parts), 'interpreter': info['dir'],
-           'cwd': spec['cwd'], 'prefer': spec['prefer'], 'mode': spec['mode']}
+           'cwd': spec['cwd'], 'prefer': spec['prefer'], 'mode': spec['mode'],
+           # A-04②: 把 launch_spec 算出的 Python 回退提示透传出去
+           # （以前算了但没放进返回体，命令层/Agent 看不到）
+           'python_note': spec.get('python_note') or '',
+           'alive': alive, 'exit_code': exit_code}
+    if not alive:
+        out['warning'] = ('进程启动后立即退出 (exit=%s)：可能是 Python 版本不匹配'
+                          '或引擎依赖缺失；详见引擎日志' % (exit_code,))
     if as_bool(args.get('agent')):
         # 轮询 Loom 的 .agent_port.json (Loom 程序目录).
         # **必须判新鲜度**: 上次运行残留的端口文件会被立刻读到, 拿着已死进程

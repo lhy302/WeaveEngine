@@ -23,7 +23,7 @@ sdl-window-contaminates-ime, pygame 版 LoomHubGUI 被弃用的原因)。
   - 工厂 `build_gui(controller=None)` 返回视图实例 ✓
   - 视图类实现 IHubView 契约 (attach/run) ✓
 
-启动验证: py -3.12 LoomHub.py → 界面下拉选 "星辉 Nova" → 重启.
+启动验证: py -3.13 LoomHub.py → 界面下拉选 "星辉 Nova" → 重启.
 """
 import os
 import sys
@@ -478,7 +478,9 @@ class NovaHubView(IHubView):
             self.interp_status.config(text="默认解释器: (无) — 请先扫描/导入/安装",
                                       fg=C['dim'])
         if self.ctrl.py_ver:
-            self.pywarn.config(text="启动 .py 解释器使用系统默认 Python → %s"
+            # A-04③: 源码引擎按 解释器.json 的 python_version 精确挑解释器，
+            # 只有匹配不到才回退系统默认 —— 文案反映这个实际行为。
+            self.pywarn.config(text="源码引擎优先用其声明的 Python；回退默认 → %s"
                                % self.ctrl.py_ver)
         else:
             self.pywarn.config(text="未检测到系统默认 python (启动 .py 可能失败)")

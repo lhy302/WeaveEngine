@@ -128,12 +128,13 @@ def t_scan_interpreters():
 
 
 def t_new_scene_file():
-    """new_scene_file: 写入 v8 空场景."""
+    """new_scene_file: 写入空场景（版本 = sceneio.SCENE_VERSION，单一事实源）."""
     with tempfile.TemporaryDirectory() as tmp:
         p = os.path.join(tmp, "a_场景.json")
         _mk_ctrl().new_scene_file(p)
         data = cfg.load_json(p)
-        check("空场景 v8 + 空对象/光源", data is not None and data.get('version') == 8
+        check("空场景版本=SCENE_VERSION + 空对象/光源",
+              data is not None and data.get('version') == cfg.scene_version()
               and data.get('objects') == [] and data.get('lights') == [], data)
         check("空场景含 camera", data is not None and 'camera' in data)
 
@@ -148,7 +149,7 @@ def t_new_project_file():
             scene = os.path.join(tmp, "我的游戏.json")
             ctrl.do_new_project_file(scene)
             check("建空场景文件", os.path.isfile(scene)
-                  and cfg.load_json(scene).get('version') == 8)
+                  and cfg.load_json(scene).get('version') == cfg.scene_version())
             check("登记项目", any(p['name'] == "我的游戏" for p in cfg.load_projects()))
             check("成功消息 ok", "已创建项目" in (ctrl.msg or "")
                   and ctrl.msg_level == 'ok', ctrl.msg)

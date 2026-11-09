@@ -174,12 +174,122 @@ def t_exe_unaffected():
               _with_python(None, lambda: cfg.interp_python_note(info)) == '')
 
 
+# ---------------- A-04 复核项 ----------------
+def t_dead_fallback_fixed():
+    """① 第三条兜底以前载荷是 %%d.%%d -> Py SyntaxError，结构上不可达。"""
+    import subprocess
+    src = open(os.path.join(REPO, 'LoomHub', 'hub_config.py'), encoding='utf-8').read()
+    check("① 旧的错误载荷（%%d.%%d + %% sys.version_info）已不在代码里",
+          '%d.%%d" %% sys.version_info' not in src)
+    check("① 新载荷是正常字面量",
+          'print("%d.%d" % sys.version_info[:2])' in src)
+    r = subprocess.run([sys.executable, '-c',
+                        'import sys;print("%d.%d" % sys.version_info[:2])'],
+                       capture_output=True, text=True, timeout=20)
+    check("① 兜底载荷真能跑出 x.y",
+          r.returncode == 0 and len((r.stdout or '').strip().split('.')) == 2,
+          (r.returncode, (r.stdout or '').strip(), (r.stderr or '')[:80]))
+
+
+def t_note_passed_through():
+    """② launch_spec 算出的 python_note 必须出现在命令层返回体里。"""
+    src = open(os.path.join(REPO, 'LoomHub', 'hub_commands.py'), encoding='utf-8').read()
+    check("② launch_spec 返回 python_note", "'python_note': cfg.interp_python_note(info)" in src)
+    check("② launch_engine 返回体透传 python_note",
+          "'python_note': spec.get('python_note')" in src)
+    check("② 启动后短窗口查存活并回报 alive/exit_code",
+          'probe_started(' in src and "'alive': alive" in src)
+
+
+def t_message_truthful():
+    """③ 文案按实际使用的解释器版本，不再一律写"系统默认"。"""
+    src = open(os.path.join(REPO, 'LoomHub', 'hub_controller.py'), encoding='utf-8').read()
+    check("③ 文案区分「引擎要求」与系统默认",
+          '（引擎要求）' in src or '(引擎要求)' in src)
+    check("③ 不再只有「用系统默认 Python 环境启动」",
+          '用系统默认 Python 环境启动' not in src, '旧文案已替换')
+    nova = open(os.path.join(REPO, 'LoomHub', 'GUI', 'NovaHubGUI.py'),
+                encoding='utf-8').read()
+    check("③ NovaHubGUI 底部提示同步改口径",
+          '源码引擎优先用其声明的 Python' in nova)
+
+
+def t_cache_invalidates():
+    """④ Python 被卸载/移动后，缓存不能继续返回死路径。"""
+    cfg._PY_RESOLVE_CACHE.clear()
+    dead = os.path.join(tempfile.mkdtemp(prefix='hub_pyver_dead_'), 'python.exe')
+    cfg._PY_RESOLVE_CACHE['3.13'] = dead          # 制造"指向不存在文件"的缓存
+    old_which, old_run = cfg.shutil.which, cfg.subprocess.run
+    cfg.shutil.which = lambda name: None          # 不让 py 启动器兜底
+    def _fake_run(cmd, **kw):                     # 当前解释器固定报 3.12，不匹配 3.13
+        class R(object):
+            returncode = 0
+            stdout = '3.12\n'
+        return R()
+    cfg.subprocess.run = _fake_run
+    try:
+        got = cfg.resolve_python_for('3.13.15')
+    finally:
+        cfg.shutil.which, cfg.subprocess.run = old_which, old_run
+        cfg._PY_RESOLVE_CACHE.clear()
+    # 本机可能真的装了 3.13（那就该解析到真实路径）—— 唯一硬要求是**不返回死路径**
+    check("④ 缓存指向已删除文件 -> 绝不返回死路径",
+          got is None or (got != dead and os.path.isfile(got)), got)
+
+
+def t_probe_started():
+    """⑤ 启动后查存活：立即退出的进程要能被识别。"""
+    import subprocess
+    p = subprocess.Popen([sys.executable, '-c', 'import sys;sys.exit(1)'])
+    alive, rc = cfg.probe_started(p, wait=2.0)
+    check("⑤ 立即退出 -> alive=False 且带 exit_code", alive is False and rc == 1, (alive, rc))
+    p2 = subprocess.Popen([sys.executable, '-c', 'import time;time.sleep(1.5)'])
+    try:
+        alive2, rc2 = cfg.probe_started(p2, wait=0.6)
+        check("⑤ 存活进程 -> alive=True", alive2 is True and rc2 is None, (alive2, rc2))
+    finally:
+        try:
+            p2.kill()
+        except OSError:
+            pass
+
+
+def t_scene_version_consistent():
+    """⑧ Hub 两处新建场景必须跟 sceneio.SCENE_VERSION 一致。"""
+    import sceneio
+    with tempfile.TemporaryDirectory() as tmp:
+        p = os.path.join(tmp, 'x.json')
+        import hub_controller as hc
+        ctrl = hc.HubController.__new__(hc.HubController)
+        ctrl.new_scene_file(p)
+        v_ctrl = json.load(open(p, encoding='utf-8')).get('version')
+        check("⑧ controller 新建场景版本 = sceneio.SCENE_VERSION",
+              v_ctrl == sceneio.SCENE_VERSION == cfg.scene_version(), v_ctrl)
+        import hub_commands as hcmd
+        old = cfg.PROJECTS_FILE
+        cfg.PROJECTS_FILE = os.path.join(tmp, 'projects.json')
+        try:
+            p2 = os.path.join(tmp, 'y.json')
+            r = hcmd.dispatch('project_create', {'path': p2})
+            v_cmd = json.load(open(p2, encoding='utf-8')).get('version')
+            check("⑧ commands 新建场景版本一致",
+                  r.get('ok') and v_cmd == sceneio.SCENE_VERSION, (r, v_cmd))
+        finally:
+            cfg.PROJECTS_FILE = old
+
+
 if __name__ == "__main__":
     print("========== LoomHub 源码引擎 Python 版本选择 ==========")
     t_ledger_records_python_version()
     t_launch_uses_matching_python()
     t_fallback_when_missing_or_unresolved()
     t_exe_unaffected()
+    t_dead_fallback_fixed()
+    t_note_passed_through()
+    t_message_truthful()
+    t_cache_invalidates()
+    t_probe_started()
+    t_scene_version_consistent()
     if _FAILS:
         print("总结果: FAIL ❌", _FAILS)
         sys.exit(1)

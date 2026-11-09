@@ -1,4 +1,4 @@
-#! python3.12
+#! python3.13
 # -*- coding: utf-8 -*-
 """
 Loom.py — 入口: 命令行参数 + 数学管线基准 + 启动引擎
@@ -419,8 +419,8 @@ if __name__ == "__main__":
         import moderngl
     except ImportError as e:
         print("[错误] 缺少渲染依赖:", e)
-        print("请使用 Python 3.12 运行本程序:")
-        print('  py -3.12 -m pip install pygame moderngl -i https://pypi.tuna.tsinghua.edu.cn/simple')
+        print("请使用 Python 3.13 运行本程序:")
+        print('  py -3.13 -m pip install pygame moderngl -i https://pypi.tuna.tsinghua.edu.cn/simple')
         sys.exit(1)
 
     # L1 插件加载 (2026-08-20): plugins\ 目录投放, 坏插件自动跳过回退官方

@@ -41,33 +41,33 @@ Python 侧保留编辑器与业务逻辑的开发效率，兼顾**性能**与**�
 
 **环境要求**
 - Windows 10/11 x64
-- Python 3.12
+- Python 3.13
 
 **安装依赖**
 
 ```bash
-py -3.12 -m pip install -r requirements.txt
+py -3.13 -m pip install -r requirements.txt
 ```
 
 **启动编辑器**
 
 ```bash
 cd Loom
-py -3.12 Loom.py
+py -3.13 Loom.py
 ```
 
 **通过 LoomHub 启动（多项目托管）**
 
 ```bash
 cd LoomHub
-py -3.12 LoomHub.py
+py -3.13 LoomHub.py
 ```
 
 **接入大模型工具（MCP）**
 
 ```bash
 cd Loom
-py -3.12 Loom.py --agent
+py -3.13 Loom.py --agent
 # 然后在 Claude Desktop / Cursor 中配置 loom_mcp.py
 ```
 

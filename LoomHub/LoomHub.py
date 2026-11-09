@@ -2,7 +2,7 @@
 """LoomHub.py — LoomHub 项目管理器入口 (薄).
 
 GUI 界面组件在 LoomHubGUI.py (类 LoomHubGUI, IHubView 默认实现, 可替换).
-启动: py -3.12 LoomHub.py  (等效 py -3.12 LoomHubGUI.py)
+启动: py -3.13 LoomHub.py  (等效 py -3.13 LoomHubGUI.py)
 换界面 = 新写一个 IHubView 实现替换 LoomHubGUI."""
 import os
 import sys

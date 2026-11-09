@@ -383,7 +383,7 @@ DEFAULT_HIGHLIGHTS = (
     '（对齐 Unity 预置 UnityPlayer 的做法）\n'
     '- **每游戏配置**：`游戏设置.json`（开发者只读默认）+ 用户层 `%LOCALAPPDATA%/Loom/games/<id>/`（只存改动）；'
     '装到只读目录也能保存\n'
-    '- **渲染后端可切换**：`render_api`（vulkan / opengl / auto）；Vulkan 不兼容时崩一次并把配置回退 OpenGL\n'
+    '- **渲染后端可切换**：`render_api`（vulkan / opengl / auto）；Vulkan 初始化失败时写回配置并给出明确指引（不再静默中断）\n'
     '- **鼠标锁定默认关闭**：`mouse_lock_allowed` / `mouse_locked`；解锁键归引擎独占且可改键，'
     '脚本用 `set_ui_capture_mouse()` 显式决定何时给光标\n'
     '- **键位可配置**：`key_bindings`，76 键表；与脚本 `keys_used` 冲突时拒绝保存\n'
@@ -430,7 +430,7 @@ def update_notes(token):
             body = ENGINE_BODY.format(
                 version=version,
                 runtime_line=(_RUNTIME_LINE_COMPILED if _compiled
-                              else _RUNTIME_LINE_SOURCE.format(pyver=_facts['python_version'] or '3.12')),
+                              else _RUNTIME_LINE_SOURCE.format(pyver=_facts['python_version'] or '3.13')),
                 python_note=(_PYTHON_NOTE_COMPILED if _compiled else _PYTHON_NOTE_SOURCE),
                 highlights=load_highlights('engine', version))
         else:
@@ -459,7 +459,7 @@ def publish_engine(token):
     body = ENGINE_BODY.format(
         version=ENGINE_VERSION,
         runtime_line=(_RUNTIME_LINE_COMPILED if _compiled
-                      else _RUNTIME_LINE_SOURCE.format(pyver=_facts['python_version'] or '3.12')),
+                      else _RUNTIME_LINE_SOURCE.format(pyver=_facts['python_version'] or '3.13')),
         python_note=(_PYTHON_NOTE_COMPILED if _compiled else _PYTHON_NOTE_SOURCE),
         highlights=load_highlights('engine', ENGINE_VERSION))
     create_local_tag(tag, title)

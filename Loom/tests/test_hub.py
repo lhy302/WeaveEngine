@@ -641,7 +641,7 @@ def t_remote_interface():
 
 
 def t_new_project_scene():
-    """新建项目: 生成 v8 空场景 (controller) + LoomHub GUI/tk 视图模块可导入 (冒烟)."""
+    """新建项目: 生成空场景(版本 = sceneio.SCENE_VERSION) + GUI/tk 视图模块可导入 (冒烟)."""
     import importlib.util
     import hub_controller
     ctrl = hub_controller.HubController.__new__(hub_controller.HubController)
@@ -649,7 +649,8 @@ def t_new_project_scene():
         p = os.path.join(tmp, "新项目_场景.json")
         ctrl.new_scene_file(p)
         data = cfg.load_json(p)
-        check("新建项目生成 v8 空场景", data is not None and data.get('version') == 8
+        check("新建项目生成空场景（版本=SCENE_VERSION）",
+              data is not None and data.get('version') == cfg.scene_version()
               and data.get('objects') == [] and data.get('lights') == [], data)
         check("空场景含 camera 字段", data is not None and 'camera' in data)
     for name, path in [("loomhub_gui", os.path.join(PM_DIR, "LoomHub.py")),
@@ -744,7 +745,8 @@ def t_new_project_flow():
             scene = os.path.join(tmp, "我的游戏.json")
             ctrl.do_new_project_file(scene)
             check("新建流程: 创建场景文件",
-                  os.path.isfile(scene) and cfg.load_json(scene).get('version') == 8)
+                  os.path.isfile(scene)
+                  and cfg.load_json(scene).get('version') == cfg.scene_version())
             check("新建流程: 登记到 projects.json",
                   any(p['name'] == "我的游戏" for p in cfg.load_projects()))
             check("新建流程: 登记场景路径正确",

@@ -531,7 +531,9 @@ def scan_save_dir_projects(save_dir=None, engine_dir=None):
 # ---------------- 系统默认 Python + 启动命令 ----------------
 def _py_launcher_python():
     r"""从 .py 文件关联 (Python.File\shell\open\command) 解析系统默认 python 路径.
-    用户已把 .py 默认打开应用绑定到 3.12.10, 这就是"系统默认环境";
+    用户把 .py 默认打开应用绑定到某个 Python, 这就是"系统默认环境";
+    **注意**: 系统默认可能仍是旧版（如 3.12），而新版源码引擎要求 3.13 ——
+    源码版按 解释器.json 的 python_version 精确挑解释器（见 resolve_python_for）。
     找不到则返回 None."""
     import re
     try:
@@ -569,7 +571,12 @@ def resolve_python_for(spec, use_cache=True):
     if not xy:
         return None
     if use_cache and xy in _PY_RESOLVE_CACHE:
-        return _PY_RESOLVE_CACHE[xy]
+        # 2026-11-09 A-04④: 缓存必须复核存在性 —— Python 被卸载/移动后
+        # 以前会一直返回死路径（实测删除后仍返回）。
+        hit = _PY_RESOLVE_CACHE[xy]
+        if hit and os.path.isfile(hit):
+            return hit
+        _PY_RESOLVE_CACHE.pop(xy, None)
     tag = 'Python' + xy.replace('.', '')
     bases = []
     la = os.environ.get('LOCALAPPDATA')
@@ -591,23 +598,55 @@ def resolve_python_for(spec, use_cache=True):
         try:
             r = subprocess.run([launcher, '-%s' % xy, '-c',
                                 'import sys;print(sys.executable)'],
-                               capture_output=True, text=True, timeout=20)
+                               capture_output=True, text=True, timeout=8)
             lines = (r.stdout or '').strip().splitlines()
             if r.returncode == 0 and lines and os.path.isfile(lines[-1]):
                 _PY_RESOLVE_CACHE[xy] = lines[-1]
                 return lines[-1]
         except (OSError, subprocess.SubprocessError):
             pass
+    # ③ 当前进程解释器正好是该版本。
+    # 2026-11-09 A-04①: 以前载荷写成 '%%d.%%d' %% ...，Py 侧直接 SyntaxError ->
+    # 这条兜底结构上不可达（"看起来三条、实际只有两条"）。现在用正常字面量。
     try:
         r = subprocess.run([sys.executable, '-c',
-                            'import sys;print("%%d.%%d" %% sys.version_info[:2])'],
-                           capture_output=True, text=True, timeout=10)
+                            'import sys;print("%d.%d" % sys.version_info[:2])'],
+                           capture_output=True, text=True, timeout=5)
         if (r.stdout or '').strip() == xy:
             _PY_RESOLVE_CACHE[xy] = sys.executable
             return sys.executable
     except (OSError, subprocess.SubprocessError):
         pass
     return None
+
+
+def scene_version(default=10):
+    """场景序列化版本：以 Loom/sceneio.SCENE_VERSION 为单一事实源。
+
+    2026-11-09 A-04⑧: Hub 两处新建场景曾分别写 v8（controller）与 v10（commands），
+    与 sceneio 现行版本（v10）不一致。这里统一收口；sceneio 不可导入时回退 default。
+    """
+    try:
+        import sceneio
+        return int(getattr(sceneio, 'SCENE_VERSION', default))
+    except (ImportError, TypeError, ValueError):
+        return default
+
+
+def probe_started(proc, wait=1.5):
+    """启动后短窗口内查存活，返回 (alive, exit_code_or_None)。
+
+    2026-11-09 A-04⑤: 启动走 pythonw + LOOM_QUIET，子进程立刻崩掉时 Popen 本身
+    不报错 —— 以前一律显示"已启动"，用户以为起来了。这里用 poll() 探一次。
+    """
+    deadline = time.time() + max(0.0, float(wait))
+    while True:
+        rc = proc.poll()
+        if rc is not None:
+            return False, rc
+        if time.time() >= deadline:
+            return True, None
+        time.sleep(0.05)
 
 
 def interp_python_note(info):
@@ -666,7 +705,7 @@ def default_python(engine_dir=None):
 
 
 def python_version(cmd=None, engine_dir=None):
-    """返回默认 python 的版本字符串 (如 '3.12.10'), 不可用返回 None.
+    """返回默认 python 的版本字符串 (如 '3.13.15'), 不可用返回 None.
 
     2026-10-19: 加 engine_dir 参数（PyInstaller 环境 sys.executable = LoomHub.exe 时，
     必须传引擎目录才能拿到嵌入式 python 版本）."""
@@ -684,7 +723,13 @@ def python_version(cmd=None, engine_dir=None):
 
 def build_launch_command(info, scene_path=None, mode='open', prefer=None):
     """构造启动解释器命令 (list).
-    .py 用系统默认 python (UI 会提醒"使用系统默认环境"); .exe 直接运行.
+
+    注意（2026-11-09 A-04⑥，改注释而不是改结构）: 本函数**不是零副作用** ——
+    源码版引擎若声明了 python_version，会调用 resolve_python_for() 解析解释器，
+    首次可能起最多 2 个子进程（py 启动器 + 当前解释器，超时 8s/5s，结果缓存且
+    带存在性复核）。理由：解析结果必须与"这一次启动"绑在一起，放到后台线程会让
+    UI 先发出一个用错解释器的命令；而缓存 + 5~8s 上限把最坏卡顿收敛到一次性。
+    .py 默认仍用系统默认 python；.exe 直接运行.
     mode: 'open' = 编辑器打开项目场景 / 'run' = 播放场景 / None = 纯启动编辑器.
     prefer: None=按 kind 默认 / 'py'=优先 .py 源码 / 'exe'=优先 .exe 封装
     (启动器设置 open_py, 2026-08-14; 无对应文件时回退按 kind)."""

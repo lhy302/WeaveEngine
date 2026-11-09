@@ -6,9 +6,9 @@ LoomHub.py — LoomHub 项目管理器入口 + pygame 自绘视图 (UI 模块化
 HubController (hub_controller.py) —— 换 UI 后端 (tkinter: `--ui tk`) 只需换
 实现类, 不动业务. 详见 hub_controller.py 的 IHubView 契约.
 
-启动: py -3.12 LoomHub.py            (pygame 自绘视图, 默认)
-      py -3.12 LoomHub.py --ui tk     (极简 tkinter 视图, 演示 UI 可更换)
-      (双击 .py 亦可, 已绑定 3.12.10)
+启动: py -3.13 LoomHub.py            (pygame 自绘视图, 默认)
+      py -3.13 LoomHub.py --ui tk     (极简 tkinter 视图, 演示 UI 可更换)
+      (双击 .py 亦可, 已绑定 3.13)
 
 功能:
   项目管理  : 新建/导入/打开/移除/扫描 项目.

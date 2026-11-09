@@ -14,7 +14,7 @@ ColorHubGUI.py — LoomHub 自定义配色视图 (IHubView 实现, 绿色系)
   - 提供工厂 `build_gui(controller=None)` 返回视图实例 ✓
   - 视图类实现 IHubView 契约 (通过继承 TkHubView 获得 attach/run) ✓
 
-启动验证: py -3.12 LoomHub.py  → 设置面板 "界面" 下拉选 "绿意 ColorHub" → 重启.
+启动验证: py -3.13 LoomHub.py  → 设置面板 "界面" 下拉选 "绿意 ColorHub" → 重启.
 """
 import os
 import sys

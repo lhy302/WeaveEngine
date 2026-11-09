@@ -105,7 +105,7 @@ class HubController:
 
     def new_scene_file(self, path):
         """写入一个最小的空场景 (sceneio v8), 供'新建项目'创建初始场景."""
-        data = {"version": 8,
+        data = {"version": cfg.scene_version(),   # A-04⑧: 与 sceneio.SCENE_VERSION 一致
                 "camera": {"target": [0.0, 0.0, 0.0], "distance": 10.0,
                            "yaw": 0.6, "pitch": -0.35},
                 "materials": [], "lights": [], "cameras": [],
@@ -590,13 +590,36 @@ class HubController:
                 pyw = os.path.join(py_dir, 'pythonw.exe') if py_dir else None
                 if pyw and os.path.isfile(pyw):
                     cmd_to_run[0] = pyw
-            subprocess.Popen(cmd_to_run, cwd=cwd, env=env)
-            note = "用系统默认 Python 环境启动" if interp['kind'] == 'py' else "直接运行 exe"
-            # 2026-11-09: 引擎要求某个 Python 版本但本机没有 -> 回退默认并提示
+            proc = subprocess.Popen(cmd_to_run, cwd=cwd, env=env)
+            # 2026-11-09 A-04③: 文案要说实话 —— 命令实际用的是哪个解释器就写哪个。
+            # 以前一律写"系统默认 Python"（=3.12），而实际可能已按引擎要求用了 3.13。
+            if interp['kind'] == 'py':
+                want = str(interp.get('python_version') or '').strip()
+                matched = cfg.resolve_python_for(want) if want else None
+                if matched:
+                    note = "用 Python %s（引擎要求）启动" % (
+                        cfg.python_xy(want) or want)
+                else:
+                    note = "用系统默认 Python 启动"
+            else:
+                note = "直接运行 exe"
+            # 引擎要求某个 Python 版本但本机没有 -> 回退默认并提示
             py_note = cfg.interp_python_note(interp)
             self.set_msg("已启动: %s %s (%s) %s%s"
                          % (interp['name'], interp['version'], interp['kind'], note,
                             " ｜ " + py_note if py_note else ''))
+            # A-04⑤: 短窗口内查存活（pythonw 下崩溃时 Popen 不报错）
+            def _watch(p, label):
+                # 测试里的 Popen 桩常返回 list/None（没有 poll）；没有 poll 就不探
+                if p is None or not hasattr(p, 'poll'):
+                    return
+                alive, rc = cfg.probe_started(p)
+                if not alive:
+                    self.set_msg("启动失败: %s 立即退出 (exit=%s)"
+                                 " —— 可能是 Python 版本不匹配或引擎依赖缺失"
+                                 % (label, rc), 'err')
+            import threading as _th
+            _th.Thread(target=_watch, args=(proc, cmd_to_run[0]), daemon=True).start()
         except OSError as e:
             self.set_msg("启动失败: %s" % e, 'err')
 
