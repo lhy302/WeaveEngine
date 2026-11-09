@@ -486,7 +486,10 @@ def launch_spec(args, info=None):
     # 2026-10-19 启动日志: LoomHub 启动的引擎静默（与 GUI 同语义）
     env = dict(os.environ)
     env['LOOM_QUIET'] = '1'
-    env['LOOM_REMOTE_MODE'] = '1'  # 2026-10-20 白屏修复：readback fallback
+    # 2026-11-09 H1: 与 GUI open_project 共用同一实现（cfg.apply_launch_env），
+    # 按 Hub 设置 remote_mode 决定是否注入 LOOM_REMOTE_MODE；默认 off 不注入。
+    # 以前这里硬写 '1'，与 GUI 路径各自为政、且强制走离屏回读（实测掉 ~20 FPS）。
+    cfg.apply_launch_env(env)
     return {'cmd': cmd_parts, 'cwd': cwd_resolved,
             'env': env, 'prefer': prefer, 'mode': mode,
             'interpreter': info}, None
@@ -594,6 +597,67 @@ _QUIT = {'flag': False}
 # 退出钩子 (测试可替换): 生产=os._exit 立即杀进程; 测试注入假函数验证
 # "quit 确实会退出", 不必真的把测试进程干掉.
 _EXIT = os._exit
+
+
+# ====================================================================
+# 自更新 (H2, 2026-11-09)：检查 / 下载 / 安装
+# ====================================================================
+@command('update_check', '检查 LoomHub 更新: {} (manual=true 可忽略 24h 节流)')
+def cmd_update_check(args):
+    import hub_update
+    manual = as_bool(args.get('manual'), False)
+    if not manual:
+        try:
+            s = guiloader_settings()
+            if not s.get('check_update_enabled', True):
+                return {'ok': False, 'disabled': True,
+                        'reason': '检查更新已在设置里关闭'}
+        except Exception:
+            pass
+        if not hub_update.due_for_check():
+            return {'ok': False, 'throttled': True, 'reason': '24h 内已检查过'}
+    info = hub_update.check_update()
+    if info.get('ok'):
+        hub_update.mark_checked()
+    return info
+
+
+@command('update_download', '下载 LoomHub 安装包到用户目录 updates/: {url?, name?, size?, digest?}')
+def cmd_update_download(args):
+    import hub_update
+    item = None
+    if args.get('url'):
+        item = {'download_url': args.get('url'),
+                'asset_name': args.get('name') or '',
+                'size': args.get('size') or 0,
+                'digest': args.get('digest') or '',
+                'version': args.get('version') or ''}
+    else:
+        info = hub_update.check_update()
+        item = (info or {}).get('update')
+        if not item:
+            return {'error': '没有可用更新（先 update_check）：%s'
+                             % (info or {}).get('reason', '未知')}
+    return hub_update.download_update(item)
+
+
+@command('update_apply', '提交静默安装任务(写 updater 脚本 + 一次 UAC): {path?}')
+def cmd_update_apply(args):
+    import hub_update
+    path = args.get('path')
+    if not path:
+        cand = [os.path.join(hub_update.updates_dir(), n)
+                for n in sorted(os.listdir(hub_update.updates_dir()))
+                if n.lower().endswith('.exe')] if os.path.isdir(hub_update.updates_dir()) else []
+        path = cand[-1] if cand else ''
+    r = hub_update.apply_update(path)
+    return r
+
+
+def guiloader_settings():
+    """Hub 设置（走 guiloader，保持与 UI 同一份分层读取）。"""
+    import guiloader
+    return guiloader.load_settings('loomhub')
 
 
 @command('quit', '退出 LoomHub (停服务+进程)')

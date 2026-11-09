@@ -106,7 +106,8 @@ class TkHubView(IHubView):
                               ("导入", self.ctrl.import_project_dir),
                               ("打开", self._open_project)])
         self._btn_row(right, [("移除", self._remove_project),
-                              ("扫描", self.ctrl.scan_save_dir_projects)])
+                              ("扫描", self.ctrl.scan_save_dir_projects),
+                              ("检查更新", self._check_update)])
 
         # 底部设置行: 界面切换 + 打开项目 .py/.exe
         import guiloader
@@ -124,6 +125,12 @@ class TkHubView(IHubView):
         tk.Checkbutton(self.root, text="打开项目用 .py 源码（开发）",
                        variable=self.open_py_var,
                        command=self._toggle_open_py).pack(fill="x", padx=8)
+        # 2026-11-09 H1: 远程模式（离屏 GL + QImage 回读兜底）。
+        # 默认关闭 —— 现场 A/B 同场景同引擎：直连 55/59/61 FPS，兜底 38/38/41 FPS。
+        self.remote_var = tk.BooleanVar(value=(s.get('remote_mode') == 'on'))
+        tk.Checkbutton(self.root, text="远程模式（离屏回读兜底，会明显降低帧率）",
+                       variable=self.remote_var,
+                       command=self._toggle_remote_mode).pack(fill="x", padx=8)
 
         # 底部状态: 默认解释器 + 动作消息
         self.interp_status = tk.Label(self.root, text="默认解释器: (无)",
@@ -217,6 +224,30 @@ class TkHubView(IHubView):
         s['gui'] = gui_id
         self.guiloader.save_settings('loomhub', s)
         self.ctrl.set_msg("已切换到「%s」，重启后生效" % gui_id)
+
+    def _toggle_remote_mode(self):
+        """H1: 远程模式开关（离屏回读兜底）。默认 off；只在确实白屏的机器上打开。"""
+        s = self.guiloader.load_settings('loomhub')
+        s['remote_mode'] = 'on' if self.remote_var.get() else 'off'
+        self.guiloader.save_settings('loomhub', s)
+        self.ctrl.set_msg("远程模式（离屏回读）%s"
+                          % ("已开启：白屏机器的兜底，帧率会明显下降"
+                             if s['remote_mode'] == 'on'
+                             else "已关闭：直连渲染（默认，帧率最高）"),
+                          'dim')
+
+    def _check_update(self):
+        """H2: 手动检查更新（后台线程跑，不阻塞 UI；失败只写 update.log）。"""
+        import threading
+        self.ctrl.set_msg("正在检查 LoomHub 更新…", 'dim')
+
+        def _worker():
+            try:
+                self.ctrl.check_update(manual=True)
+            except Exception as e:
+                self.ctrl.set_msg("检查更新失败: %r（详见 update.log）" % (e,), 'err')
+        t = threading.Thread(target=_worker, daemon=True)
+        t.start()
 
     def _toggle_open_py(self):
         s = self.guiloader.load_settings('loomhub')

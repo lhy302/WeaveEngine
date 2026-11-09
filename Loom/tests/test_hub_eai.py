@@ -493,6 +493,45 @@ def t_github_commands():
               not r["ok"] and "找不到版本" in r["error"], r)
 
 
+# ============ 9.5 自更新三条命令 (2026-11-09 H2) ============
+def t_self_update_commands():
+    """update_check / update_download / update_apply 必须可被命令层执行。
+
+    全部用替身：不联网、不下载、绝不真提权启动安装器（测试只验命令通路与返回契约）。
+    """
+    import tempfile as _tf
+    import hub_update
+    old = (hub_update.check_update, hub_update.download_update,
+           hub_update.apply_update, hub_update.mark_checked,
+           hub_update.due_for_check, hub_update.updates_dir)
+    _tmp = _tf.mkdtemp(prefix='eai_upd_')
+    hub_update.check_update = lambda *a, **k: {
+        'ok': True, 'local': '0.1.2', 'update': None, 'latest': '0.1.3'}
+    hub_update.mark_checked = lambda: None
+    hub_update.due_for_check = lambda *a, **k: True
+    hub_update.download_update = lambda item=None, **k: {
+        'ok': True, 'path': os.path.join(_tmp, 'a.exe'), 'size': 1}
+    hub_update.apply_update = lambda path=None, **k: {
+        'ok': False, 'reason': '测试替身：未真正提权启动'}
+    hub_update.updates_dir = lambda: _tmp
+    try:
+        r = _r('update_check', {'manual': 'true'})
+        check("update_check 命令可执行（不联网，替身）",
+              r['ok'] and r['result'].get('ok') is True, r)
+        r = _r('update_download', {'url': 'https://example.com/a.exe',
+                                   'name': 'a.exe', 'size': 1})
+        check("update_download 命令可执行",
+              r['ok'] and r['result'].get('ok') is True, r)
+        r = _r('update_apply', {'path': os.path.join(_tmp, 'a.exe')})
+        check("update_apply 返回结构化结果（失败不抛）", 'ok' in r, r)
+        check("update_apply 失败时给出原因（不静默）",
+              r['result'].get('reason') or r.get('error'), r)
+    finally:
+        (hub_update.check_update, hub_update.download_update,
+         hub_update.apply_update, hub_update.mark_checked,
+         hub_update.due_for_check, hub_update.updates_dir) = old
+
+
 # ============ 10. 覆盖率闸门 ============
 def t_coverage():
     table = set(hc.command_names())
@@ -517,6 +556,7 @@ if __name__ == "__main__":
     t_launch_spec_gui_align()
     t_port_freshness()
     t_github_commands()
+    t_self_update_commands()
     t_coverage()
     if _FAILS:
         print("总结果: FAIL ❌", _FAILS)

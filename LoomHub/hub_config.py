@@ -624,7 +624,18 @@ def build_launch_command(info, scene_path=None, mode='open', prefer=None):
 # 表现为"设置面板改了没保存/一重启就丢"。
 # 分层：默认 <- 模板(安装目录里的 设置.json, 只读) <- 用户层 delta。
 HUB_SETTINGS_NAME = "设置.json"
-DEFAULT_HUB_SETTINGS = {"gui": "TkHubView", "open_py": True}
+DEFAULT_HUB_SETTINGS = {
+    "gui": "TkHubView",
+    "open_py": True,
+    # 2026-11-09 H1: 离屏 GL 回读兜底。现场 A/B（同场景同引擎）：
+    #   直连 55/59/61 FPS、TPS 23.7；remote-mode 38/38/41 FPS、TPS 18.9。
+    # 因此**默认 off**（不再无条件注入 LOOM_REMOTE_MODE=1）；on 留给确实白屏的机器，
+    # auto 留给引擎侧自动降级（beta5 的 E2 再做，Hub 侧对 auto 也不注入）。
+    "remote_mode": "off",
+    # 2026-11-09 H2: 自更新检查（后台线程 / 24h 最多一次 / 失败静默）
+    "check_update_enabled": True,
+}
+REMOTE_MODES = ("auto", "off", "on")
 
 
 def _userpaths():
@@ -717,6 +728,28 @@ def _maybe_migrate_legacy_settings():
               % (legacy_path, upath, sorted(delta)))
     except Exception as e:
         print('[设置] 旧设置迁移失败（不影响本次启动，用户层可随后保存）: %r' % (e,))
+
+
+def hub_remote_mode(settings=None):
+    """Hub 设置 remote_mode 归一：auto|off|on；非法值回落 off（默认 off）。"""
+    s = load_hub_settings() if settings is None else (settings or {})
+    v = str(s.get("remote_mode") or "off").strip().lower()
+    return v if v in REMOTE_MODES else "off"
+
+
+def apply_launch_env(env, settings=None):
+    """按 Hub 设置决定是否给子进程注入 LOOM_REMOTE_MODE（H1 的唯一实现点）。
+
+    · off / auto -> **不注入**（auto 的自动降级由引擎侧 beta5 E2 实现）
+    · on         -> 注入 '1'
+    两条启动路径（GUI open_project 与命令层 launch_spec）都调这里，保证一致；
+    也保证环境里残留的值不会漏进子进程（先 pop 再按设置决定）。
+    """
+    mode = hub_remote_mode(settings)
+    env.pop("LOOM_REMOTE_MODE", None)
+    if mode == "on":
+        env["LOOM_REMOTE_MODE"] = "1"
+    return env
 
 
 def load_hub_settings():

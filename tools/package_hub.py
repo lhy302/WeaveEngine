@@ -97,6 +97,10 @@ def run_pyinstaller(version):
         '--hidden-import', 'hub_install',
         '--hidden-import', 'hub_single_instance',
     ]
+    # 2026-11-09 H2: 把版本真源一起打进产物 —— 安装版 LoomHub 要能自报版本
+    # （hub_update.local_version() 从 _MEIPASS/版本身边找 版本.json）。
+    if os.path.isfile(VERSION_FILE):
+        cmd += ['--add-data', '%s%s%s' % (VERSION_FILE, os.pathsep, '.')]
     # splash 图存在才加（缺图也能打，只是没启动画面）
     if os.path.isfile(splash_path):
         cmd += ['--splash', splash_path]
@@ -164,6 +168,28 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: de
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "启动 {#MyAppName}"; Flags: nowait postinstall skipifsilent
+
+[Code]
+{ 2026-11-08 用户配置目录契约: LoomHub 的设置/台账改存 %%LOCALAPPDATA%%\Loom\hub。
+  卸载时询问是否一并删除；默认按钮 = 否（保留），静默卸载一律保留。
+  注意: 只删 LoomHub 自己的 hub 子树，绝不动引擎的 engine/ 与游戏存档。 }
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  UserCfg: String;
+begin
+  if CurUninstallStep <> usPostUninstall then
+    Exit;
+  UserCfg := ExpandConstant('{localappdata}\Loom\hub');
+  if not DirExists(UserCfg) then
+    Exit;
+  if UninstallSilent then
+    Exit;
+  if MsgBox('是否同时删除 LoomHub 的用户配置？' + #13#10 + #13#10
+            + UserCfg + #13#10 + #13#10
+            + '选择"否"= 保留（默认）。保留后重装或换版本仍沿用你的设置。',
+            mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES then
+    DelTree(UserCfg, True, True, True);
+end;
 '''
 
 

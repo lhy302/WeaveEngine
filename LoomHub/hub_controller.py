@@ -476,12 +476,12 @@ class HubController:
         # 2026-10-19 启动日志: LoomHub 启动的引擎静默（用户拍板）
         # 命令行直接启动 Loom.py 时无此环境变量，保留完整启动信息
         env['LOOM_QUIET'] = '1'
-        # 2026-10-20 白屏修复：默认启用 remote-mode（离屏 GL readback）。
-        # 用户环境（Oray 虚拟显示器 + RustDesk + NVIDIA 1050Ti）下 QOpenGLWidget
-        # native present 失败，客户区白屏但 win.grab() 正常。
-        # remote-mode 用离屏 GL + QImage 显示，稳定跨环境。
-        # 性能敏感用户可通过设置关闭（TODO：LoomHub 加开关）。
-        env['LOOM_REMOTE_MODE'] = '1'
+        # 2026-11-09 H1: 不再无条件注入 LOOM_REMOTE_MODE=1。
+        # 现场 A/B（同场景同引擎）直连 55/59/61 FPS、TPS 23.7；remote-mode
+        # 38/38/41 FPS、TPS 18.9 —— 离屏回读明显降帧，所以默认 off。
+        # 是否注入由 Hub 设置 remote_mode（off|auto|on，默认 off）决定，
+        # 与命令层 launch_spec 共用同一个实现，保证两条启动路径一致。
+        cfg.apply_launch_env(env)
         # 2026-10-19 启动路径 bug 修复: cwd 也解析成绝对（否则子进程相对父进程 cwd 解析）
         cwd = cfg.resolve_runtime_path(interp.get('dir')) or cfg.HUB_DIR
         try:
@@ -503,6 +503,118 @@ class HubController:
                                                     interp['kind'], note))
         except OSError as e:
             self.set_msg("启动失败: %s" % e, 'err')
+
+    # ---------------- 自更新 (H2, 2026-11-09) ----------------
+    # 三个动作都 UI 无关：任何 GUI / 命令层都可直接调；返回值给调用方决定怎么显示。
+    def check_update(self, manual=False):
+        """检查更新。返回 hub_update.check_update() 的结果。
+
+        manual=False 时受 24h 节流 + check_update_enabled 设置约束（后台线程用）；
+        manual=True 忽略节流（用户点"检查更新"）。失败**静默**（只写 update.log）。
+        """
+        try:
+            import hub_update
+        except Exception as e:                 # 模块缺失属硬错误，出声
+            self.set_msg("自更新模块不可用: %r" % (e,), 'err')
+            return {'ok': False, 'reason': '自更新模块不可用: %r' % (e,)}
+        if not manual:
+            s = cfg.load_hub_settings()
+            if not s.get('check_update_enabled', True):
+                return {'ok': False, 'reason': '检查更新已在设置里关闭', 'disabled': True}
+            if not hub_update.due_for_check():
+                return {'ok': False, 'reason': '24h 内已检查过', 'throttled': True}
+        info = hub_update.check_update()
+        if info.get('ok'):
+            hub_update.mark_checked()
+        self.update_info = info
+        if info.get('ok') and info.get('update'):
+            up_ = info['update']
+            self.set_msg("发现新版本 LoomHub %s（当前 %s）"
+                         % (up_['version'], info.get('local') or '?'), 'ok')
+        elif manual:
+            self.set_msg(info.get('reason') or '已是最新版本', 'dim')
+        return info
+
+    def download_update(self, item=None):
+        r"""下载更新包到 %LOCALAPPDATA%\Loom\hub\updates（校验 size/digest）。"""
+        try:
+            import hub_update
+        except Exception as e:
+            return {'ok': False, 'reason': '自更新模块不可用: %r' % (e,)}
+        info = getattr(self, 'update_info', None) or {}
+        item = item or info.get('update')
+        if not item:
+            return {'ok': False, 'reason': '没有可下载的更新（先 check_update）'}
+        r = hub_update.download_update(item)
+        if r.get('ok'):
+            self.update_package = r.get('path')
+            self.set_msg("更新包已下载: %s" % r.get('path'), 'ok')
+        else:
+            self.set_msg("下载失败: %s" % r.get('reason'), 'err')
+        return r
+
+    def apply_update(self, setup_path=None):
+        """提交静默安装任务（写 updater 脚本 + 一次 UAC），成功即"暂时关闭"本进程。
+
+        不自动启动 LoomHub（人类口径）；失败写 update.log 并返回 err 由 UI 提示。
+        """
+        try:
+            import hub_update
+        except Exception as e:
+            return {'ok': False, 'reason': '自更新模块不可用: %r' % (e,)}
+        path = setup_path or getattr(self, 'update_package', None)
+        r = hub_update.apply_update(path)
+        if r.get('ok'):
+            self.set_msg("已提交安装任务，LoomHub 将暂时关闭", 'dim')
+            self.update_pending_restart = True
+            self._quit_for_update()
+        else:
+            self.set_msg("更新失败: %s（详见 %s）"
+                         % (r.get('reason'), hub_update.log_path()), 'err')
+        return r
+
+    def _quit_for_update(self):
+        """成功提交安装任务后让 Hub 主动退出（"暂时关闭"，不弹"请重启"）。"""
+        import threading
+        try:
+            threading.Timer(0.5, lambda: os._exit(0)).start()
+        except Exception as e:
+            self.set_msg("提交成功，请手动关闭 LoomHub 后再安装（%r）" % (e,), 'dim')
+
+    def maybe_start_update_check(self, delay=10.0):
+        """启动后台检查（延迟 ~10s、24h 最多一次、失败静默）。返回线程或 None。"""
+        try:
+            if not cfg.load_hub_settings().get('check_update_enabled', True):
+                return None
+        except Exception:
+            return None
+        import threading
+
+        def _worker():
+            try:
+                self.check_update(manual=False)
+            except Exception as e:            # 后台线程不得把异常抛到主线程
+                try:
+                    import hub_update
+                    hub_update.log_line('后台检查更新异常: %r' % (e,), level='FAIL')
+                except Exception:
+                    pass
+        t = threading.Timer(float(delay), _worker)
+        t.daemon = True
+        t.start()
+        return t
+
+    def update_notice(self):
+        """下次启动时的失败提示（读 update.log，提示后标记已读）。"""
+        try:
+            import hub_update
+        except Exception:
+            return None
+        line = hub_update.take_pending_failure()
+        if line:
+            hub_update.mark_failure_seen()
+            return "上次更新未完成：%s（详见 update.log）" % line
+        return None
 
     def remove_project(self, project):
         """从列表移除项目 (不删磁盘文件)."""
