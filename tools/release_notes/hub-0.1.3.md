@@ -1,37 +1,39 @@
 # LoomHub 0.1.3（内测）
 
-> 注：本文是**正在开发的 0.1.3** 的发布说明。开发期内部代号一直是 0.1.3，该版本线发包后才跳到下一个号。
+## 一、远程模式默认关闭（性能）
 
-> 本轮**不发布**：只备好版本号/安装器/发布说明，禁止建 tag、建 Release、上传资产。
-
-## 重点
-
-### 1. 远程模式默认关闭（H1，性能）
-以前 LoomHub 无条件给引擎注入 `LOOM_REMOTE_MODE=1`（离屏 GL 渲染 + QImage 回读兜底）。
-同一场景同一引擎的现场 A/B：
+此前 LoomHub 无条件给引擎注入 `LOOM_REMOTE_MODE=1`，引擎改走"离屏 GL + QImage 回读"兜底路径。同场景同引擎 A/B：
 
 | 模式 | FPS | TPS | GPU |
 |---|---|---|---|
 | 直连（默认） | 55 / 59 / 61 | 23.7 | 34% |
 | remote-mode | 38 / 38 / 41 | 18.9 | 31% |
 
-现在改为设置项 `remote_mode`（`off|auto|on`，**默认 off**），设置面板底部有可见开关与说明
-「离屏回读兜底，会明显降低帧率」。`on` 留给确实白屏的机器；`auto` 预留给引擎侧自动降级（beta5 E2）。
-两条启动路径（GUI 双击打开项目 / EAI 命令 launch_engine）共用同一实现，不再各自为政。
+现在改为设置项 `remote_mode`（`off|auto|on`，**默认 off**），设置面板有可见开关与说明「离屏回读兜底，会明显降低帧率」。
+GUI 打开项目与 EAI `launch_engine` 两条启动路径共用同一实现。Tk 视图与 NovaHubGUI **都有**这个开关。
 
-### 2. 自更新（H2）
-- 检查：后台线程、延迟约 10s、24h 最多一次；筛 `hub-v*`；失败静默
-- 下载：`LoomHub-<ver>-Setup.exe` → `%LOCALAPPDATA%\Loom\hub\updates\`；校验 size，有 `digest` 则校验 sha256；非 https 拒绝
-- 安装：写 `updates\apply_update.cmd`（等当前 PID 退出 → `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /ALLUSERS /SP-`），`runas` 弹一次 UAC
-- 提交后 Hub **主动退出**（暂时关闭）；安装器静默模式不跑 postinstall；updater **不**再拉起 LoomHub
-- 任一环节失败写 `updates\update.log`，下次启动提示
+## 二、自更新（按"下载好 → 关掉自身 → 静默装 → 不自动启动"策略）
 
-### 3. 台账重识别
-启动时按各安装目录里的 `解释器.json` 重新识别引擎（引擎被原地替换成编译版后不再显示旧版本号）。
+- **检查**：启动后延迟约 10s、24h 最多一次；只认 `hub-v*`；无网/失败静默；可用 `LOOM_HUB_NO_UPDATE_CHECK` 关闭
+- **下载**：`LoomHub-<ver>-Setup.exe` → `%LOCALAPPDATA%\Loom\hub\updates\`；校验 size + sha256（asset 提供 digest 时）
+- **提权前复验**：安装包执行前**再次校验**（大小/摘要），未通过或没有校验旁文件一律**拒绝提权执行**
+- **安装落点跟随当前安装**：恒传 `/DIR=<当前安装目录>`；`/ALLUSERS` **仅**当安装目录在 `Program Files` 时追加；
+  用户级安装走分离进程（**不弹 UAC**），只有需要提权时才 `runas`
+- **关闭自身**：提交安装任务后 Hub 主动退出；安装器静默模式不跑 postinstall，updater 也**不会**再拉起 LoomHub
+- **失败可见**：任一环节失败写 `updates\update.log`，并在下次启动提示
+- **GUI**：「检查更新」+「下载并安装」（无新版本时禁用）；确认框显示版本与大小
 
-### 4. 配置目录
-Hub 的设置与解释器/项目台账统一落 `%LOCALAPPDATA%\Loom\hub\`（程序目录只读也能保存），
-首次运行自动迁移旧文件，旧文件保留不动。
+## 三、引擎选择交互
 
-## 安装
-下载 `LoomHub-0.1.3-Setup.exe`，双击安装；卸载时可选择是否一并删除用户配置（默认保留）。
+- 解释器台账**启动重识别**：引擎目录被原地替换（源码版→编译版）后不再显示旧版本号、不会再去找已消失的 `Loom.py`
+- **默认引擎标记不再被刷新抹掉**（此前 `set_default` 之后紧接着的刷新会把 `default` 清掉，导致"切了没反应"）
+- 左侧新增「**选为当前引擎**」（内存缓存 + 状态行显示当前引擎），右侧项目区新增「**用当前引擎打开**」
+  - 修掉了 Tk `Listbox` 默认 `exportselection=1` 导致"引擎与项目无法同时选中"的交互死结
+  - 打开优先级：显式传入 > 缓存的当前引擎 > 项目 `engine_dir` 归属 > 默认引擎
+- 台账刷新会保留 `default` 标记，连续刷新稳定；失效条目保留并标记 `stale`（不再静默删除）
+
+## 四、安装
+
+- 系统级：`LoomHub-0.1.3-Setup.exe /VERYSILENT /ALLUSERS`（需管理员）
+- 用户级：直接双击运行安装器，或 `/VERYSILENT`（无需管理员）
+- 覆盖安装会保留用户配置与项目台账（在 `%LOCALAPPDATA%\Loom\hub\`）
