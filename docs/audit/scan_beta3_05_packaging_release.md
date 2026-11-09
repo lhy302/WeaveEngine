@@ -1675,3 +1675,27 @@ P2-② 引入「同根多版本取最高版本」后，旧用例 `test_hub_inter
 
 test_hub.py / test_hub_controller.py 里 3 条「v8 空场景」断言改为 cfg.scene_version()：
 它们原本把 controller 的 v8 写死为契约，而 sceneio 现行是 v10；现在以 sceneio 为单一事实源。
+
+---
+
+## 17. Q2=A（包内 Python 权威）+ Q5=B（冻结版兜底不拉子进程）（2026-11-10，不发布）
+
+| 裁决 | 实现 |
+|---|---|
+| Q2=A | 新增 `bundled_python(engine_dir)`：发布布局 `<发布根>/python/python.exe` 且带 `Lib/site-packages` 才算自足；`build_launch_command` 的选取顺序改为 **① 包内 python（权威）→ ② 系统默认 → ③ 声明的 python_version 匹配 → ④ 回退默认**。系统解释器不再顶掉包内运行时（此前正是因此 `pip --target` 装的依赖用不到 → engine.py ModuleNotFoundError，叠加 pythonw+LOOM_QUIET 只看到「已启动」） |
+| Q2=A 提示 | 新增 `python_source(info)`（bundled/declared/default/exe）与 `interp_python_note` 的包内不可用分支：`<发布根>/python` 存在但缺 python.exe/site-packages → 「引擎包内 python 不可用…已回退系统解释器，建议重装该引擎版本」；开发工作区（压根无 python/）不误报 |
+| Q5=B | `resolve_python_for` 的第三条兜底**不再起子进程**，直接读 `sys.version_info`；冻结态（`sys.frozen`）直接返回 None，绝不把 LoomHub.exe 当 Python（否则会再开一个 Hub 抢焦点） |
+| 文案 | controller 启动消息三分支：包内 →「用引擎包内 Python 启动（自足运行时）」；声明匹配 →「用 Python 3.13（引擎要求）启动」；否则 →「用系统默认 Python 启动」 |
+| 命令层 | `launch_spec` 返回值新增 `python_source`，Agent/UI 可判定这次用的是哪种解释器 |
+
+### 17.1 新增断言（test_hub_python_version.py 现 32 条）
+
+    ① 包内 python 存在 -> 命令首段 == 包内路径（即使系统里能解析到 3.13 也不顶替）；python_source=bundled；note 空
+    ② 包内目录在但缺 python.exe -> 回退系统解释器，note 点名「包内 python 不可用」；开发工作区不误报
+    ③ 冻结态：subprocess.run 一次都不调用，且不把 Hub 自己当 Python（返回 None）
+
+### 17.2 实跑
+
+    test_hub_python_version(32) / test_hub / test_hub_controller / test_hub_eai /
+    test_hub_interp_switch / test_hub_interp_cache / test_hub_update
+    全部 exit=0 FAIL=0，无 Traceback 噪音；py_compile 通过

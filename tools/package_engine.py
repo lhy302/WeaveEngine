@@ -1,9 +1,15 @@
 # -*- coding: utf-8 -*-
-"""package_engine.py — Loom 引擎发布包打包器（2026-10-19）
+r"""package_engine.py — Loom 引擎发布包打包器（2026-10-19）
 
 产物：tools/dist/Loom-<version>.zip
-内容：Loom/ 运行时文件 + 嵌入式 Python 3.12 + 解释器.json
-用法：py -3.12 tools/package_engine.py [--version X.Y.Z] [--allow-missing-runtime]
+内容：Loom/ 运行时文件 + 嵌入式 Python 3.13.15 + 解释器.json
+用法：py -3.13 tools/package_engine.py [--version X.Y.Z] [--allow-missing-runtime]
+
+2026-11-09/10 打包链修复（人类裁决 Q1=A / Q3=A / Q4=B）:
+  · 内嵌 Python 跟随 解释器.json 的 python_version（默认 3.13.15），不再硬编码 3.12；
+    找不到 embeddable 时自动从 python.org 下载到 C:\loom_build\python-embed\<ver>\。
+  · 嵌入版本 ≠ 解释器.json 版本 → 拒绝出包（发布硬门）。
+  · Loom.bat 双形态: 编译包走 Loom\Loom.exe，源码包才回退 pythonw + Loom.py。
 """
 import argparse
 import json
@@ -161,38 +167,137 @@ def collect_files(src_dir):
     return out
 
 
-def find_python_embed():
-    env = os.environ.get('LOOM_PYEMBED_DIR')
-    if env and os.path.isdir(env):
-        return env
-    local = os.path.join(ROOT, 'tools', 'python-embed')
-    if os.path.isdir(local):
-        return local
-    for c in (os.path.expandvars(r'%LOCALAPPDATA%\Programs\Python\Python312'),
-              r'C:\Python312'):
-        if os.path.isfile(os.path.join(c, 'python.exe')):
-            return c
+EMBED_URL_TMPL = ('https://www.python.org/ftp/python/{ver}/'
+                 'python-{ver}-embed-amd64.zip')
+EMBED_CACHE = os.environ.get('LOOM_PYEMBED_CACHE') or r'C:\loom_build\python-embed'
+
+
+def source_python_version():
+    """解释器.json 声明的 Python 版本 —— 内嵌版本与发布硬门的唯一口径。"""
+    try:
+        with open(META_PATH, 'r', encoding='utf-8') as f:
+            return (json.load(f).get('python_version') or '').strip() or None
+    except Exception:
+        return None
+
+
+def _python_exe_version(py_exe):
+    """跑一次目标 python，返回 x.y.z；失败返回 None。"""
+    try:
+        out = subprocess.check_output(
+            [py_exe, '-c', 'import sys;print("%d.%d.%d" % sys.version_info[:3])'],
+            text=True, timeout=60, stderr=subprocess.STDOUT)
+        return out.strip().splitlines()[-1].strip() or None
+    except Exception:
+        return None
+
+
+def _download_embed(ver):
+    r"""下载官方 embeddable 到 C:\loom_build\python-embed\<ver>\ 并解压。"""
+    dest = os.path.join(EMBED_CACHE, ver)
+    if os.path.isfile(os.path.join(dest, 'python.exe')):
+        return dest
+    os.makedirs(EMBED_CACHE, exist_ok=True)
+    zpath = os.path.join(EMBED_CACHE, 'python-%s-embed-amd64.zip' % ver)
+    url = EMBED_URL_TMPL.format(ver=ver)
+    if not os.path.isfile(zpath):
+        print('[打包] 下载 embeddable: %s' % url)
+        try:
+            import urllib.request
+            urllib.request.urlretrieve(url, zpath)
+        except Exception as e:
+            print('[打包] 下载失败: %r' % (e,))
+            return None
+    try:
+        with zipfile.ZipFile(zpath) as zf:
+            zf.extractall(dest)
+    except Exception as e:
+        print('[打包] 解压失败: %r' % (e,))
+        return None
+    return dest if os.path.isfile(os.path.join(dest, 'python.exe')) else None
+
+
+def find_python_embed(want_version=None):
+    r"""定位 Python 运行时目录（优先 embeddable，最后本机同版本完整安装兜底）。
+
+    顺序: LOOM_PYEMBED_DIR → tools/python-embed → C:\loom_build\python-embed\<ver>
+          → 从 python.org 下载 embeddable → 本机 Python3xx 完整安装（版本必须一致）。
+    """
+    for d in (os.environ.get('LOOM_PYEMBED_DIR'),
+              os.path.join(ROOT, 'tools', 'python-embed')):
+        if d and os.path.isfile(os.path.join(d, 'python.exe')):
+            return d
+    if want_version:
+        d = os.path.join(EMBED_CACHE, want_version)
+        if os.path.isfile(os.path.join(d, 'python.exe')):
+            return d
+        d = _download_embed(want_version)
+        if d:
+            return d
+        mm = want_version.split('.')
+        tag = '%s%s' % (mm[0], mm[1]) if len(mm) >= 2 else ''
+        for base in (os.path.expandvars(
+                         r'%LOCALAPPDATA%\Programs\Python\Python' + tag),
+                     r'C:\Python' + tag):
+            exe = os.path.join(base, 'python.exe')
+            if os.path.isfile(exe) and _python_exe_version(exe) == want_version:
+                return base
     return None
 
 
+def _patch_embed_pth(tmp_py):
+    r"""embeddable 的 python3xx._pth 默认禁 site 且不含 site-packages：
+    追加 Lib\site-packages、打开 import site，否则 pip 装的包 import 不到。"""
+    import glob
+    for pth in glob.glob(os.path.join(tmp_py, 'python*._pth')):
+        with open(pth, 'r', encoding='utf-8') as f:
+            lines = [ln.strip() for ln in f if ln.strip()]
+        out = [ln for ln in lines if ln not in ('#import site', 'import site')]
+        if not any(ln.replace('/', '\\').lower() == r'lib\site-packages'
+                   for ln in out):
+            out.insert(1, r'Lib\site-packages')
+        # 源码包布局: <pkg>/python/python.exe + <pkg>/Loom/Loom.py。
+        # _pth 是隔离模式，脚本目录不会自动进 sys.path -> 显式加 ..\Loom，
+        # 否则 pythonw Loom\Loom.py 会 ModuleNotFoundError: plugin_loader。
+        if not any(ln.replace('/', '\\').lower() == r'..\loom' for ln in out):
+            out.insert(1, r'..\Loom')
+        out.append('import site')
+        with open(pth, 'w', encoding='utf-8') as f:
+            f.write('\r\n'.join(out) + '\r\n')
 
-def build_embed_pyzip(version, out_dir):
-    py_root = find_python_embed()
+
+def build_embed_pyzip(version, out_dir, want_version=None):
+    want_version = want_version or source_python_version()
+    py_root = find_python_embed(want_version)
     if py_root is None:
         raise SystemExit(
-            '[错误] 找不到 Python 3.12 运行时。\n'
-            '  请设置环境变量 LOOM_PYEMBED_DIR，或把 Python312 目录拷贝到 tools/python-embed/')
-    print('[打包] 嵌入 Python: %s' % py_root)
+            '[错误] 找不到 Python %s 运行时（embeddable）。\n'
+            '  处理: (1) 联网后重跑（会自动下载 python-%s-embed-amd64.zip 到 %s）；\n'
+            '         (2) 或设置 LOOM_PYEMBED_DIR 指向已解压的同版本 embeddable。'
+            % (want_version or '?', want_version or '?', EMBED_CACHE))
+    got = _python_exe_version(os.path.join(py_root, 'python.exe'))
+    # 发布硬门 #1: 候选运行时版本必须等于 解释器.json（早失败，不白跑 pip）
+    if want_version and got != want_version:
+        raise SystemExit(
+            '[错误] 嵌入 Python 版本与 解释器.json 不一致，拒绝出包: '
+            '运行时=%r, 解释器.json=%r\n  运行时目录: %s\n'
+            '  处理: 换 Python %s 的 embeddable，或修正 Loom/解释器.json'
+            % (got, want_version, py_root, want_version))
+    print('[打包] 嵌入 Python: %s (%s)' % (py_root, got))
     tmp_py = os.path.join(out_dir, '_python_tmp')
     if os.path.isdir(tmp_py):
         shutil.rmtree(tmp_py)
-    # 只复制 Python 运行时本体，排除原 site-packages（避免带进不相关的大包）
-    EXCL = {'__pycache__', 'test', 'tests', 'Doc', 'Tools', 'tcl', 'idlelib',
-            'site-packages', 'Scripts'}
-    def _ignore(d, names):
-        return [n for n in names if n in EXCL]
-    shutil.copytree(py_root, tmp_py, ignore=_ignore)
-    # 重建干净的 site-packages + 只装 requirements.txt
+    # embeddable 是扁平小包（无 Lib/、带 python3xx._pth）；完整安装才需要裁剪
+    import glob as _glob
+    is_embed = (not os.path.isdir(os.path.join(py_root, 'Lib'))) or bool(
+        _glob.glob(os.path.join(py_root, 'python*._pth')))
+    if is_embed:
+        shutil.copytree(py_root, tmp_py)
+    else:
+        EXCL = {'__pycache__', 'test', 'tests', 'Doc', 'Tools', 'tcl',
+                'idlelib', 'site-packages', 'Scripts'}
+        shutil.copytree(py_root, tmp_py,
+                        ignore=lambda d, names: [n for n in names if n in EXCL])
     site_pkg = os.path.join(tmp_py, 'Lib', 'site-packages')
     os.makedirs(site_pkg, exist_ok=True)
     req_path = os.path.join(ROOT, 'requirements.txt')
@@ -203,34 +308,61 @@ def build_embed_pyzip(version, out_dir):
             '-r', req_path, '--target', site_pkg,
             '-q', '--no-warn-script-location',
         ])
+    _patch_embed_pth(tmp_py)
     return tmp_py
 
 
 def write_launcher(out_dir):
-    # 2026-10-20 白屏修复：用 pythonw.exe 替代 python.exe（无控制台窗口）。
-    # python.exe 启动会弹 ConsoleWindowClass 抢在编辑器前面，用户误以为白屏。
-    # 2026-10-20 P0-2 修复：bat 里显式设置 LOOM_REMOTE_MODE=1（离屏 GL readback），
-    # 否则用户直接双击 bat 时 QOpenGLWidget native present 失败会白屏。
-    # 用户已手动设置则不覆盖（if not defined）。
-    # 纯 ASCII 编码（Windows cmd 对 UTF-8 BAT 支持差，中文会乱码）。
+    r"""Loom.bat 双形态（2026-11-10 人类裁决 Q4=B）。
+
+    编译包: 包内是 Loom\Loom.exe（无 python/、无 Loom.py）→ 直接启动 exe；
+    源码包: 没有 exe → 回退 pythonw.exe + Loom.py。
+    纯 ASCII（cmd 对 UTF-8 BAT 支持差，中文会乱码）。
+    """
     bat = ('@echo off\r\n'
            'setlocal\r\n'
-           'if not defined LOOM_REMOTE_MODE set LOOM_REMOTE_MODE=1\r\n'
            'cd /d "%~dp0"\r\n'
-           '"%~dp0python\\pythonw.exe" "%~dp0Loom\\Loom.py" %*\r\n')
+           'if exist "%~dp0Loom\\Loom.exe" (\r\n'
+           '  start "" "%~dp0Loom\\Loom.exe" %*\r\n'
+           '  exit /b 0\r\n'
+           ')\r\n'
+           'if exist "%~dp0python\\pythonw.exe" (\r\n'
+           '  if not defined LOOM_REMOTE_MODE set LOOM_REMOTE_MODE=1\r\n'
+           '  "%~dp0python\\pythonw.exe" "%~dp0Loom\\Loom.py" %*\r\n'
+           '  exit /b %errorlevel%\r\n'
+           ')\r\n'
+           'echo [Loom] incomplete package: Loom\\Loom.exe and python\\pythonw.exe are both missing\r\n'
+           'pause\r\n'
+           'exit /b 1\r\n')
     with open(os.path.join(out_dir, 'Loom.bat'), 'w', encoding='ascii') as f:
         f.write(bat)
 
 
-def write_meta_readme(out_dir, version, slim=False):
-    readme = ('Loom 引擎 %s\n================\n'
-              '嵌入式 Python 运行时已内置，双击 Loom.bat 启动。\n\n'
-              '目录结构:\n'
-              '  Loom.bat          <- 双击启动\n'
-              '  python/           <- 嵌入式 Python 3.12（含依赖）\n'
-              '  Loom/             <- 引擎源码\n'
-              '    Loom.py         <- 主程序\n'
-              '    解释器.json     <- LoomHub 识别元数据\n') % version
+def write_meta_readme(out_dir, version, slim=False, compiled=False,
+                      python_version=None):
+    r"""README 按包形态写（Q4=B）: 编译版双击 Loom\Loom.exe，源码版双击 Loom.bat。"""
+    pyver = python_version or source_python_version() or '3.13.15'
+    if compiled:
+        readme = ('Loom 引擎 %s（编译版）\n================\n'
+                  '双击 Loom\\Loom.exe 启动（Loom.bat 也可，会自动转 exe）。\n'
+                  '本包不含嵌入式 Python、不含 .py 源码。\n\n'
+                  '目录结构:\n'
+                  '  Loom.bat              <- 双击启动（转 Loom\\Loom.exe）\n'
+                  '  Loom\\Loom.exe         <- 编辑器主程序\n'
+                  '  Loom\\build_game.exe   <- 游戏构建器\n'
+                  '  Loom\\player_runtime\\  <- 预置玩家运行时\n'
+                  '  Loom\\解释器.json      <- LoomHub 识别元数据（python_version=%s）\n'
+                  ) % (version, pyver)
+    else:
+        readme = ('Loom 引擎 %s\n================\n'
+                  '双击 Loom.bat 启动（内嵌 Python %s）。\n\n'
+                  '目录结构:\n'
+                  '  Loom.bat          <- 双击启动\n'
+                  '  python/           <- 嵌入式 Python %s（含依赖）\n'
+                  '  Loom/             <- 引擎源码\n'
+                  '    Loom.py         <- 主程序\n'
+                  '    解释器.json     <- LoomHub 识别元数据\n'
+                  ) % (version, pyver, pyver)
     if slim:
         readme += ('\n【精简包 / 无预置运行时】\n'
                    '本包**没有**预置播放器运行时（Loom/player_runtime/game_player.dist）。\n'
@@ -314,8 +446,18 @@ def make_zip(version, allow_missing_runtime=False):
             '或从已有安装包/上次构建拷一份 game_player.dist 过来；\n'
             '  若确实要产出不带走时器的调试瘦包，显式加 --allow-missing-runtime。'
             % _pr_root)
-    print('[打包] 复制嵌入式 Python...')
-    tmp_py = build_embed_pyzip(version, tmp_dir)
+    # Q1/Q3: 内嵌 Python 跟随 解释器.json 的 python_version；版本不一致 = 拒绝出包
+    _want_py = source_python_version()
+    print('[打包] 复制嵌入式 Python（目标 %s）...' % (_want_py or '?'))
+    tmp_py = build_embed_pyzip(version, tmp_dir, want_version=_want_py)
+    _py_actual = _python_exe_version(os.path.join(tmp_py, 'python.exe'))
+    if not _py_actual:
+        raise SystemExit('[错误] 包内 Python 起不来，无法确认版本: %s'
+                         % os.path.join(tmp_py, 'python.exe'))
+    if _want_py and _py_actual != _want_py:
+        raise SystemExit(
+            '[错误] 包内 Python 实际版本与 解释器.json 不一致，拒绝出包: '
+            'embedded=%r, 解释器.json=%r' % (_py_actual, _want_py))
     target_py = os.path.join(tmp_dir, 'python')
     shutil.move(tmp_py, target_py)
     # 2026-11-07 修复: --version 只改 zip 文件名, 包内 解释器.json 仍是旧版本 ->
@@ -331,6 +473,7 @@ def make_zip(version, allow_missing_runtime=False):
         raise SystemExit('[错误] 读不到/解析不了源元数据 %s: %r '
                          '（先修复该文件再打包）' % (_meta_dst, _e))
     _meta['version'] = version
+    _meta['python_version'] = _py_actual
     if key.get('slim'):
         _meta['distribution'] = 'slim'
         _meta['player_runtime'] = 'absent'
@@ -342,7 +485,8 @@ def make_zip(version, allow_missing_runtime=False):
     print('[打包] 元数据版本 -> %s%s'
           % (version, '  (精简包: 无预置运行时)' if key.get('slim') else ''))
     write_launcher(tmp_dir)
-    write_meta_readme(tmp_dir, version, slim=bool(key.get('slim')))
+    write_meta_readme(tmp_dir, version, slim=bool(key.get('slim')),
+                      python_version=_py_actual)
     zip_path = os.path.join(DIST_DIR, 'Loom-%s.zip' % version)
     print('[打包] 写 zip: %s' % zip_path)
     if os.path.exists(zip_path):

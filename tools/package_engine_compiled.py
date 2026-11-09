@@ -185,7 +185,7 @@ def main():
         _fail('写 解释器.json 失败: %r' % (e,))
 
     PE.write_launcher(tmp)
-    PE.write_meta_readme(tmp, version, slim=slim)
+    PE.write_meta_readme(tmp, version, slim=slim, compiled=True)
 
     zip_path = os.path.join(DIST_DIR, 'Loom-%s.zip' % version)
     print('[编译包] 写 zip: %s' % zip_path)

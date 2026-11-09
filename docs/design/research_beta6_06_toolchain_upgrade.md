@@ -443,4 +443,31 @@ python -m nuitka --standalone --msvc=latest --assume-yes-for-downloads --enable-
 **产物变化**：编辑器 dist 141.6→**144.1MB**、运行时 139.8→**142.3MB**（内嵌数据目录 +2.5MB×2）、构建器 22.77MB；发布包 127.65→**129.72MB**（+1.6%，仍含包根 DATA_DIRS 的一份冗余，属可接受冗余）。
 遗留观察项：物理桥（`physics_bridge` / culverin 步进）在 3.13 下的 1ms 级开销未定位，后续若做性能专项可 profile 后补回；产物与当前工作树一致（业务文件最后修改 21:06–21:09，三件产物 21:45–22:13 之后生成，无需重打）。
 
+---
+
+## 附录 F：打包链修复（2026-11-10，Q1=A / Q3=A / Q4=B）
+
+**Q1 内嵌 Python 改为 3.13.15**：`find_python_embed` 不再硬编码 Python312，改为跟随 `Loom/解释器.json` 的 `python_version`：
+`LOOM_PYEMBED_DIR` → `tools/python-embed` → `C:\loom_build\python-embed\<ver>` → 从 python.org 下载 `python-<ver>-embed-amd64.zip` → 本机同版本完整安装兜底。
+embeddable 是隔离模式（`python3xx._pth` 禁 site、且**脚本目录不进 sys.path**）→ 补丁加 `Lib\site-packages`、`..\Loom`、`import site`；否则 `pythonw Loom\Loom.py` 会 `ModuleNotFoundError: plugin_loader`（首次实测即为此失败，已修）。
+
+**Q3 版本一致性硬门（两道）**：
+1. 候选运行时 `python.exe` 实际版本 ≠ `解释器.json.python_version` → 打包前拒绝（不白跑 pip）；
+2. 包内组装完成的 `python/python.exe` 再验一次，仍不一致 → 拒绝出包；
+3. 元数据回写 `python_version = 实际内嵌版本`，README 版本口径同步。
+负向实测：`LOOM_PYEMBED_DIR=Python312` + meta=3.13.15 → exit 1，报"运行时='3.12.10', 解释器.json='3.13.15'"。
+
+**Q4 Loom.bat 双形态**：`if exist Loom\Loom.exe` → `start Loom\Loom.exe %*`；否则 `pythonw Loom\Loom.py`；两者都缺 → ASCII 错误提示 + `exit 1`。README 按包形态分开写（编译版：双击 `Loom\Loom.exe`；源码版：双击 `Loom.bat`，内嵌 Python 3.13.15）。
+
+**实测**：
+| 项 | 结果 |
+|---|---|
+| 源码包（仅 3.13 环境） | 346.6 MB；`python/python.exe`=3.13.15、`_pth` 含 `..\Loom`；meta/README 均 3.13.15 |
+| 源码包 `Loom.bat` | 走 python 分支，`pythonw.exe` 进程存活（编辑器起来） |
+| 编译包 `Loom.bat` | 走 exe 分支，`Loom\Loom.exe` 从包目录启动，bat exit 0 |
+| 版本不一致 | exit 1（见上） |
+| 测试 | `test_release_version` + 6 个 `test_hub*` 打包相关测试全绿 |
+
+**遗留**：① 源码包与编译包默认写同一个 `tools/dist/Loom-<version>.zip`，会互相覆盖（本批源码包另存 `C:\loom_build\source_pkg_beta6.zip`；建议后续加 `--kind source|compiled` 后缀）；② 源码包 `requirements.txt` 未含 `culverin`/`game-audio`（源码版物理/音频降级，编译版不受影响），是否补进 requirements 待裁决。
+
 

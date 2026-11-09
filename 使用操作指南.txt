@@ -34,8 +34,10 @@ Loom 使用操作指南 (2026-08-11, 原名 3D引擎)
   Vulkan 后端要求 Vulkan 1.1+ (wgpu-native 地板; Intel 核显需 Skylake 6 代+,
   且驱动为 2018 年之后的版本)。VK 初始化失败时 (无 loader / 无适配器 /
   apiVersion < 1.1 / 设备创建失败): 打印 [VK] 诊断 (设备/驱动/apiVersion) + 弹窗,
-  并把 游戏设置.json 的 render_api 自动改写为 opengl, **同进程**改用 OpenGL 4.3
-  继续运行 (旧行为"崩一次"已废止); GL 也不可用则打印两条原因后退出。
+  并在"后端来自配置/默认"时把 游戏设置.json 的 render_api 自动改写为 opengl,
+  **同进程**改用 OpenGL 4.3 继续运行 (旧行为"崩一次"已废止); GL 也不可用则打印
+  两条原因后退出。显式 --backend vulkan 与 --backend auto 失败**不改写配置**
+  (尊重显式选择 / auto 本身无偏好), 弹窗会给出永久改 GL 的出口指引。
   想固定回 VK: 设置面板或 游戏设置.json 把 render_api 改回 vulkan 即可。
   (两条后端的场景/脚本/UI 契约完全一致; 一次启动内只会自动降级一次)
 
