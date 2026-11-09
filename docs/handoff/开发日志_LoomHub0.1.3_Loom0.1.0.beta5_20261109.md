@@ -186,3 +186,33 @@ python tools/release_github.py all
 - 两个 tag 均指向 `08ad3a3`（= 发布时代码 HEAD）。
 - 发布脚本日志里 "推送 tag 失败: already exists" 是**预期噪音**：Release API 建 Release 时已在远端创建同名 tag，脚本随后的 `git push` 因此被拒；tag 指向已由 API 决定，无需强推。
 - 线上 digest 与本地 `Get-FileHash` 前 16 位一致（`341A6334912E6928` / `58D72606483C6D33`），确认上传的就是本地构建产物。
+
+
+---
+
+## 11. 后续开发方向（beta6 候选，2026-11-09 挂起待裁决）
+
+> 完整讨论稿见 [版本计划_Loom0.1.0.beta6_20261109.md](../design/版本计划_Loom0.1.0.beta6_20261109.md)。
+> 版本号已切到引擎 `0.1.0.beta6` / Hub `0.1.4`（仅编号，未排期）。
+
+### 11.1 与 Unity 的差距（扫描证据）
+- 渲染：双后端/PBR/阴影/IBL/LOD/instancing 都有；**后处理链全无**（bloom/ssao/ssr/tonemap/msaa 均 0）、无粒子/地形/HDR/遮挡剔除、**无 RenderPass 抽象**
+- 动画：只有 transform 关键帧；**骨骼/蒙皮 0**
+- 编辑器：无资产导入管线、无 Sequencer、无 Prefab 变体
+- 发布：仅 Windows、无 `.pak` 打包
+
+### 11.2 性能余量
+- 现状 90 FPS / TPS 30.2 / GPU 56% → GPU 有余量，瓶颈在 CPU 提交（buckets 2.3ms、draw 派发 1.4ms）
+- **Python 3.13 预研**：+5~15% 纯 Python；真正的解是 **free-threading**（逻辑/渲染线程真并行）
+- **C→C++ 迁移收益低**：手写 C 仅 `ckernels/loom_kernels.c` 18KB；值得做的是把 buckets/draw **下沉**，或 multi-draw indirect
+
+### 11.3 骨架欠账（最重要）
+**渲染 Pass 抽象**与**资产 guid 管线**是两块主要欠账。
+没有 Pass 抽象时，后处理/粒子/地形每加一个都要 GL/VK 各写一遍（57KB vs 102KB 两套实现）——这是下一批功能的乘数成本。
+
+### 11.4 卫生问题
+`Loom/%SystemDrive%`（2 文件）与 `Loom/~`（0 文件）是环境变量/HOME 未展开产生的垃圾目录，需清理并定位根因。
+
+### 11.5 待裁决 6 题（详见计划文档 §6）
+Q1 主线重心 / Q2 Python 版本 / Q3 C++ 范围 / Q4 Pass 抽象时机 / Q5 骨骼动画 / Q6 垃圾目录处理。
+主审倾向：**Q1=C、Q2=B、Q3=B、Q4=A、Q5=A、Q6=A**。
