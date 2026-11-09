@@ -707,6 +707,17 @@ class SceneDriver:
     def set_logic_paused(self, paused):
         """2026-11-07: 统一暂停接口 (VK 播放器)."""
         self.logic_paused = bool(paused)
+        # 2026-11-09 暂停重锚（同 GL: engine.toggle_logic_paused 暂停时时钟 reset）
+        if self.logic_paused:
+            self._pause_reanchored = True
+            clk = getattr(self, '_clock', None)
+            if clk is not None:
+                try:
+                    clk.reset()
+                except Exception as e:
+                    print('[驱动] 暂停重锚失败 (%r)' % (e,))
+        else:
+            self._pause_reanchored = False
 
     def request_game_exit(self):
         """2026-11-07: 统一退出接口 (VK 播放器 -> 关窗退出)."""
@@ -761,6 +772,18 @@ class SceneDriver:
         # 开发者视角鼠标 -> 逻辑步 (脚本)) —— 脚本后写仍覆盖, 契约不变。
         # 2026-11-07 通关暂停: 逻辑帧冻结 (脚本/物理/动画都不走), 渲染继续
         if getattr(self, 'logic_paused', False):
+            # 2026-11-09 (与 01 号 GL 侧「暂停重锚」对齐): 暂停期把**本驱动时钟自己的**
+            # 锚点清一次（FixedStepClock 的 _acc/_last），保证恢复首帧不补暂停期欠账。
+            # 说明: VK 侧时钟吃的是调用方 render_dt（不是墙钟），本来就不会追帧 —— 这里
+            # 重锚是防"将来改成墙钟口径/换时钟实现"的回归，并与 GL 的形状保持一致。
+            if not getattr(self, '_pause_reanchored', False):
+                self._pause_reanchored = True
+                clk = getattr(self, '_clock', None)
+                if clk is not None:
+                    try:
+                        clk.reset()
+                    except Exception as e:
+                        print('[驱动] 暂停重锚失败 (%r)' % (e,))
             # 2026-11-08 批2 (P-03-07): 暂停冻结的是"游戏逻辑", 不能连**输入逃生通道**
             # 一起冻掉 —— 解锁键轮询从逻辑帧移到渲染帧（裁决 D6=A: 引擎独占该键）。
             self.poll_unlock()
@@ -770,6 +793,7 @@ class SceneDriver:
             self.mouse_rel = (0, 0)
             self._end_frame_input()
             return (0, 0)
+        self._pause_reanchored = False        # 恢复态: 允许下一次暂停再重锚一次
         self.consume_mouse_input()
         self._refresh_player_camera()
         # 2026-11-06 对齐 GL PlayerApp: 播放器本身**没有**开发者视角鼠标

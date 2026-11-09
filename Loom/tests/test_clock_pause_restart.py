@@ -154,11 +154,41 @@ def t_thread_stop_restart():
     check("收尾 stop 后无 loom-logic 线程", len(alive2) == 0, [t.name for t in alive2])
 
 
+def t_vk_driver_pause_no_debt():
+    """P1-A 的 VK 侧对称用例 (2026-11-09): scene_driver 暂停 0.5s 后恢复首帧步数 <= 1.
+
+    VK 驱动的时钟吃的是调用方 render_dt（不是墙钟），本就不会追帧；本用例锁住
+    "暂停早退路径也做了重锚"这一形状（换时钟实现/改墙钟口径时不会退化）。
+    """
+    print("=== C. VK driver 暂停重锚 (恢复首帧不补欠账) ===")
+    import scene_driver
+    d = scene_driver.SceneDriver()
+    d.load_from_data({'version': 10,
+                      'camera': {'target': [0, 1, 0], 'distance': 8.0,
+                                 'yaw': 0.5, 'pitch': -0.3},
+                      'objects': [], 'lights': [], 'materials': [],
+                      'cameras': [], 'active_camera': None})
+    d.set_logic_paused(True)
+    for _ in range(5):
+        d.advance_logic(1 / 60.0)
+    time.sleep(0.5)                     # 真实停顿时长（旧实现恢复首帧会补欠账）
+    d.set_logic_paused(False)
+    first = d.advance_logic(1 / 60.0)
+    n_first = 0 if first is None else int(first[0] or 0)
+    check("VK: 暂停 0.5s 后恢复首帧逻辑步数 <= 1", n_first <= 1, n_first)
+    steps = []
+    for _ in range(6):
+        r = d.advance_logic(1 / 60.0)
+        steps.append(0 if r is None else int(r[0] or 0))
+    check("VK: 恢复后仍在正常推进 (6 帧总步数 >= 2)", sum(steps) >= 2, steps)
+
+
 if __name__ == "__main__":
     print("========== 时钟暂停恢复 / 逻辑线程启停 定向测试 ==========")
     t_pause_no_debt()
     t_set_logic_paused_path()
     t_thread_stop_restart()
+    t_vk_driver_pause_no_debt()
     print("=" * 50)
     if _fails:
         print("总结果: %d 项失败 ❌" % len(_fails))
