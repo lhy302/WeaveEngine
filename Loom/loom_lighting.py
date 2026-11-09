@@ -274,6 +274,23 @@ class LightingMixin:
                  and fw.shape[1:] == (4, 4) and fw.shape[0] == n)
         stamp3 = (getattr(self, '_struct_gen', 0), GameObject._appearance_gen,
                   bool(visible_only))
+        # 2026-11-09 (01 号性能 Q7=B/Q8=A): visible_only=True 的**同帧记忆化**。
+        # 现场取证 (beta5_p01_pool_gate.py): visible_only=True 不入行级缓存, 每个
+        # 调用点全量重算 —— 504 物体实测 15.3 ms/次 且走 8-worker 池; 灯光的
+        # shadow_prep / 每盏灯的 AABB 请求都各自触发一次, 是渲染主线程持 GIL 的
+        # 最大单点 (逻辑线程因此被饿到 ~10 次/秒调度)。播放态同一个 _frame_world
+        # 会被多个 call site 共享 -> 按 (fw 对象本体, n, stamp3, 可见性序列) 记忆化,
+        # 命中直接返回上次的 list 本体: 不重算, 数值与首次逐位相同。
+        # ★键里持 fw 强引用 (活对象 id 唯一, 不会与后建数组 id 复用)。
+        _vis_key = None
+        if visible_only and fw_ok:
+            _vis_key = tuple(bool(getattr(m, 'visible', True)) for m in models)
+            _vc = getattr(self, '_aabb_vis_cache', None)
+            if (_vc is not None and _vc[0] is fw and _vc[1] == n
+                    and _vc[2] == stamp3 and _vc[3] == _vis_key):
+                if _p:
+                    self._stage_calls['aabb_vis_hit'] =                         self._stage_calls.get('aabb_vis_hit', 0) + 1
+                return _vc[4]
         cache = getattr(self, '_aabb_row_cache', None)
         if (visible_only is False and fw_ok and cache is not None
                 and cache[1] == stamp3 and cache[2] == n
@@ -415,6 +432,9 @@ class LightingMixin:
                 self._aabb_shadow_gen = None
         if fw_ok and visible_only is False:
             self._aabb_row_cache = (None, stamp3, n, fw, out)
+        if _vis_key is not None:
+            # 记忆化发布 (与 _aabb_row_cache 同层; 只对 visible_only=True 生效)
+            self._aabb_vis_cache = (fw, n, stamp3, _vis_key, out)
         if _p:
             # ★M3: 同上, 避免与外层 _profile('aabbs') 重复计数
             self._stage_times['aabbs_inner'] = self._stage_times.get('aabbs_inner', 0.0) \
