@@ -65,7 +65,9 @@ class LogicThreadMixin:
                         self._logic_steps = clk.steps
                     time.sleep(0.002)
                     continue
-                self._profile('logic_step', lambda: clk.advance(dt))
+                # 2026-11-09 E1 (beta5): 统一走 _clock_advance (与同步路径同一口径;
+                # 这里的 dt 本就是实测间隔, max() 对它是无操作, 但体检记账共用)
+                self._profile('logic_step', lambda: self._clock_advance(dt, clk))
                 self._logic_steps = clk.steps
                 it = getattr(self, '_interp', None)
                 if it is not None:

@@ -722,8 +722,10 @@ class RenderMixin:
                             if it0 is not None:
                                 it0.alpha = 0.0
                     else:
+                        # 2026-11-09 E1 (beta5): 统一走 _clock_advance
+                        # (输入 = max(调用方 dt, 实测墙钟); 见 engine._clock_advance)
                         self._profile('logic_step',
-                                      lambda: clk.advance(delta_time))
+                                      lambda: self._clock_advance(delta_time, clk))
                         self._logic_steps = clk.steps        # HUD/对拍用
             self._advanced_this_frame = False   # 消费本帧标记
             # 分离批2: 时钟 alpha -> 插值层 (插值与时钟解耦, 批3 可独立设)
@@ -827,9 +829,58 @@ class RenderMixin:
         if not getattr(self, '_preframing', False):
             self._framebuf_prefetch(getattr(self, '_frame_start', time.perf_counter()))
         if not self._external_ctx:      # 外部模式: 宿主 (QOpenGLWidget) 自动交换缓冲
-            self._glfw_swap_buffers()   # 2026-10-18 A2: GLFW swap（原 pygame.display.flip）
+            self._present_swap()        # 2026-11-09 E2: 上屏 + 失败计数（判据供 remote 自动降级）
         self._prof_add('mt_render_tail', _t)
         self._prof_add('mt_render_total', _t_render)
+
+
+    # ---------------- 2026-11-09 E2: 上屏健康 / remote 自动降级判据 ----------------
+    def _present_swap(self):
+        """上屏一次并记账 (替代直接调 _glfw_swap_buffers)。
+
+        背景 (E2): 旧 `_glfw_swap_buffers` 内部 `except: pass` —— 上屏失败完全不可见,
+        于是"该不该切离屏回读兜底"没有任何**运行时**判据, 只能靠用户手动设环境变量.
+        这里把失败变成可判定事实: 连续失败计数 + 首次失败打一行, 并提供
+        should_fallback_remote() 给入口层做自动降级决策 (不改进程形态本身).
+        """
+        ok = True
+        err = None
+        try:
+            import glfw
+            win = getattr(self, '_glfw_win', None)
+            if win is None:
+                ok = False
+                err = '无 GLFW 窗口句柄'
+            else:
+                glfw.swap_buffers(win)
+        except Exception as e:
+            ok = False
+            err = repr(e)
+        if ok:
+            self._present_fail_streak = 0
+            self._present_ok_count = getattr(self, '_present_ok_count', 0) + 1
+        else:
+            self._present_fail_streak = getattr(self, '_present_fail_streak', 0) + 1
+            self._present_last_error = err
+            if not getattr(self, '_present_fail_logged', False):
+                self._present_fail_logged = True
+                print('[present] 原生上屏失败 (%s) —— 连续失败达阈值即建议切离屏回读'
+                      ' (LOOM_REMOTE_MODE=1 或 Hub 设置 remote_mode=on)' % (err,))
+        return ok
+
+    def present_health(self):
+        """上屏健康快照 (E2 判据/诊断用)。"""
+        return {'ok_count': getattr(self, '_present_ok_count', 0),
+                'fail_streak': getattr(self, '_present_fail_streak', 0),
+                'last_error': getattr(self, '_present_last_error', None)}
+
+    def should_fallback_remote(self, threshold=3):
+        """连续上屏失败 >= threshold -> 建议改走离屏回读 (remote-mode)。
+
+        只给**判据**, 不自行切换: 离屏回读需要 Qt 宿主进程, 由入口层 (Loom.py / Hub)
+        决定重启为 remote 模式 (口径见版本计划 E2: 先试原生, 失败才降级)。
+        """
+        return getattr(self, '_present_fail_streak', 0) >= int(threshold)
 
 
     # ================ 主循环 ================

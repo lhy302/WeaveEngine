@@ -543,6 +543,12 @@ class GLEngine(ShadowMixin, FrameComponentMixin, PhysicsMixin, InputMixin, HudMi
         self._aabb_shadow_gen = getattr(self, '_aabb_shadow_gen', None)
         self._phys_pipe = None            # 分离批4: 常驻物理线程 (桥建后启动)
         self._tps_events = []             # 分离批5: TPS 实测滑动窗口 (逻辑帧时间戳)
+        # 2026-11-09 E1 (beta5): 逻辑时钟输入体检 —— 判定“TPS 打不到目标”是
+        # ① 时钟没拿到全部墙钟时间 (调用方 dt 口径/掉帧) 还是 ② 每个逻辑帧本身太贵。
+        # _logic_dt_sum / _logic_wall_sum 比值 = 1.0 表示时钟拿到了全部真实耗时。
+        self._logic_dt_sum = 0.0          # 累计“喂给时钟”的逻辑时间 (秒)
+        self._logic_wall_sum = 0.0        # 累计真实墙钟 (秒, 同区间)
+        self._logic_wall_last = None      # 上次推进时钟的墙钟点 (None=首帧重锚)
         self._aabb_row_cache = None       # 批5: AABB 行级指纹缓存 (id(fw)+stamp 键)
         self._aabb_shadow_rows = None     # shadow_prep 直通行表 (2026-09-07, 与 out id 配对)
         self._aabb_shadow_gen = None      # 配对守卫 (id(out), n)
@@ -1314,6 +1320,35 @@ class GLEngine(ShadowMixin, FrameComponentMixin, PhysicsMixin, InputMixin, HudMi
         self._prep_sig = sig
         self._light_vps = self._prep_light_vps   # 渲染帧消费面不变
 
+    def _clock_advance(self, render_dt, clk=None):
+        """推进逻辑时钟的**唯一入口** (2026-11-09 E1 / beta5)。
+
+        输入取「调用方 dt」与「实测墙钟间隔」的较大者:
+          · 测试 / 无头直驱: 传合成 dt 且墙钟≈0 -> max = 合成 dt, **与旧行为逐位相同**;
+          · 真实运行: 帧率低于 dt 假设时 (如按 1/120 却只跑 95 FPS), 旧实现会让
+            逻辑时钟少累计时间 -> TPS = 目标 × Σdt/墙钟 (实测 30×0.79=23.7 即此);
+            用墙钟下限后 TPS 不再被 dt 口径低估。
+        顺带累计体检量 (get_logic_time_ratio): dt 总和 / 墙钟总和。
+        三条路径 (同步 advance_logic / 渲染帧自驱 loom_render / 异步逻辑线程)
+        共用本入口, 避免口径分叉。返回 clk.advance 的 (steps, phys_steps)。
+        """
+        clk = clk if clk is not None else self._ensure_split()
+        if clk is None:
+            return (0, 0)
+        now = time.perf_counter()
+        last = getattr(self, '_logic_wall_last', None)
+        wall_dt = 0.0 if last is None else (now - last)
+        if wall_dt < 0.0:
+            wall_dt = 0.0
+        self._logic_wall_last = now
+        # 单帧墙钟按 maximum_logic_delta 截断: 与时钟内部的死亡螺旋保险同口径,
+        # 体检比值不会被一次长卡顿 (场景加载/窗口拖动) 污染。
+        wall_dt = min(wall_dt, clk.maximum_logic_delta)
+        dt_eff = max(float(render_dt or 0.0), wall_dt)
+        self._logic_dt_sum = getattr(self, '_logic_dt_sum', 0.0) + dt_eff
+        self._logic_wall_sum = getattr(self, '_logic_wall_sum', 0.0) + wall_dt
+        return clk.advance(dt_eff)
+
     def _ensure_split(self):
         """惰性初始化分离态 (测试桩 __new__ 路径兜底: __init__ 未跑时
         按默认 30/60 建时钟; 返回 None = 分离未启用)."""
@@ -1390,8 +1425,9 @@ class GLEngine(ShadowMixin, FrameComponentMixin, PhysicsMixin, InputMixin, HudMi
                 if it is not None:
                     it.alpha = clk.alpha
                 return
+            # 2026-11-09 E1 (beta5): 统一走 _clock_advance（含“墙钟下限”与体检记账）
             self._profile('logic_step',
-                          lambda: clk.advance(render_dt))
+                          lambda: self._clock_advance(render_dt, clk))
             self._logic_steps = clk.steps            # HUD/对拍用
             self._advanced_this_frame = True
             it = getattr(self, '_interp', None)
@@ -1433,6 +1469,19 @@ class GLEngine(ShadowMixin, FrameComponentMixin, PhysicsMixin, InputMixin, HudMi
             return False
         self._step_requested = True
         return True
+
+    def get_logic_time_ratio(self):
+        """逻辑时钟拿到的时间 / 真实墙钟 (1.0 = 时钟没被 dt 口径亏欠)。
+
+        2026-11-09 E1 (beta5) 体检口, 配合 get_tps() 用:
+          · ratio ≈ 1 且 TPS < 目标 → 瓶颈是**每个逻辑帧本身太贵**
+            (看 _stage_times 的 logic_step / pipe_wait);
+          · ratio < 1 → 时钟没拿到全部墙钟 (调用方 dt 口径/掉帧), 先修输入。
+        返回 None = 还没采到样本。
+        """
+        if self._logic_wall_sum <= 1e-9:
+            return None
+        return self._logic_dt_sum / self._logic_wall_sum
 
     def get_tps(self):
         """实测 TPS (逻辑帧/秒, 2 秒滑动窗口; 状态栏直读). 暂停时 → 0."""
