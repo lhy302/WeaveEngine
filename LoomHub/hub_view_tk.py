@@ -382,8 +382,11 @@ class TkHubView(IHubView):
             self.interp_list.delete(0, tk.END)
             for it in self.ctrl.interpreters:
                 tag = "★ " if it.get('default') else ""
-                self.interp_list.insert(tk.END, "%s%s  (v%s, %s)"
-                                        % (tag, it['name'], it['version'], it['kind']))
+                pyv = it.get('python_version') or ''
+                self.interp_list.insert(
+                    tk.END, "%s%s  (v%s, %s%s)"
+                    % (tag, it['name'], it['version'], it['kind'],
+                       ", py%s" % pyv if pyv else ""))
             # 项目列表（带颜色标记）
             self.proj_list.delete(0, tk.END)
             self._proj_items = proj_items

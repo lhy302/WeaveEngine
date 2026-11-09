@@ -592,8 +592,11 @@ class HubController:
                     cmd_to_run[0] = pyw
             subprocess.Popen(cmd_to_run, cwd=cwd, env=env)
             note = "用系统默认 Python 环境启动" if interp['kind'] == 'py' else "直接运行 exe"
-            self.set_msg("已启动: %s %s (%s) %s" % (interp['name'], interp['version'],
-                                                    interp['kind'], note))
+            # 2026-11-09: 引擎要求某个 Python 版本但本机没有 -> 回退默认并提示
+            py_note = cfg.interp_python_note(interp)
+            self.set_msg("已启动: %s %s (%s) %s%s"
+                         % (interp['name'], interp['version'], interp['kind'], note,
+                            " ｜ " + py_note if py_note else ''))
         except OSError as e:
             self.set_msg("启动失败: %s" % e, 'err')
 

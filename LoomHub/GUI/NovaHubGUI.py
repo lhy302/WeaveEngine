@@ -439,8 +439,11 @@ class NovaHubView(IHubView):
             self.interp_list.delete(0, tk.END)
             for it in self.ctrl.interpreters:
                 tag = "★ " if it.get('default') else ""
-                self.interp_list.insert(tk.END, "%s%s  (v%s, %s)"
-                                        % (tag, it['name'], it['version'], it['kind']))
+                pyv = it.get('python_version') or ''
+                self.interp_list.insert(
+                    tk.END, "%s%s  (v%s, %s%s)"
+                    % (tag, it['name'], it['version'], it['kind'],
+                       ", py%s" % pyv if pyv else ""))
             self.proj_list.delete(0, tk.END)
             for p in self.ctrl.projects:
                 self.proj_list.insert(tk.END, "%s  —  %s"

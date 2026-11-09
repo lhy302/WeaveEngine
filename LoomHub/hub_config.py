@@ -19,6 +19,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import time
 
 APP_NAME = "Loom"          # 解释器名 = 项目名
@@ -206,7 +207,11 @@ def discover_interpreter(directory):
         return None   # 元数据在但主程序缺失, 视为未完成安装
     return {"name": name, "version": version, "kind": kind, "dir": directory,
             "main": main_name, "path": path,
-            "main_py": py_path, "main_exe": exe_path}   # 双路径 (open_py 启动器设置用)
+            "main_py": py_path, "main_exe": exe_path,   # 双路径 (open_py 启动器设置用)
+            # 2026-11-09: 源码版引擎要求的 Python 版本（如 3.13.15）。
+            # 以前没记录 -> 从 Hub 启动源码引擎会落到系统默认 python（3.12），
+            # 而新版源码引擎要求 3.13。编译版（kind=exe）不读这个字段。
+            "python_version": str(meta.get('python_version') or '').strip()}
 
 
 def scan_install_root(root=DEFAULT_INSTALL_ROOT):
@@ -542,6 +547,87 @@ def _py_launcher_python():
     return None
 
 
+_PY_RESOLVE_CACHE = {}
+
+
+def python_xy(spec):
+    """'3.13.15' / '3.13' / 'python3.13' -> '3.13'；认不出返回 ''。"""
+    m = re.search(r'(\d+)\.(\d+)', str(spec or ''))
+    return '%s.%s' % (m.group(1), m.group(2)) if m else ''
+
+
+def resolve_python_for(spec, use_cache=True):
+    r"""按 解释器.json 的 python_version 找可用的 python.exe（绝对路径或 None）。
+
+    2026-11-09: 源码版引擎要求 3.13（系统默认 .py 关联仍是 3.12），但**不改系统默认**
+    —— 只在启动这一个引擎时精确挑解释器。顺序：
+      ① %LOCALAPPDATA%ProgramsPythonPythonXYpython.exe 等常见安装目录
+      ② py -X.Y 启动器问出 sys.executable
+      ③ 当前进程解释器正好是该版本
+    """
+    xy = python_xy(spec)
+    if not xy:
+        return None
+    if use_cache and xy in _PY_RESOLVE_CACHE:
+        return _PY_RESOLVE_CACHE[xy]
+    tag = 'Python' + xy.replace('.', '')
+    bases = []
+    la = os.environ.get('LOCALAPPDATA')
+    if la:
+        bases.append(os.path.join(la, 'Programs', 'Python'))
+    for k in ('ProgramFiles', 'ProgramFiles(x86)', 'ProgramW6432'):
+        v = os.environ.get(k)
+        if v:
+            bases.append(v)
+    bases.append('C:\\')
+    for base in bases:
+        for cand in (os.path.join(base, tag, 'python.exe'),
+                     os.path.join(base, 'Python' + xy.replace('.', ''), 'python.exe')):
+            if os.path.isfile(cand):
+                _PY_RESOLVE_CACHE[xy] = cand
+                return cand
+    launcher = shutil.which('py')
+    if launcher:
+        try:
+            r = subprocess.run([launcher, '-%s' % xy, '-c',
+                                'import sys;print(sys.executable)'],
+                               capture_output=True, text=True, timeout=20)
+            lines = (r.stdout or '').strip().splitlines()
+            if r.returncode == 0 and lines and os.path.isfile(lines[-1]):
+                _PY_RESOLVE_CACHE[xy] = lines[-1]
+                return lines[-1]
+        except (OSError, subprocess.SubprocessError):
+            pass
+    try:
+        r = subprocess.run([sys.executable, '-c',
+                            'import sys;print("%%d.%%d" %% sys.version_info[:2])'],
+                           capture_output=True, text=True, timeout=10)
+        if (r.stdout or '').strip() == xy:
+            _PY_RESOLVE_CACHE[xy] = sys.executable
+            return sys.executable
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return None
+
+
+def interp_python_note(info):
+    """启动源码引擎时的 Python 版本提示（空串 = 无需提示）。
+
+    返回非空表示"引擎要求 X，本机没找到匹配解释器，已回退默认"。
+    """
+    if not info or info.get('kind') == 'exe':
+        return ''
+    want = str(info.get('python_version') or '').strip()
+    if not want:
+        # 元数据没声明版本：仍按系统默认 Python 启动，但要让用户知道原因
+        return '引擎元数据未声明 python_version，使用系统默认 Python 启动'
+    if resolve_python_for(want):
+        return ''
+    return ('引擎要求 Python %s，本机未找到匹配解释器，已回退默认 Python'
+            '（可能启动失败，请安装 Python %s 或 py -%s）'
+            % (want, python_xy(want) or want, python_xy(want) or want))
+
+
 def default_python(engine_dir=None):
     """系统默认 python 命令. 2026-08-20 安全加固 (Qoder 报告低危8):
     优先当前进程自己的解释器 (sys.executable, 最可信, 不受 PATH 污染),
@@ -609,6 +695,15 @@ def build_launch_command(info, scene_path=None, mode='open', prefer=None):
     main_path = resolve_runtime_path(info.get('path'))
     # 2026-10-19: 传 engine_dir 让 default_python 优先用引擎自带嵌入式 Python
     py_exe = default_python(engine_dir=info.get('dir'))
+    # 2026-11-09: 源码版引擎按 解释器.json 的 python_version 精确挑解释器
+    # （新版源码引擎要 3.13，系统 .py 关联仍是 3.12；**不改系统默认**）。
+    # 编译版（kind=exe）走 main_exe，与 Python 版本无关，不受影响。
+    if str(info.get('kind') or 'py') != 'exe':
+        _want = str(info.get('python_version') or '').strip()
+        if _want:
+            _matched = resolve_python_for(_want)
+            if _matched:
+                py_exe = _matched
     if prefer == 'py' and main_py and os.path.isfile(main_py):
         cmd = [py_exe, main_py]
     elif prefer == 'exe' and main_exe and os.path.isfile(main_exe):

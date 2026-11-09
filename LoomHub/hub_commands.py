@@ -492,7 +492,9 @@ def launch_spec(args, info=None):
     cfg.apply_launch_env(env)
     return {'cmd': cmd_parts, 'cwd': cwd_resolved,
             'env': env, 'prefer': prefer, 'mode': mode,
-            'interpreter': info}, None
+            'interpreter': info,
+            # 2026-11-09: 源码引擎要求的 Python 版本匹配不上时的提示（空 = 无）
+            'python_note': cfg.interp_python_note(info)}, None
 
 
 @command('launch_engine', '启动 Loom: {scene?, mode?(open|run), agent?(false)} '
