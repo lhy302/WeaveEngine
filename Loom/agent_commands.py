@@ -1004,6 +1004,12 @@ def cmd_skybox_set(win, args):
     """
     import sceneio
     ed = win.editor
+    if getattr(ed, 'is_playing', False):
+        # P2-2: 播放期改"场景级天空盒"会让场景真值在编辑态/播放态之间漂移
+        # （退出播放要还原编辑态场景，播放期写进去的值无处安放）；与 _save_scene
+        # "播放中不可保存"同一口径：拒绝并说明，而不是静默半生效。
+        return {'ok': False,
+                'error': '播放中不允许修改场景天空盒（请先停止播放，再设置）'}
     paths = args.get('paths')
     solid = args.get('solid_color')
     name = args.get('name')
@@ -1040,7 +1046,8 @@ def cmd_skybox_set(win, args):
     ed._scene_skybox = cube
     ed._skybox_valid = True
     ed._skybox_error = None
-    ed._skybox = None                  # 强制 refresh 走"变更"分支（重编 GPU 资源）
+    # P1-1: 不再自己把 _skybox 置 None（那会让渲染面在接下来一直是 None）；
+    # 由 _refresh_effective_skybox 负责"场景级写回 + 变更时 reset_sky_state"。
     eff = ed._refresh_effective_skybox() if hasattr(
         ed, '_refresh_effective_skybox') else cube
     return {'ok': True, 'name': cube.name, 'guid': cube.guid,
@@ -1052,10 +1059,13 @@ def cmd_skybox_set(win, args):
 @command('skybox_clear', '清空场景级天空盒（相机级若存在仍优先）')
 def cmd_skybox_clear(win, args):
     ed = win.editor
+    if getattr(ed, 'is_playing', False):
+        return {'ok': False,
+                'error': '播放中不允许修改场景天空盒（请先停止播放，再清空）'}
     ed._scene_skybox = None
     ed._skybox_valid = True            # 显式清空 = 用户意图, 不是解析失败
     ed._skybox_error = None
-    ed._skybox = None
+    # P1-1: 同上 —— 由 refresh 写回 _skybox（清空后就是 None，门自然早退）
     eff = ed._refresh_effective_skybox() if hasattr(
         ed, '_refresh_effective_skybox') else None
     return {'ok': True, 'cleared': True,
@@ -1117,10 +1127,35 @@ def cmd_skybox_get(win, args):
     desc = _skybox_describe(eff)
     if desc is not None:
         desc['source'] = eff_src
+    # P2-1: 相机级天空盒的 valid/reason 也要能查（Q5=A 在相机级同样成立）；
+    # 相机"没有"天空盒 = 正常态（valid=True，不伪造 reason）。
+    try:
+        _cam = ed.active_camera_object()
+    except Exception as e:
+        print('[天空盒] 取激活相机失败: %r' % (e,))
+        _cam = None
+    cam_info = None
+    if _cam is not None:
+        cam_info = {'name': getattr(_cam, 'name', None),
+                    'guid': getattr(_cam, 'guid', None),
+                    'has_skybox': getattr(_cam, 'skybox', None) is not None,
+                    'valid': bool(getattr(_cam, '_skybox_valid', True)),
+                    'reason': getattr(_cam, '_skybox_error', None)}
+    scene_valid = bool(getattr(ed, '_skybox_valid',
+                               getattr(ed, '_skybox_error', None) is None))
+    scene_reason = getattr(ed, '_skybox_error', None)
+    # 顶层 valid = 场景级正常 且 激活相机（若有）正常；失败原因优先给场景级，其次相机级
+    cam_bad = cam_info is not None and cam_info['valid'] is False
+    valid = scene_valid and not cam_bad
+    reason = scene_reason
+    if reason is None and cam_bad:
+        reason = cam_info.get('reason') or '激活相机的天空盒解析失败'
     return {'skybox': _skybox_describe(scene_cube),
-            'valid': bool(getattr(ed, '_skybox_valid',
-                                  getattr(ed, '_skybox_error', None) is None)),
-            'reason': getattr(ed, '_skybox_error', None),
+            'valid': valid,
+            'reason': reason,
+            'scene_valid': scene_valid,
+            'scene_reason': scene_reason,
+            'active_camera_skybox': cam_info,
             'effective': desc,
             # Q5=A: VK 侧天空盒失败也要能在查询里看见（无驱动时 None）
             'vk': _vk_skybox_info(win, ed)}

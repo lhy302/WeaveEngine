@@ -360,6 +360,153 @@ def t_get_vk_error():
           vk)
 
 
+# ============ ⑩ P1-1: 设置后立即生效（渲染面 write-back） ============
+def t_set_takes_effect():
+    print('---- 10) P1-1: skybox_set 后立即生效（_skybox 写回） ----')
+    ed = _ed()
+    ed._new_scene()
+    r = _cmd('skybox_set', ed, {'solid_color': [10, 20, 30]})
+    check('skybox_set ok', r.get('ok') is True, r)
+    check('设置后 ed._skybox 非空（修前: 恒 None -> 绘制门早退）',
+          getattr(ed, '_skybox', None) is not None, ed._skybox)
+    check('设置后 effective_skybox() 非空', ed.effective_skybox() is not None)
+    check('_skybox 就是场景级对象（无相机覆盖时）',
+          ed._skybox is ed._scene_skybox)
+    check('返回值 effective 不再谎报（=scene 且对象存在）',
+          r.get('effective') == 'scene', r.get('effective'))
+    # 清空后渲染面同步为 None（门自然早退），且不残留旧对象
+    r2 = _cmd('skybox_clear', ed)
+    check('skybox_clear -> ok 且 _skybox/生效均为 None',
+          r2.get('ok') is True and getattr(ed, '_skybox', 'x') is None
+          and ed.effective_skybox() is None,
+          (r2.get('ok'), getattr(ed, '_skybox', 'x')))
+
+
+# ============ ⑪ P1-2: 非 dict 的 skybox 不崩、不丢场景 ============
+def t_bad_skybox_type():
+    print('---- 11) P1-2: 非 dict skybox 不崩 / 不丢当前场景 ----')
+    for bad in ('abc', [], 7, True):
+        eng = _ed()
+        try:
+            S.scene_from_dict(eng, {'version': 10, 'objects': [], 'skybox': bad})
+            raised = None
+        except Exception as e:
+            raised = e
+        check('skybox=%r 不抛异常（修前 AttributeError）' % (bad,), raised is None, raised)
+        check('skybox=%r -> valid=False 且回退默认蓝' % (bad,),
+              getattr(eng, '_skybox_valid', None) is False
+              and tuple(getattr(eng._skybox, '_solid_color', ())) == S.DEFAULT_SKYBOX_COLOR,
+              (getattr(eng, '_skybox_valid', None),
+               getattr(eng._skybox, '_solid_color', None)))
+    # 编辑器路径: 坏 skybox 的场景能正常打开（模型不丢、_scene_path 更新）
+    import editor as _edmod
+    old_save = _edmod.save_last_dir
+    _edmod.save_last_dir = lambda state_file, path: None
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            p = os.path.join(tmp, 'bad.json')
+            with open(p, 'w', encoding='utf-8') as f:
+                json.dump({'version': 10, 'skybox': 'oops',
+                           'objects': [{'id': 'a', 'name': 'A', 'primitive': 'cube',
+                                        'position': [0, 0, 0], 'rotation': [0, 0, 0],
+                                        'scale': [1, 1, 1]}]}, f)
+            ed = _ed()
+            try:
+                ed._load_scene(p)
+                err = None
+            except Exception as e:
+                err = e
+            check('编辑器加载坏 skybox 场景不崩（F7 不变量）', err is None, err)
+            check('对象仍然加载（没丢场景数据）',
+                  [m.name for m in ed.models] == ['A'], [m.name for m in ed.models])
+            check('坏 skybox -> valid=False（可查询）',
+                  getattr(ed, '_skybox_valid', None) is False)
+    finally:
+        _edmod.save_last_dir = old_save
+
+
+# ============ ⑫ P1-3: 另存为/首存到别的目录 -> 相对路径重算 ============
+def t_save_as_relative():
+    print('---- 12) P1-3: 换目录保存时相对路径重算（不再静默丢资产） ----')
+    with tempfile.TemporaryDirectory() as root:
+        dir_a = os.path.join(root, 'assets'); os.makedirs(dir_a)
+        dir_b = os.path.join(root, 'scenes'); os.makedirs(dir_b)
+        faces = [_png(os.path.join(dir_a, n))
+                 for n in ('px.png', 'nx.png', 'py.png', 'ny.png', 'pz.png', 'nz.png')]
+        ed = _ed(os.path.join(dir_a, 'draft.json'))
+        r = _cmd('skybox_set', ed, {'paths': faces})
+        check('设置成功', r.get('ok') is True, r)
+        # 另存为到 dir_b: _save_scene 会先更新 _scene_path，再按新目录算 base_dir
+        p_b = os.path.join(dir_b, 'one.json')
+        ed._scene_path = p_b
+        data = S.scene_to_dict(ed, camera=ed._camera_dict(),
+                               base_dir=os.path.dirname(p_b))
+        emitted = (data.get('skybox') or {}).get('paths') or []
+        check('另存到 dir_b -> 写出的是相对 dir_b 的路径（含 ..）',
+              emitted and all(not os.path.isabs(x) for x in emitted)
+              and any('..' in x for x in emitted), emitted)
+        S.save_json_atomic(p_b, data)
+        eng2 = _ed(p_b)
+        S.scene_from_dict(eng2, json.load(open(p_b, encoding='utf-8')),
+                          base_dir=os.path.dirname(p_b))
+        check('按新目录重载 -> valid=True（修前 valid=False 回退默认蓝）',
+              getattr(eng2, '_skybox_valid', None) is True,
+              getattr(eng2, '_skybox_error', None))
+        # 同目录保存也仍然正确
+        p_a = os.path.join(dir_a, 'two.json')
+        ed._scene_path = p_a
+        data2 = S.scene_to_dict(ed, camera=ed._camera_dict(),
+                                base_dir=os.path.dirname(p_a))
+        check('同目录保存 -> 纯文件名（无 ..）',
+              all(not os.path.isabs(x) and '..' not in x
+                  for x in (data2.get('skybox') or {}).get('paths') or []),
+              (data2.get('skybox') or {}).get('paths'))
+
+
+# ============ ⑬ P2: 相机级 valid/reason + 播放守卫 + 颜色收严 ============
+def t_p2_batch():
+    print('---- 13) P2: 相机级 valid/reason / 播放守卫 / 颜色收严 ----')
+    # P2-1: 相机"没有"天空盒 = 正常态
+    eng = _ed()
+    S.scene_from_dict(eng, {'version': 10, 'objects': [],
+                            'cameras': [{'id': 'c1', 'name': 'cam'}]})
+    cam = eng.cameras[0]
+    check('相机无 skybox -> valid=True 且 reason=None（修前: False + 假 reason）',
+          getattr(cam, '_skybox_valid', None) is True
+          and getattr(cam, '_skybox_error', None) is None,
+          (getattr(cam, '_skybox_valid', None), getattr(cam, '_skybox_error', None)))
+    # P2-1: 相机天空盒坏了要进 skybox_get
+    eng2 = _ed()
+    S.scene_from_dict(eng2, {'version': 10, 'objects': [],
+                             'cameras': [{'id': 'c1', 'name': 'cam',
+                                          'skybox': {'solid_color': [0.1, 0.2, 0.3]}}]})
+    eng2.active_camera = 'c1'
+    got = _cmd('skybox_get', eng2)
+    camsb = got.get('active_camera_skybox') or {}
+    check('相机级解析失败 -> skybox_get 里 valid=False + reason 可读',
+          camsb.get('valid') is False and bool(camsb.get('reason')), camsb)
+    check('顶层 valid 也反映相机级失败', got.get('valid') is False, got.get('valid'))
+    # P2-2: 播放中禁止改场景天空盒
+    ed = _ed(); ed._new_scene(); ed.is_playing = True
+    r1 = _cmd('skybox_set', ed, {'solid_color': [1, 2, 3]})
+    r2 = _cmd('skybox_clear', ed)
+    check('播放中 skybox_set -> ok=False + 原因',
+          r1.get('ok') is False and '播放中' in str(r1.get('error')), r1)
+    check('播放中 skybox_clear -> ok=False + 原因',
+          r2.get('ok') is False and '播放中' in str(r2.get('error')), r2)
+    # P2-3: 颜色收严
+    rgba, why = S.parse_color([float('nan'), 0, 0])
+    check('nan -> reason 指明"有限数"（不再误报 0-1 浮点）',
+          rgba is None and '有限数' in str(why), why)
+    rgba, why = S.parse_color([float('inf'), 0, 0])
+    check('inf -> reason 指明"有限数"', rgba is None and '有限数' in str(why), why)
+    rgba, why = S.parse_color('3A9BD5')
+    check("'3A9BD5' 无 # -> 拒绝（Q4=A 收严）",
+          rgba is None and '#' in str(why), why)
+    rgba, why = S.parse_color('#3A9BD5')
+    check("'#3A9BD5' -> (58,155,213,255)", rgba == (58, 155, 213, 255), (rgba, why))
+
+
 def main():
     t_new_scene_default()
     t_load_without_skybox()
@@ -370,6 +517,10 @@ def main():
     t_draw_gate_effective()
     t_reset_sky_state()
     t_get_vk_error()
+    t_set_takes_effect()
+    t_bad_skybox_type()
+    t_save_as_relative()
+    t_p2_batch()
     print('\n总结果: %s' % ('ALL PASS' if ok else 'FAIL'))
     sys.exit(0 if ok else 1)
 

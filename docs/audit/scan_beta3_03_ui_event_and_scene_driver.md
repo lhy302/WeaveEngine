@@ -1196,3 +1196,20 @@ python tests\test_pacman_scene_contract.py / test_guiswitch.py / test_agent_ui_i
 验收（实跑，均 exit=0）：`test_skybox_scene.py`（9 组）、`test_skybox_engine_parity.py`（02 号）、`test_sceneio.py`、
 `test_eai_real.py`（98 命令全覆盖）、`test_editor_ui.py`、`test_editor_load_reject_keeps_scene.py`、
 `test_beta3_batch2_camera_proj.py`、`test_vk_camera_align.py`、`test_render_api.py`、`test_scene_solid_env_roundtrip.py`。
+
+
+### 8.7 第三轮审计必修（2026-11-09 追加）：3 个 P1 回归 + 3 个 P2
+
+| 编号 | 修前（病灶） | 修后 + 断言 |
+|---|---|---|
+| **P1-1** `skybox_set` 不生效 | `skybox_set` 先写 `_scene_skybox` 再把 `_skybox=None`，而 `_refresh_effective_skybox()` **只返回不写回** → `engine.effective_skybox()` 的回落值恒 None → `editor.render` 门与 `loom_render` 绘制门双早退；返回值还谎报 `effective='scene'` | `_refresh_effective_skybox()` 先把**场景级写回** `self._skybox = self._scene_skybox`，再算 eff / 判变更 / `reset_sky_state()`；命令里那句 `_skybox = None` 已删。断言：设置后 `ed._skybox is not None`、`effective_skybox() is not None`、`_skybox is _scene_skybox`、返回 `effective='scene'`；clear 后两者同步为 None |
+| **P1-2** 非 dict 的 `skybox` 崩 + 丢场景 | `skybox_from_dict` 直接 `d.get()` → str/list/int/bool 触发 AttributeError；`scene_from_dict` 外层 try 已删，而编辑器 `_load_scene` 已改 `_scene_path`、清空旧模型 → 用户丢当前场景（违背 F7） | `skybox_from_dict` 首行加 `isinstance(d, dict)` 早退（返回 `(None, False, reason)`）；`_scene_skybox_from_data` 只把 `None`/空 dict 当缺省，其它非 dict 一律 `valid=False`。断言：`'abc'/[]/7/True` 都不抛、`valid=False`、回退默认蓝；编辑器加载坏 skybox 场景不崩、对象仍加载、`_skybox_valid=False` |
+| **P1-3** 相对路径基准不重算 | `_emit_skybox` 把设/加载时刻的 `_source_paths` 原样回写 → "新建后首次另存到任意目录"与"另存为到别目录"两条路径重载 `valid=False`，静默回退默认蓝（丢资产） | 给了 `base_dir` 就**一律按当前场景目录 relpath 重算**（`_source_paths` 仅内存态兜底）。断言：另存到 dir_b 写出的是相对 dir_b 的路径（含 `..`）且重载 `valid=True`；同目录保存是纯文件名（无 `..`） |
+| **P2-1** 相机无天空盒被伪造成坏 | `_apply_cameras` 无条件调 `skybox_from_dict(None)` → `valid=False` + 假 reason"缺少 paths/solid_color" | 无相机天空盒 = **正常态**（`_skybox_valid=True`、reason None）；相机级失败进 `skybox_get`：新增 `active_camera_skybox{name,guid,has_skybox,valid,reason}` + `scene_valid/scene_reason`，顶层 `valid` = 场景级正常 且 激活相机正常 |
+| **P2-2** 播放期可改场景天空盒 | 播放中 `skybox_set/clear` 会写"场景真值"，而退出播放要还原编辑态场景 → 值无处安放（半生效漂移） | **择"播放中禁止"**（与 `_save_scene`"播放中不可保存"同口径，且不引入跨播放边界的撤销语义）：两命令 `ok=False` + "播放中不允许修改场景天空盒（请先停止播放…）"；`toggle_play` 进/退都调 refresh，`_skybox` 与 `_scene_skybox` 不漂移 |
+| **P2-3** 颜色解析口径 | `nan/inf` 被误报成"0-1 浮点"；`3A9BD5`（无 #）也被接受 | 显式 `isfinite` 检查（reason："颜色通道 #0 不是有限数 (nan/inf)"）；字符串**必须带 # 前缀**（`^#(RRGGBB|RRGGBBAA)$`），否则 reason 明说要带 # |
+
+验收（实跑，均 exit=0）：`test_skybox_scene.py`（13 组：①~⑨ 原用例 + ⑩ P1-1 / ⑪ P1-2 / ⑫ P1-3 / ⑬ P2 四组）、
+`test_skybox_engine_parity.py`、`test_eai_real.py`（98 命令全覆盖）、`test_sceneio.py`、`test_editor_ui.py`、
+`test_editor_load_reject_keeps_scene.py`、`test_beta3_batch2_camera_proj.py`、`test_vk_camera_align.py`、
+`test_render_api.py`、`test_scene_solid_env_roundtrip.py`、`test_pacman_scene_contract.py`、`test_undo_full_coverage.py`。

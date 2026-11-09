@@ -910,6 +910,11 @@ class EditorApp(GLEngine):
         （天空盒静默消失）。这里与渲染端的"对象变了自动复位"形成双保险。
         返回当前生效的 Cubemap（或 None）。
         """
+        # P1-1（回归修复）: 先把**场景级**写回渲染面 engine._skybox ——
+        # engine.effective_skybox() 的回落值就是 self._skybox；旧实现只返回不写回，
+        # 于是 skybox_set 之后 _skybox 恒 None -> editor.render 门 / loom_render 绘制门
+        # 双双早退，"设完天空盒当场不生效（要重载或新建才生效）"。
+        self._skybox = getattr(self, '_scene_skybox', None)
         eff = self._effective_skybox()
         if eff is not getattr(self, '_sky_eff_last', None):
             self._sky_eff_last = eff
