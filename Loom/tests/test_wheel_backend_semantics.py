@@ -193,6 +193,14 @@ def _fake_modules():
     return gp, sc
 
 
+class _FakeEng:
+    """GL 播放器替身（_open_opengl 只构建不阻塞）。"""
+    models = []
+
+    def run(self):
+        return None
+
+
 class _BackendHarness:
     """fake 游戏包 + run_player 后端桩; 记录实际调用的后端顺序."""
 
@@ -201,6 +209,7 @@ class _BackendHarness:
         self.rp = run_player
         self.orig_vk = run_player._run_vulkan
         self.orig_gl = run_player._run_opengl
+        self.orig_open = run_player._open_opengl
         self.old_gp = _sys.modules.get('game_pack')
         self.old_sc = _sys.modules.get('scripts')
         gp, sc = _fake_modules()
@@ -217,18 +226,22 @@ class _BackendHarness:
                 raise vk_exc
             return 'vk'
 
-        def _gl(scene, **kw):
+        def _gl(scene=None, **kw):
             self.calls.append('opengl')
             if gl_exc is not None:
                 raise gl_exc
-            return 'gl'
+            return _FakeEng()
 
         self.vk_stub, self.gl_stub = _vk, _gl
         self.rp._run_vulkan = _vk
-        self.rp._run_opengl = _gl
+        # 2026-11-09: GL 的真实入口是 _open_opengl（只构建不阻塞）；
+        # _run_opengl 保留为兼容调用面。
+        self.rp._open_opengl = _gl
+        self.rp._run_opengl = lambda scene=None, **kw: 'gl'
 
     def restore(self):
         self.rp._run_vulkan = self.orig_vk
+        self.rp._open_opengl = self.orig_open
         self.rp._run_opengl = self.orig_gl
         if self.old_gp is None:
             _sys.modules.pop('game_pack', None)
@@ -333,7 +346,7 @@ def t_backend_log():
         except SystemExit:
             pass
         check('F SystemExit 后恢复 run_player 入口',
-              h.rp._run_vulkan is h.vk_stub and h.rp._run_opengl is h.gl_stub)
+              h.rp._run_vulkan is h.vk_stub and h.rp._open_opengl is h.gl_stub)
     finally:
         h.restore()
 
