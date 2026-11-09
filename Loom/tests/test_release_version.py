@@ -2,9 +2,11 @@
 """
 test_release_version.py — 打包/发布链的"版本一致性"定向断言 (2026-11-08 第 5 批 D1=A)
 
-锁定的人类裁决: 正式发包前内部开发名**一律 0.1.0.beta4，不得改名**；
+版本号策略（2026-11-09 人类裁决）: **开发期版本号不动**——所有中间开发都算「当前已发布版本的中间版本」，
+只有**真正发包**时才跳一次（引擎 0.1.0.beta4 -> beta5、LoomHub 0.1.2 -> 0.1.3）。
 包名 = 包内元数据 = tag = Loom/解释器.json = release_github 缺省；
-LoomHub 一律 0.1.2（版本.json = installer.iss = release_github 缺省；2026-11-08 因 Hub 配置体系改动而升版）。
+当前已发布: 引擎 0.1.0.beta4 / LoomHub 0.1.2（版本.json = installer.iss = release_github 缺省）。
+下次发包时才改为 beta5 / 0.1.3。
 
 对应审计项: P-05-06（--version 无白名单）、P-05-07（两个工具缺省版本互相矛盾）、
 P-05-13/P-05-14（无版本单一事实源：源码元数据 / Hub 版本.json 从不被回写）。
@@ -74,6 +76,11 @@ import release_github as rg       # noqa: E402
 import hub_config as hcfg         # noqa: E402
 import package_hub as ph          # noqa: E402   (tools/package_hub.py: LoomHub 打包器)
 
+# 2026-11-09 版本号策略: 开发期不跳版本；这两个值 = **当前已发布版本**。发包时才改。
+# 下次升版只改这两行（其余断言全部由它们派生）。
+EXPECT_ENGINE = '0.1.0.beta4'
+EXPECT_HUB = '0.1.2'
+
 _FAILS = []
 
 
@@ -92,8 +99,8 @@ def t_engine_version_consistency():
     """Loom/解释器.json（打包工具缺省来源）== release_github 缺省 == 包名/tag 派生值。"""
     meta = _read_json(os.path.join(ROOT, '解释器.json'))
     src = str(meta.get('version'))
-    check("源码元数据版本 = 0.1.0.beta4（D1 锁定，不得改名）",
-          src == '0.1.0.beta4', src)
+    check("源码元数据版本 = %s（= 当前已发布版本；开发期不跳）" % EXPECT_ENGINE,
+          src == EXPECT_ENGINE, src)
     check("package_engine.load_version() 缺省 = 源码元数据版本",
           pe.load_version() == src, pe.load_version())
     check("release_github 缺省引擎版本 = 源码元数据版本",
@@ -112,7 +119,8 @@ def t_engine_version_consistency():
 def t_hub_version_consistency():
     """LoomHub/版本.json == release_github 缺省 == installer.iss 的 #define。"""
     hub_ver = str(_read_json(os.path.join(REPO, 'LoomHub', '版本.json')).get('version'))
-    check("LoomHub 版本.json = 0.1.2", hub_ver == '0.1.2', hub_ver)
+    check("LoomHub 版本.json = %s（= 当前已发布版本）" % EXPECT_HUB,
+          hub_ver == EXPECT_HUB, hub_ver)
     check("release_github 缺省 Hub 版本 = 版本.json",
           rg.HUB_VERSION == hub_ver, rg.HUB_VERSION)
     check("安装包名 = LoomHub-<version>-Setup.exe",
@@ -278,7 +286,7 @@ def t_hub_version_single_source():
 
 def t_version_whitelist():
     """P-05-06: 非法 --version 必须在打包/发布前被拒，绝不写进包内元数据。"""
-    check("合法版本号通过白名单", pe.check_version('0.1.0.beta4') == '0.1.0.beta4')
+    check("合法版本号通过白名单", pe.check_version(EXPECT_ENGINE) == EXPECT_ENGINE)
     for bad in ('0.1.0-beta4', 'v0.1.0.beta4', '0.1', 'beta4'):
         try:
             pe.check_version(bad)
