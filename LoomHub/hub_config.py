@@ -273,6 +273,51 @@ def _maybe_migrate_ledger(path, legacy_path, key):
         print('[台账] 迁移失败（本次以空台账启动，旧文件保持不动）: %r' % (e,))
 
 
+def refresh_interpreters():
+    """按各目录下的 解释器.json **重新识别**已登记解释器（2026-11-09 新增）。
+
+    为什么需要：引擎目录可能被**原地替换**（源码版 -> 编译版，或换了版本），
+    而台账里记的是登记那一刻的 kind/main/main_exe。旧台账会继续声称「源码版、主程序 Loom.py」，
+    于是 Hub 显示成源码版、点开项目时去找早已不存在的 Loom.py/python —— 表现为「拉不起场景」。
+
+    返回 (刷新后的列表, 是否有变化)。目录消失/主程序缺失的条目**直接移除**（不静默留死条目）。
+    """
+    old = load_interpreters()
+    out = []
+    for it in old:
+        d = it.get('dir')
+        info = discover_interpreter(d) if d and os.path.isdir(d) else None
+        if info is not None:
+            out.append(info)                    # 目录还在且元数据有效 -> 按现状重写 kind/main
+        else:
+            keep = dict(it)
+            keep['stale'] = True                # 目录缺失/元数据不全: 保留但标记, 不静默删
+            out.append(keep)
+    changed = out != old
+    if changed:
+        try:
+            save_interpreters(out)
+            n_stale = sum(1 for x in out if x.get('stale'))
+            print('[解释器] 台账已刷新: %d 条 (失效 %d 条)' % (len(out), n_stale))
+        except OSError as e:
+            print('[解释器] 台账刷新写盘失败: %r（本次仅内存生效）' % (e,))
+    return out, changed
+
+
+def interpreter_problem(info):
+    """返回「这个解释器现在能不能用来启动」的问题描述（None = 可用）。
+
+    2026-11-09: 引擎目录被原地替换（源码版 -> 编译版）后，旧台账仍指向 Loom.py，
+    双击项目会静默失败。启动前必须显式校验并给出可执行的提示。
+    """
+    if not isinstance(info, dict):
+        return '没有解释器'
+    if info.get('stale'):
+        return ('解释器已失效（%s）：目录或主程序已不存在，'
+                '请在 Hub 里重新扫描 / 重新安装该版本' % (info.get('dir') or '<空>'))
+    return None
+
+
 def load_interpreters():
     _maybe_migrate_ledger(INTERPRETERS_FILE, LEGACY_INTERPRETERS_FILE, 'interpreters')
     data = load_json(INTERPRETERS_FILE)

@@ -43,7 +43,11 @@ class HubController:
 
     def __init__(self):
         self.install_root = cfg.DEFAULT_INSTALL_ROOT
-        self.interpreters = cfg.load_interpreters()   # 已登记解释器列表 (动作后 _refresh)
+        # 2026-11-09: 启动即按各目录的 解释器.json 重识别（引擎可能被原地替换成编译版）
+        try:
+            self.interpreters, _ = cfg.refresh_interpreters()
+        except (OSError, ValueError):
+            self.interpreters = cfg.load_interpreters()   # 已登记解释器列表 (动作后 _refresh)
         self.projects = cfg.load_projects()           # 已登记项目列表
         self.msg = ""                                 # 状态栏消息 (UI 显示)
         self.msg_level = 'ok'                         # 'ok' | 'err' | 'dim'
@@ -55,7 +59,10 @@ class HubController:
     # ---------------- 通用 ----------------
     def _refresh(self):
         """动作后重载配置列表 (UI 每帧读 self.interpreters/projects 即最新)."""
-        self.interpreters = cfg.load_interpreters()
+        try:
+            self.interpreters, _ = cfg.refresh_interpreters()
+        except (OSError, ValueError):
+            self.interpreters = cfg.load_interpreters()
         self.projects = cfg.load_projects()
         self._default_interp = cfg.default_interpreter()
 
@@ -437,6 +444,10 @@ class HubController:
         interp = cfg.default_interpreter()
         if interp is None:
             self.set_msg("还没有解释器: 请先扫描/导入/安装一个", 'err')
+            return
+        _prob = cfg.interpreter_problem(interp)
+        if _prob:
+            self.set_msg('无法启动: ' + _prob, 'err')
             return
         # 2026-08-20 安全加固 (Qoder 报告提示12): 场景路径校验 ——
         # projects.json 被篡改时避免用 --open 打开任意路径文件
