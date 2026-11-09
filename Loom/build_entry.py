@@ -238,7 +238,10 @@ def _bench_scene(scene_path, n_frames=300):
                  % (os.path.basename(scene_path), n_frames, wall))
     lines.append("FPS: %.1f  (平均帧时间 %.3f ms)" % (fps, 1000.0 / fps))
     # 2026-11-09 E1 体检口: TPS + "逻辑时钟拿到的时间/墙钟" 比值
-    # ratio≈1 = dt 口径没问题(缺口在每逻辑帧成本); ratio<1 = 时钟被欠账。
+    # ★方向更正(2026-11-09 第三轮审计 P-05-08): _clock_advance 取 max(调用方 dt, 实测墙钟),
+    #   所以 ratio 恒 >= 1(实用 1.0~1.1)。旧注释写"ratio<1 = 时钟被欠账"是反的,
+    #   ratio<1 在当前实现下结构性不可能。
+    #   ratio≈1 = 时钟拿到了全部墙钟, 缺口在每逻辑帧成本。
     try:
         _tps = float(eng.get_tps() or 0.0)
     except Exception as _e:

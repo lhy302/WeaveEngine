@@ -863,8 +863,14 @@ class GLEngine(ShadowMixin, FrameComponentMixin, PhysicsMixin, InputMixin, HudMi
 
     # ================ 脚本系统 (M27) ================
     def set_logic_paused(self, paused):
-        """2026-11-07: 统一暂停接口 (脚本/编辑器/播放器同语义)."""
+        """2026-11-07: 统一暂停接口 (脚本/编辑器/播放器同语义).
+
+        2026-11-09 P1-A: 进入暂停时清墙钟锚点 (与 toggle_logic_paused 同一口径),
+        保证恢复首帧 wall_dt=0, 不补暂停期欠账。
+        """
         self._logic_paused = bool(paused)
+        if self._logic_paused:
+            self._logic_wall_last = None
 
     def request_game_exit(self):
         """2026-11-07: 统一"退出游戏"接口.
@@ -1475,6 +1481,12 @@ class GLEngine(ShadowMixin, FrameComponentMixin, PhysicsMixin, InputMixin, HudMi
                 self._advanced_this_frame = True
                 return
             if getattr(self, '_logic_paused', False):
+                # 2026-11-09 P1-A (审计回归): 暂停期本函数不调用 _clock_advance,
+                # 若不清锚点, 恢复首帧 wall_dt = 整段停顿时长 (截 0.333s) ->
+                # 一帧连跑 9~10 步, 违反 toggle_logic_paused 里"不补暂停期欠账"
+                # 的契约。三条暂停路径 (本处 / loom_render.render / 逻辑线程)
+                # 统一在这里重新锚定。
+                self._logic_wall_last = None
                 if not getattr(self, '_step_requested', False):
                     # 暂停且无步进请求: 本渲染帧零逻辑 (世界冻结), 渲染照跑
                     self._advanced_this_frame = True
@@ -1523,6 +1535,9 @@ class GLEngine(ShadowMixin, FrameComponentMixin, PhysicsMixin, InputMixin, HudMi
         if self._logic_paused:
             # 暂停边界: 清 accumulator 余量 (恢复时从整拍开始, 不补暂停期欠账)
             self._clock.reset()
+            # 2026-11-09 P1-A: 同时清墙钟锚点 —— _clock_advance 的 wall_dt 下限
+            # 是另一个"补欠账"入口, 只 reset() 时钟不足以兑现本契约。
+            self._logic_wall_last = None
             it = getattr(self, '_interp', None)
             if it is not None:
                 it.align()
@@ -1543,7 +1558,8 @@ class GLEngine(ShadowMixin, FrameComponentMixin, PhysicsMixin, InputMixin, HudMi
         2026-11-09 E1 (beta5) 体检口, 配合 get_tps() 用:
           · ratio ≈ 1 且 TPS < 目标 → 瓶颈是**每个逻辑帧本身太贵**
             (看 _stage_times 的 logic_step / pipe_wait);
-          · ratio < 1 → 时钟没拿到全部墙钟 (调用方 dt 口径/掉帧), 先修输入。
+          · ratio 恒 >= 1（_clock_advance 取 max(调用方 dt, 实测墙钟)；ratio<1 结构性不可能）。
+          ratio≈1 → 时钟拿到了全部墙钟，缺口在每逻辑帧成本（不要再去怀疑 dt 口径）。
         返回 None = 还没采到样本。
         """
         if self._logic_wall_sum <= 1e-9:

@@ -394,6 +394,15 @@ if __name__ == "__main__":
         if not _scene:
             print('用法: python Loom.py --bench <scene.json> [帧数]')
             sys.exit(1)
+        # 2026-11-09 第三轮审计 P-05-03: 转发分支此前不复刻 build_entry 的校验 ——
+        # 场景不存在会先建窗再 ValueError traceback；帧数 0 会 ZeroDivisionError。
+        # 这里补两条，与 build_entry 的行为对齐（失败要可见、且不要先建窗）。
+        if not os.path.isfile(_scene):
+            print('[错误] 场景不存在: %s' % _scene)
+            sys.exit(1)
+        if _frames <= 0:
+            print('[错误] 帧数必须 > 0（收到 %r）' % (_frames,))
+            sys.exit(1)
         _be._bench_scene(_scene, n_frames=_frames)
         sys.exit(0)
 
