@@ -3,11 +3,11 @@
 test_release_version.py — 打包/发布链的"版本一致性"定向断言 (2026-11-08 第 5 批 D1=A)
 
 版本号策略（2026-11-09 人类裁决）:
-    代码里的版本号 = **正在开发的版本号**（当前：引擎 0.1.0.beta5 / LoomHub 0.1.3）。
+    代码里的版本号 = **正在开发的版本号**（当前：引擎 0.1.0.beta6 / LoomHub 0.1.4）。
     开发期间内部代号一直不变，**该版本线真正发包之后**才跳到下一个号（引擎 beta5 -> beta6、Hub 0.1.3 -> 0.1.4）。
     两条线独立：引擎发包只跳引擎的号，Hub 发包只跳 Hub 的号。
 包名 = 包内元数据 = tag = Loom/解释器.json = release_github 缺省；
-当前在开发: 引擎 0.1.0.beta5 / LoomHub 0.1.3（版本.json = installer.iss = release_github 缺省）。
+当前在开发: 引擎 0.1.0.beta6 / LoomHub 0.1.4（版本.json = installer.iss = release_github 缺省）。
 该版本线发包之后才跳到下一号。
 
 对应审计项: P-05-06（--version 无白名单）、P-05-07（两个工具缺省版本互相矛盾）、
@@ -78,10 +78,10 @@ import release_github as rg       # noqa: E402
 import hub_config as hcfg         # noqa: E402
 import package_hub as ph          # noqa: E402   (tools/package_hub.py: LoomHub 打包器)
 
-# 2026-11-09 版本号策略: 这两个值 = **正在开发的版本号**（当前 beta5 / 0.1.3）。该线发包后才跳下一号。
+# 2026-11-09 版本号策略: 这两个值 = **正在开发的版本号**（当前 beta6 / 0.1.4）。该线发包后才跳下一号。
 # 下次升版只改这两行（其余断言全部由它们派生）。
-EXPECT_ENGINE = '0.1.0.beta5'
-EXPECT_HUB = '0.1.3'
+EXPECT_ENGINE = '0.1.0.beta6'
+EXPECT_HUB = '0.1.4'
 
 _FAILS = []
 
