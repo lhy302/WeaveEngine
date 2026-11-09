@@ -184,20 +184,29 @@ def t_explicit_vulkan_keeps_config(tmp):
     check('B1 引擎层仍未被改（Q2）', h.engine_bytes() == before, len(before))
     check('B1 明确提示不改写配置', '不改写用户配置' in out, out.strip()[-120:])
     check('B1 只弹一次窗', len(h.dialogs) == 1, len(h.dialogs))
+    text = h.dialogs[0][1] if h.dialogs else ''
+    check('B1 弹窗含永久改 GL 的出口指引（Q7=A）',
+          'LoomHub' in text and 'render_api 改成 opengl' in text, text[-160:])
+    check('B1 日志同样含出口指引',
+          'LoomHub' in out and 'render_api 改成 opengl' in out, '')
 
 
-def t_auto_falls_back_and_persists(tmp):
-    """auto: 回退 GL 并把用户层写成 opengl（下次启动不再空试 VK）。"""
-    print('=== E. --backend auto -> GL + 落用户层 ===')
+def t_auto_falls_back_without_persist(tmp):
+    """Q7=A: auto 失败 -> 本次回退 GL，但**不写配置**（auto 本身没有偏好可持久化）。"""
+    print('=== E. --backend auto -> GL 且不落配置 ===')
     h = _Harness(tmp)
     h.install(vk=run_player.VkInitError('adapter 为空'))
+    before = h.engine_bytes()
     try:
         out, exc, ret = _capture(lambda: run_player.run_backend('auto', 'x.json'))
         user_api = h.user_api()
     finally:
         h.restore()
     check('E1 auto: 回退到 GL', exc is None and h.calls == ['vk', 'gl'], (type(exc).__name__, h.calls))
-    check('E1 auto: 用户层已写 opengl', user_api == 'opengl', user_api)
+    check('E1 auto: 不改写用户配置（Q7=A）', user_api is None, user_api)
+    check('E1 auto: 引擎层字节不变', h.engine_bytes() == before, len(before))
+    check('E1 auto: 弹窗含出口指引',
+          h.dialogs and 'LoomHub' in h.dialogs[0][1], '')
 
 
 def t_double_fault_one_dialog(tmp):
@@ -405,7 +414,7 @@ def t_engine_settings_untouched(tmp):
 def main():
     cases = (t_default_path_in_process_fallback,
              t_explicit_vulkan_keeps_config,
-             t_auto_falls_back_and_persists,
+             t_auto_falls_back_without_persist,
              t_double_fault_one_dialog,
              t_gl_only_visible_failure,
              t_loop_failure_not_swallowed,
