@@ -77,6 +77,40 @@ def _runtime_dist(dir_path):
     return None
 
 
+# ---- 构建产物形状断言 (2026-11-09 工具链升级 Nuitka 4.x) ----
+# 背景: 4.x 把 pygame 依赖 DLL 放进 dist 的 pygame/ 子目录（2.7 平铺在根），
+# 且编辑器若漏 --enable-plugin=pyside6 就缺 Qt 平台插件——体积反而更小，
+# 体积检查会误判成"变好"。所以这里用"路径存在/DLL 数量"作硬判据。
+QT_REQUIRED_PATHS = (
+    'PySide6',
+    os.path.join('PySide6', 'qt-plugins'),
+    os.path.join('PySide6', 'qt-plugins', 'platforms', 'qwindows.dll'),
+)
+PYGAME_MIN_DLLS = 15
+
+
+def editor_dist_problems(dist):
+    """编辑器 Nuitka dist 必须带 PySide6 + Qt 平台插件，返回缺失路径列表。"""
+    return [rel for rel in QT_REQUIRED_PATHS
+            if not os.path.exists(os.path.join(dist, rel))]
+
+
+def runtime_layout_problems(dist):
+    """播放器运行时 dist 的 pygame 依赖布局，返回问题列表（空=通过）。"""
+    problems = []
+    pygame_dir = os.path.join(dist, 'pygame')
+    if not os.path.isdir(pygame_dir):
+        problems.append('缺 pygame/ 子目录 (Nuitka>=4 的 DLL 布局)')
+    else:
+        dlls = [f for f in os.listdir(pygame_dir) if f.lower().endswith('.dll')]
+        if len(dlls) < PYGAME_MIN_DLLS:
+            problems.append('pygame/ 下 DLL 只有 %d 个 (要求 >=%d)'
+                            % (len(dlls), PYGAME_MIN_DLLS))
+    if os.path.isfile(os.path.join(dist, 'SDL2.dll')):
+        problems.append('SDL2.dll 仍在 dist 根 (旧布局残留)')
+    return problems
+
+
 def collect_files(src_dir):
     out = []
     for dirpath, dirnames, filenames in os.walk(src_dir):
@@ -208,6 +242,14 @@ def make_zip(version, allow_missing_runtime=False):
     _pr_src = _runtime_dist(_pr_root)
     key['slim'] = False
     if _pr_src is not None:
+        # 2026-11-09: 运行时布局硬断言（缺 pygame/ 或旧布局 -> 拒绝打包，
+        # 否则会产出"能装能跑编辑器、一做游戏就缺 SDL2.dll"的坏包）
+        _layout = runtime_layout_problems(_pr_src)
+        if _layout:
+            raise SystemExit(
+                '[错误] 播放器运行时布局不符，拒绝打包: %s\n  dist: %s\n'
+                '  处理: 用 Nuitka 4.x 重新跑 build_game.py --build-runtime'
+                % ('; '.join(_layout), _pr_src))
         _pr_dst = os.path.join(tmp_dir, 'Loom', 'player_runtime', 'game_player.dist')
         _t = time.time()
         shutil.copytree(_pr_src, _pr_dst, dirs_exist_ok=True)

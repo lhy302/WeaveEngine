@@ -24,6 +24,7 @@
 | [`research_beta6_03_animation.md`](research_beta6_03_animation.md) | 动画系统底座调研（beta6） | 现状 4 个 bug + SoA 68x + 蒙皮延后 beta7 + 状态机/事件分批 |
 | [`research_beta6_04_python_hotspots.md`](research_beta6_04_python_hotspots.md) | Python 热点下沉研判（beta6） | pipe_wait 真凶=装配层 63% + buckets 残差 + 争用 44x + AVX2 逐位验证 |
 | [`research_beta6_05_python_upgrade.md`](research_beta6_05_python_upgrade.md) | Python 版本迁移预研（beta6） | 3.13 实测可迁(−8%~−19% 纯 Python) + 3.14 仅 pygame 卡 + free-threading 不可行 |
+| [`research_beta6_06_toolchain_upgrade.md`](research_beta6_06_toolchain_upgrade.md) | 工具链升级调研（beta6 批次 0） | Nuitka 2.7.1→4.3.5 实测 + pyside6 插件静默缺插件陷阱 + VS2026/依赖矩阵 + 附录 C 实施结果 |
 
 ---
 

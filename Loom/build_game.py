@@ -132,12 +132,15 @@ def _resolve_runtime(runtime_arg):
 
 def _build_runtime():
     """Nuitka 打包玩家运行时 (game_player.py -> 玩家运行时/MyGame.exe + 运行库)."""
-    cmd = [sys.executable, '-m', 'nuitka', '--standalone', '--msvc=latest',
+    cmd = [sys.executable, '-m', 'nuitka', '--mode=standalone', '--msvc=latest',
            '--assume-yes-for-downloads', '--enable-plugin=tk-inter',
            # 2026-11-07: wgpu(Vulkan) 需要 resources/combined_header.h 等数据文件，
            # 旧构建没带 -> 打包版 Vulkan 初始化失败 (Could not find combined_header.h)。
-           '--include-package-data=wgpu', '--include-package-data=wgpu_native',
-           '--windows-disable-console',
+           # 2026-11-09 工具链升级 (Nuitka 4.3.5): wgpu_native 不是 dist 包，
+           # 4.x 会对它报 "Failed to locate package directory"，已移除（数据在 wgpu 里）。
+           '--include-package-data=wgpu',
+           # Nuitka 2.7 起 --windows-disable-console 已弃用，4.x 将删
+           '--windows-console-mode=disable',
            '--output-dir=%s' % DEFAULT_RUNTIME_DIR,
            '--output-filename=MyGame.exe',
            os.path.join(BIN_DIR, 'game_player.py')]

@@ -400,8 +400,13 @@ LoomHub = 项目管理器 ("解释器名 + Hub", 类似 Unity -> Unity Hub)。
 ====================================================================
   实际打包 (必须 MSVC + SDK, 详见《制作游戏完整流程教学.txt》第八节:
     完整命令以 代码架构/教学文档 为最终依据, 这里只记要点):
-    编辑器   py -3.12 -m nuitka --standalone --msvc=latest \
-                 --windows-console-mode=disable build_entry.py   (Loom\ 下)
+    编辑器   py -3.12 -m nuitka --mode=standalone --msvc=latest \
+                 --enable-plugin=pyside6 --windows-console-mode=disable \
+                 build_entry.py   (Loom\ 下)
+              ^^ --enable-plugin=pyside6 不能漏: 漏了 dist 里没有
+                 PySide6/qt-plugins/platforms/qwindows.dll, Loom.exe 启动即崩,
+                 而且体积反而小 ~8MB (体积检查会误判成"变好");
+                 tools/package_engine_compiled.py 会硬校验该文件。
     LoomHub  另加 --include-module=filedialog + PYTHONPATH 指向 Loom 目录
               再打 (跨目录模块被 Nuitka 静态分析漏掉, 运行时报
               ModuleNotFoundError: filedialog 的教训; 记忆

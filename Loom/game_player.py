@@ -16,8 +16,8 @@ game_player.py — 纯 Player 游戏入口 (M38, Unity Build 模型)
      → 明文场景文件直接跑.
 
 打包 (开发者, 见《制作游戏完整流程教学.txt》第八节):
-  py -3.12 -m nuitka --standalone --msvc=latest --assume-yes-for-downloads \
-    --enable-plugin=tk-inter --windows-disable-console \
+  py -3.12 -m nuitka --mode=standalone --msvc=latest --assume-yes-for-downloads \
+    --enable-plugin=tk-inter --windows-console-mode=disable \
     --output-dir=Game --output-filename=MyGame.exe game_player.py
 分发: exe + 游戏包.lsc 放一个文件夹 (二者不可分离).
 """
@@ -183,7 +183,7 @@ def _run_backend_safe(backend, scene=None, explicit=False, **kw):
     """发布链最后防线: 渲染后端启动失败时醒目告警并回退 OpenGL.
 
     2026-11-06 R-06 (复核 B 指出): 发布链原来直接 run_backend(), 没有任何兜底;
-    打包版是 --windows-disable-console, Vulkan 初始化失败 (无 Vk 驱动/虚拟机/
+    打包版是 --windows-console-mode=disable, Vulkan 初始化失败 (无 Vk 驱动/虚拟机/
     远程桌面) 时用户只看到"双击没反应"。
 
     2026-11-07 (P-10 + Q6): 分工改成 ——

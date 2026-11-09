@@ -77,11 +77,25 @@ def main():
     if not os.path.isfile(args.builder_exe):
         _fail('--builder-exe 不存在: %s' % args.builder_exe)
 
+    # 2026-11-09 工具链升级: 编辑器 dist 必须带 PySide6 + Qt 平台插件。
+    # 漏 --enable-plugin=pyside6 时 dist 体积反而小 ~8MB（体积检查会误判成变好），
+    # 所以这里用"路径存在"作硬判据，缺一个就拒绝打包。
+    _bad = PE.editor_dist_problems(args.editor_dist)
+    if _bad:
+        _fail('编辑器 dist 缺 Qt 依赖: %s\n'
+              '  Nuitka 构建必须显式带 --enable-plugin=pyside6（漏了 Loom.exe 启动即崩）\n'
+              '  dist: %s' % (', '.join(_bad), args.editor_dist))
+
     runtime = PE._runtime_dist(os.path.join(ENGINE_DIR, 'player_runtime'))
     if runtime is None and not args.allow_missing_runtime:
         _fail('缺预置播放器运行时（player_runtime/game_player.dist）；'
               '显式传 --allow-missing-runtime 才允许出不带运行时的精简探针包')
     slim = runtime is None
+    if runtime is not None:
+        _bad = PE.runtime_layout_problems(runtime)
+        if _bad:
+            _fail('播放器运行时布局不符: %s\n  dist: %s'
+                  % ('; '.join(_bad), runtime))
 
     tmp = os.path.join(DIST_DIR, '_compiled_tmp_%s' % version)
     if os.path.isdir(tmp):

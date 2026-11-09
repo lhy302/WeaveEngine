@@ -216,7 +216,7 @@ def _bench_scene(scene_path, n_frames=300):
     """场景基准 (2026-09-02, 编译版测速用): 加载场景 -> 预热 -> GC 冻结 ->
     测量窗口逐帧 render -> 汇总 FPS/帧稳定性/逐阶段耗时.
     口径与 tests/_tmp/stress_probe.py 一致 (关 vsync, dt=1/120, LOOM_PROFILE=1),
-    但结果同时写用户目录 bench/bench_result.txt (编译版 --windows-disable-console 无 stdout,
+    但结果同时写用户目录 bench/bench_result.txt (编译版 --windows-console-mode=disable 无 stdout,
     靠文件收结果; 路径相对 exe/脚本工作目录)."""
     import time
     os.environ.setdefault('LOOM_PROFILE', '1')   # 逐阶段计时 (render 内插桩)
