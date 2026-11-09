@@ -37,6 +37,42 @@ from matlib import mat4_perspective, mat4_ortho, mat4_view_yaw_pitch
 from loom_game_object import GameObject
 
 
+# ============ 2026-11-09 C5=B: 上屏健康计数 (GL/VK 的唯一实现) ============
+class PresentHealth:
+    """上屏失败计数与降级判据 —— 阈值/语义只在这里定义, GL 与 VK **共用**。
+
+    口径: 连续失败达阈值 -> should_fallback() 为真（建议改走离屏回读）;
+          任意一次成功即把连续失败清零; last_error 供提示/落盘。
+    """
+    DEFAULT_THRESHOLD = 3
+
+    def __init__(self, threshold=None):
+        self.threshold = int(threshold if threshold is not None
+                             else self.DEFAULT_THRESHOLD)
+        self.ok_count = 0
+        self.fail_streak = 0
+        self.fail_total = 0
+        self.last_error = None
+
+    def note_ok(self):
+        self.ok_count += 1
+        self.fail_streak = 0
+
+    def note_fail(self, reason):
+        self.fail_streak += 1
+        self.fail_total += 1
+        self.last_error = str(reason)
+
+    def should_fallback(self, threshold=None):
+        n = int(threshold if threshold is not None else self.threshold)
+        return self.fail_streak >= n
+
+    def snapshot(self):
+        return {'ok_count': self.ok_count, 'fail_streak': self.fail_streak,
+                'fail_total': self.fail_total, 'last_error': self.last_error,
+                'threshold': self.threshold}
+
+
 class RenderMixin:
     def _sky_warn(self, tag, msg):
         """天空盒相关告警每条只打一次（失败必须可见, 但不刷屏）。"""
@@ -76,6 +112,17 @@ class RenderMixin:
             self._sky_warn('effective', '取生效天空盒失败 (%r)' % (e,))
             cube = getattr(self, '_skybox', None)
         if cube is None:
+            return
+        # 2026-11-09 A5=A: 统一错误模型 —— 无效 cubemap（缺面/尺寸不一致/空）**拒绝绘制**,
+        # 告警一次并把结论写回 _skybox_valid/_skybox_error（skybox_get 可见）。
+        try:
+            _ok, _why = cube.validate()
+        except Exception as e:
+            _ok, _why = False, repr(e)
+        if not _ok:
+            if hasattr(self, '_skybox_valid'):
+                self._skybox_valid, self._skybox_error = False, _why
+            self._sky_warn('invalid', 'cubemap 无效 (%s) -> 不绘制（本局只报一次）' % (_why,))
             return
         # P-04: 哨兵与"生效天空盒对象"绑定 —— 换天空盒/场景即复位并重试一次
         if getattr(self, '_sky_prog_for', None) is not cube:
@@ -122,6 +169,8 @@ class RenderMixin:
             cube.ensure_gl(self.ctx)
             cube.use(0)
         except Exception as e:
+            if hasattr(self, '_skybox_valid'):
+                self._skybox_valid, self._skybox_error = False, 'GL 纹理创建/绑定失败: %r' % (e,)
             self._sky_warn('bind', 'uniform/纹理绑定失败 (%r), 本帧跳过' % (e,))
             return
         # 旧状态读取必须容错: 探针/桩 Context 可能没有 depth_mask（旧实现就是拿默认值）
@@ -954,23 +1003,27 @@ class RenderMixin:
         except Exception as e:
             ok = False
             err = repr(e)
+        ph = self._present_guard()
         if ok:
-            self._present_fail_streak = 0
-            self._present_ok_count = getattr(self, '_present_ok_count', 0) + 1
+            ph.note_ok()
         else:
-            self._present_fail_streak = getattr(self, '_present_fail_streak', 0) + 1
-            self._present_last_error = err
+            ph.note_fail(err)
             if not getattr(self, '_present_fail_logged', False):
                 self._present_fail_logged = True
                 print('[present] 原生上屏失败 (%s) —— 连续失败达阈值即建议切离屏回读'
                       ' (LOOM_REMOTE_MODE=1 或 Hub 设置 remote_mode=on)' % (err,))
         return ok
 
+    def _present_guard(self):
+        """惰性建共享计数器 (C5=B: GL/VK 同一实现, 阈值不在各后端复制)。"""
+        ph = getattr(self, '_present_health', None)
+        if ph is None:
+            ph = self._present_health = PresentHealth()
+        return ph
+
     def present_health(self):
-        """上屏健康快照 (E2 判据/诊断用)。"""
-        return {'ok_count': getattr(self, '_present_ok_count', 0),
-                'fail_streak': getattr(self, '_present_fail_streak', 0),
-                'last_error': getattr(self, '_present_last_error', None)}
+        """上屏健康快照 (E2/C5 判据/诊断用)。"""
+        return self._present_guard().snapshot()
 
     def should_fallback_remote(self, threshold=3):
         """连续上屏失败 >= threshold -> 建议改走离屏回读 (remote-mode)。
@@ -978,7 +1031,7 @@ class RenderMixin:
         只给**判据**, 不自行切换: 离屏回读需要 Qt 宿主进程, 由入口层 (Loom.py / Hub)
         决定重启为 remote 模式 (口径见版本计划 E2: 先试原生, 失败才降级)。
         """
-        return getattr(self, '_present_fail_streak', 0) >= int(threshold)
+        return self._present_guard().should_fallback(threshold)
 
 
     # ================ 主循环 ================

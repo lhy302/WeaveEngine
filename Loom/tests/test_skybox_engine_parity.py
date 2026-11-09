@@ -150,10 +150,116 @@ def _gl_engine_with_base(scene_path, data):
     return eng
 
 
+def t_a5_invalid_cubemap():
+    """A5=A: 无效 cubemap 统一错误模型 —— 拒绝 + 告警一次 + 不画, 不抛到渲染循环。"""
+    print("=== D. 无效 cubemap (A5=A) ===")
+    import numpy as np
+    from loom_cubemap import Cubemap
+    arr = np.zeros((2, 2, 4), dtype=np.uint8)
+    bad_faces = Cubemap(2, faces=[arr.copy(), arr.copy()])      # 只有 2 面
+    ok, why = bad_faces.validate()
+    check('缺面(<6) -> validate False 且有原因', ok is False and bool(why), why)
+    raised = None
+    try:
+        bad_faces.ensure_gl(_gl_engine(_scene()).ctx)           # 建纹理前必须拒绝
+    except ValueError as e:
+        raised = e
+    check('缺面 -> ensure_gl 抛 ValueError (不再画 1x1 白)', raised is not None, raised)
+    # GL 渲染路径: 注入无效 cubemap 后绘制不得抛、且把结论写回 valid/error
+    eng = _gl_engine(_scene())
+    eng._skybox = bad_faces
+    eng._skybox_valid = True
+    thrown = None
+    try:
+        eng._draw_skybox()
+    except BaseException as e:
+        thrown = e
+    check('GL: 无效天空盒不抛到渲染循环', thrown is None, thrown)
+    check('GL: _skybox_valid=False 且 _skybox_error 有原因',
+          getattr(eng, '_skybox_valid', None) is False
+          and bool(getattr(eng, '_skybox_error', None)),
+          getattr(eng, '_skybox_error', None))
+
+
+def t_a6_camera_identity():
+    """A6=A: 相机级 skybox 按身份配对；非法段不得把别人的颜色给激活相机。"""
+    print("=== E. 相机级 skybox 按身份配对 (A6=A) ===")
+    red = {'solid_color': [200, 0, 0, 255], 'name': 'red'}
+    # 场景: c1 有红色天空盒, 第 2 段非法 -> build_cameras 只建 1 个相机
+    scn = _scene(with_cams=False)
+    scn['cameras'] = [{'id': 'c1', 'name': 'c1', 'position': [0, 1, 0],
+                       'yaw': 0.0, 'pitch': 0.0, 'skybox': red},
+                      'not-a-dict']
+    scn['active_camera'] = 'c1'
+    d = _vk_driver(scn)
+    check('VK: 按 id 配对 -> c1 拿到自己的红色天空盒',
+          len(d.cameras) == 1 and d.cameras[0].skybox is not None
+          and tuple(d.cameras[0].skybox._solid_color) == (200, 0, 0, 255),
+          None if not d.cameras or d.cameras[0].skybox is None
+          else d.cameras[0].skybox._solid_color)
+    # 激活相机改成不存在的 c2 -> 不得拿到 c1 的红色 (宁可不画)
+    scn2 = dict(scn)
+    scn2['active_camera'] = 'c2'
+    d2 = _vk_driver(scn2)
+    eff = d2.effective_skybox()
+    is_red = (eff is not None
+              and tuple(getattr(eff, '_solid_color', ())) == (200, 0, 0, 255))
+    check('VK: 激活 c2(不存在) 时不得拿到 c1 的 skybox', not is_red,
+          None if eff is None else getattr(eff, '_solid_color', None))
+
+
+def t_c5_present_health():
+    """C5=B: GL/VK 共用同一上屏健康实现; 连续 3 次失败 -> 建议降级, 成功一次清零。"""
+    print("=== F. 上屏健康判据 (C5=B) ===")
+    import loom_render
+    import vk_renderer
+    import vk_player
+    ph = loom_render.PresentHealth()
+    for i in range(3):
+        ph.note_fail('模拟失败 %d' % i)
+    check('PresentHealth: 连续 3 次失败 -> should_fallback(3) 为真',
+          ph.should_fallback(3) is True, ph.snapshot())
+    ph.note_ok()
+    check('PresentHealth: 成功一次后计数清零 -> 不再建议降级',
+          ph.fail_streak == 0 and ph.should_fallback(3) is False, ph.snapshot())
+    check('VK 侧复用同一实现 (不是复制阈值)',
+          getattr(vk_renderer, '_PresentHealth', None) is loom_render.PresentHealth)
+    # 包装层: vk_player.should_fallback_remote 走渲染器实例 (注入桩验证语义)
+    class _R:
+        def __init__(self):
+            self.h = loom_render.PresentHealth()
+
+        def present_health(self):
+            return self.h.snapshot()
+
+        def should_fallback_remote(self, threshold=None):
+            return self.h.should_fallback(threshold)
+
+    r = _R()
+    old = list(vk_player._LAST_RENDERER)
+    vk_player._LAST_RENDERER[0] = r
+    try:
+        for i in range(3):
+            r.h.note_fail('present fail %d' % i)
+        check('vk_player.should_fallback_remote(): 3 次失败为真',
+              vk_player.should_fallback_remote(3) is True)
+        check('vk_player.present_health(): 带 fail_streak/last_error',
+              (vk_player.present_health() or {}).get('fail_streak') == 3,
+              vk_player.present_health())
+        r.h.note_ok()
+        check('成功一次后 vk_player 判据回到 False',
+              vk_player.should_fallback_remote(3) is False)
+    finally:
+        vk_player._LAST_RENDERER[0] = old[0] if old else None
+
+
 def main():
     t_default_blue()
     t_camera_priority()
     t_relative_paths_from_other_cwd()
+    t_a5_invalid_cubemap()
+    t_a6_camera_identity()
+    t_c5_present_health()
     print('=' * 56)
     if _fails:
         print('有 FAIL:', _fails)

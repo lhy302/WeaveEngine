@@ -29,7 +29,14 @@ from collections import OrderedDict
 
 import numpy as np
 
-from loom_shaders import CLEAR_COLOR_RGBA   # 2026-11-09 Q2=A: 清屏底色唯一来源
+from loom_shaders import CLEAR_COLOR_RGBA   # 2026-11-09 Q2=A
+# 2026-11-09 C5=B: 上屏健康计数**唯一实现**在 loom_render.PresentHealth（阈值不复制）
+try:
+    from loom_render import PresentHealth as _PresentHealth
+except Exception as _ph_e:      # 不能静默: 退化成"没有降级判据"必须可见
+    _PresentHealth = None
+    print('[vk] 上屏健康计数器不可用 (%r) -> present_health/should_fallback_remote 将报错'
+          % (_ph_e,))
 
 import wgpu
 
@@ -691,6 +698,9 @@ class VkRenderer:
         self._sky_tex = None
         self._sky_cube_key = None
         self._sky_sampler = None
+        # 2026-11-09 C5=B: 上屏健康（与 GL 共用 loom_render.PresentHealth —— 阈值不复制）
+        self._present_health = None      # 惰性建 (见 _present_guard)
+        self._present_err_logged = False
         # 2026-11-06 Canvas UI / HUD (与 GL 对齐): 独立管线 + 独立 bind group,
         # 不与其他组混用 (本机驱动对多组组合有死锁史)
         self._ui_pipe = None        # VkUIPipeline (纹理/采样器/白纹理/顶点缓冲)
@@ -998,7 +1008,37 @@ class VkRenderer:
         self._sky_cube_key = key
         return True
 
-    def _draw_sky(self, ctx, rp, vp, camera_pos, cube, w, h, tint=None):
+    # ---------------- 2026-11-09 C5=B: 上屏健康 (与 GL 同语义) ----------------
+    def _present_guard(self):
+        """惰性建共享计数器（唯一实现在 loom_render.PresentHealth）。"""
+        if self._present_health is None:
+            if _PresentHealth is None:
+                raise RuntimeError('上屏健康计数器不可用 (loom_render.PresentHealth 导入失败)')
+            self._present_health = _PresentHealth()
+        return self._present_health
+
+    def present_health(self):
+        """上屏健康快照（GL 同名字段/同语义）。"""
+        return self._present_guard().snapshot()
+
+    def should_fallback_remote(self, threshold=None):
+        """连续上屏失败达阈值 -> 建议改走离屏回读（GL 同判据/同阈值）。"""
+        return self._present_guard().should_fallback(threshold)
+
+    def _draw_sky(self, ctx, rp, vp, camera_pos, cube, w, h, tint=None, engine=None):
+        # 2026-11-09 A5=A: 与 GL 统一错误模型 —— 无效 cubemap 拒绝绘制、告警一次、
+        # 绝不把 IndexError 之类逃逸到 vk_player 的渲染循环。
+        try:
+            _ok, _why = cube.validate()
+        except Exception as e:
+            _ok, _why = False, repr(e)
+        if not _ok:
+            if engine is not None and hasattr(engine, '_skybox_valid'):
+                engine._skybox_valid, engine._skybox_error = False, _why
+            if not getattr(self, '_sky_invalid_logged', False):
+                self._sky_invalid_logged = True
+                print('[vk] skybox 无效 (%s) -> 不绘制（本局只报一次）' % (_why,))
+            return False
         if not self._ensure_sky(cube):
             return False
         try:
@@ -1958,7 +1998,16 @@ class VkRenderer:
                 size=(w, h, 1), usage=wgpu.TextureUsage.RENDER_ATTACHMENT,
                 format='depth32float')
             self._depth = ((w, h), tex.create_view())
-        view = ctx.get_current_texture().create_view()
+        # 2026-11-09 C5=B: 上屏健康 —— 取交换链纹理失败(超时/outdated/设备丢失)计入连续失败,
+        # 跳过本帧(不抛), 达到阈值后由 vk_player/Loom 的 auto 判据降级为离屏回读。
+        try:
+            view = ctx.get_current_texture().create_view()
+        except Exception as _e:
+            self._present_guard().note_fail('取交换链纹理失败: %r' % (_e,))
+            if not getattr(self, '_present_err_logged', False):
+                self._present_err_logged = True
+                print('[vk] 上屏失败 (本局只报一次, 本帧跳过):', repr(_e))
+            return
         enc = d.create_command_encoder()
         rp = enc.begin_render_pass(color_attachments=[{
             'view': view, 'load_op': wgpu.LoadOp.clear,
@@ -1985,7 +2034,8 @@ class VkRenderer:
                     print('[vk] 取生效天空盒失败 (改用上层传入值):', repr(e))
         if sky is not None:
             try:
-                if self._draw_sky(ctx, rp, vp, camera_pos, sky, w, h, tint=_tint):
+                if self._draw_sky(ctx, rp, vp, camera_pos, sky, w, h, tint=_tint,
+                                  engine=engine):
                     pass
             except Exception as e:
                 if not getattr(self, '_sky_err_logged', False):
@@ -2011,6 +2061,13 @@ class VkRenderer:
                 print('[vk] world Canvas quad 绘制失败 (跳过):', repr(e))
         rp.end()
         d.queue.submit([enc.finish()])
+        # 2026-11-09 C5=B: 主 pass 提交成功 -> 记一次上屏成功（连续失败清零）
+        try:
+            self._present_guard().note_ok()
+        except Exception as e:
+            if not getattr(self, '_present_ok_err_logged', False):
+                self._present_ok_err_logged = True
+                print('[vk] 上屏健康记账失败 (%r)' % (e,))
         # ---- 2026-11-06 Canvas UI / HUD 叠加 pass (load_op=load, 无深度) ----
         # 顺序与 GL 一致: HUD 文本先, UI 元素树后 (loom_render.render 的
         # _draw_hud() -> ui.draw_all() 次序); 独立 pass/管线, 不与 3D 组混绑。

@@ -212,6 +212,32 @@ def _unlock_poll_fn(driver):
         pass
     return fn
 
+# 2026-11-09 C5=B: 上屏健康 (与 GL 同一计数器实现) —— 供 vk_player/Loom/run_player 查询
+_LAST_RENDERER = [None]
+LAST_FALLBACK_REQUESTED = [False]     # 达到阈值后置位, 由 run_player 负责降级一次
+
+
+def _remote_auto():
+    """LOOM_REMOTE_MODE=auto 时, 本进程负责上屏健康自检与降级请求。"""
+    return (os.environ.get('LOOM_REMOTE_MODE') or '').strip().lower() == 'auto'
+
+
+def present_health():
+    """最近一帧的上屏健康快照 (无渲染器时返回 None)。"""
+    r = _LAST_RENDERER[0]
+    if r is None or not hasattr(r, 'present_health'):
+        return None
+    return r.present_health()
+
+
+def should_fallback_remote(threshold=None):
+    """连续上屏失败是否达阈值 (与 GL 同语义/同阈值)。"""
+    r = _LAST_RENDERER[0]
+    if r is None or not hasattr(r, 'should_fallback_remote'):
+        return False
+    return bool(r.should_fallback_remote(threshold))
+
+
 def poll_unlock_frame(driver):
     """渲染帧的解锁键采样（D6=A：「解锁鼠标」动作归引擎独占）。
 
@@ -332,6 +358,7 @@ def run_vk(scene=None, frames_n=None, keep=False, mini=False, no_shadow=False,
         print("设备:", adapter.info['device'], "| format:", fmt)
 
         renderer = VkRenderer(device, fmt, stage=stage)
+        _LAST_RENDERER[0] = renderer    # C5: 供 present_health()/should_fallback_remote() 查询
     except BaseException as _ie:      # 初始化段 (交换链/shader/pipeline) —— 可回退
         if isinstance(_ie, (KeyboardInterrupt, SystemExit)):
             raise
@@ -580,6 +607,18 @@ def run_vk(scene=None, frames_n=None, keep=False, mini=False, no_shadow=False,
                     _hud = _vkui.hud_lines_from_driver(driver)
                 except Exception:
                     _hud = None
+            # 2026-11-09 C5=B: auto 模式下连续上屏失败 -> 主动结束原生循环, 由 run_player 降级
+            if (_remote_auto() and not LAST_FALLBACK_REQUESTED[0]
+                    and renderer.should_fallback_remote()):
+                h = renderer.present_health()
+                LAST_FALLBACK_REQUESTED[0] = True
+                print('[vk] 原生上屏连续失败 %s 次 (最近错误: %r) -> 请求降级为离屏回读'
+                      % (h.get('fail_streak'), h.get('last_error')))
+                try:
+                    canvas.close()
+                except Exception as e:
+                    print('[vk] 降级时关窗失败 (%r)' % (e,))
+                return
             renderer.draw_frame(ctx, driver.models, driver.lights, vp, cam_pos,
                                 engine=driver,
                                 interp=getattr(driver, '_interp', None),

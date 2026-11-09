@@ -595,16 +595,37 @@ class SceneDriver:
         # (先建相机, 物体建好后再连父) —— 顺序影响不到本函数 (父链只改 parent 指针).
         self.cameras = build_cameras(data)
         # 2026-11-09 Q3=A: 相机级 skybox（与 sceneio._apply_cameras 同口径、同 base_dir）
+        # 2026-11-09 A6=A: 按**身份**(id/guid)配对, 不按下标 —— build_cameras 会跳过非 dict 段,
+        # 按下标配对会把"别人的颜色"塞给激活相机(错色比不画更糟); 数量不匹配时明确告警,
+        # 未匹配到的相机不配 skybox（宁可不画）。
         try:
             import sceneio as _sio3
             _cams_d = data.get('cameras') or []
-            for _i, _c in enumerate(self.cameras):
-                _cd = _cams_d[_i] if _i < len(_cams_d) else None
-                _raw = _cd.get('skybox') if isinstance(_cd, dict) else None
+            _by_id = {}
+            _bad = 0
+            for _cd in _cams_d:
+                if isinstance(_cd, dict) and _cd.get('id'):
+                    _by_id[str(_cd['id'])] = _cd
+                else:
+                    _bad += 1
+            if _bad:
+                print('[驱动] 相机段有 %d 个非法/无 id 条目 -> 这些条目不参与配对' % (_bad,))
+            _unmatched = 0
+            for _c in self.cameras:
+                _cd = _by_id.get(str(getattr(_c, 'guid', '') or ''))
+                if _cd is None:
+                    _unmatched += 1
+                    _c.skybox = None
+                    _c._skybox_valid = False
+                    _c._skybox_error = '相机无 id 或未匹配到场景相机段（按身份配对, 不猜）'
+                    continue
+                _raw = _cd.get('skybox')
                 _cube, _v, _r = _sio3.skybox_from_dict(_raw, base_dir)
                 _c.skybox = _cube
                 _c._skybox_valid = bool(_v)
                 _c._skybox_error = _r
+            if _unmatched:
+                print('[驱动] %d 个相机未按身份匹配到场景段 -> 不配 skybox' % (_unmatched,))
         except Exception as e:
             print('[驱动] 相机天空盒解析失败 (%r) -> 该相机沿用场景级' % (e,))
         link_camera_parents(self.cameras, data.get('cameras'), self.models)

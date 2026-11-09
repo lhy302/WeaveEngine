@@ -232,6 +232,28 @@ def _handle_vk_init_failure(exc, explicit):
     raise SystemExit(1)
 
 
+def _maybe_remote_fallback(scene):
+    """C5=B: VK 侧上屏连续失败时, 由本层做**一次**远程回读降级（与 Loom.py 同语义）。
+
+    只在 LOOM_REMOTE_MODE=auto 且存在明文场景路径时生效（游戏包 dict 模式没法重启进程）。
+    """
+    try:
+        if (os.environ.get('LOOM_REMOTE_MODE') or '').strip().lower() != 'auto':
+            return False
+        import vk_player
+        if not vk_player.LAST_FALLBACK_REQUESTED[0]:
+            return False
+        if not scene or not os.path.exists(scene):
+            print('[run_player] VK 上屏失败, 但当前为游戏包/无路径模式 -> 无法重启为远程回读')
+            return False
+        from loom_player_window import run_player_window
+        run_player_window(scene)
+        return True
+    except Exception as e:
+        print('[run_player] 远程回读降级失败 (%r)' % (e,))
+        return False
+
+
 def run_backend(api, scene=None, explicit=False, **kw):
     """按 api 启动播放器 (阻塞). api == 'auto' 时先 Vk 后回退 GL.
     kw 支持 scene_data= (游戏包 dict 模式) / title= / width= / height=.
@@ -247,7 +269,9 @@ def run_backend(api, scene=None, explicit=False, **kw):
             return _run_opengl(scene, **kw)
     if api == 'vulkan':
         try:
-            return _run_vulkan(scene, **kw)
+            _ret = _run_vulkan(scene, **kw)
+            _maybe_remote_fallback(scene)
+            return _ret
         except Exception as e:
             # 只把**初始化段**当可回退信号（VkRunError / 其它异常原样上抛）
             if isinstance(e, VkInitError) or _is_vk_error(e, _VK_SEG_INIT):

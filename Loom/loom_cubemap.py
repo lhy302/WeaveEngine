@@ -152,6 +152,33 @@ class Cubemap:
             self._gl_ctx_ref = None
         self._gl_ctx_id = id(ctx)
 
+    def validate(self):
+        """2026-11-09 A5=A: 渲染前的**统一**校验 -> (ok, reason)。
+
+        缺面(<6)、尺寸不一致、空数据一律拒绝（不画 + 告警一次 + 不抛到渲染循环）;
+        GL/VK 两侧共用本方法，避免"GL 画全白 / VK 静默不画"两套错误模型。
+        """
+        faces = getattr(self, '_faces', None)
+        if not faces:
+            return False, 'cubemap 没有数据 (缺面)'
+        if len(faces) != 6:
+            return False, 'cubemap 需要 6 个面, 实际 %d 个' % (len(faces),)
+        try:
+            size = int(self.size)
+        except (TypeError, ValueError):
+            return False, 'cubemap size 非法: %r' % (getattr(self, 'size', None),)
+        if size <= 0:
+            return False, 'cubemap size 非法: %r' % (size,)
+        for i, f in enumerate(faces):
+            try:
+                h, w = int(f.shape[0]), int(f.shape[1])
+            except (AttributeError, IndexError, TypeError, ValueError):
+                return False, '第 %d 面不是 (h,w,4) 数组' % (i,)
+            if (h, w) != (size, size):
+                return False, '第 %d 面尺寸 %dx%d != %dx%d' % (i, h, w, size, size)
+        return True, None
+
+
     def ensure_gl(self, ctx):
         """在 ctx 上创建 cubemap GPU 纹理（含 mipmap）。已有则直接返回。
 
@@ -161,10 +188,12 @@ class Cubemap:
             if self._same_ctx(ctx):
                 return self._gl_tex
             self.release()                 # 换上下文: 释放旧纹理, 再重建
+        # 2026-11-09 A5=A: **删掉 1x1 白兜底** —— 无效 cubemap 一律拒绝并抛给调用方
+        # （渲染端会 catch 成"告警一次 + 本帧不画"），不再画一片全白骗人。
+        _ok, _why = self.validate()
+        if not _ok:
+            raise ValueError('cubemap 无效: %s' % (_why,))
         faces = self._faces
-        if not faces:
-            faces = [np.full((1, 1, 4), 255, dtype=np.uint8) for _ in range(6)]
-            self.size = 1
         tex = ctx.texture_cube((self.size, self.size), 4, dtype='f1')
         for i, f in enumerate(faces[:6]):
             tex.write(i, np.ascontiguousarray(f).tobytes())
