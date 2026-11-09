@@ -1458,3 +1458,152 @@ package_hub.load_version() 仍是 0.1.2，两条链静默分叉。
 - `--require-tests` 默认仍关闭，待主审合并后统一切换。
 - 打包链产物 LoomHub-0.1.3-Setup.exe 用的是**当前 build_hub 内的旧 exe**（只验证安装器脚本可编译）；
   正式打包需先 `python tools/package_hub.py --version 0.1.3` 重编 PyInstaller 产物。
+
+---
+
+## 11. 0.1.3 内修：默认引擎切换被擦 + 无法用非默认引擎打开项目（2026-11-09）
+
+> 版本号不变（仍 0.1.3），修好后可覆盖打包 + 覆盖安装；未发布。
+
+### 11.1 Bug1：refresh_interpreters 擦掉 default 标记
+
+- 根因：`hub_config.refresh_interpreters()` 里 `info = discover_interpreter(d)` 只从 解释器.json 取
+  name/version/kind/main，**天生没有 `default` 键**，旧实现直接 `out.append(info)`；
+  而 `HubController.set_default()` 是「先写 default → 再 `_refresh()` → 再 refresh 台账」，于是刚写下的标记立刻被自己擦掉，
+  UI 永远看不到 ★，`default_interpreter()` 退回「取第一条」。现场台账两条 beta4/beta5 都没有 `default` 字段即此故。
+- 修：refresh 时若旧条目 `default` 为真则给新 info 补上（并清掉旧 `stale`）。
+
+### 11.2 Bug2：open_project 写死默认解释器
+
+- 根因：`open_project(project)` 第一行就是 `interp = cfg.default_interpreter()`，多版本并存时无法用别的引擎打开项目。
+- 修：`open_project(project, interp=None)`；未显式传时走新的 `interp_for_project(project)`：
+  ① `project['engine_dir']` == 解释器目录 → 用它；② `engine_dir` == 解释器目录的父目录（`Projects/` 在 `<引擎根>/` 下的常见形态）→ 用它；
+  ③ 都不命中 → 回退默认。项目因此「记得自己用哪个引擎版本」。
+
+### 11.3 UI 入口（只在 controller 有 API 等于没修）
+
+- `hub_view_tk.py`（官方 TkHubView）：解释器区新增按钮「用选中引擎打开项目」→ `ctrl.open_project(proj, interp=选中)`；
+  项目双击仍走归属规则（engine_dir > 默认）。
+- `GUI/NovaHubGUI.py`：同样新增按钮与方法，并把说明改成「用项目归属引擎启动；归属不明时用默认引擎」。
+- `ColorHubGUI` 继承 TkHubView，自动获得该入口。
+
+### 11.4 验收（实跑）
+
+    python tests/test_hub_interp_switch.py  exit=0 FAIL=0  （15 条）
+      PASS ① set_default 后 refresh，b 仍是默认 / a 未被误标 / 连续两次 refresh 稳定 / stale 不残留
+      PASS ② default_interpreter() 返回 b（不是列表第一条）
+      PASS ③ 显式 interp=a：命令主程序来自 a，不含 b 的路径，仍带 --open + 场景
+      PASS ④ engine_dir == a 目录 -> 用 a；engine_dir == a 父目录 -> 用 a；无匹配 -> 回退默认 b；无字段 -> 回退默认
+      PASS TkHubView / NovaHubGUI 都有「用选中引擎打开项目」入口；controller.open_project 支持 interp 参数
+    python tests/test_hub.py            exit=0 FAIL=0
+    python tests/test_hub_controller.py exit=0 FAIL=0
+    python tests/test_hub_eai.py        exit=0 FAIL=0
+
+### 11.5 剩余 / 交接
+
+- 手工验证（装两版本 → 设默认 beta5 → 关掉重开仍 beta5）由主审在实机做；本轮未改真实台账。
+- 真实台账 `%LOCALAPPDATA%\Loom\hub\interpreters.json` 里现有两条（beta4/beta5）都没有 default，
+  下次在 UI 点一次「设为默认」即可写入并持久（本修复后不会再被刷新擦掉）。
+
+---
+
+## 12. 0.1.3 内修（再次）：引擎选择交互重做（exportselection + 当前引擎缓存）
+
+> 人类实测反馈：选项目后按「用选中引擎打开项目」提示选引擎；选完引擎又提示选项目；先选引擎再选项目再按，仍提示选引擎。
+> 结论是**实现问题**不是用户误操作。版本号仍 0.1.3，未发布。
+
+### 12.1 根因（两处）
+
+1. **Tk Listbox 默认 `exportselection=1`**：在另一个 Listbox 里选中会清掉前一个的选中 —— 「引擎 + 项目同时选中」物理上不可能。
+   反射实测：`Listbox().cget('exportselection')` = 1；`Listbox(exportselection=False)` = 0。
+2. 旧实现依赖两个 Listbox 同时有选中，且没有任何缓存。
+
+### 12.2 改动
+
+| 文件 | 内容 |
+|---|---|
+| hub_controller.py | 新增 `current_interp`（内存缓存，不落盘）/ `set_current_interp()` / `current_interp_cached()`（校验仍登记且未 stale，否则 None）/ `current_interp_or_default()`；`_refresh()` 后缓存按 dir 续命，条目被移除即清空；`open_project` 优先级写进 docstring 并实现：**显式 interp > 缓存当前引擎 > 项目 engine_dir > 默认引擎** |
+| hub_view_tk.py | 两个 Listbox 都 `exportselection=False`；左侧新增按钮「选为当前引擎」+ 状态行「当前引擎: 未选（将用默认）」；「用选中引擎打开项目」从左侧移到右侧项目按钮组并改名「用当前引擎打开」（读缓存，不再要求同时选中）；`_refresh_lists` 每轮更新状态行 |
+| GUI/NovaHubGUI.py | 同步：「选为当前引擎」+ 当前引擎状态行 + 项目区「用当前引擎打开」；说明文案改为「双击项目 = 归属引擎(不明则默认)；用当前引擎打开 = 左侧选定的当前引擎」 |
+| tests | 新增 `test_hub_interp_cache.py`（19 条）；`test_hub_interp_switch.py` 的 UI 断言改到新文案 |
+
+### 12.3 验收（实跑）
+
+    python tests/test_hub_interp_cache.py  exit=0 FAIL=0
+      ① set_current_interp(b) 后 refresh_interpreters()/_refresh() 仍指向 b；与 ★ 默认互不影响；条目移除后缓存自动清空
+      ② 有缓存时 open_project 用 b（压过 project.engine_dir=a）；显式传入 a 时压过缓存
+      ③ 缓存为空 -> project.engine_dir(a) -> 无匹配回退默认(b)；current_interp_or_default() 给默认
+      ④ TkHubView 两处 Listbox exportselection=False（源码 + 反射：默认 1 / 显式 False 生效）；NovaHubGUI 同
+      ⑤ 「选为当前引擎」在左侧面板（right 之前）、「用当前引擎打开」在右侧面板（right 之后）、状态行文案存在；NovaHubGUI 同步
+    python tests/test_hub.py / test_hub_controller.py / test_hub_eai.py / test_hub_interp_switch.py / test_hub_update.py 全 exit=0 FAIL=0
+    py_compile: hub_view_tk / NovaHubGUI / hub_controller 均通过
+
+### 12.4 手工验收（交接给主审）
+
+1. 左侧选中 beta5 → 点「选为当前引擎」→ 状态行显示「当前引擎: Loom v0.1.0.beta5 (py)」；
+2. 右侧选中项目 → 点「用当前引擎打开」→ 用 beta5 启动（不再要求同时选中）；
+3. 关掉 Hub 重开 → ★ 仍在该版本（上一轮 refresh 保留 default 的修复）。
+
+---
+
+## 13. 第三轮审计必修项（LoomHub 0.1.3 内修，2026-11-09）
+
+> 版本号仍 0.1.3，未发布。Q1/Q2/Q3 涉及产品口径，**本轮未动**（等人类请示结果）。
+
+### 13.1 修复清单
+
+| 编号 | 位置 | 修法 |
+|---|---|---|
+| P1-1 | hub_update.write_updater_script | 脚本改 **UTF-8 with BOM** 写盘 + 首行 `chcp 65001 >nul`（路径可含中文）；异常由 `OSError` 扩到 `(OSError, UnicodeError)`，失败写 update.log 并**删除半成品** |
+| P1-2 | hub_update 下载/安装 | ①校验失败 → `reject_download()` **删掉 dest** 并记 log；②下载成功写 `.meta.json` 旁文件（size/digest/version）；③`apply_update()` **无论是否显式给 path 都先复验**（旁文件缺失即拒绝提权执行，digest 不符同样拒绝） |
+| P1-3 | hub_commands.update_apply | 新增 `hub_update.pick_latest_package()` 按 `is_newer` 语义版本挑最新（0.1.10 > 0.1.9）；命令层改为调用它 |
+| P1-4 | hub_controller / 三个视图 | 新增 `start_background_tasks(delay=10)`（先 `update_notice()` 提示上次失败，再 `maybe_start_update_check()`）；在 TkHubView / NovaHubGUI / LoomHubGUI(pygame) 的启动流程各调一次；加 `LOOM_HUB_NO_UPDATE_CHECK` 环境兜底开关（测试/CI 不起线程不联网） |
+| R-04-01 | GUI/NovaHubGUI | 补「远程模式（离屏回读兜底，会明显降低帧率）」开关，同一 `guiloader` 键 `remote_mode`，文案与 TkHubView 一致 |
+| P2-① | hub_update.check_update | 200 + JSON 对象体（非数组）→ 记 WARN 并返回 ok=False（以前会在 `pick_release` 里抛 AttributeError） |
+| P2-② | hub_controller.interp_for_project | 先精确匹配（engine_dir == 解释器目录），再逐层放宽父/祖父目录；同层多命中取**版本最高**（以前取台账第一个，实测选中旧 beta4） |
+| P2-③ | hub_controller.check_update | 检查成功即 `mark_failure_seen()`，清掉上一次的 FAIL 提示 |
+
+### 13.2 新增断言（test_hub_update.py，+16 条）
+
+    ① 中文路径（用户\张三\AppData\...\updates）能写出脚本；文件以 UTF-8 BOM 开头；中文路径原文保留；无 0 字节残留
+    ② reject_download 后 ok=False/deleted=True 且 dest 不存在
+    ③ 无 .meta.json -> 拒绝执行（reason 点名「未经校验」）；digest 不符 -> 拒绝（reason 点名「复验失败」）
+    ④ pick_latest_package 选 0.1.10（不是字典序的 0.1.9）；is_newer 同口径
+    ⑤ controller 定义 start_background_tasks 且调用 update_notice/ maybe_start_update_check；三个视图启动流程各有调用点
+    P2-① 200+JSON 对象体不抛；P2-③ 成功清旧提示；P2-② 同根多版本取 beta5
+
+### 13.3 定向套件（实跑，全绿）
+
+    test_hub.py / test_hub_controller.py / test_hub_eai.py / test_hub_interp_switch.py /
+    test_hub_interp_cache.py / test_hub_update.py 全部 exit=0 FAIL=0；py_compile 五个模块通过
+
+### 13.4 一处需要知会的**测试口径调整**
+
+P2-② 引入「同根多版本取最高版本」后，旧用例 `test_hub_interp_switch` ④ 与 `test_hub_interp_cache` ③ 里
+「a、b 放在同一根目录、engine_dir 指向它们的共同父目录」变成**多义**（正确行为应是取最高 = beta5）。
+已把这两个用例的 fixture 改成「两个版本各占一个独立引擎根」，让「父目录命中唯一候选」这件事仍然被断言；
+「同根多版本取最高」由 test_hub_update 的 P2-② 用例单独覆盖。代码行为未为迁就测试而改动。
+
+---
+
+## 14. 第四轮修复：自更新落点 + GUI 一键安装（C1/C6=B、C2=A，2026-11-09）
+
+| 项 | 改动 |
+|---|---|
+| C1/C6=B 落点 | `hub_update.install_dir()`（frozen 用 sys.executable 目录，源码用脚本目录）/ `is_program_files()` / `needs_admin()`；updater 命令恒带 `/DIR="<当前安装目录>"`；`/ALLUSERS` **只在 Program Files 安装时**追加（已从 `SILENT_ARGS` 基表移除）；用户级安装走 `_spawn_no_uac()`（DETACHED_PROCESS）不弹 UAC，仅 Program Files/不可写目录走 `ShellExecuteW('runas')` |
+| C2=A GUI | controller 新增 `has_update()` / `download_and_install()`（下载→校验→安装；失败不进入安装阶段）；TkHubView 与 NovaHubGUI 均加「检查更新」+「下载并安装」按钮，无新版本时后者 `state=disabled`（`_refresh_lists` 每轮按 `has_update()` 刷新）；确认框显示版本号+大小；失败进状态栏 + update.log |
+
+### 14.1 新增断言（test_hub_update.py +12 条）
+
+    ① 用户级安装：命令**不含** /ALLUSERS、含 /DIR=<%LOCALAPPDATA%\Programs\LoomHub>
+    ② Program Files 安装：含 /ALLUSERS 且 /DIR=<Program Files\LoomHub>；is_program_files 判定正确；默认 target_dir = 当前安装目录
+    ③ 两个视图都有「下载并安装」且按 has_update() 切换 disabled；has_update 在无/有新版本时分别为 False/True
+    ④ 下载/校验失败 -> ok=False 且 **从未调用 apply_update**；下载成功 -> 进入安装阶段
+
+### 14.2 实跑
+
+    test_hub_update.py / test_hub.py / test_hub_controller.py / test_hub_eai.py /
+    test_hub_interp_switch.py / test_hub_interp_cache.py 全部 exit=0 FAIL=0；py_compile 四模块通过
+
+    样例（用户级）：start "" /wait "%SETUP%" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /DIR="C:\Users\...\AppData\Local\Programs\LoomHub"
+    样例（Program Files）：... /NORESTART /SP- /ALLUSERS /DIR="C:\Program Files\LoomHub"

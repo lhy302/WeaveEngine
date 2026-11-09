@@ -15,7 +15,7 @@ Loom.py — 入口: 命令行参数 + 数学管线基准 + 启动引擎
   python Loom.py --open <scene.json>      编辑器打开指定场景 (供项目管理器"打开项目")
   python Loom.py --benchmark [三角形数] [迭代数]  数学管线基准 (不弹窗口)
   python Loom.py --bench <scene.json> [帧数]     场景基准 (加载->预热->测量, 编译版测速用;
-                                          结果打印 stdout 并写 bench_result.txt —
+                                          结果打印 stdout 并写**用户目录** bench/bench_result.txt（D1: 不再写 exe 旁）—
                                           编译版是 windows-disable-console, 靠文件收结果)
 """
 import os
@@ -192,11 +192,31 @@ def _benchmark_math(n_tri=5000, n_iter=100):
     return gpu_ms is not None
 
 
+def _bench_result_path():
+    """D1（人类裁决 A）: --bench 结果落点 = **用户目录** bench/bench_result.txt.
+
+    为什么不再写 exe 旁: exe 旁是安装目录（只读/受版本控制），把跑分结果写进去既是
+    "产物污染源码树"（Loom/bench_result.txt 曾是受跟踪文件），也可能因 Program Files
+    权限直接写失败。用户目录与配置体系同源（userpaths），打包版也一定可写。
+    取不到用户目录时回退"脚本/exe 旁"，并**打印原因**（失败可见，不静默）。
+    返回 (path, fallback_reason | None)。
+    """
+    try:
+        import userpaths
+        d = os.path.join(userpaths.user_root(), 'bench')
+        os.makedirs(d, exist_ok=True)
+        return os.path.join(d, 'bench_result.txt'), None
+    except Exception as e:
+        p = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])),
+                         'bench_result.txt')
+        return p, '用户目录不可用 (%r)' % (e,)
+
+
 def _bench_scene(scene_path, n_frames=300):
     """场景基准 (2026-09-02, 编译版测速用): 加载场景 -> 预热 -> GC 冻结 ->
     测量窗口逐帧 render -> 汇总 FPS/帧稳定性/逐阶段耗时.
     口径与 tests/_tmp/stress_probe.py 一致 (关 vsync, dt=1/120, LOOM_PROFILE=1),
-    但结果同时写 bench_result.txt (编译版 --windows-disable-console 无 stdout,
+    但结果同时写用户目录 bench/bench_result.txt (编译版 --windows-disable-console 无 stdout,
     靠文件收结果; 路径相对 exe/脚本工作目录)."""
     import time
     os.environ.setdefault('LOOM_PROFILE', '1')   # 逐阶段计时 (render 内插桩)
@@ -274,12 +294,16 @@ def _bench_scene(scene_path, n_frames=300):
 
     report = "\n".join(lines)
     print(report)                                # 源码跑时直读 stdout
-    out = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])),
-                       'bench_result.txt')
+    # D1: 结果落用户目录（不再写 exe/脚本旁），打印路径供无控制台的编译版查找
+    out, _why = _bench_result_path()
+    if _why:
+        print('[bench] %s -> 结果写回脚本/exe 旁边: %s' % (_why, out))
     try:
         with open(out, 'w', encoding='utf-8') as f:
             f.write(report + "\n")
+        print("[bench] 结果文件: %s" % out)
     except OSError as e:
+        out = None
         print("[bench] 结果写盘失败 (%r), 仅有 stdout" % e)
     eng._stop_parallel()
     # 2026-10-18 A2: 保留 pygame.quit() —— 它清理 font/mixer 子系统

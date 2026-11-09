@@ -549,6 +549,10 @@ def _apply_lights(engine, light_dicts):
 #     不得用 int() 静默截断（历史病灶: [0.2,0.4,0.8] -> int -> (0,0,0) 全黑）。
 #   · Q5=A 解析失败必须可见: 打印原因, 并让调用方拿到 (valid, reason)。
 #   · Q6=A 六面图 paths 以**相对场景目录**的形式序列化, 加载时按 base_dir 解析; 缺文件报错。
+#   · A3=B 六面图**必须位于场景目录内（允许子目录）**：
+#         加载时绝对路径与 `..` 越界一律拒绝（valid=False + reason 点名）；
+#         保存时若算出的相对路径越界（绝对 / `..` 开头 / 跨盘符）-> **不写出该天空盒**
+#         并把原因记进 _skybox_valid/_skybox_error（绝不静默写一个将来加载必然失败的值）。
 DEFAULT_SKYBOX_COLOR = (58, 155, 213, 255)      # #3A9BD5 —— 默认蓝天（白盒契约）
 DEFAULT_SKYBOX_NAME = '默认蓝天'
 
@@ -602,6 +606,28 @@ def parse_color(v):
     return tuple(out), None
 
 
+def _inside_scene_dir(abs_path, base_dir):
+    """A3=B: 路径必须落在场景目录（含子目录）内 -> (ok, reason)。
+
+    用 realpath + commonpath 比较（Windows 下不区分大小写，且 realpath 会解析
+    符号链接/8.3 短名）；跨盘符时 commonpath 抛 ValueError -> 视为越界。
+    """
+    try:
+        root = os.path.realpath(os.path.abspath(base_dir))
+        p = os.path.realpath(os.path.abspath(abs_path))
+    except Exception as e:
+        return False, '路径规范化失败: %r' % (e,)
+    win = (os.name == 'nt') or (len(root) > 1 and root[1] == ':')
+    root_c, p_c = (root.lower(), p.lower()) if win else (root, p)
+    try:
+        same = (os.path.commonpath([root_c, p_c]) == root_c)
+    except ValueError:
+        return False, '与场景目录不在同一盘符（越界）'
+    if same:
+        return True, None
+    return False, '不在场景目录内'
+
+
 def skybox_from_dict(d, base_dir=None):
     """Q5=A/Q6=A: dict -> (cube | None, valid: bool, reason | None).
 
@@ -625,11 +651,20 @@ def skybox_from_dict(d, base_dir=None):
         if not isinstance(paths, (list, tuple)) or len(paths) != 6:
             return None, False, ('paths 必须是 6 个路径 (px,nx,py,ny,pz,nz): 收到 %r'
                                  % (paths,))
+        # A3=B（人类裁决 2026-11-09）: 六面图**必须位于场景目录内（允许子目录）**;
+        # 绝对路径与 `..` 越界一律拒绝（换机/越权读盘都不允许）。
+        root = os.path.abspath(base_dir or os.getcwd())
         abs_paths = []
         for i, p in enumerate(paths):
             q = str(p)
-            if not os.path.isabs(q):
-                q = os.path.join(base_dir or '', q)
+            if os.path.isabs(q):
+                return None, False, ('第 %d 面是绝对路径 (%s); 六面图必须放在场景目录'
+                                     '（含子目录）内, 请改用相对路径' % (i, q))
+            q = os.path.join(root, q)
+            _ok, _why = _inside_scene_dir(q, root)
+            if not _ok:
+                return None, False, ('第 %d 面%s (%s); 六面图必须放在场景目录'
+                                     '（含子目录）内' % (i, _why, os.path.abspath(q)))
             if not os.path.isfile(q):
                 return None, False, '第 %d 面图片不存在: %s' % (i, os.path.abspath(q))
             abs_paths.append(os.path.abspath(q))
@@ -686,7 +721,7 @@ def _apply_skybox_or_default(d, base_dir=None):
 
 
 def _emit_skybox(cube, base_dir=None):
-    """Cubemap -> dict（None 时返回 None）.
+    """Cubemap -> dict（None 时返回 None）；**不做越界判定**（那是 _emit_skybox_checked 的事）。
 
     Q6=A: paths 写**相对当前场景目录**的形式。给了 base_dir 就**一律重算**
     （P1-3 回归修复: _source_paths 只是内存态；"新建后首次另存/另存为到别的目录"必须
@@ -719,6 +754,37 @@ def _emit_skybox(cube, base_dir=None):
     return None   # 无可用来源（内存态 cubemap 无法序列化）
 
 
+def _emit_skybox_checked(cube, base_dir=None):
+    """A3=B（人类裁决 2026-11-09）: 落盘前的路径限制检查 -> (dict | None, reason | None).
+
+    规则: 六面图**必须位于场景目录内（允许子目录）**。给了 base_dir 时逐面算相对路径:
+      · 跨盘符 / 算出来是绝对路径 / 以 '..' 开头  -> **不写出**（整体返回 None）并给 reason；
+      · 调用方负责出声，并把 reason 记进 engine._skybox_valid/_skybox_error，
+        绝不静默写一个"将来加载必然失败"的值（那等于丢资产还看不见）。
+    无 base_dir 的旧调用（不落盘的场合）沿用 _emit_skybox 的行为，不判越界。
+    """
+    if cube is None:
+        return None, None
+    if not base_dir or not getattr(cube, 'paths', None):
+        return _emit_skybox(cube, base_dir), None
+    root = os.path.abspath(base_dir)
+    rel = []
+    for i, p in enumerate(cube.paths):
+        try:
+            r = os.path.relpath(os.path.abspath(str(p)), root)
+        except Exception:
+            return None, ('第 %d 面与场景目录不在同一盘符 (%s); 六面图必须放在场景目录'
+                          '（含子目录）内 -> 本次不写入' % (i, p))
+        if os.path.isabs(r) or r.split(os.sep)[0] == '..' or r.split('/')[0] == '..':
+            return None, ('第 %d 面不在场景目录内 (%s); 六面图必须放在场景目录（含子目录）'
+                          '内 -> 本次不写入' % (i, r))
+        rel.append(r)
+    out = {"name": getattr(cube, 'name', None),
+           "guid": getattr(cube, 'guid', None),
+           "paths": rel}
+    return out, None
+
+
 def _emit_camera(cam, base_dir=None):
     """CameraState -> dict (M41: 朝向度制 + roll + 俯仰角限制; 2026-08-16 相机物体化 parent_id)
 
@@ -738,7 +804,8 @@ def _emit_camera(cam, base_dir=None):
         "pitch_max": cam.pitch_max,       # 度 最高仰角 (含)
         "parent_id": cam.parent.guid if cam.parent is not None else None,
         # 2026-10-19 第1档序13 天空盒 (C3): 相机级 skybox 覆盖（None=用场景默认）
-        "skybox": _emit_skybox(getattr(cam, 'skybox', None), base_dir),
+        # A3=B: 相机级同样受"必须在场景目录内"限制；越界 -> 不写出 + 出声
+        "skybox": _emit_skybox_checked(getattr(cam, 'skybox', None), base_dir)[0],
     }
 
 
@@ -747,7 +814,14 @@ def _apply_cameras(engine, cam_dicts, base_dir=None):
     返回 [(cam, parent_id)] 供 _link_camera_parents 在物体建链后连父 (相机引用物体)."""
     engine.cameras.clear()
     links = []
-    for d in cam_dicts:
+    for _ci, d in enumerate(cam_dicts):
+        # 2026-11-09 (第三轮审计 P-02-xx / 02 号报告): 相机段不是 dict 时旧实现直接
+        # d.get(...) -> AttributeError，GL 加载整场景失败；而 VK 侧只报错继续。
+        # 统一为：跳过该段 + 出声，其它相机照常建（与 _apply_skybox 的容错口径一致）。
+        if not isinstance(d, dict):
+            print('[场景] 第 %d 个相机段不是对象 (%s) -> 跳过该段'
+                  % (_ci, type(d).__name__))
+            continue
         cam = engine.add_camera(
             position=_f3(d.get('position'), (0, 0, -5)),
             yaw=_f1(d.get('yaw'), 0.0),
@@ -1306,6 +1380,18 @@ def scene_to_dict(engine, camera=None, base_dir=None):
             except (TypeError, ValueError):
                 _fov_deg = FOV_DEFAULT_DEG
         camera["fov"] = norm_fov_deg(_fov_deg, "保存 camera.fov")
+    # A3=B: 落盘前检查六面图是否都在场景目录内；越界 -> **不写出** + 记 valid/reason
+    # （绝不静默写一个将来加载必然失败的值）。digest（camera=None）不出声避免刷屏。
+    _sb_dict, _sb_reason = _emit_skybox_checked(
+        getattr(engine, '_scene_skybox', getattr(engine, '_skybox', None)), base_dir)
+    if _sb_reason:
+        try:
+            engine._skybox_valid = False
+            engine._skybox_error = _sb_reason
+        except Exception:
+            pass
+        if camera is not None:
+            print('[场景] 天空盒未写入: %s' % (_sb_reason,))
     return {"version": SCENE_VERSION, "camera": camera,
             "gravity": getattr(engine, 'gravity', -9.8),   # 2026-08-30: 场景重力加速度
             "materials": [_emit_material(m) for m in mats],
@@ -1315,9 +1401,7 @@ def scene_to_dict(engine, camera=None, base_dir=None):
             # 2026-10-19 第1档序13 天空盒 (C3): 场景级默认天空盒
             # 场景级天空盒（Q3=A: **不是**"当前生效的那一个"——相机级覆盖只在渲染时生效，
             # 落盘必须是场景级，否则播放期保存会把相机天空盒烘焙成场景默认）。
-            "skybox": _emit_skybox(
-                getattr(engine, '_scene_skybox',
-                        getattr(engine, '_skybox', None)), base_dir),
+            "skybox": _sb_dict,
             "ui": _emit_ui(getattr(engine, 'ui', None)),   # 2026-10-18: Canvas UI
             "objects": objs}
 

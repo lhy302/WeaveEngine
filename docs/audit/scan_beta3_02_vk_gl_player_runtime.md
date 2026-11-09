@@ -577,3 +577,135 @@ PASS 从 B 目录启动: sceneio / VK driver / GL 播放器 三处相对六面�
 | `editor.py:2280` 的绘制门 `if getattr(self,'_skybox',None) is not None: self._draw_skybox()` | 只认场景级：当**仅相机级**有天空盒时不会调用（`_draw_skybox` 内部已按生效天空盒工作）。建议 03 改成 `if self.effective_skybox() is not None:`。 |
 | 换场景复位 | 渲染端已按"生效天空盒对象变化"自动复位哨兵；若要强制，03 可在换场景后调 `engine.reset_sky_state()`（幂等）。 |
 | VK 的 `_skybox_error` 未暴露到 EAI | 需要 03 在 `skybox_get` 里一并返回（driver 侧字段已就绪）。 |
+---
+
+## 12. 第三轮审计必修：run() 退出不再 terminate GLFW（P1 回归）
+
+### 12.1 事实核对（比报告口径更精确）
+
+- `_glfw_shutdown` **本体没丢**：仍在 `loom_glfw_window.py:402-407`（`glfw.terminate()` + try/except）。
+- 丢的是 `loom_render.run()` 退出段末尾的**调用**：基线 `5042d68^` 在 `audio.shutdown()` 之后有
+  `self._glfw_shutdown()`（基线第 928-929 行），HEAD 该行连同注释被删；因此正常退出不 terminate GLFW。
+
+### 12.2 修复（只动 `loom_render.py`，定点 edit，未整文件覆盖）
+
+退出清理重排为 `try/finally`，顺序与基线一致：
+
+```
+try:
+    鼠标解锁 -> on_application_quit -> _stop_parallel -> audio.shutdown   (每步独立 try, 失败打印原因)
+finally:
+    _glfw_shutdown()        # 上面任何一步抛异常也必须 terminate GLFW
+```
+
+同时把三处旧的 `except Exception: pass` 改成带原因的打印（对齐"失败必须可见"口径）。
+
+### 12.3 验收（新增探针 `Loom/tests/_tmp/probe_run_exit_glfw.py`）
+
+```
+[probe] frames=3 calls=['audio.shutdown', 'glfw.terminate']
+PASS 跑了 3 帧后退出
+PASS glfw.terminate 被调用
+PASS 只调用一次
+PASS 顺序: audio.shutdown 在 terminate 之前
+PASS run() 未抛异常
+[probe-2] calls=['audio.shutdown(raise)', 'glfw.terminate']      # 故意让音频 shutdown 抛异常
+PASS 清理中途抛异常时 finally 仍 terminate GLFW
+```
+
+| 测试 | 结果 |
+|---|---|
+| `tests/test_playmode_edges.py` | exit=0 fails=0 |
+| `tests/test_ui.py` | exit=0 fails=0 |
+| `tests/test_render_api.py` | exit=0 fails=0 |
+| `tests/test_skybox_engine_parity.py` | exit=0 fails=0 |
+
+### 12.4 顺带核对（只确认，不改）
+
+| 项 | 结论 |
+|---|---|
+| ① `_draw_skybox` 的 gate 依赖 `effective_skybox()` | 渲染端已不再自查 `_skybox`；`engine._skybox` 由上层 `sceneio.scene_from_dict` 写回（`sceneio.py:1175/1179`），`effective_skybox()` 相机级 → 场景级回退成立。**但调用点 `editor.py:2280` 仍以 `self._skybox` 为门**，仅相机级有天空盒时不会调用 —— 仍需 03 改成 `self.effective_skybox() is not None`（已在 §11.4 报过）。 |
+| ② 退出释放顺序 | 与基线一致且探针实证：鼠标 → 应用钩子 → 并行池 → **音频 → GLFW**。 |
+
+### 12.5 操作纪律回归
+
+上一轮 `vk_renderer.py` 被"整文件读-改-写"截断的根因已定位：**读取工具对超大文件会少返回行**
+（实测 `loom_render.py` totalLines=1025 而返回数组只有 936 行）。因此本轮全部改动改用**定点 `edit`**，
+不再读全文回写。此结论应写进给下一位 Agent 的交接。
+---
+
+## 13. 第三轮收尾：VK 侧暂停重锚（与 GL 对称）
+
+- `scene_driver.advance_logic` 的 `logic_paused` 早退分支补**重锚**：每场暂停只做一次
+  `self._clock.reset()`（清 FixedStepClock 自己的 `_acc`/`_last` —— 按本驱动时钟语义，不复制 engine 的
+  `_logic_wall_last` 实现），恢复态清 `_pause_reanchored` 标志；`set_logic_paused(True)` 同样立即重锚。
+- **实测口径（诚实留痕）**：VK 驱动的时钟吃的是调用方 `render_dt`（非墙钟），**修前本来就不会补欠账**
+  （探针实测恢复首帧 0 步）。因此本项是"形状对齐 + 防回归"，不是修一个已发生的缺陷；断言把该性质锁死。
+- 新增断言（`tests/test_clock_pause_restart.py` 的 `t_vk_driver_pause_no_debt`）：
+  `PASS VK: 暂停 0.5s 后恢复首帧逻辑步数 <= 1`；`PASS VK: 恢复后仍在正常推进 (6 帧总步数 >= 2)`（实测 `[1,0,1,0,1,0]`）。
+- 验收：`test_clock_pause_restart` / `test_vk_camera_align` / `test_beta3_batch2_camera_proj` / `test_render_api` 全部 exit=0。
+---
+
+## 14. 第四轮：A5=A 无效 cubemap 错误模型 / A6=A 相机配对 / C5=B VK 上屏降级
+
+### 14.1 A5=A —— 无效 cubemap 统一为「拒绝 + 告警一次 + 不画」
+
+- `loom_cubemap.Cubemap.validate()`（新增）：缺面(<6)/size 非法/面尺寸不一致 → `(False, reason)`；
+  **GL/VK 共用同一判定**。
+- `Cubemap.ensure_gl()`：**删掉 1x1 白兜底**，先 `validate()`，无效直接 `ValueError`（不再画全白骗人）。
+- `loom_render._draw_skybox`：绘制前 `validate()`；无效 → 写回 `_skybox_valid=False / _skybox_error=原因`、告警一次、本帧不画；
+  `ensure_gl`/绑定失败同样写回并跳过（异常不冒泡）。
+- `vk_renderer._draw_sky(..., engine=)`：同样先 `validate()`；无效 → 写回 driver 的 `_skybox_valid/_skybox_error`、
+  告警一次、返回 False；**IndexError 等不再可能逃逸到 vk_player 循环**（校验发生在纹理上传前）。
+
+### 14.2 A6=A —— 相机级 skybox 按身份配对
+
+- `scene_driver.load_from_data`：由「下标 zip」改为「按 `id`→段」映射，再用 `CameraState.guid` 查找；
+  非 dict / 无 id 的段只计数并告警、不参与配对；未匹配到的相机 `skybox=None`（宁可不画，不错色）。
+- 断言（新增）：`c1(红) + 非法第 2 段` → c1 拿到自己的红色；激活 `c2(不存在)` 时 `effective_skybox()`
+  回落到场景级默认蓝，**不会**拿到 c1 的红色。
+- 遗留（03 文件）：GL 侧的 `sceneio._apply_cameras` 仍是同款下标式配对（非 dict 段会 `AttributeError`），
+  建议 03 用同一「按 id 配对 + 不匹配就不配」写法对齐。
+
+### 14.3 C5=B —— VK 补同构上屏健康判据（阈值只在一处）
+
+- `loom_render.PresentHealth`（新增，**唯一实现**）：`note_ok()/note_fail(reason)/should_fallback(n)/snapshot()`，
+  `DEFAULT_THRESHOLD=3`；GL 的 `_present_swap/present_health/should_fallback_remote` 改为委托它（删掉散落的 `_present_*` 字段计数）。
+- `VkRenderer`：持同一 `PresentHealth` 实例；`ctx.get_current_texture()` 失败（超时/outdated/设备丢失）计为失败、
+  **告警一次 + 跳过本帧（不抛）**；主 pass `queue.submit` 成功后 `note_ok()`；暴露 `present_health()/should_fallback_remote(n)`。
+- `vk_player`：`present_health()/should_fallback_remote(n)` 模块级入口 + `LAST_FALLBACK_REQUESTED`；
+  `LOOM_REMOTE_MODE=auto` 且判据命中 → 打印原因、关窗、结束原生循环。
+- `run_player.run_backend`：VK 返回后若该标志置位且场景是明文路径 → **重启一次**为离屏回读（`loom_player_window`）；
+  游戏包（`scene_data`）模式无法重启，打印明确原因（不静默）。
+
+### 14.4 验收（真实输出）
+
+```
+tests/test_skybox_engine_parity.py: exit=0 fails=0   (A-E 共 21 条断言, 含新增 A5/A6/C5 共 10 条)
+tests/test_skybox_scene.py:        exit=0 fails=0
+tests/test_vk_camera_align.py:     exit=0 fails=0
+tests/test_vk_ui_input.py:         exit=0 fails=0
+tests/test_render_api.py:          exit=0 fails=0
+tests/test_playmode_edges.py:      exit=0 fails=0
+tests/test_clock_pause_restart.py: exit=0 fails=0
+skybox_ab_probe: 有天空盒 MAE=0.000 / 无天空盒 MAE=0.000 (0/38400 像素差)
+```
+
+新增断言摘要：
+
+```
+[A5] 缺面(<6) -> validate False 且有原因; ensure_gl 抛 ValueError (不再 1x1 白)
+[A5] GL: 无效天空盒不抛到渲染循环; _skybox_valid=False 且 _skybox_error 有原因
+[A6] 按 id 配对 -> c1 拿到自己的红色; 激活 c2(不存在) 时不得拿到 c1 的 skybox (回退默认蓝)
+[C5] PresentHealth: 3 次失败 -> should_fallback(3) 真; 成功一次 -> streak=0/False
+[C5] VK 复用同一实现 (`vk_renderer._PresentHealth is loom_render.PresentHealth`);
+     vk_player.should_fallback_remote()/present_health() 同语义（3 次失败真 / 成功一次 False）
+```
+
+### 14.5 剩余 / 已知限制
+
+| 项 | 说明 |
+|---|---|
+| GL 侧相机配对 | `sceneio._apply_cameras`（03 文件）仍是下标式，非 dict 段会 `AttributeError`；需 03 同款对齐。 |
+| 游戏包（`scene_data`）模式的 VK 降级 | 没有可重启的场景路径，只打印原因；要支持需入口层把 Loom/machine 的 remote 重启做成"重新 exec 进程"。 |
+| `Loom.py` 的 auto 监视 | 仍只包 `PlayerApp.run`（GL）；VK 的 auto 由 vk_player+run_player 自闭环（本轮已实现），两侧语义一致。 |

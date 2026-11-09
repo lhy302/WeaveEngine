@@ -1213,3 +1213,62 @@ python tests\test_pacman_scene_contract.py / test_guiswitch.py / test_agent_ui_i
 `test_skybox_engine_parity.py`、`test_eai_real.py`（98 命令全覆盖）、`test_sceneio.py`、`test_editor_ui.py`、
 `test_editor_load_reject_keeps_scene.py`、`test_beta3_batch2_camera_proj.py`、`test_vk_camera_align.py`、
 `test_render_api.py`、`test_scene_solid_env_roundtrip.py`、`test_pacman_scene_contract.py`、`test_undo_full_coverage.py`。
+
+
+### 8.8 第四轮：六面图路径限制（人类裁决 A3=B，2026-11-09）
+
+**裁决**：六面图路径限制在**场景目录内（允许子目录）**；`..` 越界与绝对路径一律拒绝。
+实现只动 `Loom/sceneio.py`（+ 测试第 12/14 组）。
+
+| 环节 | 规则 | 代码 | 证据 |
+|---|---|---|---|
+| **加载** | 绝对路径 → 拒绝；解析后的绝对路径必须落在 `base_dir`（缺省 = CWD）之下（`realpath` + `commonpath`，Windows 不区分大小写，跨盘符 `ValueError` 视为越界）；越界 → `valid=False` + reason 点名 | `_inside_scene_dir()` + `skybox_from_dict()` | ① 场景目录内子目录 `assets/faces/*.png` 可加载（valid=True）；② `../outside.png`（文件真实存在于场景外）→ valid=False 且 reason 含"场景目录"；`C:…\px.png` → valid=False 且 reason 含"绝对路径" |
+| **保存** | 算出相对路径若是绝对 / 以 `..` 开头 / 跨盘符 → **整块不写出**（`scene_to_dict` 的 `skybox` = None），并把 reason 记进 `engine._skybox_valid/_skybox_error`；真落盘（`camera is not None`）时打印一句，digest 调用静默避免刷屏 | `_emit_skybox_checked()`（`_emit_skybox` 保持为不做越界判定的原语）；相机级 emit 同样走 checked | ③ 图在场景外的 cube → `_emit_skybox_checked` 返回 `(None, reason)`、`scene_to_dict` 的 `skybox is None`、`_skybox_valid=False` 且 reason 含"场景目录"；文件重载得到默认蓝（文件里确实没有越界路径） |
+
+**行为变化（需下游知道）**：`另存为` 到"图片不在其下"的目录时，天空盒**不会**被写成 `..` 相对路径，
+而是本次不写 + valid/reason（第 12 组据此更新：旧断言"写出含 `..` 的路径"已废弃）。
+
+**注释/文档**：`sceneio.py` 天空盒契约块补 A3=B 一条（"六面图必须位于场景目录内（允许子目录）"）。
+
+验收（实跑，均 exit=0）：`test_skybox_scene.py`（14 组）、`test_skybox_engine_parity.py`、`test_sceneio.py`、
+`test_eai_real.py`（98 命令全覆盖）、`test_editor_ui.py`、`test_editor_load_reject_keeps_scene.py`、
+`test_beta3_batch2_camera_proj.py`、`test_vk_camera_align.py`、`test_render_api.py`、`test_pacman_scene_contract.py`、
+`test_scene_solid_env_roundtrip.py`。
+
+
+### 8.9 追加裁决：A1「清空 = 恢复默认蓝天」+ D1「--bench 落用户目录」（2026-11-09）
+
+#### A1（语义澄清，**不新增第 4 种状态**）
+
+| 项 | 修前 | 修后 |
+|---|---|---|
+| `skybox_clear` | 置 `_scene_skybox = None`，返回 `cleared: True` + `effective: None`；语义是"没有天空盒"（与"缺键/null -> 默认蓝"打架：用户清了、重载又变蓝 = "清空没生效"） | **恢复默认蓝天**：`_scene_skybox = sceneio.default_skybox()`、`_skybox_valid=True`、reason=None、refresh 后 `effective_skybox()` 即默认蓝；返回 `{'ok': True, 'reset_to_default': True, 'skybox':…, 'effective':…(58,155,213,255)}` |
+| 文案/帮助 | 命令描述"清空场景级天空盒" | `skybox_clear` 描述改为"恢复**默认蓝天盒**（不是'没有天空盒'；要黑天空请 `skybox_set solid_color=#000000`）"，docstring 写清语义与黑色做法；`skybox_set` 帮助补"六面图必须在场景目录内 / 黑天空 #000000 / 清空用 skybox_clear" |
+| 断言 | — | clear 后 `effective_skybox()` = (58,155,213,255)、`_skybox` 非空、绘制门为真；存盘 `solid_color=[58,155,213,255]`、重载仍默认蓝（**期望行为，不是丢值**）；`skybox_set '#000000'` -> (0,0,0,255) 且存盘重载仍黑 |
+
+证据（`test_skybox_scene` 第 15 组全 PASS；`test_eai_real` 的旧断言 `skybox_clear 后为空` 已按 A1 更新为 `skybox_clear = 恢复默认蓝天 (A1)` 并转绿，98 命令全覆盖）。
+
+#### D1（裁决 A：跑分结果落用户目录）
+
+| 项 | 修前 | 修后 |
+|---|---|---|
+| 落点 | `build_entry._bench_scene` 写 `<脚本/exe 目录>/bench_result.txt`（安装目录只读 + 污染源码树：`Loom/bench_result.txt` 曾是**受跟踪文件**，每次 --bench 都会改它） | 新增 `_bench_result_path()`：`<userpaths.user_root()>/bench/bench_result.txt`（目录自动创建）；用户目录不可用时回退脚本/exe 旁并**打印原因**（失败可见） |
+| 告知 | 只写文件不报路径（编译版无控制台找不着） | 写盘后打印 `[bench] 结果文件: <绝对路径>` |
+| 仓库卫生 | `Loom/bench_result.txt` 受跟踪 | `git rm --cached Loom/bench_result.txt` + 删除工作区文件 + `.gitignore` 加 `bench_result.txt` |
+
+**端到端证据**（`LOOM_USER_ROOT=<temp>` 实跑 `python build_entry.py --bench Projects\场景.json 60`）：
+```
+========== 场景基准 场景.json (60 帧, 墙钟 0.05s) ==========
+FPS: 1200.4  (平均帧时间 0.833 ms)
+TPS: 55.99  (logic dt/墙钟 ratio=1.0009)
+[bench] 结果文件: C:\Users\…\Temp\loom_bench_e2e_17e3c237\bench\bench_result.txt
+exit=0 ; 结果文件存在 959B ; git status 无新增 bench_result 相关改动（仅本批预期的 D  Loom/bench_result.txt）
+```
+单元断言（新增 `Loom/tests/test_bench_result_path.py`）：① 落点 = `<user_root>/bench/bench_result.txt` 且目录创建；② 用户目录不可用 -> 回退脚本/exe 旁 + 原因可见；③ 写盘后打印路径、旧"写 exe 旁"实现已移除。
+
+**边界说明**：`git rm --cached` 是本轮裁决明确要求的仓库动作（仅改索引，让产物不再受跟踪）；未执行 add/commit/checkout/stash。
+`.gitignore` + `Loom/bench_result.txt` 的删除会以 `D  Loom/bench_result.txt` 出现在 `git status`，属本批预期改动，待主审统一提交。
+
+验收（实跑，均 exit=0）：`test_skybox_scene.py`（15 组）、`test_bench_result_path.py`、`test_sceneio.py`、`test_eai_real.py`（98 命令）、
+`test_skybox_engine_parity.py`、`test_editor_ui.py`、`test_editor_load_reject_keeps_scene.py`、`test_beta3_batch2_camera_proj.py`、
+`test_vk_camera_align.py`、`test_render_api.py`、`test_pacman_scene_contract.py`。

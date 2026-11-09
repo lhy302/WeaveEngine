@@ -59,3 +59,6 @@ nul
 tools/dist/
 tools/build_hub/
 tools/python-embed/
+
+# ---- 跑分产物（D1: --bench 结果改落用户目录 userpaths, 不再进仓库） ----
+bench_result.txt

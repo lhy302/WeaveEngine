@@ -374,11 +374,11 @@ def t_set_takes_effect():
           ed._skybox is ed._scene_skybox)
     check('返回值 effective 不再谎报（=scene 且对象存在）',
           r.get('effective') == 'scene', r.get('effective'))
-    # 清空后渲染面同步为 None（门自然早退），且不残留旧对象
+    # A1 语义（2026-11-09 追加裁决）: clear = 恢复默认蓝天，不是"没有天空盒"
     r2 = _cmd('skybox_clear', ed)
-    check('skybox_clear -> ok 且 _skybox/生效均为 None',
-          r2.get('ok') is True and getattr(ed, '_skybox', 'x') is None
-          and ed.effective_skybox() is None,
+    check('skybox_clear -> ok + 恢复默认蓝（A1: 不再是 None）',
+          r2.get('ok') is True and r2.get('reset_to_default') is True
+          and tuple(ed.effective_skybox()._solid_color) == S.DEFAULT_SKYBOX_COLOR,
           (r2.get('ok'), getattr(ed, '_skybox', 'x')))
 
 
@@ -436,22 +436,27 @@ def t_save_as_relative():
         ed = _ed(os.path.join(dir_a, 'draft.json'))
         r = _cmd('skybox_set', ed, {'paths': faces})
         check('设置成功', r.get('ok') is True, r)
-        # 另存为到 dir_b: _save_scene 会先更新 _scene_path，再按新目录算 base_dir
+        # 另存为到 dir_b（图仍在 dir_a = 场景目录之外）: A3=B 裁决后**不得**写出 '..' 路径,
+        # 而是整块不写 + 记 valid=False/reason（不静默写一个将来加载必然失败的值）。
         p_b = os.path.join(dir_b, 'one.json')
         ed._scene_path = p_b
         data = S.scene_to_dict(ed, camera=ed._camera_dict(),
                                base_dir=os.path.dirname(p_b))
         emitted = (data.get('skybox') or {}).get('paths') or []
-        check('另存到 dir_b -> 写出的是相对 dir_b 的路径（含 ..）',
-              emitted and all(not os.path.isabs(x) for x in emitted)
-              and any('..' in x for x in emitted), emitted)
+        check('另存到 dir_b（图在场景目录外）-> 不写出越界路径',
+              data.get('skybox') is None and emitted == [], (data.get('skybox'), emitted))
+        check('且 valid=False + reason 点名场景目录（不静默）',
+              getattr(ed, '_skybox_valid', None) is False
+              and '场景目录' in str(getattr(ed, '_skybox_error', None)),
+              (getattr(ed, '_skybox_valid', None),
+               getattr(ed, '_skybox_error', None)))
         S.save_json_atomic(p_b, data)
         eng2 = _ed(p_b)
         S.scene_from_dict(eng2, json.load(open(p_b, encoding='utf-8')),
                           base_dir=os.path.dirname(p_b))
-        check('按新目录重载 -> valid=True（修前 valid=False 回退默认蓝）',
-              getattr(eng2, '_skybox_valid', None) is True,
-              getattr(eng2, '_skybox_error', None))
+        check('按新目录重载 -> 默认蓝（文件里确实没有越界路径）',
+              tuple(getattr(eng2._skybox, '_solid_color', ())) == S.DEFAULT_SKYBOX_COLOR,
+              getattr(eng2._skybox, '_solid_color', None))
         # 同目录保存也仍然正确
         p_a = os.path.join(dir_a, 'two.json')
         ed._scene_path = p_a
@@ -507,6 +512,113 @@ def t_p2_batch():
     check("'#3A9BD5' -> (58,155,213,255)", rgba == (58, 155, 213, 255), (rgba, why))
 
 
+# ============ ⑭ A3=B: 六面图路径限制在场景目录内 ============
+def t_path_confinement():
+    print('---- 14) A3=B: 六面图必须在场景目录内（绝对/.. 越界拒绝） ----')
+    with tempfile.TemporaryDirectory() as root:
+        scene_dir = os.path.join(root, 'scene')
+        faces_dir = os.path.join(scene_dir, 'assets', 'faces')
+        os.makedirs(faces_dir)
+        names = ('px.png', 'nx.png', 'py.png', 'ny.png', 'pz.png', 'nz.png')
+        for n in names:
+            _png(os.path.join(faces_dir, n))
+        rel_sub = ['assets/faces/' + n for n in names]
+        cube, valid, reason = S.skybox_from_dict({'paths': rel_sub}, scene_dir)
+        check('① 场景目录内子目录的 6 面图可加载',
+              valid is True and cube is not None, reason)
+
+        # ② ../ 越界：把图真实放到场景目录**外**再引用
+        outside = os.path.join(root, 'outside.png')
+        _png(outside)
+        bad_rel = ['../outside.png'] * 6
+        cube2, valid2, reason2 = S.skybox_from_dict({'paths': bad_rel}, scene_dir)
+        check('② ../ 越界被拒绝且 reason 点名"场景目录"',
+              valid2 is False and '场景目录' in str(reason2), reason2)
+
+        # ② 绝对路径一律拒绝
+        abs_six = [os.path.join(faces_dir, n) for n in names]
+        cube3, valid3, reason3 = S.skybox_from_dict({'paths': abs_six}, scene_dir)
+        check('② 绝对路径被拒绝且 reason 点名"绝对路径"',
+              valid3 is False and '绝对路径' in str(reason3), reason3)
+
+        # ③ 保存越界：cube 的图在场景目录外 -> 不写出 + valid=False + reason 可见
+        from loom_cubemap import Cubemap
+        out_six = []
+        for i, n in enumerate(names):
+            pth = os.path.join(root, 'ext', n)
+            os.makedirs(os.path.dirname(pth), exist_ok=True)
+            out_six.append(_png(pth))
+        cube_out = Cubemap.from_files(out_six, name='越界六面图')
+        emitted, why = S._emit_skybox_checked(cube_out, scene_dir)
+        check('③ 保存越界路径 -> 不写出（返回 None）+ reason 点名',
+              emitted is None and '场景目录' in str(why), (emitted, why))
+        eng = _ed()
+        eng._scene_skybox = cube_out
+        eng._skybox = cube_out
+        data = S.scene_to_dict(eng, camera=eng._camera_dict(), base_dir=scene_dir)
+        check('③ scene_to_dict 不写越界 skybox（skybox=None）',
+              data.get('skybox') is None, data.get('skybox'))
+        check('③ 并把 valid=False / reason 记进引擎（不静默）',
+              getattr(eng, '_skybox_valid', None) is False
+              and '场景目录' in str(getattr(eng, '_skybox_error', None)),
+              (getattr(eng, '_skybox_valid', None),
+               getattr(eng, '_skybox_error', None)))
+
+
+# ============ ⑮ A1: 清空 = 恢复默认蓝天（不是"没有天空盒"） ============
+def t_clear_means_default():
+    print('---- 15) A1: skybox_clear = 恢复默认蓝天（+ #000000 才是黑） ----')
+    src = open(os.path.join(ROOT, 'agent_commands.py'), encoding='utf-8').read()
+    check('命令帮助写明"清空 = 恢复默认蓝天"',
+          '恢复**默认蓝天盒**' in src or '恢复默认蓝天' in src)
+    check('命令帮助给出黑天空的显式方式（solid_color=#000000）',
+          '#000000' in src)
+
+    ed = _ed()
+    ed._new_scene()
+    # 先设成红的，再 clear -> 回到默认蓝
+    red, _ = S.parse_color('#FF0000')
+    _cmd('skybox_set', ed, {'solid_color': '#FF0000'})
+    check('前置: 设成红', tuple(ed._scene_skybox._solid_color) == (255, 0, 0, 255),
+          ed._scene_skybox._solid_color)
+    r = _cmd('skybox_clear', ed)
+    check('clear -> ok + reset_to_default=True（不再返回 cleared/none 语义）',
+          r.get('ok') is True and r.get('reset_to_default') is True, r)
+    check('clear 后 effective 是默认蓝 (58,155,213,255)',
+          (r.get('effective') or {}).get('solid_color') == list(S.DEFAULT_SKYBOX_COLOR),
+          r.get('effective'))
+    check('clear 后 effective_skybox() 是默认蓝且绘制门为真',
+          tuple(ed.effective_skybox()._solid_color) == S.DEFAULT_SKYBOX_COLOR
+          and getattr(ed, '_skybox', None) is not None,
+          ed.effective_skybox()._solid_color)
+    # 存盘重载仍是默认蓝（期望行为，不是丢值）
+    with tempfile.TemporaryDirectory() as tmp:
+        p = os.path.join(tmp, 'c.json')
+        data = S.scene_to_dict(ed, camera=ed._camera_dict(), base_dir=tmp)
+        check('clear 后存盘写出默认蓝',
+              (data.get('skybox') or {}).get('solid_color') == list(S.DEFAULT_SKYBOX_COLOR),
+              data.get('skybox'))
+        S.save_json_atomic(p, data)
+        eng2 = _ed(p)
+        S.scene_from_dict(eng2, json.load(open(p, encoding='utf-8')),
+                          base_dir=os.path.dirname(p))
+        check('重载仍是默认蓝（A1 期望行为）',
+              tuple(eng2._skybox._solid_color) == S.DEFAULT_SKYBOX_COLOR,
+              eng2._skybox._solid_color)
+    # 黑天空: 显式 #000000 -> 黑且能持久
+    rb = _cmd('skybox_set', ed, {'solid_color': '#000000'})
+    check('设 #000000 -> 黑 (0,0,0,255)',
+          tuple(ed._scene_skybox._solid_color) == (0, 0, 0, 255),
+          ed._scene_skybox._solid_color)
+    with tempfile.TemporaryDirectory() as tmp2:
+        data2 = S.scene_to_dict(ed, camera=ed._camera_dict(), base_dir=tmp2)
+        eng3 = _ed(os.path.join(tmp2, 'b.json'))
+        S.scene_from_dict(eng3, data2, base_dir=tmp2)
+        check('黑天空能持久（重载仍黑）',
+              tuple(eng3._skybox._solid_color) == (0, 0, 0, 255),
+              eng3._skybox._solid_color)
+
+
 def main():
     t_new_scene_default()
     t_load_without_skybox()
@@ -521,6 +633,8 @@ def main():
     t_bad_skybox_type()
     t_save_as_relative()
     t_p2_batch()
+    t_path_confinement()
+    t_clear_means_default()
     print('\n总结果: %s' % ('ALL PASS' if ok else 'FAIL'))
     sys.exit(0 if ok else 1)
 

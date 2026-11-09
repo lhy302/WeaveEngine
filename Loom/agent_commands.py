@@ -89,8 +89,11 @@ def _write_roots(win=None):
     try:
         roots.append(os.path.abspath(guiloader.program_dir()))
     except Exception:
-        roots.append(os.path.abspath(
-            os.path.dirname(os.path.abspath(sys.argv[0]))))
+        # 2026-11-09 修复: 旧兜底用 dirname(abspath(sys.argv[0]))，而本函数可能在
+        # os.chdir() 之后被调用（test_eai_real 会 chdir 到引擎根）—— 相对 argv[0]
+        # 二次拼接会得到不存在的 Loom/Loom/tests，于是 tests/_tmp 被判越域，
+        # asset_save/screenshot 全部失败。改用本模块自身目录（= 引擎目录），与 cwd 无关。
+        roots.append(os.path.dirname(os.path.abspath(__file__)))
     try:
         ed = getattr(win, 'editor', None)
         sp = getattr(ed, '_scene_path', None)
@@ -996,7 +999,9 @@ def _skybox_describe(cube):
 
 
 @command('skybox_set',
-         '设置场景级天空盒: {paths: [6 张图]} 或 {solid_color: "#RRGGBB"|[r,g,b,a]}, 可选 {name}')
+         '设置场景级天空盒: {paths: [6 张图(必须在场景目录内)]} 或 '
+         '{solid_color: "#RRGGBB"|[r,g,b,a]}, 可选 {name}。'
+         '要黑天空用 solid_color=#000000；"清空"请用 skybox_clear（=恢复默认蓝天）')
 def cmd_skybox_set(win, args):
     """设置**场景级**天空盒（相机级覆盖仍优先，见 camera_* 命令）。
 
@@ -1056,20 +1061,32 @@ def cmd_skybox_set(win, args):
             'effective': ('camera' if eff is not None and eff is not cube else 'scene')}
 
 
-@command('skybox_clear', '清空场景级天空盒（相机级若存在仍优先）')
+@command('skybox_clear',
+         '恢复**默认蓝天盒**（不是"没有天空盒"; 要黑天空请 skybox_set solid_color=#000000）')
 def cmd_skybox_clear(win, args):
+    """A1 语义（人类裁决 2026-11-09）: **清空 = 恢复默认蓝天**.
+
+    为什么不是"设成 None": 场景的缺省天空盒就是默认蓝（Q1=A），"清空"若等于 None，
+    会与"场景没写 skybox 键"的语义打架（加载时又变回默认蓝 = 用户看到"清空没生效"）。
+    所以这里显式恢复默认蓝：clear 之后编辑器/播放器都仍是蓝天，只是回到出厂值。
+    想要黑天空：`skybox_set {"solid_color": "#000000"}`（用户显式选择，可持久化）。
+    """
+    import sceneio
     ed = win.editor
     if getattr(ed, 'is_playing', False):
         return {'ok': False,
-                'error': '播放中不允许修改场景天空盒（请先停止播放，再清空）'}
-    ed._scene_skybox = None
-    ed._skybox_valid = True            # 显式清空 = 用户意图, 不是解析失败
+                'error': '播放中不允许修改场景天空盒（请先停止播放，再恢复默认蓝天）'}
+    cube = sceneio.default_skybox()
+    ed._scene_skybox = cube
+    ed._skybox_valid = True            # 回到出厂值 = 正常态, 不是解析失败
     ed._skybox_error = None
-    # P1-1: 同上 —— 由 refresh 写回 _skybox（清空后就是 None，门自然早退）
+    # P1-1: refresh 负责"场景级写回 _skybox + 变更时 reset_sky_state"
     eff = ed._refresh_effective_skybox() if hasattr(
-        ed, '_refresh_effective_skybox') else None
-    return {'ok': True, 'cleared': True,
-            'effective': None if eff is None else _skybox_describe(eff)}
+        ed, '_refresh_effective_skybox') else cube
+    desc = _skybox_describe(eff or cube)
+    return {'ok': True, 'reset_to_default': True,
+            'skybox': _skybox_describe(cube),
+            'effective': desc}
 
 
 def _vk_skybox_info(win, ed):

@@ -795,8 +795,13 @@ def t_api_coverage_fill():
     res("skybox_set", {"solid_color": "#223344"})
     r = res("skybox_get")
     check("skybox_set 后 get 有值", r.get("skybox") is not None, str(r)[:80])
-    res("skybox_clear")
-    check("skybox_clear 后为空", res("skybox_get").get("skybox") is None)
+    r = res("skybox_clear")
+    # 2026-11-09 A1 裁决: "清空 = 恢复默认蓝天"（不是"为空/没有天空盒"）。
+    # 要黑天空必须 skybox_set solid_color=#000000。
+    check("skybox_clear = 恢复默认蓝天 (A1)",
+          r.get("reset_to_default") is True
+          and (res("skybox_get").get("skybox") or {}).get("solid_color")
+          == [58, 155, 213, 255], str(r)[:120])
 
     # ---- Canvas UI 全链 ----
     res("ui_canvas_add", {"type": "screen", "name": "_cov_canvas"})

@@ -14,7 +14,7 @@ Loom.py — 入口: 命令行参数 + 数学管线基准 + 启动引擎
   python Loom.py --run <scene.json>       播放场景 (运行时, 无编辑器 UI)
   python Loom.py --open <scene.json>      编辑器打开指定场景 (供项目管理器"打开项目")
   python Loom.py --benchmark [三角形数] [迭代数]  数学管线基准 (不弹窗口)
-  python Loom.py --bench <scene.json> [帧数]     场景基准 (转交 build_entry._bench_scene; 结果写 bench_result.txt)
+  python Loom.py --bench <scene.json> [帧数]     场景基准 (转交 build_entry._bench_scene; 结果写用户目录 bench/bench_result.txt)
 """
 import os
 import sys
