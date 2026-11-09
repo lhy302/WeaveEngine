@@ -153,6 +153,8 @@ class TkHubView(IHubView):
         # 与远程 Agent/HTTP 同一 dispatch)
         import hub_console
         hub_console.attach_console(self.root)
+        # 2026-11-09 P1-4: 启动期钩子（上次失败提示 + 延迟 10s 的后台检查，24h 一次）
+        self.ctrl.start_background_tasks()
 
     def _btn_row(self, parent, pairs):
         """一行等宽按钮: pairs = [(文本, 命令), ...]"""

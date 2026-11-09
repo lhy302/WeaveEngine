@@ -192,9 +192,11 @@ def t_cached_interp_used():
 
 # ---------------- ③ 缓存为空 -> engine_dir -> 默认 ----------------
 def t_fallback_chain():
-    with tempfile.TemporaryDirectory() as root:
+    # 分放两个引擎根：父目录命中只有一个候选（同根多版本取最高由 test_hub_update 覆盖）
+    with tempfile.TemporaryDirectory() as root, \
+            tempfile.TemporaryDirectory() as rootB:
         a = _make_interp(root, '0.1.0.beta4')
-        b = _make_interp(root, '0.1.0.beta5')
+        b = _make_interp(rootB, '0.1.0.beta5')
         cfg.save_interpreters([cfg.discover_interpreter(a),
                                cfg.discover_interpreter(b)])
         cfg.set_default_interpreter(cfg.discover_interpreter(b))   # ★ 在 b

@@ -171,6 +171,8 @@ class NovaHubView(IHubView):
             os.path.abspath(__file__))))
         import hub_console
         hub_console.attach_console(self.root, height=5)
+        # 2026-11-09 P1-4: 启动期钩子（失败提示 + 延迟 10s 的后台检查，24h 一次）
+        self.ctrl.start_background_tasks()
 
     def _build_header(self):
         """顶栏: 橙竖条 + 大标题 + 副标题."""
@@ -252,6 +254,15 @@ class NovaHubView(IHubView):
                        activeforeground=C['text'], selectcolor=C['panel'],
                        font=self.f_small, highlightthickness=0,
                        cursor='hand2').pack(side='left')
+        # 2026-11-09 R-04-01: TkHubView 有「远程模式」开关，默认视图若是本 GUI，
+        # 白屏用户就找不到兜底开关 —— 这里补同款（同一 guiloader 键 remote_mode）。
+        self.remote_var = tk.BooleanVar(value=(s.get('remote_mode') == 'on'))
+        tk.Checkbutton(row1, text="远程模式（离屏回读兜底，会明显降低帧率）",
+                       variable=self.remote_var, command=self._toggle_remote_mode,
+                       bg=C['bg'], fg=C['text'], activebackground=C['bg'],
+                       activeforeground=C['text'], selectcolor=C['panel'],
+                       font=self.f_small, highlightthickness=0,
+                       cursor='hand2').pack(side='left', padx=(10, 0))
         self.interp_status = tk.Label(row1, text="默认解释器: (无)", bg=C['bg'],
                                       fg=C['dim'], font=self.f_small)
         self.interp_status.pack(side='right')
@@ -296,6 +307,16 @@ class NovaHubView(IHubView):
 
     def _open_project(self):
         self.ctrl.open_project(self._selected(self.proj_list))
+
+    def _toggle_remote_mode(self):
+        """R-04-01: 远程模式（离屏回读兜底）开关，默认 off；白屏机器才打开。"""
+        s = self.guiloader.load_settings('loomhub')
+        s['remote_mode'] = 'on' if self.remote_var.get() else 'off'
+        self.guiloader.save_settings('loomhub', s)
+        self.ctrl.set_msg("远程模式（离屏回读）%s"
+                          % ("已开启：白屏兜底，帧率会明显下降"
+                             if s['remote_mode'] == 'on'
+                             else "已关闭：直连渲染（默认，帧率最高）"), 'dim')
 
     def _set_current_interp(self):
         """把选中的解释器记为「当前引擎」（内存缓存，不落盘）。"""

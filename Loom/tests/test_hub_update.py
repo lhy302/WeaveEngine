@@ -238,7 +238,8 @@ def t_updater_script():
     check("脚本不启动 LoomHub（不自动重启）", 'LoomHub.exe' not in s)
     check("脚本以 start /wait 跑安装器（安装完脚本才结束）",
           'start "" /wait "%SETUP%"' in s)
-    check("脚本是纯 ASCII（cmd 编码安全）", all(ord(c) < 128 for c in s))
+    check("脚本首行 chcp 65001（UTF-8 代码页，中文路径可用）",
+          s.splitlines()[1].strip().lower().startswith('chcp 65001'), s.splitlines()[:3])
 
     with tempfile.TemporaryDirectory() as tmp:
         old_script = hu.script_path
@@ -246,7 +247,7 @@ def t_updater_script():
         try:
             r = hu.write_updater_script(os.path.join(tmp, 'fake.exe'), 999)
             check("write_updater_script 落盘成功", r.get('ok') and os.path.isfile(r['path']), r)
-            body = open(r['path'], encoding='ascii').read()
+            body = open(r['path'], encoding='utf-8-sig').read()
             check("落盘脚本含 PID=999 与静默参数",
                   'set "PID=999"' in body and '/VERYSILENT' in body)
             r2 = hu.apply_update(os.path.join(tmp, '不存在.exe'))
@@ -279,6 +280,121 @@ def t_check_and_notice():
     check("提示后标记已读（不重复打扰）", hu.take_pending_failure() is None)
 
 
+# ---------------- 审计硬化（第三轮 P1-1/2/3/4 + P2） ----------------
+def t_script_nonascii_path():
+    """P1-1: 路径含非 ASCII（中文用户名下的 LocalAppData）也能写出脚本。"""
+    with tempfile.TemporaryDirectory() as tmp:
+        d = os.path.join(tmp, '用户', '张三', 'AppData', 'Local', 'Loom', 'hub', 'updates')
+        old = hu.script_path
+        hu.script_path = lambda: os.path.join(d, 'apply_update.cmd')
+        try:
+            r = hu.write_updater_script(os.path.join(d, 'LoomHub-0.1.3-Setup.exe'), 4321)
+            check("① 含中文路径能写出脚本", r.get('ok') is True, r)
+            p = r.get('path') or ''
+            raw = open(p, 'rb').read()
+            check("① 脚本以 UTF-8 BOM 开头（cmd 65001 可读中文路径）",
+                  raw[:3] == b'\xef\xbb\xbf', raw[:6])
+            check("① 脚本里保留了中文路径原文",
+                  '用户' in raw.decode('utf-8-sig'))
+            check("① 残留 0 字节半成品不存在", os.path.getsize(p) > 0)
+        finally:
+            hu.script_path = old
+
+
+def t_reject_deletes_dest():
+    """P1-2a: 校验失败必须删掉 dest（否则会被提权执行）。"""
+    with tempfile.TemporaryDirectory() as tmp:
+        p = os.path.join(tmp, 'LoomHub-0.1.3-Setup.exe')
+        open(p, 'wb').write(b'CORRUPT')
+        r = hu.reject_download(p, 'size 不符')
+        check("② 校验失败返回 ok=False 且 deleted=True",
+              r.get('ok') is False and r.get('deleted') is True, r)
+        check("② 校验失败后 dest 已不存在", not os.path.exists(p))
+
+
+def t_apply_requires_verified():
+    """P1-2b: 未校验的包一律拒绝提权执行。"""
+    with tempfile.TemporaryDirectory() as tmp:
+        p = os.path.join(tmp, 'LoomHub-9.9.9-Setup.exe')
+        open(p, 'wb').write(b'CORRUPT')
+        r = hu.apply_update(p)
+        check("③ 无旁文件 -> 拒绝执行（ok=False）", r.get('ok') is False, r)
+        check("③ 拒绝原因点名未校验", '未经校验' in (r.get('reason') or ''), r)
+        # 有旁文件但 digest 不符 -> 也拒绝
+        hu._write_sidecar(p, {'digest': 'sha256:' + '0' * 64, 'version': '9.9.9'})
+        r2 = hu.apply_update(p)
+        check("③ 旁文件 digest 不符 -> 拒绝执行", r2.get('ok') is False, r2)
+        check("③ 拒绝原因点名复验失败", '复验失败' in (r2.get('reason') or ''), r2)
+
+
+def t_pick_latest_semver():
+    """P1-3: 0.1.10 必须比 0.1.9 新（字典序会选错）。"""
+    with tempfile.TemporaryDirectory() as tmp:
+        for v in ('0.1.9', '0.1.10', '0.1.2'):
+            open(os.path.join(tmp, 'LoomHub-%s-Setup.exe' % v), 'wb').write(b'x')
+        p, ver = hu.pick_latest_package(tmp)
+        check("④ pick_latest_package 选 0.1.10（不是字典序的 0.1.9）",
+              ver == '0.1.10' and os.path.basename(p) == 'LoomHub-0.1.10-Setup.exe',
+              (ver, p))
+        check("④ is_newer 同口径", hu.is_newer('0.1.10', '0.1.9') is True)
+
+
+def t_startup_wiring():
+    """P1-4: 启动流程真的调用了"失败提示 + 延迟检查"。"""
+    ctrl_src = open(os.path.join(REPO, 'LoomHub', 'hub_controller.py'),
+                    encoding='utf-8').read()
+    check("⑤ controller 定义 start_background_tasks 并调用两个函数",
+          'def start_background_tasks' in ctrl_src
+          and 'self.update_notice()' in ctrl_src
+          and 'self.maybe_start_update_check(' in ctrl_src)
+    for name, rel in (('TkHubView', 'LoomHub/hub_view_tk.py'),
+                      ('NovaHubGUI', 'LoomHub/GUI/NovaHubGUI.py'),
+                      ('LoomHubGUI(pygame)', 'LoomHub/LoomHubGUI.py')):
+        src = open(os.path.join(REPO, rel), encoding='utf-8').read()
+        check("⑤ %s 启动流程调用 start_background_tasks" % name,
+              'start_background_tasks()' in src)
+
+
+def t_p2_fixes():
+    """P2: JSON 非数组不抛 / 父目录匹配取最高版本 / 成功清旧失败提示。"""
+    old_api, old_req = hu.API_BASE, hu._request
+    hu.API_BASE = 'https://example.invalid'          # 只为了让 check_update 走到 _request
+    hu._request = lambda *a, **k: (200, {}, b'{"message": "Not Found"}')
+    try:
+        r = hu.check_update(local='0.1.2')
+        check("P2-① 200+JSON 对象体不抛异常、返回 ok=False",
+              isinstance(r, dict) and r.get('ok') is False, r.get('reason'))
+    finally:
+        hu._request, hu.API_BASE = old_req, old_api
+    hu.log_line('旧失败（应被成功清除）', level='FAIL')
+    hu.mark_failure_seen()
+    check("P2-③ 成功检查会清掉旧失败提示",
+          hu.take_pending_failure() is None)
+
+    # P2-② 同一引擎根下多版本 -> 取最高版本
+    with tempfile.TemporaryDirectory() as root:
+        dirs = {}
+        for v in ('0.1.0.beta4', '0.1.0.beta5'):
+            d = os.path.join(root, v, 'Loom')       # <安装根>/<版本>/Loom
+            os.makedirs(d)
+            with open(os.path.join(d, cfg.META_NAME), 'w', encoding='utf-8') as fh:
+                json.dump({'name': 'Loom', 'version': v, 'main': 'Loom.py',
+                           'main_exe': None}, fh)
+            open(os.path.join(d, 'Loom.py'), 'w').close()
+            dirs[v] = d
+        lst = [cfg.discover_interpreter(dirs['0.1.0.beta4']),
+               cfg.discover_interpreter(dirs['0.1.0.beta5'])]
+        ctrl = hctrl.HubController.__new__(hctrl.HubController)
+        ctrl.interpreters = lst
+        ctrl.msg = ''
+        ctrl.current_interp = None
+        # 场景挂在共同安装根下（<root>/Projects/x.json）-> 两个版本都是候选
+        picked = ctrl.interp_for_project({'engine_dir': root})
+        check("P2-② 父目录匹配取版本最高（beta5，不是台账里第一个 beta4）",
+              picked is not None and picked.get('version') == '0.1.0.beta5',
+              picked and picked.get('version'))
+
+
 if __name__ == "__main__":
     print("========== LoomHub 0.1.3：H1 remote-mode / H2 自更新 ==========")
     t_remote_mode_env()
@@ -286,6 +402,12 @@ if __name__ == "__main__":
     t_download_verify()
     t_updater_script()
     t_check_and_notice()
+    t_script_nonascii_path()
+    t_reject_deletes_dest()
+    t_apply_requires_verified()
+    t_pick_latest_semver()
+    t_startup_wiring()
+    t_p2_fixes()
     if _FAILS:
         print("总结果: FAIL ❌", _FAILS)
         sys.exit(1)

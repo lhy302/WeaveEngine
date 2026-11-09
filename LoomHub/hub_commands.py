@@ -646,11 +646,11 @@ def cmd_update_apply(args):
     import hub_update
     path = args.get('path')
     if not path:
-        cand = [os.path.join(hub_update.updates_dir(), n)
-                for n in sorted(os.listdir(hub_update.updates_dir()))
-                if n.lower().endswith('.exe')] if os.path.isdir(hub_update.updates_dir()) else []
-        path = cand[-1] if cand else ''
-    r = hub_update.apply_update(path)
+        # 2026-11-09 P1-3: 按**语义版本**挑最新（0.1.10 > 0.1.9）；
+        # 以前 sorted()[-1] 是字典序，会挑错版本。
+        path, _ver = hub_update.pick_latest_package(hub_update.updates_dir())
+    r = hub_update.apply_update(path, size=args.get('size') or 0,
+                                digest=args.get('digest') or '')
     return r
 
 

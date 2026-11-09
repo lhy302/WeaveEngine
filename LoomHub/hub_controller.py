@@ -493,14 +493,30 @@ class HubController:
                     d = it.get('dir')
                     if d and os.path.normcase(os.path.abspath(d)) == want:
                         return it
-                # ② engine_dir 是解释器目录的父目录（Projects/ 在 <引擎根>/ 下）
-                for it in lst:
-                    if it.get('stale'):
-                        continue
-                    d = it.get('dir')
-                    if d and os.path.normcase(
-                            os.path.abspath(os.path.dirname(d))) == want:
-                        return it
+                # ② engine_dir 是解释器目录的父目录（Projects/ 在 <引擎根>/ 下）。
+                # 2026-11-09 P2-②: 同一引擎根下可能并存多个版本目录，取**版本最高**的那个
+                # （以前按台账顺序返回第一个，实测会选中最旧的 beta4）。
+                def _vk(x):
+                    try:
+                        return cfg._version_key(x.get('version', '0'))
+                    except (TypeError, ValueError):
+                        return (0, 0, 0, 0, 0)
+
+                # 逐层放宽：先看"父目录"，再看"祖父目录"（场景在 <安装根>/Projects/
+                # 而解释器在 <安装根>/<版本>/Loom 的布局）；每层若命中多个版本，
+                # 取**版本最高**的那个，而不是台账里的第一个。
+                for depth in (1, 2):
+                    cands = []
+                    for it in lst:
+                        if it.get('stale') or not it.get('dir'):
+                            continue
+                        base = os.path.abspath(it['dir'])
+                        for _ in range(depth):
+                            base = os.path.dirname(base)
+                        if os.path.normcase(base) == want:
+                            cands.append(it)
+                    if cands:
+                        return max(cands, key=_vk)
         return cfg.default_interpreter()
 
     def open_project(self, project, interp=None):
@@ -603,6 +619,9 @@ class HubController:
         info = hub_update.check_update()
         if info.get('ok'):
             hub_update.mark_checked()
+            # P2-③: 检查成功说明网络/接口已恢复，清掉上次失败提示，
+            # 免得下次启动还显示一条早已过期的 FAIL。
+            hub_update.mark_failure_seen()
         self.update_info = info
         if info.get('ok') and info.get('update'):
             up_ = info['update']
@@ -658,12 +677,34 @@ class HubController:
         except Exception as e:
             self.set_msg("提交成功，请手动关闭 LoomHub 后再安装（%r）" % (e,), 'dim')
 
+    def start_background_tasks(self, delay=10.0):
+        """启动期钩子（2026-11-09 P1-4）：接上"启动后检查 / 下次启动提示失败"。
+
+        以前 maybe_start_update_check() 与 update_notice() 都没有调用点，
+        等于自更新只有 API 没有行为。视图/入口在 UI 建好后调本方法一次。
+        """
+        note = None
+        try:
+            note = self.update_notice()
+        except (OSError, ValueError) as e:
+            try:
+                import hub_update
+                hub_update.log_line('启动期更新提示失败: %r' % (e,), level='FAIL')
+            except (ImportError, OSError, ValueError):
+                pass          # 连日志都写不了时只能放弃（不阻断启动）
+        if note:
+            self.set_msg(note, 'err')
+        return self.maybe_start_update_check(delay)
+
     def maybe_start_update_check(self, delay=10.0):
         """启动后台检查（延迟 ~10s、24h 最多一次、失败静默）。返回线程或 None。"""
+        if os.environ.get('LOOM_HUB_NO_UPDATE_CHECK'):
+            return None            # 测试/CI 兜底开关：不起后台线程、不联网
         try:
             if not cfg.load_hub_settings().get('check_update_enabled', True):
                 return None
-        except Exception:
+        except (OSError, ValueError) as e:
+            self.set_msg("读取更新设置失败: %r（本次跳过检查）" % (e,), 'dim')
             return None
         import threading
 

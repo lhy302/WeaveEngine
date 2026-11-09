@@ -181,9 +181,12 @@ def t_open_project_explicit_interp():
 
 def t_open_project_by_engine_dir():
     """④ 未显式传 interp：engine_dir 命中 a 就用 a；命中不了回退默认。"""
-    with tempfile.TemporaryDirectory() as root:
+    # 两个版本放在不同引擎根：让"父目录命中"是唯一候选，不与
+    # "同根多版本取最高版本"(P2-②) 规则冲突（那由 test_hub_update 覆盖）。
+    with tempfile.TemporaryDirectory() as root, \
+            tempfile.TemporaryDirectory() as rootB:
         a = _make_interp(root, '0.1.0.beta4')
-        b = _make_interp(root, '0.1.0.beta5')
+        b = _make_interp(rootB, '0.1.0.beta5')
         cfg.save_interpreters([cfg.discover_interpreter(a),
                                cfg.discover_interpreter(b)])
         cfg.set_default_interpreter(cfg.discover_interpreter(b))
