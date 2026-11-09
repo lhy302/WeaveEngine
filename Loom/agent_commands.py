@@ -1292,6 +1292,33 @@ def cmd_engine_metrics(win, args):
     if clk is not None:
         out['clock'] = {'logic_fps': clk.logic_fps, 'alpha': round(clk.alpha, 4),
                         'steps': clk.steps, 'phys_steps': clk.phys_steps}
+    # 2026-11-09 E1: **累计**体检面 —— clock.steps 是'上一次调用'的步数, 不是累计值,
+    # 用它做差分会得到 0; 这里给可累计字段 + 时间账本 + 丢步/截断计数。
+    try:
+        _ratio = None
+        if hasattr(ed, 'get_logic_time_ratio'):
+            _ratio = ed.get_logic_time_ratio()
+        out['logic_metrics'] = {
+            'steps_total': getattr(ed, '_logic_steps_total', None),
+            'calls_total': getattr(ed, '_logic_calls_total', None),
+            'dt_sum': round(getattr(ed, '_logic_dt_sum', 0.0), 4),
+            'wall_sum': round(getattr(ed, '_logic_wall_sum', 0.0), 4),
+            'ratio': (None if _ratio is None else round(_ratio, 4)),
+            'clock_steps_total': getattr(clk, 'steps_total', None),
+            'clock_calls_total': getattr(clk, 'calls_total', None),
+            'drop_events': getattr(clk, 'drop_events', None),
+            'drop_time': round(getattr(clk, 'drop_time', 0.0), 4),
+            'clamp_frames': getattr(clk, 'clamp_frames', None),
+            'clamp_time': round(getattr(clk, 'clamp_time', 0.0), 4),
+            'max_steps_per_frame': getattr(clk, 'max_steps_per_frame', None),
+            'same_clock_as_clock_field': (clk is getattr(ed, '_clock', None)),
+            'calls_by_thread': dict(getattr(ed, '_clock_calls_by_thread', {}) or {}),
+            'max_gap_s': round(getattr(ed, '_clock_max_gap', 0.0), 4),
+            'logic_async': bool(getattr(ed, '_logic_async', False)),
+            'external_ctx': bool(getattr(ed, '_external_ctx', False)),
+            'logic_thread_alive': bool(getattr(getattr(ed, '_logic_thread', None), 'is_alive', lambda: False)()),        }
+    except Exception as e:
+        out['logic_metrics'] = 'err:%r' % e
     # LOOM_PROFILE=1 时附阶段耗时快照 (编译版诊断用: exe 内存不可直读)
     st_t = getattr(ed, '_stage_times', None)
     if st_t:

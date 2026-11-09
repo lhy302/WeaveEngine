@@ -1347,7 +1347,32 @@ class GLEngine(ShadowMixin, FrameComponentMixin, PhysicsMixin, InputMixin, HudMi
         dt_eff = max(float(render_dt or 0.0), wall_dt)
         self._logic_dt_sum = getattr(self, '_logic_dt_sum', 0.0) + dt_eff
         self._logic_wall_sum = getattr(self, '_logic_wall_sum', 0.0) + wall_dt
-        return clk.advance(dt_eff)
+        # 2026-11-09 E1 现场取证: 按线程记调用数与最大间隔 (判定时钟被谁在推/推得够不够/是否双推)。
+        try:
+            import threading as _th
+            _ct = _th.current_thread()
+            _tn = '%s#%s' % (_ct.name, _ct.ident)
+            _d = getattr(self, '_clock_calls_by_thread', None)
+            if _d is None:
+                _d = self._clock_calls_by_thread = {}
+            _d[_tn] = _d.get(_tn, 0) + 1
+            if wall_dt > getattr(self, '_clock_max_gap', 0.0):
+                self._clock_max_gap = wall_dt
+        except Exception as e:
+            if not getattr(self, '_clock_stat_err', False):
+                self._clock_stat_err = True
+                print('[engine] 时钟线程统计失败 (%r)' % (e,))
+        _r = clk.advance(dt_eff)
+        # 2026-11-09 E1 体检: 累计执行步数 (与 get_tps 的滑动窗口口径互相印证)
+        try:
+            _st = _r[0] if isinstance(_r, tuple) and _r else 0
+            self._logic_steps_total = getattr(self, '_logic_steps_total', 0) + int(_st or 0)
+            self._logic_calls_total = getattr(self, '_logic_calls_total', 0) + 1
+        except Exception as e:
+            if not getattr(self, '_logic_metric_err', False):
+                self._logic_metric_err = True
+                print('[engine] 时钟体检计数失败 (%r), 不影响推进' % (e,))
+        return _r
 
     def _ensure_split(self):
         """惰性初始化分离态 (测试桩 __new__ 路径兜底: __init__ 未跑时

@@ -15,6 +15,7 @@
   self._prep_pub / self._prep_pairs / self._prep_light_vps
   self._interp / self.is_playing / self._profile
 """
+import sys
 import threading
 import time
 
@@ -25,6 +26,17 @@ class LogicThreadMixin:
         if self._logic_thread is not None:
             return
         self._logic_stop = threading.Event()
+        # 2026-11-09 E1 现场取证结论: 逻辑线程被渲染主线程「饿住」—— 默认 GIL 切换
+        # 间隔 5ms，而渲染主线程有上百毫秒级的纯 Python 段（501 模型世界矩阵/剔除），
+        # 逻辑线程每轮要等 100~400ms 才拿到 GIL，稳态只能跑到 2.5~10 轮/秒，
+        # 靠 accumulator 补回大部分时间后 TPS 仍落在 22~25（实测）。
+        # 处置: 把切换间隔收到 1ms（逻辑线程能更及时拿到 GIL），停止时恢复原值。
+        try:
+            self._gil_switch_back = sys.getswitchinterval()
+            sys.setswitchinterval(0.001)
+        except Exception as e:
+            self._gil_switch_back = None
+            print('[engine] GIL 切换间隔调整失败 (%r), 逻辑线程可能被渲染线程饥饿' % (e,))
         t = threading.Thread(target=self._logic_loop, args=(clk,),
                              name='loom-logic', daemon=True)
         self._logic_thread = t
@@ -36,6 +48,14 @@ class LogicThreadMixin:
         t = self._logic_thread
         self._logic_thread = None
         self._logic_stop = None
+        # 2026-11-09 E1: 恢复 GIL 切换间隔 (别把引擎进程的默认值永久改掉)
+        _gb = getattr(self, '_gil_switch_back', None)
+        if _gb is not None:
+            try:
+                sys.setswitchinterval(_gb)
+            except (ValueError, TypeError) as e:
+                print('[engine] 恢复 GIL 切换间隔失败 (%r)' % (e,))
+            self._gil_switch_back = None
         if ev is not None:
             ev.set()
         if t is not None and t.is_alive() and t is not threading.current_thread():

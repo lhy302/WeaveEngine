@@ -108,7 +108,13 @@ class FixedStepClock:
             render_dt = 0.0 if self._last is None else now - self._last
             self._last = now
         # 死亡螺旋保险: 单帧计入时间封顶 (Unity maximumDeltaTime)
-        dt = min(max(render_dt, 0.0), self.maximum_logic_delta) * self.time_scale
+        # 2026-11-09 E1 体检: 单独记"被截断的时间"与"被丢弃的积压", 使 "TPS 不够"
+        # 可以区分成 ①单帧太长被截断 ②积压被丢 ③纯粹算不过来。
+        _raw = max(render_dt, 0.0)
+        if _raw > self.maximum_logic_delta:
+            self.clamp_frames = getattr(self, 'clamp_frames', 0) + 1
+            self.clamp_time = getattr(self, 'clamp_time', 0.0) + (_raw - self.maximum_logic_delta)
+        dt = min(_raw, self.maximum_logic_delta) * self.time_scale
         self._acc += dt
         steps = 0
         psteps = 0
@@ -124,9 +130,14 @@ class FixedStepClock:
             steps += 1
             psteps += self._sub_steps
         if steps == self.max_steps_per_frame and self._acc >= fdt:
+            self.drop_events = getattr(self, 'drop_events', 0) + 1
+            self.drop_time = getattr(self, 'drop_time', 0.0) + self._acc
             self._acc = 0.0              # 积压丢弃 (死亡螺旋保险)
         self.steps = steps
         self.phys_steps = psteps
+        # 累计计数 (E1: 供 engine_metrics 区分"步频不够"与"读数不是累计值")
+        self.steps_total = getattr(self, 'steps_total', 0) + steps
+        self.calls_total = getattr(self, 'calls_total', 0) + 1
         # alpha: 渲染帧在 curr 逻辑帧内的进度 (插值层只看逻辑 alpha)
         self.alpha = self._acc / fdt if steps or self._acc > 0.0 else 0.0
         return steps, psteps
