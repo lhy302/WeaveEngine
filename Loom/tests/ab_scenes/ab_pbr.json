@@ -1,0 +1,131 @@
+{
+ "version": 10,
+ "camera": {
+  "target": [
+   0,
+   1,
+   0
+  ],
+  "distance": 7,
+  "yaw": 0.6,
+  "pitch": -0.3
+ },
+ "materials": [
+  {
+   "id": "m_pbr",
+   "name": "PBR铜",
+   "color": "#c8783c",
+   "saturation": 1,
+   "metallic": 0.9,
+   "roughness": 0.25,
+   "pbr": true
+  },
+  {
+   "id": "m_plain",
+   "name": "普通",
+   "color": "#6a8fbf",
+   "saturation": 1,
+   "metallic": 0,
+   "roughness": 0.5,
+   "pbr": false
+  }
+ ],
+ "objects": [
+  {
+   "id": "g",
+   "type": "plane",
+   "params": {
+    "size": 20
+   },
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "rotation": [
+    0,
+    0,
+    0
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "color": "#8a8f98",
+   "visible": true,
+   "material_id": "m_plain"
+  },
+  {
+   "id": "pbr_c",
+   "type": "cube",
+   "params": {
+    "size": 1.2
+   },
+   "position": [
+    -1,
+    0.6,
+    0
+   ],
+   "rotation": [
+    0,
+    0.5,
+    0
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "color": "#c8783c",
+   "visible": true,
+   "material_id": "m_pbr"
+  },
+  {
+   "id": "sph",
+   "type": "sphere",
+   "params": {
+    "radius": 0.7
+   },
+   "position": [
+    1.2,
+    0.7,
+    0
+   ],
+   "rotation": [
+    0,
+    0,
+    0
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "color": "#c8783c",
+   "visible": true,
+   "material_id": "m_pbr"
+  }
+ ],
+ "lights": [
+  {
+   "id": "sun",
+   "kind": "directional",
+   "direction": [
+    -0.5,
+    -1,
+    -0.5
+   ],
+   "color": [
+    1,
+    1,
+    1
+   ],
+   "intensity": 1.2,
+   "shadow": false,
+   "mode": "full",
+   "shape": "circle",
+   "size": 5
+  }
+ ]
+}

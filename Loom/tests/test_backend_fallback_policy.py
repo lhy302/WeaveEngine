@@ -1,16 +1,18 @@
 # -*- coding: utf-8 -*-
 """test_backend_fallback_policy.py — 后端回退策略 (Q6) 的白盒契约.
 
-基准 (任务裁决 Q6):
+基准 (2026-11-09 人类裁决 A，**取代旧 Q6「崩一次」**):
   · 默认后端仍是 vulkan (设置里的 render_api);
-  · **Vulkan 初始化失败**时 (非显式指定): 打印"Vulkan 后端不兼容（<原因>），
-    已把设置回退为 OpenGL，下次启动将使用 OpenGL"; 把 设置.json 的
-    render_api 写成 opengl; 本次进程**非零退出** (崩一次, 不伪装成功);
-  · 显式 --backend vulkan: **不改写设置**, 只报错退出;
-  · --backend auto: 仍自动回退 (不写设置);
-  · 渲染循环内失败 (VkRunError) 不回退, 打印原因后失败退出。
+  · **Vulkan 初始化失败**（无 loader / 无适配器 / apiVersion < 1.1 / 设备创建失败）:
+    打印 [VK] 诊断（设备/驱动/apiVersion）+ 弹窗 + 把用户层 游戏设置.json 的
+    render_api 写成 opengl + **同进程立即改走 GL 4.3**（不退出、不闪退）；
+  · 显式 --backend vulkan: 同样当场降级并落配置，但**额外记一条「用户手选」日志**；
+  · --backend auto: 同样回退并落配置（下次启动不再空试 VK）；
+  · GL 也不可用 -> 打印两条原因（[VK]+[GL]）后 SystemExit(1)；
+  · 渲染循环内失败 (VkRunError) 不回退、不改配置。
 
-同时锁住 scan_05 P-10 的"段"划分: 初始化失败 = 可回退信号, 循环内失败 = 不可回退。
+同时锁住 scan_05 P-10 的"段"划分: 初始化失败 = 可回退信号, 循环内失败 = 不可回退；
+以及 VK 地板 1.1（loom_backend_guard）与旧配置键名兼容。
 """
 import sys as _sys_utf8
 try:
@@ -129,28 +131,32 @@ def _run_captured(fn):
     return out, exc
 
 
-def t_default_path_persists_opengl(tmp):
-    """非显式 (设置/默认走到 vulkan) 初始化失败 -> 写 opengl + 非零退出."""
-    print("=== 默认路径: Vulkan 初始化失败 (Q6) ===")
+def t_default_path_in_process_fallback(tmp):
+    """非显式 (设置/默认走到 vulkan) 初始化失败 -> 诊断+落配置+同进程 GL（裁决 A）."""
+    print("=== 默认路径: Vulkan 初始化失败 -> 同进程 GL ===")
     h = _Harness(tmp)
-    h.install(vk=run_player.VkInitError("adapter 为空 (无 Vulkan 设备)"))
+    h.install(vk=run_player.VkInitError(
+        "[VK] Vulkan API: 1.0.0（地板: 1.1）\n[VK] 设备: 假设备\n[VK] 驱动: 假驱动 (0.0.0)"))
+    nxt = None
     try:
         out, exc = _run_captured(lambda: run_player.run_backend("vulkan", "x.json"))
+        nxt = run_player.resolve_backend(None)      # 必须在 restore 之前（隔离目录仍生效）
     finally:
         h.restore()
-    code = getattr(exc, 'code', None) if isinstance(exc, SystemExit) else None
-    check("本次进程非零退出 (SystemExit code != 0)",
-          isinstance(exc, SystemExit) and code not in (None, 0), (type(exc).__name__, code))
-    check("提示含「不兼容」", "不兼容" in out, out.strip())
-    check("提示含「下次启动将使用 OpenGL」", "下次启动将使用 OpenGL" in out, "")
-    check("设置.json render_api 已写成 opengl", h.read_setting().get("render_api") == "opengl",
-          h.read_setting())
-    check("没有在同进程里偷偷改走 GL (不伪装成功)", h.calls == ["vk"], h.calls)
+    check("A1 不退出（不再崩一次）", exc is None, type(exc).__name__)
+    check("A1 同进程依次调用 vk -> gl", h.calls == ["vk", "gl"], h.calls)
+    check("A1 打印 [VK] 诊断（含 apiVersion/地板）",
+          "[VK]" in out and "1.1" in out, out.strip()[:200])
+    check("A1 提示已自动切换 OpenGL", "自动切换为 OpenGL" in out, "")
+    check("A1 设置.json render_api 已写成 opengl",
+          h.read_setting().get("render_api") == "opengl", h.read_setting())
+    check("A1 下次启动解析为 opengl", nxt == "opengl", nxt)
+    check("A1 非手选 -> 不出现「用户手选」日志", "用户手选" not in out, "")
 
 
-def t_explicit_vulkan_keeps_setting(tmp):
-    """显式 --backend vulkan: 不改写设置, 只报错退出."""
-    print("=== 显式 --backend vulkan (Q6) ===")
+def t_explicit_vulkan_falls_back_with_log(tmp):
+    """显式 --backend vulkan: 同样当场降级并落配置, 但额外记「用户手选」日志."""
+    print("=== 显式 --backend vulkan -> 降级 + 手选日志 ===")
     h = _Harness(tmp)
     h.install(vk=run_player.VkInitError("adapter 为空 (无 Vulkan 设备)"))
     try:
@@ -158,27 +164,25 @@ def t_explicit_vulkan_keeps_setting(tmp):
             lambda: run_player.run_backend("vulkan", "x.json", explicit=True))
     finally:
         h.restore()
-    code = getattr(exc, 'code', None) if isinstance(exc, SystemExit) else None
-    check("显式 vulkan: 非零退出",
-          isinstance(exc, SystemExit) and code not in (None, 0), (type(exc).__name__, code))
-    check("显式 vulkan: 设置未被改写 (仍 vulkan)",
-          h.read_setting().get("render_api") == "vulkan", h.read_setting())
-    check("显式 vulkan: 提示写明不改写设置", "不改写设置" in out, out.strip())
-    check("显式 vulkan: 不回退 GL", h.calls == ["vk"], h.calls)
+    check("B1 显式手选也当场降级（不退出）", exc is None and h.calls == ["vk", "gl"],
+          (type(exc).__name__, h.calls))
+    check("B1 设置仍被改写为 opengl",
+          h.read_setting().get("render_api") == "opengl", h.read_setting())
+    check("B1 记录「用户手选」日志（裁决 A 要求）", "用户手选" in out, out.strip()[-160:])
 
 
-def t_auto_falls_back_without_writing(tmp):
-    """--backend auto: 自动回退 GL, 不写设置."""
-    print("=== --backend auto (Q6) ===")
+def t_auto_falls_back_and_persists(tmp):
+    """--backend auto: 回退 GL 并落配置（下次启动不再空试 VK）."""
+    print("=== --backend auto -> GL + 落配置 ===")
     h = _Harness(tmp)
     h.install(vk=run_player.VkInitError("adapter 为空"))
     try:
         out, exc = _run_captured(lambda: run_player.run_backend("auto", "x.json"))
     finally:
         h.restore()
-    check("auto: 回退到 GL", exc is None and h.calls == ["vk", "gl"], (exc, h.calls))
-    check("auto: 设置未被改写", h.read_setting().get("render_api") == "vulkan",
-          h.read_setting())
+    check("E1 auto: 回退到 GL", exc is None and h.calls == ["vk", "gl"], (exc, h.calls))
+    check("E1 auto: 设置已写 opengl（下次直接走 GL）",
+          h.read_setting().get("render_api") == "opengl", h.read_setting())
 
 
 def t_loop_failure_not_swallowed(tmp):
@@ -206,15 +210,23 @@ def t_game_player_safe_layer(tmp):
 
     h = _Harness(tmp)
     h.install(vk=run_player.VkInitError("adapter 为空"))
+    _safe_ret = None
     try:
-        out, exc = _run_captured(
-            lambda: game_player._run_backend_safe("vulkan", "x.json"))
+        buf = io.StringIO()
+        exc = None
+        with contextlib.redirect_stdout(buf):
+            try:
+                _safe_ret = game_player._run_backend_safe("vulkan", "x.json")
+            except BaseException as e:     # noqa: BLE001 - 退出信号是断言对象
+                exc = e
+        out = buf.getvalue()
     finally:
         h.restore()
-    check("VkInitError -> 转成非零退出 (发布链不伪装成功)",
-          isinstance(exc, SystemExit) and getattr(exc, 'code', 1) not in (None, 0),
-          type(exc).__name__)
-    check("VkInitError -> 不改走 GL", h.calls == ["vk"], h.calls)
+    check("VkInitError -> 同进程改走 GL（裁决 A），发布链拿到实际后端 opengl",
+          exc is None and h.calls == ["vk", "gl"],
+          (type(exc).__name__, h.calls))
+    check("VkInitError -> 发布链返回的实际后端是 opengl",
+          _safe_ret == "opengl", _safe_ret)
 
     h = _Harness(tmp)
     h.install(vk=run_player.VkRunError("loop 内异常"))
@@ -253,12 +265,83 @@ def t_settings_key_named_backend(tmp):
           s.get("render_api") == "opengl" and s.get("backend") == "opengl", s)
 
 
+def t_double_fault_exits(tmp):
+    """GL 也不可用 -> 两条原因都打印 + 非零退出（不静默、不假成功）."""
+    print("=== 双后端都不可用 ===")
+    h = _Harness(tmp)
+    h.install(vk=run_player.VkInitError("[VK] 模拟: 无 Vulkan 设备"))
+
+    def _gl_boom(scene=None, **kw):
+        h.calls.append("gl")
+        raise RuntimeError("[GL] 模拟: GL 4.3 不可用")
+
+    run_player._run_opengl = _gl_boom
+    try:
+        out, exc = _run_captured(lambda: run_player.run_backend("vulkan", "x.json"))
+    finally:
+        h.restore()
+    check("C1 双错 -> SystemExit(1)",
+          isinstance(exc, SystemExit) and getattr(exc, 'code', None) == 1,
+          (type(exc).__name__, getattr(exc, 'code', None)))
+    check("C1 明确说两条后端都不可用", "两条后端都不可用" in out, out.strip()[-200:])
+    check("C1 [VK] 与 [GL] 原因都在", "[VK]" in out and "[GL]" in out, "")
+
+
+def t_vk_floor_99_end_to_end(tmp):
+    """把 VK 地板抬到 9.9 -> **真实 vk_player** 过门失败 -> run_player 回退 GL."""
+    print("=== VK 地板 9.9 桩（端到端）===")
+    import loom_backend_guard as G
+    old = (G.VK_MIN_API_MAJOR, G.VK_MIN_API_MINOR)
+    try:
+        G.VK_MIN_API_MAJOR, G.VK_MIN_API_MINOR = 9, 9
+        err = None
+        try:
+            G.require_vulkan_api("地板桩")
+        except G.VkBackendInitError as e:
+            err = e
+        check("F1 地板 9.9 被拒且带 apiVersion",
+              err is not None and "9.9" in str(err), str(err)[:120])
+        check("F1 诊断含 设备/驱动/API",
+              all(k in str(err) for k in ("设备", "驱动", "Vulkan API")), "")
+        check("F1 段标记可被 run_player 识别（可回退）",
+              run_player._is_vk_error(err, "vulkan-init"), "")
+        # 端到端: 真实 _run_vulkan -> vk_player 的初始化段检查（在开窗之前）触发回退；
+        # GL 用桩，避免测试真的开窗。
+        h = _Harness(tmp)
+        run_player._SETTINGS_BASE = tmp
+        run_player._run_opengl = lambda scene=None, **kw: "gl"
+        buf = io.StringIO()
+        ret = None
+        try:
+            with contextlib.redirect_stdout(buf):
+                ret = run_player.run_backend("vulkan", _mini_scene(tmp))
+        finally:
+            h.restore()
+        out = buf.getvalue()
+        check("F2 真实 vk_player 地板失败 -> 回退 GL", ret == "gl", ret)
+        check("F2 诊断来自 vk_player（含 9.9 / Vulkan）",
+              "9.9" in out and "Vulkan" in out, out.strip()[:160])
+    finally:
+        G.VK_MIN_API_MAJOR, G.VK_MIN_API_MINOR = old
+
+
+def _mini_scene(tmpdir):
+    """最小场景文件（vk_player 走到初始化段即被地板挡住, 不会真开窗）."""
+    p = os.path.join(tmpdir, "mini.json")
+    with open(p, "w", encoding="utf-8") as f:
+        json.dump({"version": 10, "objects": [], "lights": [], "materials": [],
+                   "cameras": [], "active_camera": None}, f)
+    return p
+
+
 def main():
     import tempfile
     with tempfile.TemporaryDirectory() as tmp:
-        t_default_path_persists_opengl(tmp)
-        t_explicit_vulkan_keeps_setting(tmp)
-        t_auto_falls_back_without_writing(tmp)
+        t_default_path_in_process_fallback(tmp)
+        t_explicit_vulkan_falls_back_with_log(tmp)
+        t_auto_falls_back_and_persists(tmp)
+        t_double_fault_exits(tmp)
+        t_vk_floor_99_end_to_end(tmp)
         t_loop_failure_not_swallowed(tmp)
         t_game_player_safe_layer(tmp)
         t_settings_key_named_backend(tmp)

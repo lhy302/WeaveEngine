@@ -398,26 +398,48 @@ def t_run_player_entry_identity():
             def _boom(scene, **kw):
                 raise vk_player.VkInitError('模拟: 无 Vulkan 设备')
             mod._run_vulkan = _boom
+            # 2026-11-09 裁决 A: 初始化失败后**同进程**改走 GL（旧「崩一次」已废止），
+            # 这里桩掉 GL 入口，只验证「不退出 + 落配置 + 可见诊断」。
+            mod._run_opengl = lambda scene=None, **kw: 'GL-OK'
             mod._SETTINGS_BASE = tmp
             mod._BOOTSTRAP_KEY[0] = None
             import contextlib
             import io
             buf = io.StringIO()
             exc = None
+            ret = None
             with contextlib.redirect_stdout(buf):
                 try:
-                    mod.run_backend('vulkan', 'x.json')
+                    ret = mod.run_backend('vulkan', 'x.json')
                 except BaseException as e:
                     exc = e
             out = buf.getvalue()
-            code = getattr(exc, 'code', None) if isinstance(exc, SystemExit) else None
-            check('脚本入口: 初始化失败 -> 非零退出 (不再冒泡成未捕获异常)',
-                  isinstance(exc, SystemExit) and code not in (None, 0),
-                  (type(exc).__name__, code))
-            check('脚本入口: 提示含「不兼容」并走回退', '不兼容' in out, out.strip()[:120])
+            check('脚本入口: 初始化失败 -> 当场改走 GL (不再崩一次)',
+                  exc is None and ret == 'GL-OK',
+                  (type(exc).__name__, getattr(exc, 'code', None), ret))
+            check('脚本入口: 提示含「自动切换为 OpenGL」',
+                  '自动切换为 OpenGL' in out, out.strip()[:160])
             setting = os.path.join(tmp, '设置.json')
             wrote = os.path.isfile(setting)
-            check('脚本入口: 回退已写入配置 (Q6 持久化真的发生)', wrote, setting)
+            check('脚本入口: 回退已写入配置 (持久化真的发生)', wrote, setting)
+            # 双后端都不可用 -> 必须非零退出且两条原因都可见（不再伪装成功）
+            def _gl_boom(scene=None, **kw):
+                raise RuntimeError('模拟: GL 4.3 不可用')
+            mod._run_opengl = _gl_boom
+            buf2 = io.StringIO()
+            exc2 = None
+            with contextlib.redirect_stdout(buf2):
+                try:
+                    mod.run_backend('vulkan', 'x.json')
+                except BaseException as e:
+                    exc2 = e
+            out2 = buf2.getvalue()
+            check('脚本入口: GL 也不可用 -> 非零退出 + 两条原因',
+                  isinstance(exc2, SystemExit)
+                  and getattr(exc2, 'code', None) not in (None, 0)
+                  and '[VK]' in out2 and '[GL]' in out2,
+                  (type(exc2).__name__, getattr(exc2, 'code', None),
+                   out2.strip()[-120:]))
         finally:
             sys.modules['__main__'] = saved_main
             if saved_rp is not None:

@@ -1,0 +1,126 @@
+{
+  "gate": {
+    "mae_abs": 0.0002,
+    "mae_drift": 5e-05,
+    "max_abs": 0.2,
+    "ncc_drift": 0.0001
+  },
+  "generated": "2026-11-09",
+  "note": "GL 4.3 vs VK 逐像素基线; 由 test_ab_gl_vk.py --update-baseline 生成",
+  "resolution": [
+    480,
+    320
+  ],
+  "scenes": {
+    "ab_c_dir+point.json": {
+      "mae": 2e-08,
+      "max": 0.003922,
+      "ncc": 0.99998689
+    },
+    "ab_c_dir_only.json": {
+      "mae": 2e-08,
+      "max": 0.003922,
+      "ncc": 1.00000107
+    },
+    "ab_c_dir_shadow.json": {
+      "mae": 7.084e-05,
+      "max": 0.078431,
+      "ncc": 0.99988639
+    },
+    "ab_c_point_only.json": {
+      "mae": 3e-08,
+      "max": 0.003922,
+      "ncc": 0.99999303
+    },
+    "ab_c_spot_only.json": {
+      "mae": 0.0,
+      "max": 0.0,
+      "ncc": 0.99998832
+    },
+    "ab_cube.json": {
+      "mae": 0.0,
+      "max": 0.0,
+      "ncc": 0.99994552
+    },
+    "ab_env.json": {
+      "mae": 5.4e-07,
+      "max": 0.003922,
+      "ncc": 1.00000131
+    },
+    "ab_env_off.json": {
+      "mae": 2e-08,
+      "max": 0.003922,
+      "ncc": 1.00005174
+    },
+    "ab_nrm.json": {
+      "mae": 2e-08,
+      "max": 0.003922,
+      "ncc": 1.0000155
+    },
+    "ab_nrm_off.json": {
+      "mae": 0.0,
+      "max": 0.0,
+      "ncc": 0.99995083
+    },
+    "ab_pbr.json": {
+      "mae": 3e-08,
+      "max": 0.003922,
+      "ncc": 1.0000025
+    },
+    "ab_plane.json": {
+      "mae": 1e-08,
+      "max": 0.003922,
+      "ncc": 0.99999738
+    },
+    "ab_plane_cube.json": {
+      "mae": 1.896e-05,
+      "max": 0.058824,
+      "ncc": 0.99997002
+    },
+    "ab_plane_cube_sun_pt.json": {
+      "mae": 1.751e-05,
+      "max": 0.054902,
+      "ncc": 0.99996817
+    },
+    "ab_plane_shfalse.json": {
+      "mae": 1e-08,
+      "max": 0.003922,
+      "ncc": 0.99999738
+    },
+    "ab_plane_shtrue.json": {
+      "mae": 1e-08,
+      "max": 0.003922,
+      "ncc": 0.99999738
+    },
+    "ab_plane_sphere.json": {
+      "mae": 5.189e-05,
+      "max": 0.078431,
+      "ncc": 0.99990857
+    },
+    "ab_point_shadow.json": {
+      "mae": 6.264e-05,
+      "max": 0.12549,
+      "ncc": 0.99938345
+    },
+    "ab_scene.json": {
+      "mae": 6.846e-05,
+      "max": 0.07451,
+      "ncc": 0.99991035
+    },
+    "ab_sky.json": {
+      "mae": 1.745e-05,
+      "max": 0.05098,
+      "ncc": 0.99995881
+    },
+    "ab_tex.json": {
+      "mae": 0.0,
+      "max": 0.0,
+      "ncc": 0.99997413
+    },
+    "ab_ui_scene.json": {
+      "mae": 8.229e-05,
+      "max": 0.098039,
+      "ncc": 0.9992761
+    }
+  }
+}

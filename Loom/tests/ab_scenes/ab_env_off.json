@@ -1,0 +1,72 @@
+{
+ "version": 10,
+ "camera": {
+  "target": [
+   0,
+   0.8,
+   0
+  ],
+  "distance": 5,
+  "yaw": 0.6,
+  "pitch": -0.25
+ },
+ "materials": [
+  {
+   "id": "m_env",
+   "name": "envPBR",
+   "color": "#c8c8d0",
+   "saturation": 1,
+   "metallic": 0.9,
+   "roughness": 0.25,
+   "pbr": true
+  }
+ ],
+ "objects": [
+  {
+   "id": "s",
+   "type": "sphere",
+   "params": {
+    "radius": 0.9
+   },
+   "position": [
+    0,
+    0.9,
+    0
+   ],
+   "rotation": [
+    0,
+    0,
+    0
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "color": "#c8c8d0",
+   "visible": true,
+   "material_id": "m_env"
+  }
+ ],
+ "lights": [
+  {
+   "id": "sun",
+   "kind": "directional",
+   "direction": [
+    -0.4,
+    -1,
+    -0.5
+   ],
+   "color": [
+    1,
+    1,
+    1
+   ],
+   "intensity": 1,
+   "shadow": false,
+   "mode": "full",
+   "shape": "circle",
+   "size": 5
+  }
+ ]
+}

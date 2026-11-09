@@ -1,0 +1,61 @@
+{
+ "version": 10,
+ "camera": {
+  "target": [
+   0,
+   0,
+   0
+  ],
+  "distance": 5,
+  "yaw": 0,
+  "pitch": 0
+ },
+ "objects": [
+  {
+   "id": "c",
+   "type": "cube",
+   "params": {
+    "size": 1
+   },
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "rotation": [
+    0,
+    0,
+    0
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "color": "#cc4444",
+   "visible": true
+  }
+ ],
+ "lights": [
+  {
+   "id": "sun",
+   "kind": "directional",
+   "direction": [
+    0,
+    -1,
+    0
+   ],
+   "color": [
+    1,
+    1,
+    1
+   ],
+   "intensity": 1,
+   "shadow": false,
+   "mode": "full",
+   "shape": "circle",
+   "size": 5
+  }
+ ],
+ "materials": []
+}

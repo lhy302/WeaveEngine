@@ -1,0 +1,83 @@
+{
+ "version": 10,
+ "camera": {
+  "target": [
+   0,
+   0.5,
+   0
+  ],
+  "distance": 9,
+  "yaw": 0.65,
+  "pitch": -0.35
+ },
+ "objects": [
+  {
+   "id": "g",
+   "type": "plane",
+   "params": {
+    "size": 20
+   },
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "rotation": [
+    0,
+    0,
+    0
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "color": "#8a8f98",
+   "visible": true
+  },
+  {
+   "id": "c",
+   "type": "cube",
+   "params": {
+    "size": 1
+   },
+   "position": [
+    0,
+    0.5,
+    0
+   ],
+   "rotation": [
+    0,
+    0,
+    0
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "color": "#d05a4a",
+   "visible": true
+  }
+ ],
+ "lights": [
+  {
+   "id": "lamp",
+   "kind": "point",
+   "position": [
+    3,
+    4,
+    3
+   ],
+   "color": [
+    1,
+    1,
+    1
+   ],
+   "intensity": 2,
+   "shadow": true,
+   "range": 20
+  }
+ ],
+ "materials": []
+}

@@ -12,6 +12,11 @@ run_player.py — 播放器渲染 API 选择入口 (2026-08-29 P5)
    - opengl: 现有引擎 PlayerApp (pygame 窗口, 保底路径)
    - auto  : 先试 vulkan; 初始化失败 (无 Vulkan 能力/设备) 自动回退 opengl
 
+2026-11-09 人类裁决 A（VK 不兼容 -> 可见失败 + 持久化回退 GL）:
+  初始化段失败 = 打印诊断（device/driver/apiVersion）+ 弹窗 + 把用户层 render_api 写成
+  opengl + **同进程**立即按 GL 4.3 继续（旧 Q6「崩一次」已废弃）；GL 也失败 -> 打印两条
+  原因后非零退出；运行期失败（VkRunError）不回退、不改配置。
+
 配置分层见 docs/design/用户配置目录契约_20261108.md：模板层只读、用户层只存 delta。
 
 用法: py -3.12 run_player.py <场景.json> [--backend vulkan|opengl|auto]
@@ -20,6 +25,8 @@ run_player.py — 播放器渲染 API 选择入口 (2026-08-29 P5)
 """
 import os
 import sys
+
+from loom_backend_guard import show_blocking_dialog   # 2026-11-09 A: 换后端前的可见失败
 
 
 # 2026-11-07 scan_05 P-10 / Q6: 失败按"段"分类, 供上层决定能不能回退。
@@ -206,30 +213,60 @@ def _persist_backend(api):
 
 
 def _handle_vk_init_failure(exc, explicit):
-    """Vulkan 初始化失败的统一出口 (Q6 后端策略). 打印原因后非零退出.
+    """Vulkan 初始化失败的统一出口（2026-11-09 人类裁决 A：可见失败 + 持久化回退 GL）。
 
-    · 非显式 (设置/默认走到 vulkan): 把 render_api 写成 opengl 并**复核**,
-      成功才提示"下次启动将使用 OpenGL"; 失败如实报错 —— 两种情况都非零退出
-      (崩一次, 不伪装成功);
-    · 显式 --backend vulkan: 不改写设置, 只报错退出 (用户明确要 vulkan);
-    · --backend auto: 不走这里 (见 run_backend 的回退分支, 不写设置)。
+    · 打印诊断（device / driver / driver_info / apiVersion，见 loom_backend_guard）
+      并弹窗告知「Vulkan 驱动不兼容（需要 1.1+），已自动切换为 OpenGL（需要 4.3）」；
+    · 把**用户层** 游戏设置.json 的 render_api 写成 opengl 并复核（只动 delta 层，
+      不碰只读模板）；
+    · **不退出进程**：返回是否持久化成功，调用方随即同进程改走 GL 4.3；
+    · 只在初始化段调用。运行期（VkRunError）不来回退、不改配置（见 run_backend）。
+
+    与旧 Q6「崩一次」的差异：人类改判为「当场降级 + 落配置」，因为崩一次会让用户
+    看到窗口闪退且下次仍要重试；现在一次启动内完成切换，下次直接走 GL。
     """
     reason = str(exc) or repr(exc)
     src = _SOURCE_TEXT.get(_LAST_SOURCE, _LAST_SOURCE)
-    if explicit:
-        print("[run_player] Vulkan 后端不可用 (%s)" % reason)
-        print("[run_player] 显式 --backend vulkan: 不改写设置, 只报错退出")
-        raise SystemExit(1)
+    # 手选判定必须在 _persist_backend 之前取 —— 它内部会 resolve 一次并把 _LAST_SOURCE
+    # 改成 'game'，否则每次回退都会被误判成「用户手选」。
+    was_hand_picked = (_LAST_SOURCE == 'game')
+    print("[run_player] Vulkan 后端不可用 —— 自动切换为 OpenGL（需要 4.3 core）")
+    print(reason)
+    shown = show_blocking_dialog(
+        '[VK] Vulkan 驱动不兼容（需要 1.1+）',
+        '你的 Vulkan 驱动不兼容（需要 1.1+），建议升级显卡驱动。\n'
+        '已自动切换为 OpenGL（需要 4.3 core）。\n\n' + reason)
     ok = _persist_backend('opengl')
     if ok:
-        print("[run_player] Vulkan 后端不兼容（%s），已把 render_api 回退为 OpenGL，"
-              "下次启动将使用 OpenGL（本次后端来自: %s）" % (reason, src))
+        print("[run_player] 已把 render_api 回退为 opengl（写用户层 游戏设置.json），"
+              "下次启动直接走 OpenGL（本次后端来自: %s）" % src)
     else:
-        print("[run_player] Vulkan 后端不兼容（%s），且**回退未能持久化** —— "
-              "下次启动仍会尝试 Vulkan（本次后端来自: %s）" % (reason, src))
-        print("[run_player] 请手动把 游戏设置.json / 设置.json 的 render_api 改成 "
-              "opengl；本次可直接用 --backend opengl 启动")
-    raise SystemExit(1)
+        print("[run_player] 回退**未能持久化** —— 下次启动仍会尝试 Vulkan；"
+              "本次已切 GL，可用 --backend opengl 固定（本次后端来自: %s）" % src)
+    if explicit or was_hand_picked:
+        print("[run_player] 注意: 本次 vulkan 是用户手选（%s）；已按裁决改写为 opengl，"
+              "可在设置面板 / 游戏设置.json 随时改回" % src)
+    if not shown:
+        print("[run_player] (未弹窗: 无 GUI 或 LOOM_NO_DIALOG=1 —— 原因见上面的 [VK] 行)")
+    return ok
+
+
+def _run_gl_or_double_fault(vk_exc, scene, **kw):
+    """VK 初始化失败后**同进程**改走 GL 4.3；GL 也失败 -> 报两条原因并退出。
+
+    两条后端各自的地板不同（VK 1.1 / GL 4.3），所以不允许「VK 失败就当 GL 能用」。
+    """
+    try:
+        return _run_opengl(scene, **kw)
+    except BaseException as gl_exc:
+        if isinstance(gl_exc, (KeyboardInterrupt, SystemExit)):
+            raise
+        msg = ("[backend] 两条后端都不可用（Vulkan 与 OpenGL 均启动失败）:\n"
+               "[VK] %s\n"
+               "[GL] %s" % (vk_exc, gl_exc))
+        print(msg)
+        show_blocking_dialog('无法启动渲染（Vulkan 与 OpenGL 均不可用）', msg)
+        raise SystemExit(1)
 
 
 def _maybe_remote_fallback(scene):
@@ -265,8 +302,12 @@ def run_backend(api, scene=None, explicit=False, **kw):
         except Exception as e:
             if isinstance(e, VkRunError) or _is_vk_error(e, _VK_SEG_RUN):
                 raise                   # 运行期失败: 不回退, 如实失败
-            print("[run_player] Vulkan 不可用 (%s), 回退 OpenGL" % e)
-            return _run_opengl(scene, **kw)
+            if isinstance(e, VkInitError) or _is_vk_error(e, _VK_SEG_INIT):
+                # 2026-11-09 裁决 A: 初始化失败 -> 诊断+弹窗+落配置, 然后同进程走 GL
+                _handle_vk_init_failure(e, explicit)
+            else:
+                print("[run_player] Vulkan 不可用 (%s), 回退 OpenGL" % e)
+            return _run_gl_or_double_fault(e, scene, **kw)
     if api == 'vulkan':
         try:
             _ret = _run_vulkan(scene, **kw)
@@ -275,7 +316,8 @@ def run_backend(api, scene=None, explicit=False, **kw):
         except Exception as e:
             # 只把**初始化段**当可回退信号（VkRunError / 其它异常原样上抛）
             if isinstance(e, VkInitError) or _is_vk_error(e, _VK_SEG_INIT):
-                _handle_vk_init_failure(e, explicit)     # 内部 SystemExit(1)
+                _handle_vk_init_failure(e, explicit)     # 不再 SystemExit: 当场降级
+                return _run_gl_or_double_fault(e, scene, **kw)
             raise
     return _run_opengl(scene, **kw)
 

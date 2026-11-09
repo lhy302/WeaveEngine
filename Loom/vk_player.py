@@ -33,6 +33,9 @@ from vk_ui import UIInputBridge      # 2026-11-06 R3: 窗口事件 -> driver.ui
 # (上层 run_player/game_player 据此改走 OpenGL), 渲染循环内失败不可同进程回退,
 # 只能打印原因后非零退出 (原来一律 os._exit, 发布链的兜底也只覆盖 init)。
 from run_player import VkInitError, VkRunError
+# 2026-11-09 批次 A/阶段1: VK 地板（1.1）+ 可读诊断（单点实现见 loom_backend_guard）
+from loom_backend_guard import (VkBackendInitError, require_vulkan_api,
+                                vk_diag_text, vulkan_api_text)
 
 
 # ==================== 2026-11-07: 输入注册/回调链 小工具 ====================
@@ -326,19 +329,29 @@ def run_vk(scene=None, frames_n=None, keep=False, mini=False, no_shadow=False,
     # 2026-11-07 scan_05 P-10: 初始化段包成"可回退信号" —— 这一段失败时上层可以
     # 干净地改走 OpenGL (VkInitError); 之前任何异常都直接冒泡, 由 Loom.py 的
     # except Exception 变成"无法启动渲染引擎", 发布链的 auto 回退覆盖不到细节。
+    _dev_info = None
     try:
+        # 2026-11-09 批次 A/阶段1: API 地板 1.1（wgpu-native 要求）。低于地板在这里就
+        # 干净地失败（带 apiVersion + 驱动诊断），由 run_player 同进程改走 GL 4.3。
+        require_vulkan_api('Vulkan 渲染')
         canvas = GlfwRenderCanvas(size=(width, height), title=title, vsync=False)
         canvas.set_update_mode('fastest')
         adapter = wgpu.gpu.request_adapter_sync(
             canvas=canvas, power_preference='high-performance')
+        if adapter is None:
+            raise RuntimeError('无可用 Vulkan 适配器 (request_adapter_sync 返回 None)')
+        _dev_info = dict(getattr(adapter, 'info', None) or {})
         device = adapter.request_device_sync()
         ctx = canvas.get_wgpu_context()
         fmt = ctx.get_preferred_format(adapter)
+    except VkBackendInitError:
+        raise                       # 已是可读诊断（含 apiVersion），不再套壳
     except BaseException as _ie:
         if isinstance(_ie, (KeyboardInterrupt, SystemExit)):
             raise
-        raise VkInitError("Vulkan 初始化失败 (%s): %r"
-                          % (type(_ie).__name__, _ie)) from _ie
+        raise VkInitError("Vulkan 初始化失败 (%s): %r\n%s"
+                          % (type(_ie).__name__, _ie,
+                             vk_diag_text(_dev_info, extra=repr(_ie)))) from _ie
     # 2026-11-06 双后端一致性: 着色器里已经做了 pow(col, 1/2.2) 的手工 gamma
     # (与 GL 路径同一段公式)。若交换链用 *-srgb 格式, GPU 会再做一次线性->sRGB
     # 编码 => 二次伽马, 画面明显发白, 与 GL 不可能逐像素一致。
@@ -355,15 +368,17 @@ def run_vk(scene=None, frames_n=None, keep=False, mini=False, no_shadow=False,
                 ctx.configure(device=device, format=fmt, usage=_usage)
         else:
             ctx.configure(device=device, format=fmt, usage=_usage)
-        print("设备:", adapter.info['device'], "| format:", fmt)
+        print("设备:", adapter.info['device'], "| Vulkan", vulkan_api_text(),
+              "| format:", fmt)
 
         renderer = VkRenderer(device, fmt, stage=stage)
         _LAST_RENDERER[0] = renderer    # C5: 供 present_health()/should_fallback_remote() 查询
     except BaseException as _ie:      # 初始化段 (交换链/shader/pipeline) —— 可回退
         if isinstance(_ie, (KeyboardInterrupt, SystemExit)):
             raise
-        raise VkInitError("Vulkan 交换链/渲染器初始化失败 (%s): %r"
-                          % (type(_ie).__name__, _ie)) from _ie
+        raise VkInitError("Vulkan 交换链/渲染器初始化失败 (%s): %r\n%s"
+                          % (type(_ie).__name__, _ie,
+                             vk_diag_text(_dev_info, extra=repr(_ie)))) from _ie
     if no_shadow:
         import copy
         driver.lights = [copy.copy(l) for l in driver.lights]

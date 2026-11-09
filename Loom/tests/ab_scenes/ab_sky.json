@@ -1,0 +1,95 @@
+{
+ "version": 10,
+ "camera": {
+  "target": [
+   0,
+   1,
+   0
+  ],
+  "distance": 8,
+  "yaw": 0.6,
+  "pitch": -0.25
+ },
+ "skybox": {
+  "name": "测试天空",
+  "guid": "sky_test_1",
+  "solid_color": [
+   90,
+   140,
+   210,
+   255
+  ]
+ },
+ "objects": [
+  {
+   "id": "g",
+   "type": "plane",
+   "params": {
+    "size": 20
+   },
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "rotation": [
+    0,
+    0,
+    0
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "color": "#8a8f98",
+   "visible": true
+  },
+  {
+   "id": "c",
+   "type": "cube",
+   "params": {
+    "size": 1.2
+   },
+   "position": [
+    0,
+    0.6,
+    0
+   ],
+   "rotation": [
+    0,
+    0.4,
+    0
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "color": "#d05a4a",
+   "visible": true
+  }
+ ],
+ "lights": [
+  {
+   "id": "sun",
+   "kind": "directional",
+   "direction": [
+    -0.5,
+    -1,
+    -0.5
+   ],
+   "color": [
+    1,
+    1,
+    1
+   ],
+   "intensity": 1,
+   "shadow": true,
+   "mode": "full",
+   "shape": "circle",
+   "size": 5
+  }
+ ],
+ "materials": []
+}

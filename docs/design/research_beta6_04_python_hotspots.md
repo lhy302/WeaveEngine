@@ -446,12 +446,12 @@ min/max 用 `_mm256_min_pd/max_pd`（精确、与顺序无关）→ 天然逐位
 
 | # | 函数 | 3.12 | 3.13 | Δ | 所在线程 | 性质 |
 |---|---|---:|---:|---:|---|---|
-| 1 | `update_animations` | 17.3 | 42.3 | **+145%** | 逻辑 | 纯 Python 循环（绝对值小） |
-| 2 | `_transform_snapshot` | 526.6 | 734.6 | **+39.5%** | 逻辑 | 501×属性链 + 逐元素 SoA 写 |
+| 1 | `update_animations` | 17.3 | 42.3 | **+145%** | 主线程* | 纯 Python 循环（绝对值小） |
+| 2 | `_transform_snapshot` | 526.6 | 734.6 | **+39.5%** | 主线程* | 501×属性链 + 逐元素 SoA 写 |
 | 3 | `_refresh_free` | 84.7 | 117.2 | **+38%** | 物理 | [m for m in models if ...] |
-| 4 | `compute_world_matrices` | 593.8 | 809.6 | **+36.3%** | 逻辑 | numpy 批量 + 上述快照 |
-| 5 | `_run_scripts` | 876.9 | 1044.6 | +19.1% | 逻辑 | 脚本回调 |
-| 6 | `_dispatch_fixed_update` | 127.5 | 151.5 | +18.8% | 逻辑 | 事件派发 |
+| 4 | `compute_world_matrices` | 593.8 | 809.6 | **+36.3%** | 主线程* | numpy 批量 + 上述快照 |
+| 5 | `_run_scripts` | 876.9 | 1044.6 | +19.1% | 主线程* | 脚本回调 |
+| 6 | `_dispatch_fixed_update` | 127.5 | 151.5 | +18.8% | 主线程* | 事件派发 |
 | 7 | `br.pre_step` | 3252.8 | 3632.3 | +11.7% | 物理 | 脏检测装配（§1.3 那段） |
 | 8 | `br._dirty_mask_batch` | 2568.6 | 2828.2 | +10.1% | 物理 | 501×属性链抓取 |
 | 9 | `pipe.wait_pending` | 8395 | 9055 | +7.9% | 主线程 | 等物理（GIL 交接的直接账单） |
@@ -482,7 +482,7 @@ min/max 用 `_mm256_min_pd/max_pd`（精确、与顺序无关）→ 天然逐位
 |---|---:|---:|---|
 | 两线程 Event 乒乓（research_04e_gil.py，2 万轮） | **51.25 µs/次** | **93.56 µs/次** | **+83%**，同机同脚本 |
 | 纯 Python 互抢放大 | 1.79x | 1.56x | GIL 公平性没变差 |
-| 关掉逻辑线程（`LOOM_LOGIC_SYNC=1`）后 FPS | 85.3 | **82.6** | 缺口从 **-15% 收窄到 -3.2%** |
+| ~~关掉逻辑线程（`LOOM_LOGIC_SYNC=1`）后 FPS~~ | ~~85.3~~ | ~~82.6~~ | **已作废（E.7）**：bench 宿主根本没有逻辑线程，该开关在此入口是空操作 |
 | 全进程 CPU/帧（research_04e_cpu.py，GetThreadTimes） | 12.66 ms（1.08 核） | **14.45 ms（1.17 核）** | 不是干等，是**多烧 14% CPU** |
 | 同上分线程：MainThread / loom-physics / 8 池 | 7.27 / 2.50 / 1.16 | 7.66 / **2.89** / **1.72** | 物理线程 +16%、池线程 **+48%** CPU |
 
@@ -500,7 +500,7 @@ min/max 用 `_mm256_min_pd/max_pd`（精确、与顺序无关）→ 天然逐位
 
 | 方案 | 代价 | 预期 / 实测 | 判定 |
 |---|---|---|---|
-| A. 运行时 `LOOM_LOGIC_SYNC=1`（已有开关） | 零代码 | 3.13：73.4 → **82.6**（≈3.12 的 97%）；3.12：86.5 → 85.3 | **可作 3.13 的临时口径**；但 M3-N3 记录过异步在别的场景更快（134→155 FPS），需按场景复核，不建议改默认 |
+| A. 运行时 `LOOM_LOGIC_SYNC=1`（已有开关） | 零代码 | ~~3.13：73.4 → 82.6~~ **数据作废（E.7）**：该开关只在`_external_ctx=True` 的宿主（编辑器/播放窗口）才真正移除逻辑线程；在 `--bench` 宿主上无效果，两份`--bench` 数据都是负载噪声 | **需在编辑器路径重测后再判**；不建议改默认 |
 | B. 降交接频次：缩短物理线程 Python 段（R04 §③ 步骤 2 的 `loom_pose_sync` / SoA） | 3.5 人天 | pre_step 2.9 ms → ~0.4 ms，交接窗口同缩；预计 pipe_wait 3.66 → ~2.6、logic_step 回 ~3.8 | **正解，属批次 D**——本报告确认它同时是 3.13 的最优解 |
 | C. 逻辑帧装配段（`_transform_snapshot` / `compute_world_matrices`）也改吃 SoA 平面 | 1.5 人天 | 逻辑线程 Python 时间 -30~40%，交接次数不变但每次窗口更短 | 可与 B 合并 |
 | D. 调 switchinterval / 加大轮询睡眠 | — | 实测无效（E.4） | **不做** |
@@ -509,10 +509,56 @@ min/max 用 `_mm256_min_pd/max_pd`（精确、与顺序无关）→ 天然逐位
 ### E.6 结论（一句话）
 
 **3.13 的退化不是某个函数被去优化，而是跨线程 GIL 交接成本 +83% 在"高频交接架构"上的复利**；
-函数级"变慢"是墙钟表象（单线程实测 3.13 更快）。可低成本缓解的只有运行时开关
-（`LOOM_LOGIC_SYNC=1`，实测回收 ~9 个 FPS）；**根治要等批次 D 把物理桥/逻辑帧装配层改成 SoA + 单次 C 调用**
+函数级"变慢"是墙钟表象（单线程实测 3.13 更快）。可低成本缓解的运行时开关在**编辑器路径**尚待重测（bench 上的 82.6 已作废，见 E.7）；**根治要等批次 D 把物理桥/逻辑帧装配层改成 SoA + 单次 C 调用**
 （与 R04 的 P1/P2 是同一件事，做一次两边都赚）。在此之前**不建议**为 3.13 单独打补丁。
 
-> 环境说明（诚实登记）：本机 3.12 为 numpy 2.2.5 / moderngl 5.12.0，3.13 为 numpy 2.5.4 / moderngl 5.13.0
-> （人类侧核实为版本一致）。为排除该混淆：E.3 第 4 条的 numpy 微基准显示两版本算子耗时差 <5%，
-> 且 E.4 的三条主证据（乒乓、LOGIC_SYNC A/B、线程 CPU 分解）都不依赖 numpy 版本。
+> 环境说明（2026-11-09 复核后更新）：两版本现均为 **numpy 2.5.4 / moderngl 5.13.0**（批次 0 已升级，实测确认）。为排除该混淆：E.3 第 4 条的 numpy 微基准显示两版本算子耗时差 <5%，
+> 且 E.4 仍然有效的证据（乒乓、线程 CPU 分解、E.3 的单线程对照）都不依赖 numpy 版本。
+
+### E.7 更正记录（复核 R06 的反例，2026-11-09 追加）
+
+**R06 反例成立，我附录 E 的第 3 条证据作废。** 逐条核对：
+
+1. **场景/入口**：我当时跑的是 `cd Loom; py -3.13 Loom.py --bench 压测500混合.json 300`
+   （= `Loom/压测500混合.json`，与 `Loom/Projects/压测500混合.json` **SHA256 完全相同**：
+   `208E43E4…66C4488`，所以场景不是差异源）。入口就是 `--bench`（转 `build_entry._bench_scene` → `runtime.PlayerApp`）。
+2. **其它环境变量**：当次只设了 `LOOM_LOGIC_SYNC=1`；`LOOM_PROFILE` 由 `_bench_scene` 自身 setdefault。**但这不是重点**。
+3. **82.6 是 FPS**（bench 自己算的 `n_frames/wall`，同一行还有 TPS 30.10），没有读错列。
+4. **真正的问题：这个开关在 `--bench` 宿主上是空操作。**
+   - `engine.py:1478`：`if self._logic_async and getattr(self, '_external_ctx', False): self._start_logic_thread(clk)`
+     —— 逻辑线程要求 `_external_ctx=True`（编辑器/播放窗口），`PlayerApp` 走 GLFW 自持上下文，**从来不建逻辑线程**；
+   - `loom_render.py:851`：`is_async_active = _logic_async and _external_ctx` → 两种取值下都为 False，逻辑一律在渲染线程内联跑；
+   - 实测线程表（`research_04e_sync_probe.py`，3.13）：无论 `LOOM_LOGIC_SYNC` 有无，
+     `threads = [MainThread, loom-physics, loom-scripts, loom-sched-0..2, ThreadPoolExecutor-0_0..7]`，**没有 loom-logic**。
+   ⇒ 我用"`--bench` + 开关`"测"去掉逻辑线程"，测的是一个不存在的线程，数值差只能是运行间噪声。
+5. **自证噪声**：复核时同一命令、同一工作树重复跑，符号翻转——
+   `--bench` 无 env：FPS **31.4**（logic_step 17.26、pipe_wait 11.32）；`--bench` 加 `LOOM_LOGIC_SYNC=1`：FPS **81.8**（logic_step 4.33）。
+   与"先前 73.4 → 82.6"方向相反；直接探针（无 bench 头）两种设置都只有 ~21.7 FPS。
+   结论：**本机这段时间被并行任务压着，两次 bench 之间不可比**（同配置重跑可差 2.5x）。
+
+**E.4 更正后只剩三条支撑**（主结论仍成立，但证据结构要改口径）：
+
+| 仍有效的证据 | 数值 | 为什么它不受上面问题影响 |
+|---|---|---|
+| GIL 交接乒乓 | 51.25 → **93.56 µs/次（+83%）** | 纯两线程、无引擎、无负载假设；唯一变量是解释器 |
+| 全进程 CPU/帧 + 分线程 CPU | 12.66 → **14.45 ms/帧（+14%）**；loom-physics +16%、8 池合计 **+48%** | 同进程 GetThreadTimes，与 FPS 噪声解耦；说明是"多烧 CPU"而非"干等" |
+| 单线程下 3.13 更快（E.3 全部四条） | 访问器 1.5~2.5x 更快 | 停线程 + 关 GC 后测，排除争用 |
+
+另外两条**间接**支撑保留但要降级表述：C 侧段不退化（Jolt +0.4%、collide +3.5%、interp −11%）而
+Python 密集段与"跨线程汇合点"（`pipe_wait` +7.9%/次）同向变差；以及 3.13 侧帧时方差显著更大（p99 25→34 ms）。
+
+**E.2 线程列的更正**：`--bench` 宿主无逻辑线程，所以 E.2 里
+`compute_world_matrices` / `_transform_snapshot` / `_run_scripts` / `_dispatch_fixed_update` / `update_animations`
+实际都在**渲染线程内联**执行（已改为"主线程*"）。只有 `pre_step` / `_dirty_mask_batch` / `ensure_models` / `post_step` 在 `loom-physics`。
+这也意味着：本次能确证的是**渲染线程 ↔ 物理线程**这条交接；**逻辑线程那条（编辑器/播放窗口路径）本次没有测到**。
+
+**要验证"逻辑线程交接"这件事，正确入口是编辑器/播放窗口路径**（`_external_ctx=True` 才会起 `loom-logic`）：
+
+    cd 'D:\my-project - 副本\Loom(py源代码-工作区)\Loom'
+    # A/B 各跑一次, 先确认线程表里出现/消失 loom-logic
+    $env:LOOM_LOGIC_SYNC='1'; py -3.13 tests/_tmp/mt_profile_check.py --scene Projects/压测500混合.json --secs 12 --suffix _r04e_sync
+    Remove-Item Env:LOOM_LOGIC_SYNC; py -3.13 tests/_tmp/mt_profile_check.py --scene Projects/压测500混合.json --secs 12 --suffix _r04e_async
+    # 每次先看 tests/_tmp/mt_profile_on_*.json 的 derived/ms_per_frame; 两组都要在**空载**机器上跑
+
+**建议 R06 复测口径**：同一台机、同一次会话内交替跑 async/sync 各 3 轮取中位数，且记录
+`threads` 快照与 `p50/p99`；否则 ±10 FPS 的负载噪声足以把结论翻面（本次已实证）。

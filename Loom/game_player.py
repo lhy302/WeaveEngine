@@ -186,12 +186,12 @@ def _run_backend_safe(backend, scene=None, explicit=False, **kw):
     打包版是 --windows-console-mode=disable, Vulkan 初始化失败 (无 Vk 驱动/虚拟机/
     远程桌面) 时用户只看到"双击没反应"。
 
-    2026-11-07 (P-10 + Q6): 分工改成 ——
-      · Vulkan **初始化**失败: 由 run_player 统一处理 (非显式时把设置回退成
-        opengl 并以非零码退出, 下次启动即 OpenGL; 显式 --backend vulkan 只报错),
-        这里**不**吞掉那个 SystemExit (崩一次, 不伪装成功);
-      · Vulkan **渲染循环内**失败 (VkRunError): 同样不回退 —— 已初始化的后端
-        半路改道只会把问题藏起来;
+    2026-11-09 (裁决 A，取代旧 Q6「崩一次」): 分工改成 ——
+      · Vulkan **初始化**失败: 由 run_player 统一处理 —— 打印诊断 + 弹窗 + 把
+        用户层 render_api 写成 opengl, 并**同进程**改走 GL 4.3; 只有 GL 也失败时
+        run_player 才 SystemExit(1)（两条原因都已打印），这里**不**吞掉该退出;
+      · Vulkan **渲染循环内**失败 (VkRunError): 不回退、不改配置 —— 已初始化的
+        后端半路改道只会把问题藏起来;
       · 其余意外异常: 仍兜底回退 OpenGL (发布链最后一道网)。
 
     返回**实际生效**的后端名 ('vulkan'/'opengl'), 供 _start_pack 打印日志
