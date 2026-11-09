@@ -172,3 +172,17 @@ python tools/release_github.py all
 2. GPU 像素级 A/B 基线（GL vs VK 全场景对拍）
 3. 六面图资产的 guid 化（跨机可移植）
 4. 播放器运行时瘦身（若未来不需要 remote 回退，可去掉 Qt 依赖回收 16.5 MB）
+
+
+---
+
+## 10. 发布记录（2026-11-09 15:50 CST）
+
+| Release | 链接 | 类型 | 资产 | GitHub digest |
+|---|---|---|---|---|
+| `engine-v0.1.0.beta5` | https://github.com/lhy302/WeaveEngine/releases/tag/engine-v0.1.0.beta5 | prerelease | `Loom-0.1.0.beta5.zip` 125.94 MB | `sha256:341a6334912e6928…90993a9` |
+| `hub-v0.1.3` | https://github.com/lhy302/WeaveEngine/releases/tag/hub-v0.1.3 | release | `LoomHub-0.1.3-Setup.exe` 23.82 MB | `sha256:58d72606483c6d33…f275fe1d4a` |
+
+- 两个 tag 均指向 `08ad3a3`（= 发布时代码 HEAD）。
+- 发布脚本日志里 "推送 tag 失败: already exists" 是**预期噪音**：Release API 建 Release 时已在远端创建同名 tag，脚本随后的 `git push` 因此被拒；tag 指向已由 API 决定，无需强推。
+- 线上 digest 与本地 `Get-FileHash` 前 16 位一致（`341A6334912E6928` / `58D72606483C6D33`），确认上传的就是本地构建产物。
