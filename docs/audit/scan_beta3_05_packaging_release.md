@@ -1411,3 +1411,50 @@ package_hub.load_version() 仍是 0.1.2，两条链静默分叉。
 - docs/handoff §3.5 的发布手册写法（set LOOM_ENGINE_VERSION=... / set LOOM_HUB_VERSION=...）**仍然可用**，
   因为这些值本来就该等于真源；写错的（分叉）现在会被拦下而不是静默生效。
 - tools/package_hub.py 无需新增函数：N5 之后 load_version() 已是纯读取（缺文件即报错、不回写）。
+
+---
+
+## 10. 版本计划 beta5 / LoomHub 0.1.3 · 05 号（H1 + H2 + 版本号，2026-11-09）
+
+> 人类裁决：本轮是**内测版本，不发布** —— 未建 tag、未建/改 Release、未上传任何资产；
+> 版本号 / installer.iss / 发布说明照常备好，下一轮可直接用。
+
+### 10.1 改动清单
+
+| 文件 | 内容 |
+|---|---|
+| LoomHub/hub_config.py | DEFAULT_HUB_SETTINGS 增 `remote_mode='off'`（活 A/B：直连 55/59/61 FPS、TPS 23.7 vs 兜底 38/38/41、18.9）与 `check_update_enabled=True`；新增 `hub_remote_mode()` 归一（非法→off）与 `apply_launch_env()` —— **唯一**决定是否注入 LOOM_REMOTE_MODE 的实现点（先 pop 再按设置决定，环境残留不会漏进子进程） |
+| LoomHub/hub_controller.py | open_project 不再硬写 `LOOM_REMOTE_MODE=1`，改调 `cfg.apply_launch_env(env)`；新增 `check_update(manual)` / `download_update(item)` / `apply_update(path)` / `maybe_start_update_check(delay=10)` / `update_notice()` / `_quit_for_update()`（提交安装任务后主动退出） |
+| LoomHub/hub_commands.py | launch_spec 同样改调 `cfg.apply_launch_env(env)`（两入口一致）；注册 `update_check` / `update_download` / `update_apply` 三条命令 |
+| LoomHub/hub_update.py（新增） | 自更新主体：`parse_version/is_newer/pick_release`（纯函数）、`check_update`（仅 https，失败静默+记 log）、`verify_download`（size + sha256 digest）、`download_update`（非 https 拒绝）、`build_updater_script/write_updater_script/apply_update`（等 PID→静默参数→不启动 LoomHub；ShellExecuteW('runas') 一次 UAC）、`due_for_check/mark_checked`（24h 节流）、`log_line/take_pending_failure/mark_failure_seen`（失败可见） |
+| LoomHub/hub_view_tk.py | 设置区新增「远程模式（离屏回读兜底，会明显降低帧率）」勾选（写用户层 delta）+ 按钮行「检查更新」（后台线程，不阻塞 UI） |
+| tools/package_hub.py | `--add-data 版本.json` 打进产物（安装版 Hub 才能自报版本）；**ISS_TEMPLATE 同步补上 [Code] 卸载选项**（此前只改了生成物 installer.iss，下次打包会被模板覆盖 —— 本轮修掉） |
+| 版本 | LoomHub/版本.json → 0.1.3；installer.iss MyAppVersion → 0.1.3；Loom/解释器.json → 0.1.0.beta5 |
+| tools/release_notes/ | 新增 hub-0.1.3.md、engine-0.1.0.beta5.md（引擎侧要点留「由 02 号补」占位） |
+| 测试 | 新增 Loom/tests/test_hub_update.py（H1/H2 断言）；test_hub_eai.py 补 3 条自更新命令进覆盖率闸门；test_release_version.py 的 EXPECT_ENGINE/EXPECT_HUB 单点化 |
+
+### 10.2 修前 / 修后证据（实跑）
+
+    test_hub_update.py:
+      PASS 默认 off: GUI 打开项目不注入 LOOM_REMOTE_MODE
+      PASS 默认 off: 命令层 launch_spec 不注入（两入口一致）
+      PASS 设为 on: GUI 注入 LOOM_REMOTE_MODE=1 / 命令层注入（两入口一致）
+      PASS auto: Hub 侧不注入（自动降级留给引擎 beta5 E2）
+      PASS 环境残留 LOOM_REMOTE_MODE 会被清掉
+      PASS 远端更新/相同/更旧/非法/数值序(0.1.10>0.1.9) 五种版本比较
+      PASS pick_release 选中最新且有资产的 hub-v0.1.3 / 忽略 engine-v* 与无资产 release
+      PASS verify: size 不符 / sha256 不符 / 文件不存在 -> 失败；非 https 下载 -> 拒绝；失败写 update.log
+      PASS 脚本等待旧 PID 退出 + 含全部静默参数 + 不启动 LoomHub + 纯 ASCII + start /wait
+      PASS 离线/非 https 检查不抛异常（静默）；24h 节流；失败提示可读且只提示一次
+
+    test_eai_real 侧（HUB-EAI 命令表）: 21 条全部覆盖（含 update_check/update_download/update_apply）
+    test_hub.py / test_hub_controller.py / test_hub_eai.py / test_release_version.py / test_hub_update.py 全 exit=0 FAIL=0
+    ISCC 7.1: Successful compile -> tools/dist/LoomHub-0.1.3-Setup.exe（仅验证打包链，未发布）
+
+### 10.3 本轮未做 / 待其他号
+
+- 引擎侧 E1（TPS 不达标）/ E2（remote-mode 自动降级）由 02 号；`engine-0.1.0.beta5.md` 已留占位。
+- 未发布：无 tag / 无 Release / 无资产上传（内测口径）。
+- `--require-tests` 默认仍关闭，待主审合并后统一切换。
+- 打包链产物 LoomHub-0.1.3-Setup.exe 用的是**当前 build_hub 内的旧 exe**（只验证安装器脚本可编译）；
+  正式打包需先 `python tools/package_hub.py --version 0.1.3` 重编 PyInstaller 产物。

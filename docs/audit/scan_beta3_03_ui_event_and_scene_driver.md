@@ -1014,3 +1014,108 @@ $ python tests\test_vk_ui_input.py             -> exit=0  ALL PASS
 1. `vk_renderer.draw_frame/draw_ui` 的 `engine=None` **默认值本身**未改（文件属 02 批）；我在 `loom_ui.draw_all` 侧加了"宿主缺失必须出声一次"的兜底告警，使该缺陷不再静默。
 2. `§6.1 的"命中坐标系不一致"根因未按其修复**（审计已证伪）；仍缺 VK 侧 Canvas↔窗口尺寸同步（P-03 报告 §2.S 的真问题 A，P2），本批未动（属 02 批 UI 管线）。
 3. GL 侧 `engine.py` 的同源暂停分支（`_logic_paused` 早退）未改 —— 第 1 批已提供 `poll_unlock()` 并由其接线；本批只在 VK 驱动补调用（按第 1 批"不要重复调用"要求）。
+
+## 7. beta5 收尾（2026-11-09）：E2 自动降级 / 编辑器 dt 口径 / --bench dt 口径
+
+> 背景：02 号定位并修复 R1（同步路径把"调用方 dt"当墙钟 → 时钟只拿到 79% 墙钟 → TPS 23.7）。
+> 本批（03 号）做三件接线，只改 `Loom/Loom.py` 与 `Loom/build_entry.py`（探针在 `Loom/tests/_tmp/`）。
+
+### 7.1 E2：`LOOM_REMOTE_MODE=auto`（Loom.py）
+
+**实现**（`Loom.py:93-203`）：
+- `_remote_mode()` 把环境变量归一成三态：`off`（未设/0/未知值，保持旧语义）、`on`（1/on/true/yes/remote，保持旧语义）、`auto`。
+- `_install_present_watch(3)`：在 `runtime.PlayerApp.run` 外面包一层观测（原生播放是**阻塞**调用，
+  入口拿不到引擎实例；而 present 健康是引擎实例态）。后台线程每 0.1s 调**引擎自己的判据**
+  `loom_render.should_fallback_remote(3)`（不复制阈值、不自己数），命中后先等 `_running` 真正起来
+  （防"起跑竞态被 run() 开头覆盖"）再置 `_running=False` 收口原生循环，并把 `present_health()` 的
+  `fail_streak/last_error` 记进 state。
+- `_launch_player`：`on` → 离屏回读；`off` → 原生；`auto` → 先原生，`state['fallback']` 为真时
+  **只重启一次**为 on 等价路径，并打印一行原因：
+  `[remote] 原生上屏连续失败 3 次 (最近错误: 'present-fail') -> 自动降级为离屏回读 (等价于 LOOM_REMOTE_MODE=1), 本次只重启一次`
+- `--run` / 游戏配置两处入口不再各自判断 `LOOM_REMOTE_MODE`（统一走 `_launch_player`），消除两条入口口径分叉。
+
+**探针**（`Loom/tests/_tmp/beta5_e2_auto_probe.py`，实跑）：
+```
+PASS ''/'0' -> off | '1'/'on'/'true' -> on | 'auto'/'AUTO' -> auto | 'garbage' -> off   (8 项)
+PASS 监视器已装上 (PlayerApp.run 被打包)
+PASS 连续失败 >=3 -> 原生循环被请求退出 (远早于 1.5s 自旋)  0.023
+PASS state.fallback=True 且带上引擎给的原因  {'fallback': True, 'streak': 3, 'last_error': 'present-fail'}
+PASS 上屏正常 -> 不降级  {'fallback': False, 'streak': 0, 'last_error': None}
+PASS off -> 只走原生 / PASS on -> 只走离屏回读
+PASS auto + 引擎判失败 -> 原生一次 + 离屏回读**一次**
+PASS auto + 上屏正常 -> 不重启
+总结果: ALL PASS
+```
+
+### 7.2 编辑器侧 dt 口径（确认，无需改代码）
+
+**代码事实**：编辑器的渲染帧由 Qt 定时器/宿主驱动，两条路径都已用**实测墙钟差**并走统一入口：
+- `ui/loom_gui.py:233-242`（`GLViewport.paintGL`）：`now = perf_counter(); delta = min(now - e.last_frame_time, 0.1); e.advance_logic(delta)`
+- `ui/loom_gui.py:558-597`（`RemoteViewport._tick`）：同一写法
+- `engine.advance_logic`（`engine.py:1428-1430`）→ `self._clock_advance(render_dt, clk)`（02 号新加的唯一入口）
+- `EditorApp.render`（`editor.py:2172+`）**不自行推进时钟**（只画），不存在第二套 dt 计算。
+
+**体检**（`Loom/tests/_tmp/beta5_e1_editor_dt_probe.py`，headless 复刻上面的调用序：帧边界 sleep+忙等模拟渲染耗时，再 `advance_logic(墙钟差)`）：
+```
+[fps= 60 dt=measured] ratio=1.0033  logic_steps=149  TPS= 30.10
+[fps= 60 dt=fixed120] ratio=1.0017  logic_steps=149  TPS= 30.11
+[fps= 94 dt=measured] ratio=1.0033  logic_steps= 95  TPS= 30.17
+[fps= 94 dt=fixed120] ratio=1.0026  logic_steps= 95  TPS= 30.17
+```
+**结论（写进报告，决定 E1 方向）**：`ratio ≈ 1.00`（60 与 94 FPS 均如此）→ **宿主 dt 口径已经不是缺口**；
+若真机播放态仍出现 TPS < 30，瓶颈只可能在**每逻辑帧成本**（看 `_stage_times` 的 `logic_step` / `pipe_wait`），
+不需要再动宿主 dt。附注：`fixed120` 也 ≈1 是因为 `_clock_advance` 取 `max(调用方 dt, 实测墙钟)`（R1 的墙钟下限），
+即口径错误已被兜住，但宿主传实测值仍是正确做法（避免将来改动下限逻辑时再次被低估）。
+
+### 7.3 `--bench` 的 dt 口径（build_entry.py）
+
+**改动**（`build_entry._bench_scene`）：预热与测量两段都从固定 `1.0/120.0` 改为**实测帧间隔**
+（`dt = min(max(_f0 - _prev, 1e-4), 0.1)`，与渲染循环同口径），并在报告里新增体检行：
+`TPS: x.xx  (logic dt/墙钟 ratio=...)`。
+
+**同场景对照**（`Projects/压测500混合.json`，300 帧，本机）：
+
+| 口径 | FPS | TPS | ratio |
+|---|---|---|---|
+| 改前（固定 1/120，`build_entry.py` 原实现；TPS 用同口径探针补测） | 52.0 | 30.18 | 1.0011 |
+| 改后（实测帧间隔；`python build_entry.py --bench ... 300`） | **52.9** | **30.17** | **1.0001** |
+
+```
+========== 场景基准 压测500混合.json (300 帧, 墙钟 5.67s) ==========
+FPS: 52.9  (平均帧时间 18.893 ms)
+TPS: 30.17  (logic dt/墙钟 ratio=1.0001)
+帧稳定性: p50=23.874 p99=30.676 max=35.810 ms
+  logic_step                6.34
+  已插桩阶段合计            27.55 (帧时间 18.893, 其余=GL/脚本/事件)
+```
+
+**诚实结论**：改前/改后 FPS/TPS 差异在噪声内（52.0→52.9 / 30.18→30.17），因为 **R1 的墙钟下限已经兜住**
+了"dt 偏小"（`_clock_advance = max(dt, 墙钟)`）。本次改动的价值是**口径一致 + 可解释**：
+① 非分离路径（`logic_fps<=0`）下 `render(dt)` 会直接拿 dt 跑脚本/物理/late_update，固定 1/120 在 52FPS 机器上会让
+这些系统慢 2.3×；② 基准报告现在自带 TPS/ratio，同类"dt 口径"回归一眼可见。
+
+### 7.4 验收（定向，实跑）
+
+```
+python tests\_tmp\beta5_e2_auto_probe.py       -> ALL PASS（三态 + 降级 + 只重启一次）
+python tests\_tmp\beta5_e1_editor_dt_probe.py  -> ratio≈1.00（60FPS/94FPS）
+python build_entry.py --bench 'Projects\压测500混合.json' 300 -> FPS 52.9 / TPS 30.17 / ratio 1.0001
+python tests\test_playmode_edges.py            -> exit=0  ALL PASS ✅
+python tests\test_core_clock.py                -> exit=0
+python tests\test_frame_pacing.py              -> exit=0
+python tests\test_vk_camera_align.py           -> exit=0  ALL PASS ✅
+python tests\test_beta3_batch2_camera_proj.py  -> exit=0  ALL PASS
+python tests\test_render_api.py                -> exit=0  ALL PASS ✅
+python tests\test_user_config.py               -> exit=0  ALL PASS ✅
+python tests\test_editor_ui.py / test_guiswitch.py / test_agent_ui_indicator.py（均 import Loom）-> exit=0 ALL PASS
+```
+未跑 `run_all.py`（按约束交主审统一跑）；未发布任何东西。
+
+### 7.5 剩余 / 需他人决定的点
+
+1. **E2 的降级判据只在 GL 路径有**（`loom_render.present_health/should_fallback_remote` 是 GL 的上屏计数）。
+   `auto` 下若后端解析为 Vulkan，本层不会触发降级（Vulkan 的初始化失败另由 `run_player._handle_vk_init_failure` 处理）；
+   若希望"VK 白屏也自动降级"，需要 02/03 在 VK 侧也提供等价判据（本批不扩权）。
+2. **`_install_present_watch` 采用包装 `runtime.PlayerApp.run`** 的方式观测（入口层拿不到引擎实例的唯一低侵入点）。
+   若之后 `loom_render.run()` 增加"上屏失败自动收口"的官方钩子，应改为消费该钩子并删除这层包装（避免长期猴补丁）。
+3. `--bench` 的 TPS 依赖 `is_playing` 语义未变（bench 沿用 `PlayerApp` 默认），本批未改判据，只加打印。

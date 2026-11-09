@@ -520,74 +520,94 @@ D) 不传 script_host -> _ACTIVE_ENGINE 类型 = DrawEngine | 有 models 属性 
 
 ---
 
-## 8. 鼠标锁定语义重构（人类裁决 2026-11-08 · 播放器侧）
+---
 
-### 8.1 改动（本批文件：`runtime.py` / `vk_player.py`）
+## 9. beta5：E1（TPS 不达标）与 E2（remote-mode 判据）
 
-| 裁决条目 | 落点 | 实现方向 |
+### 9.1 可复跑的测量方法（本次新建）
+
+`Loom/tests/_tmp/tps_probe.py`（gitignore；不参与 run_all）：
+
+```
+cd Loom
+python -u tests/_tmp/tps_probe.py sync  Projects/压测500混合.json 4            # = --bench 口径 (render 自驱时钟)
+python -u tests/_tmp/tps_probe.py async Projects/压测500混合.json 4 --fps=58  # = 编辑器逻辑线程口径
+# 可选: --nopipe / --inline-scripts 做对照；输出 FPS / 实测TPS / logic_step / pipe_wait / 脚本线程 RTT / ratio
+```
+
+输出含 `GLEngine.get_logic_time_ratio()`（本轮新增体检口）：`dt 总和 / 墙钟总和`。
+
+### 9.2 根因（两条，均已量化；第一条已修）
+
+**(R1) 同步推进路径把「调用方 dt」当墙钟 —— TPS 被系统性低估**
+
+- 机制：`clk.advance(render_dt)` 只累计调用方给的时间。调用方给的 dt 若小于真实帧间隔
+  （典型 `--bench` 传固定 `1/120` 而实际跑 94 FPS），逻辑时钟每秒只拿到 79% 的墙钟。
+- 关系式与实测完全吻合：`TPS = logic_fps × Σdt/墙钟 = 30 × 0.79 = 23.7`（**与现场读数逐位相同**）。
+- 证据（改前）：
+
+```
+RESULT mode=sync wall=4.01s frames=380 FPS=94.8 TPS=24.0 (target 30)
+  logic_step=3.79 pipe_wait=1.87 ms/渲染帧 -> 每逻辑帧 14.97 ms
+  script_run_frame: 95 次, 平均 0.93 ms/逻辑帧      # 脚本线程交接不是瓶颈
+```
+
+**(R2) 每逻辑帧成本已吃掉大半预算（未改，属结构性问题）**
+
+- async（编辑器同构）实测：每个逻辑帧 23.4 ms / 33.3 ms 预算（`logic_step` 12.2 + `pipe_wait` 5.6），
+  只剩 ~10 ms 余量；渲染线程一旦多占 GIL/CPU，TPS 就会掉到 24 左右 —— 与现场 `CPU 1.33 核` 一致。
+- 对照实验（async 58 FPS，改前）：`--nopipe` 每逻辑帧 23.30 ms、`--inline-scripts` 22.05 ms、
+  基线 22.84 ms —— 三条都 ≈23 ms，说明**当前瓶颈不是某一段可轻易省掉的开销**，
+  而是「逻辑帧内串行链」整体偏长（`pipe_wait` 是其中最大的单段）。
+
+### 9.3 改动（本批文件）
+
+| 文件 | 改动 |
+|---|---|
+| `engine.py` | 新增 `_clock_advance(render_dt, clk=None)` 作为**推进逻辑时钟的唯一入口**：输入 `max(调用方 dt, 实测墙钟)`，并按 `maximum_logic_delta` 截断墙钟采样；累计 `_logic_dt_sum/_logic_wall_sum`。同步分支 `advance_logic` 改调它。新增只读体检口 `get_logic_time_ratio()`。 |
+| `loom_render.py` | 渲染自驱分支改调 `self._clock_advance(delta_time, clk)`；新增 `_present_swap()`（上屏失败计数 + 首次告警）、`present_health()`、`should_fallback_remote(threshold=3)`（E2 判据）。 |
+| `loom_logic_thread.py` | 异步逻辑线程改调 `self._clock_advance(dt, clk)`（其 dt 本就是实测值 → 行为不变，但记账/口径统一）。 |
+| `tools/release_notes/engine-0.1.0.beta5.md` | 补 02 号负责的引擎侧要点（E1 根因/数字、E2 判据、前几轮的锁定/VK/配置/GL UI 修复）。 |
+
+### 9.4 改前 / 改后对照（同场景 `Projects/压测500混合.json`，501 模型）
+
+| 口径 | 改前 | 改后 |
 |---|---|---|
-| ① 默认**不锁** | `runtime.read_mouse_lock_policy()`（新增，模块级）+ `PlayerApp.__init__` + `vk_player.apply_startup_mouse_lock()` | 用 `game_settings.read_bool(key, False)` 读**原始值**：未配置 = `allowed=False / initial=False`；`allowed=False` 时 `initial` 恒 False。启动各打一行 `[鼠标] 策略: allowed=… initial=…` |
-| ② 不猜 UI | —（**未实现任何自动解锁**） | `set_ui_capture_mouse` 仍只由脚本显式调用；代码里没有"检测到 UI 就解锁"的分支 |
-| ③ 三件能力 | 整局 = allowed；某时刻 = 脚本 `set_mouse_locked` / `set_ui_capture_mouse`；解锁键 = 引擎独占动作 `解锁鼠标`（默认 Tab，可改，冲突在 `loom_input` 拒绝） | 播放器侧只执行①②③里的①②，键位不改（跨批已定） |
-| 锁不锁的执行点 | `runtime.PlayerApp.set_mouse_locked`（覆写）+ `vk_player._install_lock_policy_guard()` | `allowed=False` 时**任何** `set_mouse_locked(True)` 都不生效（脚本/宿主都锁不住），只报一次原因 |
-| 后端落地（实测病灶） | `runtime.apply_mouse_lock_backend()`（新增，模块级，GL/VK 共用） | 三段式：`glfw.set_input_mode` → **`glfw.get_input_mode` 回读校验** → 不符/异常时 **Win32 兜底**（`ClipCursor`/`ShowCursor`）+ 一行日志；不再 `except: pass` |
-| VK 接线 | `vk_player._apply_cursor_mode()` | 改为调用共享工具 `apply_mouse_lock_backend(win, locked, tag='VK 播放器')`，不复制实现 |
-| 兜底释放 | `_release_cursor` / `finally` | 保持不变；`allowed=False` 时只会走解锁分支，不会误锁 |
+| sync（dt=1/120，实测 94 FPS） | TPS **24.0**，每逻辑帧 15.0 ms | TPS **32.6**，ratio **1.07**（不再低估；>30 是名义 dt 下取墙钟下限的结果） |
+| sync（配速 58 FPS） | — | TPS **30.0**，ratio **1.001** |
+| async（逻辑线程，58 FPS） | TPS **30.1**，每逻辑帧 22.8 ms | TPS **30.1**，每逻辑帧 23.4 ms（口径统一后行为不变） |
 
-### 8.2 修前 / 修后（真实输出）
-
-**修前（实测病灶，见裁决文本）**：默认 `allowed=True/initial=True` → 打包吃豆人启动即被锁死；Tab 后光标出现但动不了（只翻了一个 CURSOR 模式且失败被 `except: pass` 吞掉）；`set_ui_capture_mouse` 无人调用。
-
-**修后**（`python tests/test_render_api.py` 的 `t_mouse_lock_policy`，16 条断言全 PASS）：
+改后关键输出：
 
 ```
-PASS 默认策略 = 不锁 (allowed=False/initial=False)  (False, False)
-PASS VK 默认启动不锁  ((False, False), False)
-PASS VK: allowed=False 时脚本 set_mouse_locked(True) 不生效
-PASS 显式配置: allowed=True/initial=True  (True, True)
-PASS VK 启动即锁 (allowed=True+initial=True)  ((True, True), True)
-PASS Tab 可解锁 (允许锁的游戏)  (False, True)
-PASS 再按 Tab 回锁  True
-PASS GL 默认启动不锁 (mouse_locked=False)
-PASS GL 默认 mouse_lock_allowed=False
-PASS GL: allowed=False 时脚本锁不住
-PASS GL/VK 共用同一份后端落地工具 (回读+Win32 兜底)
-PASS VK 侧调用共享后端工具而非自写 except:pass
+RESULT mode=sync pace=58 wall=6.01s frames=295 FPS=49.1 TPS=30.0 (target 30)
+  ratio(dt/墙钟)=1.0011327212886565  tps_events=61  steps_seen=180 (TPS*wall=180)
+RESULT mode=async pace=58 wall=4.00s frames=232 FPS=58.0 TPS=30.1 (target 30)
+  logic_step=12.16 pipe_wait=5.61 ms/渲染帧 -> 每逻辑帧 23.43 ms
 ```
 
-启动日志实际形态（构造 PlayerApp / apply_startup_mouse_lock 时各一行）：
+### 9.5 E2（remote-mode 自动降级的引擎侧判据）
 
-```
-[鼠标] 策略: allowed=False initial=False (来源: 游戏设置.json; 未配置=不锁)
-[鼠标] 策略: allowed=False initial=False -> 启动不锁
-[鼠标] GL 播放器: 解锁 (glfw 回读=一致)
-```
+- `_present_swap()` 让上屏失败**可判定**（旧 `_glfw_swap_buffers` 是 `except: pass`，白屏期零信号）。
+- `should_fallback_remote(threshold=3)` 供入口层做「先试原生 → 连续失败才切离屏回读」。
+- **未落地部分（需协调，不属本批文件）**：`Loom.py:108/314` 的 `LOOM_REMOTE_MODE` 判定要接受
+  `auto`：先按原生启动，`should_fallback_remote()` 为真时以 `LOOM_REMOTE_MODE=1` 重启一次。
+  这是 2 行接线，改在 `Loom.py`（03 号范围）——按"不碰别人文件"的边界留给主审协调。
 
-### 8.3 验收
+### 9.6 验收与剩余
 
 | 测试 | 结果 |
 |---|---|
-| `tests/test_render_api.py` | **ALL PASS**（新增 `t_mouse_lock_policy`；原有 N4/P-02-06 断言仍绿） |
-| `tests/test_backend_fallback_policy.py` | **ALL PASS** |
-| `tests/test_vk_camera_align.py` | **ALL PASS** |
-| `tests/test_unlock_key.py` / `test_wheel_backend_semantics.py` / `test_vk_ui_input.py` / `test_user_config.py` | **ALL PASS** |
-| `tests/test_scripts.py` | ALL PASS（**一次可疑波动**，见 §8.4） |
-| 真机短跑 `run_vk(mini=True)` | 5 帧正常返回（启动策略路径无异常） |
+| `tests/test_core_clock.py` | OK（exit 0） |
+| `tests/test_frame_pacing.py` | OK |
+| `tests/test_frame_buffer.py` | OK |
+| `tests/test_playmode_edges.py` / `test_vk_camera_align.py` / `test_scripts.py` / `test_render_api.py` | ALL PASS |
+| `py_compile`（engine / loom_render / loom_logic_thread） | OK |
+| `run_all.py` | **未跑**（按主审约定） |
 
-### 8.4 一次不可复现的测试波动（诚实留痕）
-
-某一轮按顺序跑 `test_render_api → test_backend_fallback_policy → test_vk_camera_align → test_unlock_key → test_scripts` 时，
-`test_scripts.py` 报 2 条 FAIL：`M39: 非特殊场景 Tab 解锁`、`M39: 退出特殊场景鼠标回锁`（EXIT=1）。
-随后**同一顺序重跑 2 次**、以及**单独跑**均为 ALL PASS；为排查"用户层跨测试污染"我临时往
-`%LOCALAPPDATA%\Loom\games\tests-a8d2cdb8\settings.json` 注入 `key_bindings.解锁鼠标=['w']` 再跑 `test_scripts.py`：
-**仍 ALL PASS**（该文件的桩引擎自带 actions，不读用户层）→ 污染假设被证伪，之后已把该文件**原样还原**。
-最可能的原因是**同工作区其他子代理的测试进程并发**（共享 `%LOCALAPPDATA%` 与仓库），本轮无法在我方进程内复现；
-建议主审跑 `run_all` 前，让所有测试统一 `setdefault('LOOM_USER_ROOT', mkdtemp())` 以彻底消除这类串扰（同 N2）。
-
-### 8.5 剩余（不属本批 / 未实测）
-
-| 项 | 说明 |
-|---|---|
-| `game_settings.MOUSE_LOCK_*DEFAULT` 仍为 `True` | **未改**（batch 0 的文件）。播放器侧已按裁决落到"未配置=不锁"，但 `scene_driver`/`engine` 侧仍会读到 `True` 默认；建议 batch 0 把两个常量改成 False，使全仓口径一致（改后本批行为不变） |
-| `scene_driver.SceneDriver.__init__` 里 `self.mouse_locked = mouse_lock_initial()` | 会按旧默认先置 True，随后被 `apply_startup_mouse_lock` 覆盖；一旦 batch 0 改默认则两者天然一致 |
-| 真鼠标/打包版实机 | 未实测（无打包环境）；`clip 回读` 与 Win32 兜底只在真实窗口路径生效，需实机确认一次 |
+**剩余 / 未实测**：
+1. 编辑器（Qt 宿主）实机 TPS 未测（无 GUI 长窗口条件）；请用 `get_logic_time_ratio()` 分流：
+   ratio≈1 → 缺口在每逻辑帧成本 + GIL 竞争（下一步：把 `_logic_prep` 的 shadow/collide 段移出逻辑帧，
+   或把 `pipe_wait` 改成"上一子步的等待"流水线）；ratio<1 → 宿主 dt 口径问题（`loom_gui` 侧）。
+2. remote-mode 实机未测；E2 自动重启接线待协调。
+3. `--bench` 口径（build_entry.py 传固定 1/120）建议改传实测间隔 —— 引擎侧已不再被它低估，但基准脚本仍会偏高。
