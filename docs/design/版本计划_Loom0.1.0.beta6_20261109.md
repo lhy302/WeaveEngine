@@ -324,3 +324,20 @@ R04 复核时发现两件事，直接推翻了它自己的一条证据，也暴�
 **处置不变**：保留 3.13（裁决①），**批次 D 的物理桥/装配层改造必须把满载 FPS 补回 ≥85**（≈ 3.12 基线水平），并给出"跨线程交接次数"前后对比。
 
 **测量纪律补充（本轮踩坑）**：PowerShell 调外部程序传**含空格的路径**必须拼成**带引号的单个字符串**；用数组形式会被截断成 `D:\my-project`，导致"看起来在跑、实际加载空场景"（本轮首测因此作废，见 §9.7）。
+
+### 9.11 批次 A 阶段 2A 验收（2026-11-10）
+
+**产物**：`Loom/loom_pass.py`（PassSpec/FramePlan 纯数据 + 按参数缓存）、`Loom/loom_pass_gl.py`（GLTargetPool + GLFrameExecutor）、`Loom/tests/test_frame_plan.py`（27 项）；`loom_render.py` / `editor.py` 两条路径统一走 `frame_plan()` + 执行器，编辑器清屏字面量删除统一 `CLEAR_COLOR_RGBA`。
+
+**验收（硬门）**：
+- 22 场景 **GL/参考 MAE 恒 0.000000**（逐像素与迁移前相同）；VK/参考、GL/VK 逐值等于旧基线；22/22 PASS、0 SKIP
+- 313 项测试 FAIL=0（frame_plan 27 / render_api 60 / ui 13 / vk_ui_input 32 / skybox_parity 23 / ab_gl_vk 23 / fallback_policy 44 / user_config 60 / wheel_backend 31）
+- 抽象层单帧开销 **6.7 us**（plan 取缓存 0.3 us），约 0.8% 帧时
+- 编辑器 `--auto-close 3` 正常；主审复跑 frame_plan / ab_gl_vk / render_api / skybox_parity 全绿
+
+**共享 vs 未共享（诚实口径）**：
+- 已共享：FramePlan 描述（目标语义名、pass 顺序、depth/raster 声明、绘制源、参数块与语义槽清单）+ GL 执行器
+- 未共享：WGSL/GLSL 双份着色器、天空时机与几何、VK 的 `f32[352]` 参数块、阴影目标编码（S3 处理）、VK submit 粒度
+- `DepthState.write` 在 GL 仍无法真正执行（moderngl 无 depth_mask）→ 标注 advisory
+
+**下一步**：2B1（阴影 + HUD/UI 迁入，仍要求 GL/参考 MAE=0）→ 2B2（tonemap + bloom，画面会**故意变化**，闸门改为「人工确认新基线 + 双后端一致」）。
