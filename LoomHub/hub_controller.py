@@ -649,6 +649,22 @@ class HubController:
             self.set_msg("下载失败: %s" % r.get('reason'), 'err')
         return r
 
+    def has_update(self):
+        """当前检查结果里是否有可安装的新版本（GUI 按钮 enable 状态用）。"""
+        info = getattr(self, 'update_info', None) or {}
+        return bool(info.get('update'))
+
+    def download_and_install(self, item=None):
+        """GUI 一键：下载 → 校验（必须过）→ 提交静默安装。
+
+        下载/校验失败**绝不进入安装阶段**（失败原因由 download_update 写
+        update.log 并放进 self.msg）。
+        """
+        r = self.download_update(item)
+        if not r.get('ok'):
+            return r
+        return self.apply_update(r.get('path'))
+
     def apply_update(self, setup_path=None):
         """提交静默安装任务（写 updater 脚本 + 一次 UAC），成功即"暂时关闭"本进程。
 

@@ -31,8 +31,10 @@ REPO_NAME = 'WeaveEngine'
 HUB_TAG_PREFIX = 'hub-v'
 ASSET_FMT = 'LoomHub-%s-Setup.exe'
 USER_AGENT = 'LoomHub-Update/0.1.3'
-# 静的安装参数（人类口径原文）：/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /ALLUSERS /SP-
-SILENT_ARGS = ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/ALLUSERS', '/SP-']
+# 静的安装参数。注意 /ALLUSERS **不在**这里：它只在"安装目录确实在 Program Files"
+# 时追加（C1/C6=B 人类裁决），否则用户级安装（%LOCALAPPDATA%\Programs）会被升到
+# Program Files、旧副本继续跑。
+SILENT_ARGS = ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-']
 CHECK_INTERVAL_HOURS = 24
 WAIT_MAX_SECONDS = 180          # updater 等旧进程退出的上限
 
@@ -418,7 +420,51 @@ def read_sidecar(package_path):
 
 # ---------------- 安装（写 updater 脚本 + 提权） ----------------
 
-def build_updater_script(setup_path, pid=None, wait_max=WAIT_MAX_SECONDS):
+_PROGRAM_FILES_ENV = ('ProgramFiles', 'ProgramFiles(x86)', 'ProgramW6432')
+
+
+def install_dir():
+    """当前 LoomHub 的安装目录（自更新必须原地升级，不能另起一份）。"""
+    exe = os.path.abspath(sys.executable)
+    if getattr(sys, 'frozen', False):
+        return os.path.dirname(exe)
+    return os.path.dirname(os.path.abspath(sys.argv[0])) or os.getcwd()
+
+
+def _program_files_roots():
+    roots = []
+    for k in _PROGRAM_FILES_ENV:
+        v = os.environ.get(k)
+        if v:
+            roots.append(os.path.normcase(os.path.abspath(v)))
+    return roots
+
+
+def is_program_files(path):
+    """安装目录是否在 Program Files 下（决定要不要 /ALLUSERS + UAC）。"""
+    p = os.path.normcase(os.path.abspath(path or ''))
+    for root in _program_files_roots():
+        if p == root or p.startswith(root + os.sep):
+            return True
+    return False
+
+
+def needs_admin(install_dir_path):
+    """是否需要提权：在 Program Files 下，或目标目录不可写（探测一次）。"""
+    if is_program_files(install_dir_path):
+        return True
+    try:
+        probe = os.path.join(install_dir_path, '.loom_write_probe')
+        with open(probe, 'w') as fh:
+            fh.write('x')
+        os.remove(probe)
+        return False
+    except OSError:
+        return True
+
+
+def build_updater_script(setup_path, pid=None, wait_max=WAIT_MAX_SECONDS,
+                         target_dir=None, all_users=None):
     """生成后台 updater 脚本内容（纯函数，便于断言）。
 
     必须满足：① 等旧进程 PID 退出；② 静默安装参数；③ **不**启动 LoomHub。
@@ -429,6 +475,15 @@ def build_updater_script(setup_path, pid=None, wait_max=WAIT_MAX_SECONDS):
     导致异常逃逸、update.log 无记录、还残留 0 字节脚本。
     """
     pid = int(pid if pid is not None else os.getpid())
+    # C1/C6=B（人类裁决）: 升级必须落在**当前安装目录**，否则用户级安装会被
+    # 升到 Program Files、旧副本继续跑。/ALLUSERS 只在 Program Files 安装时传。
+    tdir = target_dir or install_dir()
+    if all_users is None:
+        all_users = is_program_files(tdir)
+    args = list(SILENT_ARGS)
+    if all_users:
+        args.append('/ALLUSERS')
+    args.append('/DIR="%s"' % tdir)
     lines = [
         '@echo off',
         'chcp 65001 >nul',
@@ -447,7 +502,7 @@ def build_updater_script(setup_path, pid=None, wait_max=WAIT_MAX_SECONDS):
         'goto waitloop',
         ':install',
         # 注意 %% 转义：这一行本身还要过 % 格式化
-        'start "" /wait "%%SETUP%%" %s' % ' '.join(SILENT_ARGS),
+        'start "" /wait "%%SETUP%%" %s' % ' '.join(args),
         'rem NOTE: intentionally NOT starting LoomHub here (user opens it manually)',
         'endlocal',
         'exit /b 0',
@@ -455,7 +510,7 @@ def build_updater_script(setup_path, pid=None, wait_max=WAIT_MAX_SECONDS):
     return '\r\n'.join(lines) + '\r\n'
 
 
-def write_updater_script(setup_path, pid=None):
+def write_updater_script(setup_path, pid=None, target_dir=None, all_users=None):
     p = script_path()
     try:
         up.ensure_parent(p)          # 目标脚本所在目录（测试会把它指到临时目录）
@@ -465,7 +520,9 @@ def write_updater_script(setup_path, pid=None):
     try:
         # utf-8-sig = 带 BOM，cmd.exe 在 65001 代码页下能正确读中文路径
         with open(p, 'w', encoding='utf-8-sig', newline='') as f:
-            f.write(build_updater_script(setup_path, pid))
+            f.write(build_updater_script(setup_path, pid,
+                                         target_dir=target_dir,
+                                         all_users=all_users))
     except (OSError, UnicodeError) as e:
         # 半成品必须清掉：0 字节/半截脚本被 runas 执行是更糟的失败
         try:
@@ -504,17 +561,43 @@ def apply_update(setup_path, pid=None, size=0, digest=''):
     if not ok:
         log_line('安装前复验失败: %s (%s)' % (why, setup_path), level='FAIL')
         return {'ok': False, 'reason': '安装前复验失败: ' + why}
-    w = write_updater_script(setup_path, pid)
+    # C1/C6=B: 原地升级到当前安装目录；只有需要提权时才 runas（一次 UAC）
+    tdir = install_dir()
+    all_users = is_program_files(tdir)
+    admin = needs_admin(tdir)
+    w = write_updater_script(setup_path, pid, target_dir=tdir, all_users=all_users)
     if not w.get('ok'):
         return w
     cmd = w['path']
-    launched, why = _shell_execute_runas(cmd)
+    if admin:
+        launched, why = _shell_execute_runas(cmd)
+    else:
+        launched, why = _spawn_no_uac(cmd)
     if not launched:
-        log_line('提权启动 updater 失败: %s' % why, level='FAIL')
-        return {'ok': False, 'reason': '提权启动失败（需要管理员权限）: %s' % why,
-                'script': cmd}
-    log_line('已提交安装任务: %s' % setup_path)
-    return {'ok': True, 'script': cmd, 'setup': setup_path}
+        log_line('启动 updater 失败: %s' % why, level='FAIL')
+        return {'ok': False,
+                'reason': '启动安装失败（%s）: %s' % ('需要管理员权限' if admin else '无需提权',
+                                              why),
+                'script': cmd, 'install_dir': tdir, 'all_users': all_users}
+    log_line('已提交安装任务: %s -> %s (allusers=%s, admin=%s)'
+             % (setup_path, tdir, all_users, admin))
+    return {'ok': True, 'script': cmd, 'setup': setup_path,
+            'install_dir': tdir, 'all_users': all_users, 'needs_admin': admin}
+
+
+def _spawn_no_uac(cmd_path):
+    r"""用户级安装（%LOCALAPPDATA%\Programs）：直接起 updater，不弹 UAC。"""
+    if os.name != 'nt':
+        return False, '非 Windows 平台'
+    try:
+        flags = 0
+        flags |= getattr(subprocess, 'DETACHED_PROCESS', 0)
+        flags |= getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0)
+        subprocess.Popen(['cmd.exe', '/c', cmd_path], cwd=updates_dir(),
+                         creationflags=flags, close_fds=True)
+        return True, ''
+    except OSError as e:
+        return False, repr(e)
 
 
 def _shell_execute_runas(cmd_path):

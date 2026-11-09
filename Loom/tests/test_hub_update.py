@@ -355,6 +355,70 @@ def t_startup_wiring():
               'start_background_tasks()' in src)
 
 
+def t_install_dir_and_allusers():
+    """C1/C6=B: /DIR=<当前安装目录> 恒有；/ALLUSERS 只在 Program Files 安装时出现。"""
+    user_dir = os.path.join(os.environ.get('LOCALAPPDATA') or r'C:\Users\x\AppData\Local',
+                            'Programs', 'LoomHub')
+    s_user = hu.build_updater_script(r'C:\x\LoomHub-0.1.4-Setup.exe', 4321,
+                                     target_dir=user_dir, all_users=False)
+    check("① 用户级安装：命令不含 /ALLUSERS", '/ALLUSERS' not in s_user,
+          [l for l in s_user.splitlines() if 'SETUP%' in l])
+    check("① 用户级安装：带 /DIR=<当前安装目录>",
+          '/DIR="%s"' % user_dir in s_user, [l for l in s_user.splitlines() if '/DIR=' in l])
+    pf = os.environ.get('ProgramFiles') or r'C:\Program Files'
+    pf_dir = os.path.join(pf, 'LoomHub')
+    s_pf = hu.build_updater_script(r'C:\x\a.exe', 1, target_dir=pf_dir, all_users=True)
+    check("② Program Files 安装：含 /ALLUSERS", '/ALLUSERS' in s_pf,
+          [l for l in s_pf.splitlines() if 'SETUP%' in l])
+    check("② Program Files 安装：带 /DIR=<当前目录>", '/DIR="%s"' % pf_dir in s_pf)
+    check("② is_program_files 判定正确",
+          hu.is_program_files(pf_dir) is True and hu.is_program_files(user_dir) is False,
+          (pf_dir, user_dir))
+    check("② 默认 target_dir 就是当前安装目录",
+          '/DIR="%s"' % hu.install_dir() in hu.build_updater_script(r'C:\x\a.exe', 1),
+          hu.install_dir())
+
+
+def t_gui_button_and_fail_gate():
+    """C2=A: 两个视图都有「下载并安装」、无新版本禁用、下载失败不进安装阶段。"""
+    for name, rel in (('TkHubView', 'LoomHub/hub_view_tk.py'),
+                      ('NovaHubGUI', 'LoomHub/GUI/NovaHubGUI.py')):
+        src = open(os.path.join(REPO, rel), encoding='utf-8').read()
+        check("③ %s 有「下载并安装」按钮" % name, '下载并安装' in src)
+        check("③ %s 按 has_update() 切换可用/禁用" % name,
+              'has_update()' in src and 'disabled' in src)
+
+    ctrl = hctrl.HubController.__new__(hctrl.HubController)
+    ctrl.msg = ''
+    ctrl.msg_level = 'ok'
+    ctrl.set_msg = lambda m, lvl='ok': setattr(ctrl, 'msg', m)
+    ctrl.update_info = {'update': None}
+    check("③ 无新版本时 has_update()=False（按钮禁用依据）", ctrl.has_update() is False)
+    ctrl.update_info = {'update': {'version': '0.1.4', 'size': 1024}}
+    check("③ 有新版本时 has_update()=True", ctrl.has_update() is True)
+
+    old_dl, old_ap = hu.download_update, hu.apply_update
+    called = {'apply': 0}
+    hu.download_update = lambda *a, **k: {'ok': False, 'reason': '校验失败: 测试替身'}
+    hu.apply_update = lambda *a, **k: (called.__setitem__('apply', called['apply'] + 1)
+                                       or {'ok': True})
+    try:
+        r = ctrl.download_and_install()
+        check("④ 下载/校验失败 -> 返回 ok=False", r.get('ok') is False, r)
+        check("④ 下载/校验失败 -> 从未进入安装阶段", called['apply'] == 0, called)
+    finally:
+        hu.download_update, hu.apply_update = old_dl, old_ap
+    # 成功路径确实会进安装
+    called2 = {'apply': 0}
+    hu.download_update = lambda *a, **k: {'ok': True, 'path': 'C:/x/a.exe'}
+    hu.apply_update = lambda *a, **k: (called2.__setitem__('apply', 1) or {'ok': True})
+    try:
+        r2 = ctrl.download_and_install()
+        check("④ 下载成功 -> 进入安装阶段", r2.get('ok') is True and called2['apply'] == 1, r2)
+    finally:
+        hu.download_update, hu.apply_update = old_dl, old_ap
+
+
 def t_p2_fixes():
     """P2: JSON 非数组不抛 / 父目录匹配取最高版本 / 成功清旧失败提示。"""
     old_api, old_req = hu.API_BASE, hu._request
@@ -407,6 +471,8 @@ if __name__ == "__main__":
     t_apply_requires_verified()
     t_pick_latest_semver()
     t_startup_wiring()
+    t_install_dir_and_allusers()
+    t_gui_button_and_fail_gate()
     t_p2_fixes()
     if _FAILS:
         print("总结果: FAIL ❌", _FAILS)

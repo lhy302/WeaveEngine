@@ -118,6 +118,13 @@ class TkHubView(IHubView):
                               ("检查更新", self._check_update)])
         # 2026-11-09: 用「当前引擎」（左侧缓存）+ 本列表选中的项目打开。
         self._btn_row(right, [("用当前引擎打开", self._open_project_with_current)])
+        # 2026-11-09 C2=A: 「下载并安装」——仅在检查到新版本时可用
+        up_row = tk.Frame(right)
+        up_row.pack(fill="x", pady=3)
+        self.install_btn = tk.Button(up_row, text="下载并安装", relief="groove",
+                                     state="disabled",
+                                     command=self._download_and_install)
+        self.install_btn.pack(side="left", fill="x", expand=True)
 
         # 底部设置行: 界面切换 + 打开项目 .py/.exe
         import guiloader
@@ -280,6 +287,25 @@ class TkHubView(IHubView):
                              else "已关闭：直连渲染（默认，帧率最高）"),
                           'dim')
 
+    def _download_and_install(self):
+        """C2=A: 确认 → 下载 → 校验 → 关闭自身 → 静默安装（失败可见）。"""
+        item = (getattr(self.ctrl, 'update_info', None) or {}).get('update')
+        if not item:
+            self.ctrl.set_msg("没有可安装的新版本（先点「检查更新」）", 'dim')
+            return
+        from tkinter import messagebox
+        size_mb = (item.get('size') or 0) / 1048576.0
+        if not messagebox.askyesno(
+                "安装 LoomHub 更新",
+                "将下载并安装 LoomHub %s（%.1f MB）。\n\n"
+                "安装时 LoomHub 会暂时关闭，完成后请手动打开。"
+                % (item.get('version'), size_mb)):
+            return
+        r = self.ctrl.download_and_install(item)
+        if not r.get('ok'):
+            self.ctrl.set_msg("更新未完成: %s（详见 updates\\update.log）"
+                              % r.get('reason'), 'err')
+
     def _check_update(self):
         """H2: 手动检查更新（后台线程跑，不阻塞 UI；失败只写 update.log）。"""
         import threading
@@ -381,6 +407,12 @@ class TkHubView(IHubView):
             self._update_current_label()      # 当前引擎状态行随刷新保持
         except AttributeError:
             pass                              # 构建早期 label 还没创建（唯一可接受的时序窗）
+        try:
+            # C2=A: 无新版本时「下载并安装」保持禁用
+            self.install_btn.config(
+                state='normal' if self.ctrl.has_update() else 'disabled')
+        except AttributeError:
+            pass
         if dflt:
             self.interp_status.config(
                 text="默认解释器: %s v%s (%s)" % (dflt['name'], dflt['version'],
