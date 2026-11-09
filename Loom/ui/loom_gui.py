@@ -71,6 +71,11 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 
+# 2026-11-09 批次 A0（人类裁决 D1=B）：GL 地板 3.3 -> 4.3 core。
+# 版本门与报错文案的唯一实现在 loom_gl_version（GLFW/Qt 两条路径共用）。
+from loom_gl_version import (GL_MIN_MAJOR, GL_MIN_MINOR, GLVersionError,
+                             require_gl_version)
+
 # pygame 键值 (Qt.Key -> pygame 常量)
 _QT_TO_PG = {
     Qt.Key.Key_W: pygame.K_w, Qt.Key.Key_S: pygame.K_s,
@@ -141,6 +146,28 @@ class AssetListWidget(QListWidget):
 # =====================================================================
 # GLViewport — moderngl 视口 + 事件 -> 引擎状态
 # =====================================================================
+def _show_gl_floor_error(widget, err):
+    """GL 地板不满足：把原因弹到用户面前（2026-11-09 A0 硬要求：不得静默黑屏）。
+
+    只负责「可见」：详细诊断已由 loom_gl_version.require_gl_version 打印到控制台，
+    这里补一个模态框，避免用户只看到黑视口却以为「引擎在跑、只是场景空」。
+    """
+    def _pop():
+        try:
+            QMessageBox.critical(
+                widget, '无法启动渲染',
+                '当前显卡/驱动不满足 OpenGL %d.%d core 要求，渲染已停止。\n\n'
+                '详见控制台 [GL] 开头的诊断（含显卡/驱动版本）；'
+                '先更新显卡驱动，或改用 Vulkan 后端：--backend vulkan'
+                % (GL_MIN_MAJOR, GL_MIN_MINOR))
+        except Exception:
+            pass
+    try:
+        QTimer.singleShot(0, _pop)
+    except Exception:
+        pass
+
+
 class GLViewport(QOpenGLWidget):
     """QOpenGLWidget 承载 moderngl 上下文 (initializeGL 建), 每帧 paintGL 调
     editor.render; 鼠标/键盘/滚轮事件写入引擎状态字段并调 on_key_event 钩子."""
@@ -164,6 +191,8 @@ class GLViewport(QOpenGLWidget):
         然后创建 EditorApp (嵌入式 ctx 模式, 不建 pygame 窗口)."""
         try:
             self.ctx = moderngl.create_context()
+            # 2026-11-09 A0 (D1=B): 4.3 core 地板硬门。Qt 可能静默给更低版本 -> 明确报错。
+            require_gl_version(self.ctx, '编辑器 GL 视口')
             self.ctx.enable(moderngl.DEPTH_TEST)
             from editor import EditorApp
             self.editor = EditorApp(self._init_w, self._init_h,
@@ -172,10 +201,12 @@ class GLViewport(QOpenGLWidget):
             self._window.bind_editor(self.editor)
             from loom_log import verbose
             verbose("[Qt] EditorApp 创建成功 (嵌入式 ctx 模式)")
-        except Exception:
+        except Exception as _e:
             import traceback
             traceback.print_exc()
-            self.init_error = repr(sys.exc_info()[1])
+            self.init_error = repr(_e)
+            if isinstance(_e, GLVersionError):
+                _show_gl_floor_error(self, _e)
 
     def paintGL(self):
         e = self.editor
@@ -481,10 +512,12 @@ class RemoteViewport(QWidget):
         # 离屏 GL
         try:
             self._init_offscreen_gl()
-        except Exception:
+        except Exception as _e:
             import traceback
             traceback.print_exc()
-            self.init_error = repr(sys.exc_info()[1])
+            self.init_error = repr(_e)
+            if isinstance(_e, GLVersionError):
+                _show_gl_floor_error(self, _e)
 
         # 2026-10-20 修复：EditorApp 不能在 __init__ 里创建 —— 那时
         # LoomGUI.viewport 还没赋值，EditorApp._seed_scene 会触发 gl_guard()
@@ -502,7 +535,8 @@ class RemoteViewport(QWidget):
     def _init_offscreen_gl(self):
         from PySide6.QtGui import QOpenGLContext, QOffscreenSurface
         fmt = QSurfaceFormat()
-        fmt.setVersion(3, 3)
+        # 2026-11-09 A0 (D1=B): 请求 4.3 core（地板）
+        fmt.setVersion(GL_MIN_MAJOR, GL_MIN_MINOR)
         fmt.setProfile(QSurfaceFormat.OpenGLContextProfile.CoreProfile)
         fmt.setDepthBufferSize(24)
         fmt.setSamples(0)       # 无 MSAA（readback 路径用不上）
@@ -517,6 +551,7 @@ class RemoteViewport(QWidget):
         if not self._gl_ctx.makeCurrent(self._surface):
             raise RuntimeError('QOpenGLContext.makeCurrent 失败')
         self.ctx = moderngl.create_context()
+        require_gl_version(self.ctx, '编辑器离屏回读视口')   # A0 硬门
         self.ctx.enable(moderngl.DEPTH_TEST)
         # moderngl framebuffer（color + depth）
         color_tex = self.ctx.texture((self._init_w, self._init_h), 4)
@@ -4169,7 +4204,8 @@ def run_loom_gui(scene_path=None, width=1280, height=800):
     """PySide6 编辑器入口 (Loom.py --ui qt 调用). QApplication + 主窗口 + 事件循环.
     支持 --auto-close N: N 秒后自动关闭 (冒烟测试用, 交互使用不要带)."""
     fmt = QSurfaceFormat()
-    fmt.setVersion(3, 3)
+    # 2026-11-09 A0 (D1=B): GL 地板 4.3 core（Qt 里请求不到时由各视口的版本门明确报错）
+    fmt.setVersion(GL_MIN_MAJOR, GL_MIN_MINOR)
     fmt.setProfile(QSurfaceFormat.OpenGLContextProfile.CoreProfile)
     fmt.setDepthBufferSize(24)
     fmt.setSamples(4)   # TEMP-回退: 恢复用户测试时的多采样状态

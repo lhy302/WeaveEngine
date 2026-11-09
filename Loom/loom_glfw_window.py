@@ -46,6 +46,8 @@ import time
 import glfw
 import pygame   # 仅键码常量（K_* / KMOD_*）；import 不触发 pygame.init()
 
+from loom_gl_version import GL_MIN_MAJOR, GL_MIN_MINOR   # 2026-11-09 A0: GL 地板 4.3 core
+
 
 # ======================== GLFW 键码 -> pygame 常量 ========================
 # 覆盖 loom_input._KEYMAP 全部键 + 引擎快捷键（F9/F10/F11/ESC/Z/Y/0）
@@ -117,11 +119,18 @@ class GlfwWindowMixin:
 
     # ---------------- 初始化 ----------------
     def _init_glfw_window(self, width, height, title=None):
-        """创建 GLFW 窗口 + 3.3 Core 上下文 + 注册全部回调。"""
+        """创建 GLFW 窗口 + **4.3 Core** 上下文 + 注册全部回调。
+
+        2026-11-09 批次 A0（人类裁决 D1=B）：GL 地板 3.3 -> 4.3 core。
+        理由：3.3 只够亮机卡；4.3 是「DX11 同级」的现代硬件前提（SSBO/compute/显式
+        layout 也都在这一档可用）。现有着色器源码仍是 #version 330 —— 4.3 core 驱动
+        能编 330，只有新增能力才写 430（见 loom_gl_version 模块头）。
+        版本硬门在 engine 里 create_context() 之后立即执行（失败 -> 明确报错，不黑屏）。
+        """
         if not glfw.init():
             raise RuntimeError("GLFW 初始化失败")
-        glfw.window_hint(glfw.CONTEXT_VERSION_MAJOR, 3)
-        glfw.window_hint(glfw.CONTEXT_VERSION_MINOR, 3)
+        glfw.window_hint(glfw.CONTEXT_VERSION_MAJOR, GL_MIN_MAJOR)
+        glfw.window_hint(glfw.CONTEXT_VERSION_MINOR, GL_MIN_MINOR)
         glfw.window_hint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
         glfw.window_hint(glfw.RESIZABLE, glfw.TRUE)
         win = glfw.create_window(width, height,
@@ -129,7 +138,15 @@ class GlfwWindowMixin:
                                  None, None)
         if not win:
             glfw.terminate()
-            raise RuntimeError("GLFW create_window 失败")
+            # 2026-11-09 A0: 建窗失败最常见原因 = 显卡/驱动给不了 4.3 core。
+            # 必须把原因打出来（不能只抛一句「失败」让用户看到黑屏/闪退）。
+            print("[GL] GLFW create_window 失败：可能是显卡或驱动不支持 OpenGL %d.%d core。"
+                  % (GL_MIN_MAJOR, GL_MIN_MINOR))
+            print("[GL] 提示: 先更新显卡驱动；若显卡确实不支持，改用 Vulkan 后端 "
+                  "—— 启动参数 --backend vulkan（或设置 render_api=vulkan）。")
+            raise RuntimeError(
+                "GLFW create_window 失败 (需要 OpenGL %d.%d core)"
+                % (GL_MIN_MAJOR, GL_MIN_MINOR))
         glfw.make_context_current(win)
         glfw.swap_interval(0)   # 关 vsync，与 Qt 编辑器行为一致（高帧率换潜在撕裂）
 

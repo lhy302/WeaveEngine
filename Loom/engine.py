@@ -85,6 +85,7 @@ from loom_render import RenderMixin   # 渲染管线子系统 (主 pass 帧准�
 from loom_model_gpu import ModelGpuMixin   # 模型/材质 GPU 资源子系统 (几何构建/桶/场景加载)
 from loom_lighting import LightingMixin   # 光源/光照上传/阴影 VP 子系统
 from loom_glfw_window import GlfwWindowMixin   # 2026-10-18: GLFW 窗口 (pygame 已剥离)
+from loom_gl_version import require_gl_version   # 2026-11-09 A0: GL 4.3 core 地板门 (失败必须可见)
 from loom_transform import TransformMixin   # 变换层次子系统 (世界矩阵/父链/包围盒)
 from loom_profiler import ProfilerMixin   # 性能插桩子系统 (LOOM_PROFILE 阶段耗时)
 from loom_logic_thread import LogicThreadMixin   # 逻辑帧线程子系统 (异步逻辑线程启停/主循环)
@@ -287,6 +288,9 @@ class GLEngine(ShadowMixin, FrameComponentMixin, PhysicsMixin, InputMixin, HudMi
                                    title="Loom - OpenGL (GLFW) GPU 渲染")
             # GLFW make_context_current 已建好 GL 上下文，moderngl 直接复用
             self.ctx = moderngl.create_context()
+            # 2026-11-09 A0 (D1=B): 产品路径硬门 —— 低于 4.3 core 打印诊断并中止启动。
+            # 外部注入 ctx 的测试/宿主路径不走此门（版本由注入方自担）。
+            require_gl_version(self.ctx, 'GLFW 窗口')
         else:
             self.window = None                 # 外部模式: 无 pygame 窗口 (Qt 宿主管窗口)
             self._desktop_size = (width, height)

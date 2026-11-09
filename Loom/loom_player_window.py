@@ -59,6 +59,8 @@ class _PlayerWidget:
                                    QOpenGLContext, QOffscreenSurface)
         from PySide6.QtWidgets import QWidget
         import moderngl
+        from loom_gl_version import (GL_MIN_MAJOR, GL_MIN_MINOR,
+                                     require_gl_version)   # A0: 4.3 core 地板
 
         class PlayerWidget(QWidget):
             def __init__(self):
@@ -73,7 +75,8 @@ class _PlayerWidget:
                 # 离屏 GL
                 self._gl_ctx = QOpenGLContext()
                 fmt = QSurfaceFormat()
-                fmt.setVersion(3, 3)
+                # 2026-11-09 A0 (D1=B): 请求 4.3 core（地板），不再请求 3.3
+                fmt.setVersion(GL_MIN_MAJOR, GL_MIN_MINOR)
                 fmt.setProfile(QSurfaceFormat.OpenGLContextProfile.CoreProfile)
                 fmt.setDepthBufferSize(24)
                 fmt.setSamples(0)
@@ -87,6 +90,8 @@ class _PlayerWidget:
                 if not self._gl_ctx.makeCurrent(self._surface):
                     raise RuntimeError('makeCurrent 失败')
                 self.ctx = moderngl.create_context()
+                # 硬门：Qt 有时会静默给低版本上下文 —— 低于 4.3 明确报错并中止
+                require_gl_version(self.ctx, 'Qt 离屏播放器')
                 self.ctx.enable(moderngl.DEPTH_TEST)
                 self.ctx.enable(moderngl.CULL_FACE)
                 self.ctx.front_face = 'cw'
