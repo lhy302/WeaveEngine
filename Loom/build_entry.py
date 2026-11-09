@@ -259,7 +259,14 @@ def _bench_scene(scene_path, n_frames=300):
     # 2026-10-18 A2: 保留 pygame.quit() —— 它清理 font/mixer 子系统
     # （_load_font 与 AudioSystem 内部按需 pygame.font/mixer.init，
     #  quit 负责反初始化。与"删 pygame 窗口"不冲突：窗口层已走 GLFW）
-    pygame.quit()
+    # 2026-11-09 修复: 本函数从未 import pygame -> 每次 --bench 收尾都抛
+    # NameError，结果文件写出来看着正常、**退出码却是 1**（"报了结果但报了失败"）。
+    # 编译版实测: exit=1 而 bench_result.txt 完整，正是这个原因。
+    try:
+        import pygame as _pg_quit
+        _pg_quit.quit()
+    except ImportError:
+        pass
     return fps
 
 

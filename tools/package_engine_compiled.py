@@ -39,8 +39,11 @@ DIST_DIR = PE.DIST_DIR
 # 注意: ckernels / core_components 是**原生组件目录**（loom_kernels.dll、module_ref.dll、
 # registry.json、official_manifest 哈希表），由 ctypes/自检在**程序目录**下按路径加载，
 # 不编进 exe。实测漏带时 fastpath 直接 raise：loom_kernels.dll 未找到（B1 退役后是硬加载）。
-DATA_DIRS = ['scripts', 'GUI', 'Projects', 'assets', 'ckernels', 'core_components',
+DATA_DIRS = ['scripts', 'GUI', 'assets', 'ckernels', 'core_components',
              'core_plugins', 'plugins']
+# Projects/ 不整目录拷: 仓库里那堆 压测500混合/压测500球/_m3_* 是**开发压测资产**，
+# 不该进发布包（2026-11-09 实测发布包里带了 7 个开发场景）。只放 examples/ 的样例。
+SAMPLE_DIR = os.path.join(os.path.dirname(HERE), 'examples')
 DATA_FILES = ['输入配置.default.json', '设置.json']
 
 
@@ -119,6 +122,14 @@ def main():
         s = os.path.join(ENGINE_DIR, f)
         if os.path.isfile(s):
             shutil.copy2(s, os.path.join(out_loom, f))
+
+    # 只放 examples/ 的样例场景（开发压测场景不随发布包分发）
+    if os.path.isdir(SAMPLE_DIR):
+        proj = os.path.join(out_loom, 'Projects')
+        os.makedirs(proj, exist_ok=True)
+        for fn in sorted(os.listdir(SAMPLE_DIR)):
+            if fn.lower().endswith('.json'):
+                shutil.copy2(os.path.join(SAMPLE_DIR, fn), os.path.join(proj, fn))
 
     meta = {
         'name': 'Loom',
