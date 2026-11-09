@@ -86,6 +86,12 @@ def main():
               '  Nuitka 构建必须显式带 --enable-plugin=pyside6（漏了 Loom.exe 启动即崩）\n'
               '  dist: %s' % (', '.join(_bad), args.editor_dist))
 
+    _bloat = PE.editor_dist_bloat(args.editor_dist)
+    if _bloat:
+        _fail('编辑器 dist 含可选重包: %s\n'
+              '  构建必须加 --nofollow-import-to=cupy（3.13 环境有 cupy-cuda12x，'
+              '漏了 dist 多 ~123MB）\n  dist: %s' % (', '.join(_bloat), args.editor_dist))
+
     runtime = PE._runtime_dist(os.path.join(ENGINE_DIR, 'player_runtime'))
     if runtime is None and not args.allow_missing_runtime:
         _fail('缺预置播放器运行时（player_runtime/game_player.dist）；'
@@ -151,7 +157,7 @@ def main():
         'main': '',                  # 编译版没有 .py 主程序
         'main_exe': 'Loom.exe',
         'build_mode': 'compiled',
-        'python_version': '%d.%d' % sys.version_info[:2],
+        'python_version': '%d.%d.%d' % sys.version_info[:3],
         'note': 'Nuitka 编译版引擎（无嵌入式 Python、无 .py 源码）；'
                 '游戏构建器 = 同目录 build_game.exe；配置写用户目录 %LOCALAPPDATA%/Loom',
     }

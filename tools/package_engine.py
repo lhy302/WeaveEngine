@@ -95,6 +95,13 @@ def editor_dist_problems(dist):
             if not os.path.exists(os.path.join(dist, rel))]
 
 
+def editor_dist_bloat(dist):
+    """编辑器 dist 里不该出现的可选重包（2026-11-09: 3.13 环境装了 cupy-cuda12x，
+    不排除会带进 thrust.pyd/cub.pyd/openblas，dist 从 141MB 涨到 265MB）。"""
+    return [name for name in ('cupy', 'cupy_backends', 'cupyx')
+            if os.path.isdir(os.path.join(dist, name))]
+
+
 def runtime_layout_problems(dist):
     """播放器运行时 dist 的 pygame 依赖布局，返回问题列表（空=通过）。"""
     problems = []

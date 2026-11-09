@@ -380,5 +380,39 @@ python -m nuitka --standalone --msvc=latest --assume-yes-for-downloads --enable-
 
 **回滚点（全部保留）**：`C:\loom_build\pre_upgrade_freeze_3.12.txt`（pip 回滚清单）、`C:\loom_build\engine\build_entry.dist.__old271`、`C:\loom_build\builder\build_game.exe.__old271`（启动对照用 `build_game_271.exe`）、`Loom/player_runtime/game_player.dist.__old271`、`C:\loom_build\toolchain_probe\runtime271\game_player.dist`、`C:\loom_build\toolchain_probe\pkg_baseline_0.1.0.beta6.zip`。
 
-**附录 B 状态**：第 1、4、5 条已闭合（onefile/编辑器耗时、121 测试、ab/bench 均已有数）；第 2、3 条仍开放（VS2026 无环境、PySide6 6.12 未实测）。
+**附录 B 状态**：第 1、4、5 条已闭合（onefile/编辑器耗时、121 测试、ab/bench 均已有数）；第 2 条仍开放（VS2026 无环境）；第 3 条已在批次 0.5 实测（PySide6 6.12.0 + 3.13：qwindows 正常、121 测试全过、ab 无差）。
+---
+
+## 附录 D：批次 0.5 实施结果（2026-11-09，主线迁 Python 3.13）
+
+按 D8 裁决：主线直接迁 **Python 3.13.15**，依赖拉满；保留 3.12 回滚路径。
+
+**环境终态（3.13.15）**：Nuitka 4.3.5 / numpy 2.5.4 / moderngl 5.13.0 / wgpu **0.33.0** / PySide6 **6.12.0** / glfw 2.11.0 / pygame 2.6.1 / pillow 13.0.0 / culverin 0.14.0 / game-audio 2.1.0；MSVC 14.44 不变。
+**期间补装（3.13 原本缺失，会静默降级）**：culverin 0.14.0（物理）、game-audio 2.1.0（音频）、numba 0.67.0（与 3.12 对齐；fastpath 实测两版均不启用）。
+
+**改动文件**：`Loom/解释器.json`（python_version→3.13.15）、`使用操作指南.txt`（全量 py -3.13 + §7.5 补 `--nofollow-import-to=cupy` + 3.12 回滚段）、`架构互联协议总表.md` §10.2、`Loom/game_player.py` 注释、`tools/package_engine.py`（新增 `editor_dist_bloat`）、`tools/package_engine_compiled.py`（cupy 断言 + python_version 全量号）。
+
+**3.12 → 3.13 对照（同机，source 口径）**
+
+| 指标 | 3.12（批次 0 终态） | 3.13（本批） | Δ / 门禁 |
+|---|---|---|---|
+| 运行时构建 | 363.9 s / 140.4 MB / 125 | **443.7 s / 139.8 MB / 125** | 体积 −0.4%；耗时不可比（3.13 首次编译，clcache 冷） |
+| 编辑器构建 | 476.6 s / 141.7 MB / 141 | **454.5 s / 141.6 MB / 141** | −4.6% 耗时，体积持平（含 qwindows.dll） |
+| 构建器（onefile） | 252.5 s / 22.73 MB | **399.1 s / 21.56 MB** | 体积 −5.1% |
+| 发布包 zip | 128.46 MB | **127.65 MB** | **−0.6%**（门禁 ≤+5% ✅） |
+| 启动中位数（`--help`×4） | 1.61 s | **1.535 s** | **−4.7%**（门禁 ≤+10% ✅） |
+| `--bench` FPS 中位（n=3，交替） | 84.2–88.8（漂移） | **79.5–80.3** | **−6%~−9%，门禁 ≥85 ✗** |
+| `--bench` TPS 中位 | 30.05 | 30.04 | 持平 ✅ |
+| `ab_gl_vk` | 0.0021 / 0.2353 / 0.9741 | **同值** | 不劣化 ✅（wgpu 0.33 + PySide6 6.12 实测无差） |
+| 121 测试 | 121/121 | **121/121 PASS** | ✅（含物理/音频/编辑器/离屏） |
+| 导入/解析 | 启动 72.7ms；import engine 690ms；editor 701ms；71 文件解析 418ms | **67.3ms / 579ms / 586ms / 425ms** | **−7.4% / −16.0% / −16.3% / +1.7%** |
+
+**FPS 门禁失败（唯一未过项）**：3.13 在 `压测500混合`（物理重载）上稳定慢 6–9%；逐阶段看 `logic_step`（4.4 vs 3.8ms）与 `pipe_wait`（3.0 vs 2.5ms）同时变大，渲染/解析反而更快。已排除：culverin 版本（0.14/0.15 同）、numba（两版均未启用）、PySide6（bench 走 runtime.PlayerApp，不建 Qt 窗口）、wgpu（GL bench 不走）。**未定位**到具体调用点（疑似 3.13 下物理桥的小对象/线程调度开销）。
+
+**重要干扰项**：本批执行期间有另一条并行批次在改业务代码（`Loom/engine.py`、`loom_glfw_window.py`、`loom_player_window.py`、`ui/loom_gui.py`、新增 `loom_gl_version.py`，时间 21:06–21:09）。3.12/3.13 交替 bench 同在改后代码上跑（相对比较有效），但 3.13 产物与 beta6 包**包含这些在途修改**；若该批次未定稿，需在其定稿后重打三件。
+
+**回滚点**：`C:\loom_build\pre_py313_freeze.txt`（3.12 依赖+产物路径）、`C:\loom_build\post_py313_freeze.txt`、`C:\loom_build\engine\build_entry.dist.__py312`、`C:\loom_build\builder\build_game.exe.__py312`、`Loom/player_runtime/game_player.dist.__py312`、`tools/dist/Loom-0.1.0.beta6.zip`（3.13 版）。
+
+**裁决（2026-11-09）**：人类**接受 −6%~−9% 物理 FPS 换 Python 3.13**，3.13 主线保留，不整体回滚；FPS 门禁记为"有条件豁免"。遗留观察项：物理桥（`physics_bridge` / culverin 步进）在 3.13 下的 1ms 级开销未定位，后续若做性能专项可 profile 后补回；产物与当前工作树一致（业务文件最后修改 21:06–21:09，三件产物 21:45–22:13 之后生成，无需重打）。
+
 

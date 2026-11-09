@@ -19,28 +19,36 @@ Loom 使用操作指南 (2026-08-11, 原名 3D引擎)
    (Vulkan 后端) —— 缺哪个都自动降级, 功能正确性不受影响。
 
 环境要求:
-  Python 3.12 (py -3.12 命令; .py 默认打开应用已绑定 3.12.10)
+  Python 3.13.15 (py -3.13 命令; 2026-11-09 主线已迁 3.13, 见 §7.5 末尾回滚说明)
+  回滚: 3.12 环境仍可用 (py -3.12), 依赖快照见 C:\loom_build\pre_py313_freeze.txt
   pip 安装:  moderngl  pygame  numpy  PySide6 >= 6.6  game-audio  (打包还要 nuitka)
   (编辑器界面 = LoomGUI: PySide6 Qt 原生控件, 必装; pygame 仅取键值常量;
    game-audio (2026-08-30 B2 音频主后端, miniaudio): 缺失时自动回退 pygame
    音频, 功能零丢失, 但 wav/mp3/flac 与低延迟/组音量特性需装它才有)
 
+  显卡 (2026-11-09 批次 A0 / 人类裁决 D1=B: GL 地板 3.3 -> 4.3 core):
+  OpenGL 后端要求 OpenGL 4.3 core 及以上 (DX11 同级显卡)。不满足时**明确报错并
+  停止启动** (打印 GL 版本/显卡/驱动 + 提示, 编辑器还会弹窗), 不会黑屏空转;
+  启动时看到 [GL] 开头的诊断, 先更新显卡驱动; 显卡确实不支持则改用 Vulkan 后端:
+    py -3.13 "Loom\Loom.py" --backend vulkan        (或设置 render_api=vulkan)
+  (Vulkan 后端需驱动支持 Vulkan 1.1+; 两条后端的场景/脚本/UI 契约完全一致)
+
 启动 Loom 解释器 (在项目根下运行):
-  py -3.12 "Loom\Loom.py"                    打开编辑器 (默认 = LoomGUI, Qt 原生界面)
-  py -3.12 "Loom\Loom.py" --ui qt            显式指定 LoomGUI (同默认)
-  py -3.12 "Loom\Loom.py" --run 场景.json    直接运行一个场景(播放器)
-  py -3.12 "Loom\Loom.py" --open 场景.json   编辑器打开项目场景 (LoomHub 打开项目用)
-  py -3.12 "Loom\Loom.py" --benchmark        无头性能自检
-  py -3.12 "Loom\Loom.py" --agent            额外启动命令桥 (EAI: 端口令牌 +
+  py -3.13 "Loom\Loom.py"                    打开编辑器 (默认 = LoomGUI, Qt 原生界面)
+  py -3.13 "Loom\Loom.py" --ui qt            显式指定 LoomGUI (同默认)
+  py -3.13 "Loom\Loom.py" --run 场景.json    直接运行一个场景(播放器)
+  py -3.13 "Loom\Loom.py" --open 场景.json   编辑器打开项目场景 (LoomHub 打开项目用)
+  py -3.13 "Loom\Loom.py" --benchmark        无头性能自检
+  py -3.13 "Loom\Loom.py" --agent            额外启动命令桥 (EAI: 端口令牌 +
                                              命令行内部可达, 见《Loom-EAI与HUB-EAI说明书.txt》;
                                              常用搭配 --auto-close N: N 秒后自动关闭)
   (2026-08-28: 旧 pygame 即时模式视图已删除, "LoomGUI" 之名回归 Qt 原生核心视图;
   --ui default 走 guiloader 自定义 GUI 机制, --ui minimal 是极简只读第二实现)
 
 启动 LoomHub 项目管理器:
-  py -3.12 "LoomHub\LoomHub.py"               (默认 = TkHubView, tkinter 官方视图)
-  py -3.12 "LoomHub\LoomHub.py" --ui tk       (显式 tkinter, 同默认)
-  py -3.12 "LoomHub\LoomHub.py" --ui pygame   (旧自绘视图, 已弃用仅参考)
+  py -3.13 "LoomHub\LoomHub.py"               (默认 = TkHubView, tkinter 官方视图)
+  py -3.13 "LoomHub\LoomHub.py" --ui tk       (显式 tkinter, 同默认)
+  py -3.13 "LoomHub\LoomHub.py" --ui pygame   (旧自绘视图, 已弃用仅参考)
   功能: 解释器多版本扫描/导入/.zip安装/设默认 + 项目文件式管理 +
   用默认解释器打开项目 + 底部"命令行"区 (Hub-EAI 命令表)。
   界面换肤: 设置行"界面:"下拉可换 NovaHubGUI (星辉 Nova) / ColorHubGUI 等
@@ -297,7 +305,7 @@ LoomHub = 项目管理器 ("解释器名 + Hub", 类似 Unity -> Unity Hub)。
 它把"项目管理"从解释器里分离: 解释器只管编辑/运行, LoomHub 管
 项目列表、启动项目、解释器(编辑器)多版本管理。
 
-启动:  py -3.12 "LoomHub\LoomHub.py"   (默认 = TkHubView tkinter 官方视图)
+启动:  py -3.13 "LoomHub\LoomHub.py"   (默认 = TkHubView tkinter 官方视图)
 
 界面 (左=解释器, 右=项目):
   左侧 [解释器] 面板:
@@ -400,9 +408,12 @@ LoomHub = 项目管理器 ("解释器名 + Hub", 类似 Unity -> Unity Hub)。
 ====================================================================
   实际打包 (必须 MSVC + SDK, 详见《制作游戏完整流程教学.txt》第八节:
     完整命令以 代码架构/教学文档 为最终依据, 这里只记要点):
-    编辑器   py -3.12 -m nuitka --mode=standalone --msvc=latest \
+    编辑器   py -3.13 -m nuitka --mode=standalone --msvc=latest \
                  --enable-plugin=pyside6 --windows-console-mode=disable \
+                 --nofollow-import-to=cupy \
                  build_entry.py   (Loom\ 下)
+              ^^ --nofollow-import-to=cupy: 3.13 环境装了可选 cupy-cuda12x,
+                 不排除会把 thrust.pyd/cub.pyd/openblas 打进 exe (dist 141MB->265MB).
               ^^ --enable-plugin=pyside6 不能漏: 漏了 dist 里没有
                  PySide6/qt-plugins/platforms/qwindows.dll, Loom.exe 启动即崩,
                  而且体积反而小 ~8MB (体积检查会误判成"变好");
@@ -411,7 +422,13 @@ LoomHub = 项目管理器 ("解释器名 + Hub", 类似 Unity -> Unity Hub)。
               再打 (跨目录模块被 Nuitka 静态分析漏掉, 运行时报
               ModuleNotFoundError: filedialog 的教训; 记忆
               3d-engine-packaging-nuitka 有完整命令)
-    玩家运行时 build_game.exe --build-runtime (内部调同样命令)
+    玩家运行时 py -3.13 build_game.py --build-runtime (内部用 sys.executable 调同样命令)
+
+  回滚到 Python 3.12 (2026-11-09 主线迁 3.13 的配套):
+    三件产物用同参数 + py -3.12 重打即可; 3.12 依赖快照见
+    C:\loom_build\pre_py313_freeze.txt; 迁移前 3.12 产物留在
+    C:\loom_build\engine\build_entry.dist.__py312、C:\loom_build\builder\build_game.exe.__py312、
+    Loom\player_runtime\game_player.dist.__py312 (含 qwindows.dll 校验)。
 
 ====================================================================
 八、命令行快速上手 (不想开编辑器时)
@@ -462,7 +479,7 @@ Q: 挂了 重力落地 却没落下去?
 十、一键验证工具没坏
 ====================================================================
 在项目根运行:
-  py -3.12 "Loom(py源代码-工作区)\Loom\tests\run_all.py"
+  py -3.13 "Loom(py源代码-工作区)\Loom\tests\run_all.py"
 全部测试应显示 "ALL PASS ✅"。改代码后跑一遍, 别让回归溜进来。
 
 ====================================================================

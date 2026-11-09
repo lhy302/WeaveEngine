@@ -16,7 +16,7 @@ game_player.py — 纯 Player 游戏入口 (M38, Unity Build 模型)
      → 明文场景文件直接跑.
 
 打包 (开发者, 见《制作游戏完整流程教学.txt》第八节):
-  py -3.12 -m nuitka --mode=standalone --msvc=latest --assume-yes-for-downloads \
+  py -3.13 -m nuitka --mode=standalone --msvc=latest --assume-yes-for-downloads \
     --enable-plugin=tk-inter --windows-console-mode=disable \
     --output-dir=Game --output-filename=MyGame.exe game_player.py
 分发: exe + 游戏包.lsc 放一个文件夹 (二者不可分离).
