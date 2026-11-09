@@ -1119,3 +1119,80 @@ python tests\test_editor_ui.py / test_guiswitch.py / test_agent_ui_indicator.py�
 2. **`_install_present_watch` 采用包装 `runtime.PlayerApp.run`** 的方式观测（入口层拿不到引擎实例的唯一低侵入点）。
    若之后 `loom_render.run()` 增加"上屏失败自动收口"的官方钩子，应改为消费该钩子并删除这层包装（避免长期猴补丁）。
 3. `--bench` 的 TPS 依赖 `is_playing` 语义未变（bench 沿用 `PlayerApp` 默认），本批未改判据，只加打印。
+
+---
+
+## 8. beta5 内轮回修：天空盒「场景 / 编辑器 / 命令」侧（2026-11-09，裁决 Q1/Q3/Q4/Q5/Q6 = A）
+
+> 只改 `Loom/sceneio.py`、`Loom/editor.py`、`Loom/agent_commands.py`、`Loom/loom_scene_entities.py`（仅注释/契约），
+> 新增 `Loom/tests/test_skybox_scene.py`。渲染端约定不变：**渲染器只读 `engine._skybox`**（与 02 号一致），
+> 本批负责把"生效的那一个"算好赋给它，不在渲染器里各判一套。
+
+### 8.1 白盒契约（写进代码注释）
+
+| 裁决 | 落点 | 契约 |
+|---|---|---|
+| Q1=A | `sceneio.DEFAULT_SKYBOX_COLOR = (58,155,213,255)` / `DEFAULT_SKYBOX_NAME` / `default_skybox()` | 新建场景、以及"无 `skybox` 键 / 值为 null"的场景 → **默认纯色蓝天 #3A9BD5**；默认值**单点**定义，其它模块不得写字面量 |
+| Q3=A | `EditorApp._effective_skybox() / _refresh_effective_skybox()`；`loom_scene_entities.Camera.skybox` 注释 | active camera 的 skybox 非 None 时优先，否则场景级；**渲染端只读 `engine._skybox`**，解析在场景/编辑器侧完成 |
+| Q4=A | `sceneio.parse_color()` | 颜色只认 0..255 的 int（或**整值**浮点）；0-1 浮点 / 越界 / 长度≠3,4 / 非数值 → `ok=False` + 原因，不得 `int()` 静默截断 |
+| Q5=A | `sceneio.skybox_from_dict() -> (cube, valid, reason)`；`engine._skybox_valid/_skybox_error`；`skybox_get` | 解析失败**出声**（打印原因）+ 可查询；get 返回 `valid` / `reason` |
+| Q6=A | `_emit_skybox(cube, base_dir)` / `skybox_from_dict(d, base_dir)` / `scene_from_dict(..., base_dir=)` / `scene_to_dict(..., base_dir=)` | 六面图 `paths` 以**相对场景目录**序列化，加载按场景目录解析；缺文件 → 明确报错并 `valid=False` |
+
+### 8.2 修前 → 修后（`python tests\test_skybox_scene.py`，实跑 ALL PASS）
+
+| 用例 | 修前 | 修后 |
+|---|---|---|
+| ① 新建场景 | `_new_scene` 显式 `self._skybox = None`（黑底） | `_skybox is _scene_skybox` 且 `_solid_color == (58,155,213,255)`；存盘写出 `skybox.solid_color` |
+| ② 加载无 `skybox` 键 / null | `_apply_skybox(None) -> None`（黑底） | 默认蓝 + `_skybox_valid=True`（两种输入都覆盖） |
+| ③ `skybox_set [0.2,0.4,0.8]` | `int(0.2)=0` → 落库 `(0,0,0,255)` **静默全黑** | `ok=False`：`颜色通道 #0=0.2 不是 0..255 的整数（看起来是 0-1 浮点）; 请乘 255, 或用 #RRGGBB`；**状态不变** |
+| ③' 其它非法色 | 抛异常/静默 | 越界 / 长度 2 / 非数值 / 非法 hex 全部 `ok=False` + 各自原因；`[58.0,123.0,213.0]`（整值浮点）放行 |
+| ④ `[58,123,213]` | — | 落库 `(58,123,213,255)` → 存盘 `solid_color=[58,123,213,255]` → 重载读回一致 → `skybox_get` `valid=True` 且含 solid_color |
+| ⑤ 六面图 | 绝对路径入库（换机丢） | `skybox_set` 存 `['px.png',…]`（相对场景目录）；换 CWD 后按 `base_dir` 解析成功；**删掉一面**后 `_skybox_valid=False` + reason 指明 `py.png`，并回退默认蓝（出声：`[场景] 天空盒解析失败 (第 2 面图片不存在: …) -> 回退默认蓝天盒`）；`skybox_get` 能读出 invalid+reason |
+| ⑥ 相机级优先 | 相机 `skybox` 字段**无人消费**（渲染恒用场景级） | 相机绿 / 场景红 → `_refresh_effective_skybox()` 得绿；`skybox_get` 报 `skybox=红`（场景级）+ `effective.source='camera'`=绿；取消激活相机 → 回落红 |
+
+### 8.3 播放/加载接线
+
+- `_load_scene`：`scene_from_dict(..., base_dir=场景目录)` → `_scene_skybox = _skybox`（场景级）→ `_refresh_effective_skybox()`（相机优先）。
+- `toggle_play`：进播放应用 `active_camera` 后刷新；退播放恢复 `active_camera` 后再刷新（播放前后恒等）。
+- `set_active_camera`：换激活相机即刷新（编辑/播放一致）。
+- `_save_scene` / `_scene_digest`：都传 `base_dir=self._scene_dir()`；落盘写的是 **`_scene_skybox`**（场景级），
+  不会把播放期相机天空盒烘焙成场景默认。
+
+### 8.4 验收（定向，实跑）
+
+```
+python tests\test_skybox_scene.py            -> ALL PASS（①~⑥ 全绿）
+python tests\test_sceneio.py                -> ALL PASS ✅
+python tests\test_eai_real.py               -> ALL PASS ✅ (命令 98 条全部覆盖)
+python tests\test_editor_ui.py              -> ALL PASS ✅
+python tests\test_editor_load_reject_keeps_scene.py -> ALL PASS
+python tests\test_scene_solid_env_roundtrip.py      -> ALL PASS
+python tests\test_beta3_batch2_camera_proj.py       -> ALL PASS
+python tests\test_vk_camera_align.py / test_render_api.py / test_undo_full_coverage.py -> exit=0 ALL PASS
+python tests\test_pacman_scene_contract.py / test_guiswitch.py / test_agent_ui_indicator.py -> exit=0 ALL PASS
+```
+未跑 `run_all.py`（按约束交主审统一跑）。
+
+### 8.5 剩余（跨批 / 需他人决定）
+
+1. **VK 播放器未接入**本轮天空盒语义：`scene_driver.py` 仍直接 `_sio._apply_skybox(data.get('skybox'))`
+   → 既没有 Q1 的默认蓝，也没有 Q3 的相机级优先。`scene_driver` 不在本批文件域，建议下一批改为
+   `_apply_skybox_or_default(...)` + `active_camera.skybox` 优先（一行级依赖 vk_player 传 `base_dir`）。
+2. **`runtime.PlayerApp`（GL 播放器）未传 `base_dir`**：相对路径会按 CWD 解析；打包游戏 CWD 通常= exe 目录，
+   若场景不在该目录仍会报"缺文件"（会出声 + 回退默认蓝，不是静默）。需 02/03 批在 `runtime.py` 传入
+   `os.path.dirname(scene_path)`。
+3. **`skybox_clear` 后保存 → 重新加载按 Q1 会得到默认蓝**（"值为 null 视为默认蓝"是裁决原文）。若人类希望
+   "显式清空"可持久化，需要一个新的"显式无天空盒"标记（例如 `skybox: {}` 或 `skybox: {"none": true}`）——
+   本批按裁决原文实现，未自行扩张语义。
+
+### 8.6 收尾三项（2026-11-09 追加，02 号渲染侧已合入后）
+
+| # | 改动 | 修前 | 修后（`test_skybox_scene` 第 7~9 组） |
+|---|---|---|---|
+| 1 | `editor.py` 主 pass 前的绘制门：`if getattr(self,'_skybox',None) is not None` → `if self.effective_skybox() is not None` | 只认**场景级**字段 → 相机级天空盒在编辑器里永远不画（Q3=A 只在播放器生效） | 场景级 None + 相机级绿 → `effective_skybox()` 非空、门为真、`_draw_skybox` 计数=1；同时 `_effective_skybox()` 改为**委托** `GLEngine.effective_skybox()`（GL/VK 同一判定，不再各写一套） |
+| 2 | 场景加载/新建调用 `engine.reset_sky_state()`（幂等，02 提供） | 旧 `_sky_prog = False` 是**永久哨兵**：一次编译失败后换场景也永不重试 | 新建/加载后 `_sky_prog is None`、`_sky_fail_logged is False`——"先失败过一次再换场景"能恢复出图（与渲染端"生效对象变了自动复位"双保险） |
+| 3 | `skybox_get` 返回体新增 `'vk'` 字段（无驱动为 None） | VK 侧天空盒失败在查询里完全不可见 | 挂 `win.vk_driver` 桩后返回 `{'valid': False, 'error': …, '_skybox_error': '第 2 面图片不存在: C:/x/py.png', 'has_skybox': False}`；无驱动时 `vk=None`（不假装成功） |
+
+验收（实跑，均 exit=0）：`test_skybox_scene.py`（9 组）、`test_skybox_engine_parity.py`（02 号）、`test_sceneio.py`、
+`test_eai_real.py`（98 命令全覆盖）、`test_editor_ui.py`、`test_editor_load_reject_keeps_scene.py`、
+`test_beta3_batch2_camera_proj.py`、`test_vk_camera_align.py`、`test_render_api.py`、`test_scene_solid_env_roundtrip.py`。

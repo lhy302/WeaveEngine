@@ -522,92 +522,58 @@ D) 不传 script_host -> _ACTIVE_ENGINE 类型 = DrawEngine | 有 models 属性 
 
 ---
 
-## 9. beta5：E1（TPS 不达标）与 E2（remote-mode 判据）
+---
 
-### 9.1 可复跑的测量方法（本次新建）
+---
 
-`Loom/tests/_tmp/tps_probe.py`（gitignore；不参与 run_all）：
+## 11. 天空盒渲染侧（Q2=A / Q3=A / Q4=A + P-04/P-05/P-06）与 VK/GL 对齐
 
-```
-cd Loom
-python -u tests/_tmp/tps_probe.py sync  Projects/压测500混合.json 4            # = --bench 口径 (render 自驱时钟)
-python -u tests/_tmp/tps_probe.py async Projects/压测500混合.json 4 --fps=58  # = 编辑器逻辑线程口径
-# 可选: --nopipe / --inline-scripts 做对照；输出 FPS / 实测TPS / logic_step / pipe_wait / 脚本线程 RTT / ratio
-```
-
-输出含 `GLEngine.get_logic_time_ratio()`（本轮新增体检口）：`dt 总和 / 墙钟总和`。
-
-### 9.2 根因（两条，均已量化；第一条已修）
-
-**(R1) 同步推进路径把「调用方 dt」当墙钟 —— TPS 被系统性低估**
-
-- 机制：`clk.advance(render_dt)` 只累计调用方给的时间。调用方给的 dt 若小于真实帧间隔
-  （典型 `--bench` 传固定 `1/120` 而实际跑 94 FPS），逻辑时钟每秒只拿到 79% 的墙钟。
-- 关系式与实测完全吻合：`TPS = logic_fps × Σdt/墙钟 = 30 × 0.79 = 23.7`（**与现场读数逐位相同**）。
-- 证据（改前）：
-
-```
-RESULT mode=sync wall=4.01s frames=380 FPS=94.8 TPS=24.0 (target 30)
-  logic_step=3.79 pipe_wait=1.87 ms/渲染帧 -> 每逻辑帧 14.97 ms
-  script_run_frame: 95 次, 平均 0.93 ms/逻辑帧      # 脚本线程交接不是瓶颈
-```
-
-**(R2) 每逻辑帧成本已吃掉大半预算（未改，属结构性问题）**
-
-- async（编辑器同构）实测：每个逻辑帧 23.4 ms / 33.3 ms 预算（`logic_step` 12.2 + `pipe_wait` 5.6），
-  只剩 ~10 ms 余量；渲染线程一旦多占 GIL/CPU，TPS 就会掉到 24 左右 —— 与现场 `CPU 1.33 核` 一致。
-- 对照实验（async 58 FPS，改前）：`--nopipe` 每逻辑帧 23.30 ms、`--inline-scripts` 22.05 ms、
-  基线 22.84 ms —— 三条都 ≈23 ms，说明**当前瓶颈不是某一段可轻易省掉的开销**，
-  而是「逻辑帧内串行链」整体偏长（`pipe_wait` 是其中最大的单段）。
-
-### 9.3 改动（本批文件）
+### 11.1 改动
 
 | 文件 | 改动 |
 |---|---|
-| `engine.py` | 新增 `_clock_advance(render_dt, clk=None)` 作为**推进逻辑时钟的唯一入口**：输入 `max(调用方 dt, 实测墙钟)`，并按 `maximum_logic_delta` 截断墙钟采样；累计 `_logic_dt_sum/_logic_wall_sum`。同步分支 `advance_logic` 改调它。新增只读体检口 `get_logic_time_ratio()`。 |
-| `loom_render.py` | 渲染自驱分支改调 `self._clock_advance(delta_time, clk)`；新增 `_present_swap()`（上屏失败计数 + 首次告警）、`present_health()`、`should_fallback_remote(threshold=3)`（E2 判据）。 |
-| `loom_logic_thread.py` | 异步逻辑线程改调 `self._clock_advance(dt, clk)`（其 dt 本就是实测值 → 行为不变，但记账/口径统一）。 |
-| `tools/release_notes/engine-0.1.0.beta5.md` | 补 02 号负责的引擎侧要点（E1 根因/数字、E2 判据、前几轮的锁定/VK/配置/GL UI 修复）。 |
+| `loom_shaders.py` | 新增 `CLEAR_COLOR_RGBA = (0.10, 0.12, 0.16, 1.0)` —— **清屏底色唯一来源**（Q2=A）。 |
+| `loom_render.py` | 清屏改用该常量（原 0.05/0.05/0.1）；`_draw_skybox` 重写：生效天空盒（相机级优先）→ 场景级；哨兵按**生效天空盒对象**隔离（P-04：换天空盒/场景即重试一次）；每类失败**告警一次 + 本帧跳过**（P-05，绝不让播放循环终止）；draw 状态的读取容错（探针/桩 Context 无 depth_mask 时用默认值）。 |
+| `engine.py`（仅 sky 段） | 新增 `effective_skybox()`（相机级 `CameraState.skybox` 优先 → 场景级；GL/VK 共用同一判定）、`reset_sky_state()`、`_warn_sky_once()`。 |
+| `vk_renderer.py` | 清屏用同一常量；`_draw_sky(..., tint=)` 从**引擎** `_skybox_tint` 取值（P-06：旧实现读 renderer 上的 `skybox_tint`，VK 侧 tint 永远不生效）；生效天空盒优先取 `engine.effective_skybox()`；天空绘制失败**只报一次**并跳过（P-05）。 |
+| `loom_cubemap.from_solid` | 只认 0-255 / `#RGB`/`#RRGGBB`/`#RRGGBBAA`；**取消 0-1 隐式放大**；越界/非数值/非法色串一律 `ValueError`（Q4=A / P-07）。顺带修掉 `_hex_rgba` 对非法串静默回退灰的问题（先严格校验形态再解析）。 |
+| `scene_driver.py` | VK 侧天空盒改走 `sceneio._scene_skybox_from_data(data, base_dir)`：缺键/null → **默认蓝**、失败出声并记 `_skybox_valid/_skybox_error`；相机级 skybox 按 `skybox_from_dict(..., base_dir)` 解析；新增 `effective_skybox()`（与 GLEngine 同口径）。 |
+| `runtime.py` | `PlayerApp` 加载场景时把**场景文件所在目录**作为 `base_dir` 传给 `sceneio.scene_from_dict`（Q6=A：六面图相对路径可解析）。 |
+| `vk_player.py`（1 行） | `driver.load_from_data(data, base_dir=dirname(scene))` —— 与 GL 播放器同口径（相对路径）。 |
+| `tests/test_skybox_engine_parity.py`（新增） | 11 条断言：缺键→默认蓝两端逐位相同、相机级优先两端相同、相对六面图路径从别的目录启动仍可解析。 |
 
-### 9.4 改前 / 改后对照（同场景 `Projects/压测500混合.json`，501 模型）
-
-| 口径 | 改前 | 改后 |
-|---|---|---|
-| sync（dt=1/120，实测 94 FPS） | TPS **24.0**，每逻辑帧 15.0 ms | TPS **32.6**，ratio **1.07**（不再低估；>30 是名义 dt 下取墙钟下限的结果） |
-| sync（配速 58 FPS） | — | TPS **30.0**，ratio **1.001** |
-| async（逻辑线程，58 FPS） | TPS **30.1**，每逻辑帧 22.8 ms | TPS **30.1**，每逻辑帧 23.4 ms（口径统一后行为不变） |
-
-改后关键输出：
+### 11.2 验收（真实输出）
 
 ```
-RESULT mode=sync pace=58 wall=6.01s frames=295 FPS=49.1 TPS=30.0 (target 30)
-  ratio(dt/墙钟)=1.0011327212886565  tps_events=61  steps_seen=180 (TPS*wall=180)
-RESULT mode=async pace=58 wall=4.00s frames=232 FPS=58.0 TPS=30.1 (target 30)
-  logic_step=12.16 pipe_wait=5.61 ms/渲染帧 -> 每逻辑帧 23.43 ms
+tests/test_skybox_scene.py:          exit=0 fails=0  ALL PASS
+tests/test_skybox_engine_parity.py:  exit=0 fails=0  ALL PASS   (11/11 PASS)
+tests/test_ui.py:                    exit=0 fails=0  ALL PASS
+tests/test_render_api.py:            exit=0 fails=0  ALL PASS
+tests/test_vk_ui_input.py:           exit=0 fails=0  ALL PASS
+tests/test_playmode_edges.py:        exit=0 fails=0  ALL PASS
+skybox_ab_probe（离屏 GL vs VK 240x160）:
+  GL vs VK (有天空盒): MAE=0.000  MAX=0  差异>2 的像素=0/38400
+  GL vs VK (无天空盒): MAE=0.000  MAX=0  差异>2 的像素=0/38400
 ```
 
-### 9.5 E2（remote-mode 自动降级的引擎侧判据）
+新增断言摘要（`test_skybox_engine_parity.py`）：
 
-- `_present_swap()` 让上屏失败**可判定**（旧 `_glfw_swap_buffers` 是 `except: pass`，白屏期零信号）。
-- `should_fallback_remote(threshold=3)` 供入口层做「先试原生 → 连续失败才切离屏回读」。
-- **未落地部分（需协调，不属本批文件）**：`Loom.py:108/314` 的 `LOOM_REMOTE_MODE` 判定要接受
-  `auto`：先按原生启动，`should_fallback_remote()` 为真时以 `LOOM_REMOTE_MODE=1` 重启一次。
-  这是 2 行接线，改在 `Loom.py`（03 号范围）——按"不碰别人文件"的边界留给主审协调。
+```
+PASS GL/VK 默认蓝天空盒 (58,155,213,255) 逐位相同 / valid 同为 True / effective_skybox 结论一致
+PASS GL/VK 相机实体都拿到相机级 (10,20,30,255); 两端 effective_skybox 都取相机级
+PASS 从 B 目录启动: sceneio / VK driver / GL 播放器 三处相对六面图路径解析 valid=True
+```
 
-### 9.6 验收与剩余
+### 11.3 事故留痕（自曝）
 
-| 测试 | 结果 |
+编辑 `vk_renderer.py` 时用"整文件读-改-写"把文件截断成 1064 行（读工具单次返回有上限）。
+已用 `git show HEAD:Loom/vk_renderer.py`（**只读**，不是 checkout）恢复成 1999 行的提交版本，
+再用定向 `edit` 重做改动；`py_compile` 与全部测试通过。之后所有编辑改为定向 `edit`。
+
+### 11.4 剩余（不属本批文件）
+
+| 项 | 说明 |
 |---|---|
-| `tests/test_core_clock.py` | OK（exit 0） |
-| `tests/test_frame_pacing.py` | OK |
-| `tests/test_frame_buffer.py` | OK |
-| `tests/test_playmode_edges.py` / `test_vk_camera_align.py` / `test_scripts.py` / `test_render_api.py` | ALL PASS |
-| `py_compile`（engine / loom_render / loom_logic_thread） | OK |
-| `run_all.py` | **未跑**（按主审约定） |
-
-**剩余 / 未实测**：
-1. 编辑器（Qt 宿主）实机 TPS 未测（无 GUI 长窗口条件）；请用 `get_logic_time_ratio()` 分流：
-   ratio≈1 → 缺口在每逻辑帧成本 + GIL 竞争（下一步：把 `_logic_prep` 的 shadow/collide 段移出逻辑帧，
-   或把 `pipe_wait` 改成"上一子步的等待"流水线）；ratio<1 → 宿主 dt 口径问题（`loom_gui` 侧）。
-2. remote-mode 实机未测；E2 自动重启接线待协调。
-3. `--bench` 口径（build_entry.py 传固定 1/120）建议改传实测间隔 —— 引擎侧已不再被它低估，但基准脚本仍会偏高。
+| `editor.py:2280` 的绘制门 `if getattr(self,'_skybox',None) is not None: self._draw_skybox()` | 只认场景级：当**仅相机级**有天空盒时不会调用（`_draw_skybox` 内部已按生效天空盒工作）。建议 03 改成 `if self.effective_skybox() is not None:`。 |
+| 换场景复位 | 渲染端已按"生效天空盒对象变化"自动复位哨兵；若要强制，03 可在换场景后调 `engine.reset_sky_state()`（幂等）。 |
+| VK 的 `_skybox_error` 未暴露到 EAI | 需要 03 在 `skybox_get` 里一并返回（driver 侧字段已就绪）。 |

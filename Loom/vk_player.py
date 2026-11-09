@@ -276,7 +276,10 @@ def run_vk(scene=None, frames_n=None, keep=False, mini=False, no_shadow=False,
             raise FileNotFoundError("场景不存在: %s" % scene)
         data = sceneio.load_scene_data(scene)
     driver = SceneDriver()
-    driver.load_from_data(data)
+    # 2026-11-09 (Q6=A): 与 GL 播放器一致 —— 场景目录作为 base_dir，
+    # skybox 六面图的相对路径按它解析（否则换目录启动就只剩默认蓝）。
+    _base_dir = os.path.dirname(os.path.abspath(scene)) if scene else None
+    driver.load_from_data(data, base_dir=_base_dir)
     # 2026-11-06 R3: UI 输入桥 (GLFW 回调缓存 -> 每帧 dispatch_mouse + 键盘/文本).
     ui_bridge = UIInputBridge(getattr(driver, 'ui', None))
     try:

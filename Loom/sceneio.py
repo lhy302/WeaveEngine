@@ -540,46 +540,175 @@ def _apply_lights(engine, light_dicts):
 
 # ---------------- 摄像机 (Unity Camera 概念) ----------------
 
-def _emit_skybox(cube):
-    """2026-10-19 第1档序13 天空盒: Cubemap 实例 -> dict（None 时返回 None）.
-    两种来源:
-      - paths 非空: 6 面文件路径 (from_files 加载)
-      - _solid_color 非空: 纯色 (from_solid 加载)
-    都无则返回 None（视为无天空盒）。"""
+# ---------------- 天空盒 (beta5 Q1/Q4/Q5/Q6, 人类裁决 2026-11-09) ----------------
+# 白盒契约:
+#   · Q1=A 新建场景、以及"没有 skybox 键 / 值为 null"的场景 -> **默认纯色蓝天**;
+#     默认值只在本文件定义一次 (DEFAULT_SKYBOX_COLOR), 其它模块不得再写字面量。
+#   · Q3=A 相机级 skybox 非 None 时优先（"生效的那一个"由 editor 算好交给 engine._skybox）。
+#   · Q4=A 颜色只认 0..255 的整数（或整值浮点）; 0-1 浮点 / 越界 / 长度错 -> 明确报错，
+#     不得用 int() 静默截断（历史病灶: [0.2,0.4,0.8] -> int -> (0,0,0) 全黑）。
+#   · Q5=A 解析失败必须可见: 打印原因, 并让调用方拿到 (valid, reason)。
+#   · Q6=A 六面图 paths 以**相对场景目录**的形式序列化, 加载时按 base_dir 解析; 缺文件报错。
+DEFAULT_SKYBOX_COLOR = (58, 155, 213, 255)      # #3A9BD5 —— 默认蓝天（白盒契约）
+DEFAULT_SKYBOX_NAME = '默认蓝天'
+
+
+def default_skybox():
+    """Q1=A: 默认纯色天空盒（新建场景 / 场景无 skybox 键 / 值解析失败时使用）。"""
+    from loom_cubemap import Cubemap
+    return Cubemap.from_solid(DEFAULT_SKYBOX_COLOR, name=DEFAULT_SKYBOX_NAME)
+
+
+def parse_color(v):
+    """Q4=A 颜色白盒契约 -> ((r,g,b,a) | None, reason | None).
+
+    接受: '#RRGGBB' / '#RRGGBBAA' / [r,g,b] / [r,g,b,a]，通道必须是 0..255 的 int
+    （bool 不算）或**整值浮点**（58.0 可以, 0.2 不行）。拒绝: 0-1 浮点、越界、
+    长度不是 3/4、非数值。
+    """
+    import re as _re
+    if isinstance(v, str):
+        s = v.strip()
+        m = _re.match(r'^#?([0-9a-fA-F]{6})([0-9a-fA-F]{2})?$', s)
+        if not m:
+            return None, '颜色字符串必须形如 #RRGGBB 或 #RRGGBBAA: %r' % (v,)
+        h, a = m.group(1), (m.group(2) or 'FF')
+        return ((int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16),
+                 int(a, 16)), None)
+    if not isinstance(v, (list, tuple)):
+        return None, '颜色必须是 #RRGGBB 字符串或 [r,g,b(,a)] 数组: %r' % (v,)
+    if len(v) not in (3, 4):
+        return None, '颜色数组必须是 3 或 4 个通道: 收到 %d 个 %r' % (len(v), v)
+    out = []
+    for i, x in enumerate(v):
+        if isinstance(x, bool) or not isinstance(x, (int, float)):
+            return None, '颜色通道 #%d 必须是数值: %r' % (i, x)
+        if isinstance(x, float):
+            if not float(x).is_integer():
+                return None, ('颜色通道 #%d=%r 不是 0..255 的整数（看起来是 0-1 浮点）; '
+                              '请乘 255, 或用 #RRGGBB' % (i, x))
+            x = int(x)
+        if not (0 <= int(x) <= 255):
+            return None, '颜色通道 #%d=%r 超出 0..255' % (i, x)
+        out.append(int(x))
+    if len(out) == 3:
+        out.append(255)
+    return tuple(out), None
+
+
+def skybox_from_dict(d, base_dir=None):
+    """Q5=A/Q6=A: dict -> (cube | None, valid: bool, reason | None).
+
+    失败一律给 reason（不抛、不静默）；paths 的相对项按 base_dir（场景目录）解析；
+    成功时把**原始（可能相对的）paths** 记到 cube._source_paths，供 _emit_skybox 原样回写。
+    """
+    if not d:
+        return None, False, '缺少 paths/solid_color'
+    try:
+        from loom_cubemap import Cubemap
+    except Exception as e:
+        return None, False, 'Cubemap 模块不可用: %r' % (e,)
+    paths = d.get('paths')
+    if paths:
+        if not isinstance(paths, (list, tuple)) or len(paths) != 6:
+            return None, False, ('paths 必须是 6 个路径 (px,nx,py,ny,pz,nz): 收到 %r'
+                                 % (paths,))
+        abs_paths = []
+        for i, p in enumerate(paths):
+            q = str(p)
+            if not os.path.isabs(q):
+                q = os.path.join(base_dir or '', q)
+            if not os.path.isfile(q):
+                return None, False, '第 %d 面图片不存在: %s' % (i, os.path.abspath(q))
+            abs_paths.append(os.path.abspath(q))
+        try:
+            cube = Cubemap.from_files(abs_paths, name=d.get('name'),
+                                      guid=d.get('guid'))
+        except Exception as e:
+            return None, False, '六面图加载失败: %r' % (e,)
+        cube._source_paths = [str(p) for p in paths]        # Q6: 保留相对形式
+        return cube, True, None
+    solid = d.get('solid_color')
+    if solid is not None:
+        rgba, reason = parse_color(solid)
+        if rgba is None:
+            return None, False, reason
+        try:
+            cube = Cubemap.from_solid(rgba, name=d.get('name'), guid=d.get('guid'))
+        except Exception as e:
+            return None, False, '纯色天空盒创建失败: %r' % (e,)
+        return cube, True, None
+    return None, False, '缺少 paths/solid_color'
+
+
+def _apply_skybox(d, base_dir=None):
+    """dict -> Cubemap 实例（兼容旧签名）。失败: **出声** + 返回 None（Q5=A）。"""
+    cube, valid, reason = skybox_from_dict(d, base_dir)
+    if not valid and d:
+        print('[场景] 天空盒解析失败: %s' % (reason,))
+    return cube
+
+
+def _scene_skybox_from_data(data, base_dir=None):
+    """场景级天空盒 -> (cube, valid, reason)；Q1=A: 缺键/null -> 默认蓝。
+
+    有值但解析失败: 出声 + 回退默认蓝（保证"打开场景一定有天空盒"），valid=False
+    由调用方转成可查询的 _skybox_valid/_skybox_error（skybox_get 用）。
+    """
+    d = data.get('skybox')
+    if not d:
+        return default_skybox(), True, None
+    cube, valid, reason = skybox_from_dict(d, base_dir)
+    if valid:
+        return cube, True, None
+    print('[场景] 天空盒解析失败 (%s) -> 回退默认蓝天盒' % (reason,))
+    return default_skybox(), False, reason
+
+
+def _apply_skybox_or_default(d, base_dir=None):
+    """只要 cube 的便捷口（场景级）；缺键/null/解析失败都回落默认蓝。"""
+    cube, _valid, _reason = _scene_skybox_from_data({'skybox': d}, base_dir)
+    return cube
+
+
+def _emit_skybox(cube, base_dir=None):
+    """Cubemap -> dict（None 时返回 None）.
+
+    Q6=A: paths 优先写**相对场景目录**的形式（_source_paths 原样回写；否则按
+    base_dir 做 relpath）。无可用来源（内存态 cubemap）返回 None。
+    """
     if cube is None:
         return None
     out = {"name": getattr(cube, 'name', None),
            "guid": getattr(cube, 'guid', None)}
     paths = getattr(cube, 'paths', None)
     if paths:
-        out["paths"] = list(paths)
+        src = getattr(cube, '_source_paths', None)
+        if src and len(src) == len(paths):
+            out["paths"] = [str(p) for p in src]
+        elif base_dir:
+            rel = []
+            for p in paths:
+                try:
+                    rel.append(os.path.relpath(p, base_dir))
+                except Exception:
+                    rel.append(p)
+            out["paths"] = rel
+        else:
+            out["paths"] = list(paths)
         return out
     solid = getattr(cube, '_solid_color', None)
     if solid:
-        out["solid_color"] = list(solid)
+        out["solid_color"] = [int(c) for c in solid]
         return out
     return None   # 无可用来源（内存态 cubemap 无法序列化）
 
 
-def _apply_skybox(d):
-    """dict -> Cubemap 实例（失败返回 None，容错）。"""
-    if not d:
-        return None
-    try:
-        from loom_cubemap import Cubemap
-        if d.get('paths'):
-            return Cubemap.from_files(
-                d['paths'], name=d.get('name'), guid=d.get('guid'))
-        if d.get('solid_color'):
-            return Cubemap.from_solid(
-                tuple(d['solid_color']), name=d.get('name'), guid=d.get('guid'))
-    except Exception:
-        pass
-    return None
+def _emit_camera(cam, base_dir=None):
+    """CameraState -> dict (M41: 朝向度制 + roll + 俯仰角限制; 2026-08-16 相机物体化 parent_id)
 
-
-def _emit_camera(cam):
-    """CameraState -> dict (M41: 朝向度制 + roll + 俯仰角限制; 2026-08-16 相机物体化 parent_id)"""
+    base_dir: 场景目录（Q6=A: 相机级 skybox 的六面图路径写成相对该目录的形式）。
+    """
     return {
         "id": cam.guid,
         "name": cam.name,
@@ -594,11 +723,11 @@ def _emit_camera(cam):
         "pitch_max": cam.pitch_max,       # 度 最高仰角 (含)
         "parent_id": cam.parent.guid if cam.parent is not None else None,
         # 2026-10-19 第1档序13 天空盒 (C3): 相机级 skybox 覆盖（None=用场景默认）
-        "skybox": _emit_skybox(getattr(cam, 'skybox', None)),
+        "skybox": _emit_skybox(getattr(cam, 'skybox', None), base_dir),
     }
 
 
-def _apply_cameras(engine, cam_dicts):
+def _apply_cameras(engine, cam_dicts, base_dir=None):
     """摄像机 dict 列表 -> engine.cameras (清空重建; 文件 id 覆盖 guid).
     返回 [(cam, parent_id)] 供 _link_camera_parents 在物体建链后连父 (相机引用物体)."""
     engine.cameras.clear()
@@ -618,7 +747,14 @@ def _apply_cameras(engine, cam_dicts):
         if d.get('id'):
             cam.guid = d['id']
         # 2026-10-19 天空盒: 相机级覆盖（旧文件无此键 -> None=用场景默认）
-        cam.skybox = _apply_skybox(d.get('skybox'))
+        # Q5=A: 解析失败出声并记下原因（skybox_get 可查询），不让它静默变"无天空盒"
+        _cube, _valid, _reason = skybox_from_dict(d.get('skybox'), base_dir)
+        cam.skybox = _cube
+        cam._skybox_valid = bool(_valid)
+        cam._skybox_error = _reason
+        if not _valid and d.get('skybox'):
+            print('[场景] 相机 %r 的天空盒解析失败: %s'
+                  % (getattr(cam, 'name', '?'), _reason))
         links.append((cam, d.get('parent_id')))
     return links
 
@@ -1109,9 +1245,10 @@ def _link_ui_targets(engine, id_map=None):
             pass
 
 
-def scene_to_dict(engine, camera=None):
+def scene_to_dict(engine, camera=None, base_dir=None):
     """引擎场景 -> v7 dict. camera: {'target','distance','yaw','pitch'} 或 None
 
+    base_dir: 场景文件所在目录（Q6=A: skybox 六面图路径按它写成相对形式）。
     保存前校验父链: 成环/不可达抛 SceneCycleError, 绝不静默丢对象."""
     _validate_model_graph(engine.models)
     objs = []
@@ -1150,17 +1287,22 @@ def scene_to_dict(engine, camera=None):
             "gravity": getattr(engine, 'gravity', -9.8),   # 2026-08-30: 场景重力加速度
             "materials": [_emit_material(m) for m in mats],
             "lights": [_emit_light(l) for l in engine.lights],
-            "cameras": [_emit_camera(c) for c in engine.cameras],
+            "cameras": [_emit_camera(c, base_dir) for c in engine.cameras],
             "active_camera": engine.active_camera,
             # 2026-10-19 第1档序13 天空盒 (C3): 场景级默认天空盒
-            "skybox": _emit_skybox(getattr(engine, '_skybox', None)),
+            # 场景级天空盒（Q3=A: **不是**"当前生效的那一个"——相机级覆盖只在渲染时生效，
+            # 落盘必须是场景级，否则播放期保存会把相机天空盒烘焙成场景默认）。
+            "skybox": _emit_skybox(
+                getattr(engine, '_scene_skybox',
+                        getattr(engine, '_skybox', None)), base_dir),
             "ui": _emit_ui(getattr(engine, 'ui', None)),   # 2026-10-18: Canvas UI
             "objects": objs}
 
 
-def scene_from_dict(engine, data, camera_out=None):
+def scene_from_dict(engine, data, camera_out=None, base_dir=None):
     """dict -> 引擎场景 (容错加载). 返回创建的模型列表.
-    camera_out: dict 则把相机字段写进去 (编辑器/运行时自行应用)."""
+    camera_out: dict 则把相机字段写进去 (编辑器/运行时自行应用).
+    base_dir: 场景文件目录（Q6=A: skybox 相对路径按它解析）。"""
     data = migrate(data)
     # 2026-11-07: 父链成环 -> 拒绝加载 (成环对象无根, DFS 会静默丢整棵).
     # 必须在清空/重建引擎状态之前校验, 保证失败时旧场景不被破坏.
@@ -1171,13 +1313,19 @@ def scene_from_dict(engine, data, camera_out=None):
     # 2026-08-30: 场景级重力加速度 (缺失=保留引擎当前值)
     engine.gravity = float(data.get('gravity', getattr(engine, 'gravity', -9.8)))
     # 2026-10-19 第1档序13 天空盒 (C3): 场景级默认天空盒（旧文件无此键 -> None）
-    try:
-        engine._skybox = _apply_skybox(data.get('skybox'))
-    except Exception:
-        engine._skybox = None
+    # 2026-11-09 beta5 Q1=A: 缺键/null -> 默认蓝天盒（吃豆人这类旧场景不再是黑底）；
+    # Q5=A: 有值但解析失败 -> 出声 + 回退默认蓝，并把 (valid, reason) 挂在引擎上供
+    # skybox_get / 编辑器查询（不得静默）。
+    _cube, _sb_valid, _sb_reason = _scene_skybox_from_data(data, base_dir)
+    # 场景级（落盘/查询用）与"生效"（渲染端只读 _skybox）在加载后是同一个对象；
+    # editor 会在 _load_scene 里按 active camera 再算一次生效值（Q3=A）。
+    engine._scene_skybox = _cube
+    engine._skybox = _cube
+    engine._skybox_valid = bool(_sb_valid)
+    engine._skybox_error = _sb_reason
     _apply_ui(engine, data.get('ui'))                # 2026-10-18: Canvas UI (清空重建)
     _apply_lights(engine, data.get('lights', []))   # M21: 场景光源 (清空重建)
-    cam_links = _apply_cameras(engine, data.get('cameras', []))  # 场景摄像机 (清空重建)
+    cam_links = _apply_cameras(engine, data.get('cameras', []), base_dir)  # 场景摄像机 (清空重建)
     engine.active_camera = data.get('active_camera')  # 玩家视角摄像机
     _apply_materials(engine, data.get('materials', []))  # M23: 材质库 (先于物体, 供引用)
     # 2026-11-07 D2=A: 文件显式登记的材质 (keep_ids) 与 add_model 自建材质区分

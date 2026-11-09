@@ -1320,6 +1320,48 @@ class GLEngine(ShadowMixin, FrameComponentMixin, PhysicsMixin, InputMixin, HudMi
         self._prep_sig = sig
         self._light_vps = self._prep_light_vps   # 渲染帧消费面不变
 
+    # ---------------- 2026-11-09 天空盒生效源 (人类裁决 Q3=A) ----------------
+    def effective_skybox(self):
+        """**生效**天空盒: 相机级 (active_camera.skybox) 优先, 否则场景级。
+
+        上层（03 号的命令层 / 场景运行期）把"当前相机的天空盒"写到 CameraState.skybox,
+        渲染端只读这里，不再各自实现一套优先级（GL/VK 共用同一判定）。
+        返回 Cubemap 实例或 None。
+        """
+        try:
+            cam = self.active_camera_object()
+        except Exception as e:
+            self._warn_sky_once('effective', '取激活相机失败 (%r)' % (e,))
+            cam = None
+        cube = getattr(cam, 'skybox', None) if cam is not None else None
+        if cube is not None:
+            return cube
+        return getattr(self, '_skybox', None)
+
+    def reset_sky_state(self):
+        """复位天空盒渲染状态 (审计 P-04): 哨兵/程序/VAO 全部失效, 下次绘制重编译。
+
+        旧实现 `_sky_prog = False` 是**永久**哨兵: 一旦某次编译失败, 之后换场景也永不重试,
+        天空盒静默消失且零日志。换场景/新建模型后调用本方法（渲染端也会在"生效天空盒
+        对象变了"时自动复位一次，见 loom_render._draw_skybox）。
+        """
+        self._sky_prog = None
+        self._sky_vao = None
+        self._sky_vbo = None
+        self._sky_prog_for = None
+        self._sky_fail_logged = False
+
+    def _warn_sky_once(self, tag, msg):
+        """天空盒相关告警每条只打一次（失败必须可见, 但不刷屏）。"""
+        seen = getattr(self, '_sky_warned', None)
+        if seen is None:
+            seen = self._sky_warned = set()
+        if tag in seen:
+            return
+        seen.add(tag)
+        print('[渲染] 天空盒 %s' % (msg,))
+
+
     def _clock_advance(self, render_dt, clk=None):
         """推进逻辑时钟的**唯一入口** (2026-11-09 E1 / beta5)。
 

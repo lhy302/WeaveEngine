@@ -884,6 +884,43 @@ class EditorApp(GLEngine):
         d.update(self._camera_proj_state())
         return d
 
+    # ---- 天空盒（beta5 Q1=A 默认蓝 / Q3=A 相机级优先 / Q5=A 失败可见） ----
+    def _scene_dir(self):
+        """当前场景文件目录（skybox 相对路径的基准；无对应文件时用 CWD）。"""
+        p = getattr(self, '_scene_path', None)
+        return os.path.dirname(os.path.abspath(p)) if p else os.getcwd()
+
+    def _effective_skybox(self):
+        """Q3=A: 生效天空盒 —— **委托** GLEngine.effective_skybox()（GL/VK 同一判定）。
+
+        2026-11-09 收尾: 优先级判定已上收到引擎（相机级优先 → 场景级），本方法只做兼容别名，
+        避免编辑器/渲染端各写一套（那正是 Q3 要消灭的分叉）。
+        """
+        fn = getattr(self, 'effective_skybox', None)
+        if callable(fn):
+            return fn()
+        cam = self.active_camera_object()      # 极旧桩兜底
+        cb = getattr(cam, 'skybox', None) if cam is not None else None
+        return cb if cb is not None else getattr(self, '_scene_skybox', None)
+
+    def _refresh_effective_skybox(self):
+        """生效天空盒换了对象 -> 复位渲染端 sky 状态（02 号 reset_sky_state, 幂等）。
+
+        为什么需要: 旧实现 `_sky_prog = False` 是永久哨兵，一次编译失败后换场景也永不重试
+        （天空盒静默消失）。这里与渲染端的"对象变了自动复位"形成双保险。
+        返回当前生效的 Cubemap（或 None）。
+        """
+        eff = self._effective_skybox()
+        if eff is not getattr(self, '_sky_eff_last', None):
+            self._sky_eff_last = eff
+            rs = getattr(self, 'reset_sky_state', None)
+            if callable(rs):
+                rs()
+            else:                              # 极旧桩兜底
+                for attr in ('_sky_prog', '_sky_vao', '_sky_vbo'):
+                    setattr(self, attr, None)
+        return eff
+
     # ---- 相机投影三件套（D7=A: 场景相机属性 -> 脏判定 / 撤销 / 播放前后恒等） ----
     def _camera_proj_state(self):
         """当前投影状态 {'ortho','ortho_size','fov'(度)}（值已归一）。"""
@@ -960,7 +997,7 @@ class EditorApp(GLEngine):
             if isinstance(v, (list, tuple)):
                 return [_norm(x) for x in v]
             return v
-        data = sceneio.scene_to_dict(self, camera=None)
+        data = sceneio.scene_to_dict(self, camera=None, base_dir=self._scene_dir())
         # 2026-11-08 批2 (D7=A): 轨道相机**视角**(target/distance/yaw/pitch) 仍属
         # 编辑器视图状态, 不计入场景内容; 但投影三件套是**场景相机属性** -> 必须进
         # 脏判定, 否则 EAI camera_proj 改完直接关窗口 = 静默丢失（P-03-05 同源）。
@@ -1069,7 +1106,8 @@ class EditorApp(GLEngine):
         if base:
             self.scene_name = base        # 名称框同步为文件名 (去扩展名)
         save_last_dir(STATE_FILE, path)   # 记住这次保存的目录
-        data = sceneio.scene_to_dict(self, camera=self._camera_dict())
+        data = sceneio.scene_to_dict(self, camera=self._camera_dict(),
+                                    base_dir=self._scene_dir())
         try:
             sceneio.save_json_atomic(path, data)
             print("[编辑器] 场景已保存到", os.path.abspath(path))
@@ -1133,7 +1171,9 @@ class EditorApp(GLEngine):
             self.remove_model(m)
         self.undo.clear()
         cam_out = {}
-        sceneio.scene_from_dict(self, data, camera_out=cam_out)
+        # Q6=A: 天空盒六面图相对路径按**场景目录**解析（不再相对 CWD/引擎目录）
+        sceneio.scene_from_dict(self, data, camera_out=cam_out,
+                                base_dir=os.path.dirname(os.path.abspath(path)))
         if cam_out:
             self._apply_camera(cam_out)          # 含投影三件套 (D7=A)
         else:
@@ -1146,6 +1186,12 @@ class EditorApp(GLEngine):
             self._apply_camera_proj({'ortho': False,
                                      'ortho_size': sceneio.ORTHO_SIZE_DEFAULT,
                                      'fov': sceneio.FOV_DEFAULT_DEG})
+        # Q3=A: scene_from_dict 已同时写 engine._scene_skybox / engine._skybox（都是场景级）；
+        # 这里只做"换场景 -> 复位渲染端 sky 状态"（02 号 reset_sky_state, 幂等）：
+        # 覆盖"上一次编译失败(_sky_prog=False 永久哨兵) 后换场景仍不出图"的病灶。
+        self._scene_skybox = getattr(self, '_skybox', self._scene_skybox)
+        self._sky_eff_last = None
+        self._refresh_effective_skybox()
         base = os.path.splitext(os.path.basename(path))[0]
         if base:
             self.scene_name = base
@@ -1177,8 +1223,12 @@ class EditorApp(GLEngine):
                 pass
         if getattr(self, 'materials', None):
             self.materials.clear()
-        # 2026-10-19 Fix 4: 天空盒不随场景继承（默认无天空盒 = 清屏深色底）
-        self._skybox = None
+        # 2026-11-09 beta5 Q1=A: 新建场景 = **默认纯色蓝天**（白盒契约;
+        # 颜色单点在 sceneio.DEFAULT_SKYBOX_COLOR, 这里不写字面量）
+        self._scene_skybox = sceneio.default_skybox()
+        self._skybox = self._scene_skybox   # 场景级（engine 侧字段保持"场景默认"语义）
+        self._sky_eff_last = None           # 强制下一次 refresh 走"变更"分支
+        self._refresh_effective_skybox()    # -> reset_sky_state()（幂等）
         self.undo.clear()
         self.selected_index = 0
         self.selected_light_index = -1
@@ -1845,8 +1895,11 @@ class EditorApp(GLEngine):
         传 None = 取消激活 (active_camera=None, 播放时用编辑器轨道视角/脚本视角)."""
         if cam is None:
             self.active_camera = None
+            self._refresh_effective_skybox()
             return
         self.active_camera = cam.guid
+        # Q3=A: 换了激活相机 -> 相机级天空盒优先级随之变化
+        self._refresh_effective_skybox()
 
     # ---- 摄像机"用此相机预览" (M41: 编辑器视口切到某摄像机视角) ----
     def toggle_camera_preview(self, cam):
@@ -1981,6 +2034,8 @@ class EditorApp(GLEngine):
             cam = self.active_camera_object()
             if cam is not None:
                 self.apply_camera(cam)
+            # Q3=A: 播放态天空盒 = active camera 覆盖 ? 场景级（相机优先）
+            self._refresh_effective_skybox()
         else:
             # —— 退出播放: 还原编辑态场景 ——
             self.is_playing = False
@@ -2018,6 +2073,8 @@ class EditorApp(GLEngine):
                     self.cameras.append(c)
                 apply_camera_snapshot(c, self._play_camera_snap[id(c)], self)
             self.active_camera = self._play_active_camera
+            # Q3=A: 退出播放后按恢复的 active_camera 重算"生效的那一个"（播放前后恒等）
+            self._refresh_effective_skybox()
             if self._play_edit_cam is not None:
                 self.camera_target, self.camera_distance, self.camera_yaw, \
                     self.camera_pitch, self.camera_roll, self.orbit_mode = self._play_edit_cam
@@ -2277,7 +2334,9 @@ class EditorApp(GLEngine):
         self._prof_add('mt_mp_draws', _t)
         # 2026-10-20 Bug B 修复：编辑器主 pass 之前没调 _draw_skybox（只有 PlayerApp
         # 的 GLEngine.render 调了），所以编辑器里设了天空盒也永远看不到。
-        if getattr(self, '_skybox', None) is not None:
+        # 2026-11-09 收尾: 门判**生效天空盒**（Q3=A 相机级优先），否则编辑器里
+        # 相机级天空盒永远画不出来（只有播放器画）。判定单一来源 = engine.effective_skybox()。
+        if self.effective_skybox() is not None:
             try:
                 self._draw_skybox()
             except Exception as _e:

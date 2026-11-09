@@ -172,6 +172,10 @@ class CameraState:
         # 2026-10-19 第1档序13 天空盒 (C3 决策): 相机级天空盒覆盖。
         # 语义: 非 None 时优先于场景级 engine._skybox；None 时用场景默认。
         # 类型: loom_cubemap.Cubemap 实例或 None。
+        # 2026-11-09 beta5 Q3=A 白盒契约（人类裁决）: **渲染端只读 engine._skybox**；
+        # "active camera 的 skybox 优先，否则场景级"这条解析由场景/编辑器侧完成并
+        # 赋给 engine._skybox（editor._refresh_effective_skybox）。渲染器不得再各自
+        # 判断相机级，避免 GL/VK/编辑器三处语义分叉。
         self.skybox = skybox
 
     @property

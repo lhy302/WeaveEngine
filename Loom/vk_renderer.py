@@ -29,6 +29,8 @@ from collections import OrderedDict
 
 import numpy as np
 
+from loom_shaders import CLEAR_COLOR_RGBA   # 2026-11-09 Q2=A: 清屏底色唯一来源
+
 import wgpu
 
 from matlib import (mat4_view_yaw_pitch, mat4_view_forward, mat4_perspective,
@@ -996,7 +998,7 @@ class VkRenderer:
         self._sky_cube_key = key
         return True
 
-    def _draw_sky(self, ctx, rp, vp, camera_pos, cube, w, h):
+    def _draw_sky(self, ctx, rp, vp, camera_pos, cube, w, h, tint=None):
         if not self._ensure_sky(cube):
             return False
         try:
@@ -1007,7 +1009,10 @@ class VkRenderer:
         buf[0:16] = inv.reshape(16)
         buf[16:19] = (camera_pos[0], camera_pos[1], camera_pos[2])
         buf[19] = 1.0
-        tint = getattr(self, 'skybox_tint', (1.0, 1.0, 1.0))
+        # 2026-11-09 P-06: tint 的唯一来源是引擎的 _skybox_tint（旧实现读 renderer 上的
+        # skybox_tint，而 GL 写的是 engine._skybox_tint -> VK 侧 tint 永远不生效）。
+        if tint is None:
+            tint = getattr(self, 'skybox_tint', (1.0, 1.0, 1.0))
         buf[20:23] = tint
         buf[24] = float(w)
         buf[25] = float(h)
@@ -1957,19 +1962,35 @@ class VkRenderer:
         enc = d.create_command_encoder()
         rp = enc.begin_render_pass(color_attachments=[{
             'view': view, 'load_op': wgpu.LoadOp.clear,
-            'clear_value': (0.10, 0.12, 0.16, 1.0), 'store_op': wgpu.StoreOp.store}],
+            'clear_value': CLEAR_COLOR_RGBA, 'store_op': wgpu.StoreOp.store}],
             depth_stencil_attachment={
                 'view': self._depth[1], 'depth_clear_value': 1.0,
                 'depth_load_op': wgpu.LoadOp.clear, 'depth_store_op': wgpu.StoreOp.store})
         # 2026-11-06 天空盒: 先画背景 (不写深度), 再画几何 -> 与 GL 的
         # "几何后画天空但只在 depth==1 处通过" 视觉等价 (无 overdraw 顾虑:
         # 天空只画一次, 且几何随后完整覆盖)。sky=None 时保持原清屏色。
+        # 2026-11-09 (Q3=A / P-06): 生效天空盒与 tint 都从引擎取（与 GL 同一判定/同一来源）;
+        # 上层显式给了 sky 就用它（相机级已由上层解析）。
+        _tint = getattr(engine, '_skybox_tint', None)
+        if engine is not None:
+            # 引擎是"生效天空盒"的权威（相机级优先, 见 GLEngine/SceneDriver.effective_skybox）;
+            # 上层传入的 sky 只在引擎给不出时兜底 —— 否则 VK 永远用场景级、丢掉相机级。
+            eff = getattr(engine, 'effective_skybox', None)
+            if callable(eff):
+                try:
+                    _c = eff()
+                    if _c is not None:
+                        sky = _c
+                except Exception as e:
+                    print('[vk] 取生效天空盒失败 (改用上层传入值):', repr(e))
         if sky is not None:
             try:
-                if self._draw_sky(ctx, rp, vp, camera_pos, sky, w, h):
+                if self._draw_sky(ctx, rp, vp, camera_pos, sky, w, h, tint=_tint):
                     pass
             except Exception as e:
-                print("[vk] 天空盒绘制失败 (跳过):", repr(e))
+                if not getattr(self, '_sky_err_logged', False):
+                    self._sky_err_logged = True
+                    print("[vk] 天空盒绘制失败 (本局只报一次, 本帧跳过):", repr(e))
         rp.set_pipeline(self._pipeline)
         rp.set_bind_group(0, self._scene_group, [], 0, 1)
         for k, idxs in buckets.items():

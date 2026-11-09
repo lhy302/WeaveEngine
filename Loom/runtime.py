@@ -9,6 +9,7 @@ Loom.py / build_entry.py 的 --run <scene.json> 都从这里启动。
 (游戏包.lsc 解包产物, 场景不出明文) + title (玩家窗口标题 = 游戏名).
 """
 import json
+import os
 
 # 2026-10-18 A2: import pygame 已删（GLFW 窗口剥离；set_caption 改用 glfw）
 from engine import GLEngine, gc_play_enter, gc_play_exit, engine_gc_frozen
@@ -130,7 +131,11 @@ class PlayerApp(GLEngine):
             data = sceneio.load_scene_data(scene_path) if scene_path else None
         if not isinstance(data, dict):
             raise ValueError("无法加载场景: %s" % scene_path)
-        sceneio.scene_from_dict(self, data, camera_out=cam_out)
+        # 2026-11-09 (Q6=A): 场景目录作为 base_dir —— skybox 六面图的**相对路径**按它解析
+        # （不传的话播放器按 CWD 解析，换目录启动就找不到图 -> 只能回退默认蓝）。
+        _base = (os.path.dirname(os.path.abspath(scene_path))
+                 if scene_path else None)
+        sceneio.scene_from_dict(self, data, camera_out=cam_out, base_dir=_base)
         if cam_out:
             self.camera_target = cam_out['target']
             # 2026-11-06 R-03: 与 Vk 后端同语义 —— 场景距离在入口钳制

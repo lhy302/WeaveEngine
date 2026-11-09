@@ -1,0 +1,166 @@
+# -*- coding: utf-8 -*-
+# test_skybox_engine_parity.py — 天空盒：GL/VK 结论一致 + base_dir 相对路径 (2026-11-09, 02 号)
+# 覆盖人类裁决 Q1=A(缺键→默认蓝) / Q3=A(相机级优先) / Q6=A(六面图相对路径按场景目录解析)。
+import os
+import sys
+import tempfile
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+sys.path.insert(0, ROOT)
+os.environ.setdefault('LOOM_NO_PARALLEL', '1')
+
+_fails = []
+
+
+def check(name, cond, detail=''):
+    print(('PASS ' if cond else 'FAIL ') + name + ('  ' + str(detail) if detail else ''))
+    if not cond:
+        _fails.append(name)
+
+
+def _scene(sky=None, cam_sky=None, with_cams=False):
+    d = {'version': 10,
+         'camera': {'target': [0, 1, 0], 'distance': 8.0, 'yaw': 0.5, 'pitch': -0.3},
+         'gravity': -9.8, 'objects': [], 'lights': [], 'materials': [],
+         'cameras': [], 'active_camera': None}
+    if sky is not None:
+        d['skybox'] = sky
+    if with_cams:
+        cam = {'id': 'cam1', 'name': 'c1', 'position': [0, 1, 0], 'yaw': 0.0,
+               'pitch': 0.0, 'roll': 0.0, 'fov': 60.0, 'fov_locked': True}
+        if cam_sky is not None:
+            cam['skybox'] = cam_sky
+        d['cameras'] = [cam]
+        d['active_camera'] = 'cam1'
+    return d
+
+
+def _gl_engine(data):
+    import moderngl
+    import runtime
+    ctx = moderngl.create_standalone_context(require=330)
+    fbo = ctx.framebuffer(color_attachments=[ctx.renderbuffer((64, 64), components=4)],
+                          depth_attachment=ctx.depth_renderbuffer((64, 64)))
+    eng = runtime.PlayerApp(width=64, height=64, ctx=ctx, scene_data=data)
+    eng._external_fb = fbo
+    return eng
+
+
+def _vk_driver(data, base_dir=None):
+    import scene_driver
+    d = scene_driver.SceneDriver()
+    d.load_from_data(data, base_dir=base_dir)
+    return d
+
+
+def t_default_blue():
+    """Q1=A: 场景没有 skybox 键 -> GL/VK 都拿到同一个默认蓝。"""
+    print('=== A. 缺 skybox 键 -> 默认蓝 (GL vs VK) ===')
+    import sceneio
+    want = tuple(sceneio.DEFAULT_SKYBOX_COLOR)
+    g = _gl_engine(_scene())
+    v = _vk_driver(_scene())
+    gs = getattr(g, '_skybox', None)
+    vs = getattr(v, 'skybox', None)
+    check('GL 有默认蓝天空盒', gs is not None and tuple(gs._solid_color) == want,
+          None if gs is None else gs._solid_color)
+    check('VK 有默认蓝天空盒', vs is not None and tuple(vs._solid_color) == want,
+          None if vs is None else vs._solid_color)
+    check('GL/VK 默认色逐位相同', gs is not None and vs is not None
+          and tuple(gs._solid_color) == tuple(vs._solid_color))
+    check('GL/VK valid 标记同为 True',
+          bool(getattr(g, '_skybox_valid', False)) and bool(getattr(v, '_skybox_valid', False)))
+    check('GL/VK effective_skybox 结论一致 (都=场景级)',
+          getattr(g, 'effective_skybox', lambda: None)() is gs
+          and getattr(v, 'effective_skybox', lambda: None)() is vs)
+
+
+def t_camera_priority():
+    """Q3=A: 相机级 skybox 优先于场景级，两端结论一致。"""
+    print('=== B. 相机级 skybox 优先 (GL vs VK) ===')
+    cam_sky = {'solid_color': [10, 20, 30, 255], 'name': 'camsky'}
+    scn_sky = {'solid_color': [200, 100, 50, 255], 'name': 'scnsky'}
+    data = _scene(sky=scn_sky, cam_sky=cam_sky, with_cams=True)
+    g = _gl_engine(data)
+    v = _vk_driver(data)
+    gc = getattr(g.cameras[0], 'skybox', None) if getattr(g, 'cameras', None) else None
+    vc = getattr(v.cameras[0], 'skybox', None) if getattr(v, 'cameras', None) else None
+    check('GL 相机实体拿到相机级 skybox',
+          gc is not None and tuple(gc._solid_color) == (10, 20, 30, 255),
+          None if gc is None else gc._solid_color)
+    check('VK 相机实体拿到相机级 skybox',
+          vc is not None and tuple(vc._solid_color) == (10, 20, 30, 255),
+          None if vc is None else vc._solid_color)
+    ge = g.effective_skybox()
+    ve = v.effective_skybox()
+    check('两端 effective_skybox 都取相机级',
+          ge is gc and ve is vc,
+          (None if ge is None else ge.name, None if ve is None else ve.name))
+
+
+def t_relative_paths_from_other_cwd():
+    """Q6=A: 场景在 A 目录、从 B 目录启动 -> 六面图相对路径仍能解析。"""
+    print('=== C. 相对六面图路径按场景目录解析 (从别处启动) ===')
+    import pygame
+    import sceneio
+    pygame.init()
+    root = tempfile.mkdtemp(prefix='loom_sky_')
+    adir = os.path.join(root, 'A')
+    bdir = os.path.join(root, 'B')
+    img_dir = os.path.join(adir, 'sky')
+    os.makedirs(img_dir, exist_ok=True)
+    os.makedirs(bdir, exist_ok=True)
+    names = ['px.png', 'nx.png', 'py.png', 'ny.png', 'pz.png', 'nz.png']
+    for i, n in enumerate(names):
+        s = pygame.Surface((8, 8))
+        s.fill((40 + i * 10, 80, 120))
+        pygame.image.save(s, os.path.join(img_dir, n))
+    scene = _scene(sky={'paths': ['sky/' + n for n in names], 'name': 'six'})
+    scene_path = os.path.join(adir, 'scene.json')
+    import json
+    with open(scene_path, 'w', encoding='utf-8') as f:
+        json.dump(scene, f)
+    old_cwd = os.getcwd()
+    try:
+        os.chdir(bdir)                       # 从 B 目录启动（CWD 无 sky/ 目录）
+        data = sceneio.load_scene_data(scene_path)
+        base = os.path.dirname(os.path.abspath(scene_path))
+        cube, valid, reason = sceneio.skybox_from_dict(data.get('skybox'), base)
+        check('sceneio: 相对路径按 base_dir 解析成功', valid, reason)
+        v = _vk_driver(data, base_dir=base)
+        check('VK driver: 相对路径解析成功 (valid=True)',
+              bool(getattr(v, '_skybox_valid', False)), getattr(v, '_skybox_error', None))
+        g = _gl_engine_with_base(scene_path, data)
+        check('GL 播放器: 相对路径解析成功 (valid=True)',
+              bool(getattr(g, '_skybox_valid', False)), getattr(g, '_skybox_error', None))
+    finally:
+        os.chdir(old_cwd)
+
+
+def _gl_engine_with_base(scene_path, data):
+    """按 PlayerApp 的真实入口（scene_path）加载，验证它把场景目录作为 base_dir。"""
+    import moderngl
+    import runtime
+    ctx = moderngl.create_standalone_context(require=330)
+    fbo = ctx.framebuffer(color_attachments=[ctx.renderbuffer((64, 64), components=4)],
+                          depth_attachment=ctx.depth_renderbuffer((64, 64)))
+    eng = runtime.PlayerApp(scene_path, 64, 64, ctx=ctx)
+    eng._external_fb = fbo
+    return eng
+
+
+def main():
+    t_default_blue()
+    t_camera_priority()
+    t_relative_paths_from_other_cwd()
+    print('=' * 56)
+    if _fails:
+        print('有 FAIL:', _fails)
+        return 1
+    print('总结果: ALL PASS')
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

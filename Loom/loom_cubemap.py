@@ -78,38 +78,52 @@ class Cubemap:
 
     @classmethod
     def from_solid(cls, color, size=4, name=None, guid=None, mipmaps=True):
-        """单色立方体贴图（占位/纯色环境）。color=(r,g,b,a) 0-255 或 '#RRGGBB'。
+        """单色立方体贴图（占位/纯色环境）。
 
-        2026-10-20 Bug A 修复：字符串路径 _hex_rgba 返回 0-1 浮点，旧代码直接
-        int(0.227)=0 导致 #3a7bd5 变全黑 [0,0,0,1]。修复：
-          - 字符串路径：显式乘 255 再取整
-          - tuple 路径：若所有通道都 ≤ 1.0 视为 0-1 浮点（含 alpha=1.0），也乘 255
-        这样 hex / [0-1 浮点] / [0-255 整数] 三种输入都能得到正确颜色。
+        口径（2026-11-09 人类裁决 Q4=A / P-07）: **只认 0-255 通道值** 或 '#RRGGBB'。
+          · 不再做 "全通道 <= 1.0 就自动乘 255" 的隐式放大（与命令层 int() 截断口径不一致，
+            且会把 0.5 这类非法输入静默变成合法颜色 128）；
+          · 越界 / 非数值 / 非法颜色串一律 ValueError（命令层由 03 号负责给出可读拒绝，
+            这里是最后一道防御）；
+          · alpha 缺省 255。
         """
-        def _to_255(v):
-            v = float(v)
-            if 0.0 <= v <= 1.0:
-                return int(round(v * 255))
-            return int(round(v))
-
         if isinstance(color, str):
+            # loom_color._hex_rgba 对非法串会静默回退灰色（假成功）—— 这里先严格校验形态。
+            s = color.strip()
+            ok_form = (len(s) in (4, 7, 9) and s[:1] == '#'
+                       and all(ch in '0123456789abcdefABCDEF' for ch in s[1:]))
+            if not ok_form:
+                raise ValueError("from_solid 颜色串必须是 #RGB / #RRGGBB / #RRGGBBAA: %r"
+                                 % (color,))
             from loom_color import _hex_rgba
-            rf = _hex_rgba(color)  # 0-1 floats
-            rgba = (int(round(rf[0] * 255)), int(round(rf[1] * 255)),
-                    int(round(rf[2] * 255)), int(round(rf[3] * 255)))
+            rf = _hex_rgba(s[:7])
+            rgba = [int(round(rf[0] * 255)), int(round(rf[1] * 255)),
+                    int(round(rf[2] * 255)), 255]
+            if len(s) == 4:      # #RGB 简写: 每位重复一次 (f -> ff)
+                rgba = [int(s[1] * 2, 16), int(s[2] * 2, 16),
+                        int(s[3] * 2, 16), 255]
+            elif len(s) == 9:    # #RRGGBBAA
+                rgba[3] = int(s[7:9], 16)
         else:
+            if color is None or isinstance(color, (int, float, bool)):
+                raise ValueError("from_solid 需要 (r,g,b[,a]) 0-255 或颜色串，收到 %r"
+                                 % (color,))
             rgba = list(color)
-            # 若全在 0-1 范围内（含 1.0 alpha），视为浮点输入放大到 0-255
-            try:
-                vals = [float(v) for v in rgba[:4]]
-                if len(vals) >= 3 and all(0.0 <= v <= 1.0 for v in vals):
-                    rgba = [_to_255(v) for v in vals]
-                    if len(rgba) < 4:
-                        rgba.append(255)
-            except Exception:
-                pass
+            if len(rgba) < 3:
+                raise ValueError("from_solid 颜色至少 3 个通道，收到 %r" % (color,))
             if len(rgba) < 4:
-                rgba = list(rgba) + [255]
+                rgba = rgba + [255]
+            rgba = rgba[:4]
+            out = []
+            for i, v in enumerate(rgba):
+                if isinstance(v, bool) or not isinstance(v, (int, float)):
+                    raise ValueError("from_solid 通道 %d 不是数值: %r" % (i, v))
+                fv = float(v)
+                if not (0.0 <= fv <= 255.0):
+                    raise ValueError("from_solid 通道 %d 越界 (%r)：本 API 只认 0-255"
+                                     % (i, v))
+                out.append(int(round(fv)))
+            rgba = out
 
         arr = np.zeros((size, size, 4), dtype=np.uint8)
         arr[:, :, 0] = int(rgba[0]); arr[:, :, 1] = int(rgba[1])

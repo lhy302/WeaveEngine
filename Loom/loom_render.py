@@ -28,6 +28,8 @@ import os
 import time
 
 import numpy as np
+
+from loom_shaders import CLEAR_COLOR_RGBA   # 2026-11-09 Q2=A: 清屏底色唯一来源
 # 2026-10-18 A2: import pygame 已删（GLFW 窗口剥离；本文件不再引用 pygame 常量）
 import moderngl
 
@@ -36,22 +38,51 @@ from loom_game_object import GameObject
 
 
 class RenderMixin:
+    def _sky_warn(self, tag, msg):
+        """天空盒相关告警每条只打一次（失败必须可见, 但不刷屏）。"""
+        ow = getattr(self, '_warn_sky_once', None)
+        if callable(ow):
+            try:
+                ow(tag, msg)
+                return
+            except Exception:
+                pass
+        seen = getattr(self, '_sky_warned', None)
+        if seen is None:
+            seen = self._sky_warned = set()
+        if tag in seen:
+            return
+        seen.add(tag)
+        print('[渲染] 天空盒 %s' % (msg,))
+
     def _draw_skybox(self):
         """2026-10-19 第1档序13 天空盒（B1 先画几何后画天空, depth==1.0 才画）。
 
         用户拍板 A1+B1: 全屏 quad + fragment 反投影采样 cubemap。
         绘制时机: _draw_main_buckets 之后、_draw_hud 之前。
-        深度机制:
-          - 清屏时深度清成 1.0（_clear_main_fbo 已调用 clear）
-          - 几何体绘制时写 depth <1.0，覆盖的像素深度被更新
-          - 天空盒 quad 在 z=1.0（远平面），depth_func='<=' 允许等值通过
-          - 几何覆盖的像素 depth<1.0 无法通过（1.0 > 实际深度）-> 跳过（无 overdraw）
-        状态管理: 临时关 CULL_FACE（quad 从相机看是背面绕序）+ 不写 depth mask（防污染）。
+        深度机制: 清屏时深度清成 1.0；几何写 depth<1.0；天空 quad 在 z=1.0 且
+        depth_func '<=' 允许等值通过 —— 被几何覆盖的像素被跳过（无 overdraw）。
+        状态管理: 临时关 CULL_FACE + 不写 depth mask（防污染）。
+
+        2026-11-09（Q3=A / P-04 / P-05）:
+          · 生效天空盒 = 相机级优先 → 场景级（交给 engine.effective_skybox 统一判定, GL/VK 同源）;
+          · 编译失败不再是"永久哨兵": 按生效天空盒对象隔离, 换了对象/场景会重试一次;
+          · 任何失败都"告警一次 + 本帧跳过", 绝不把异常抛给渲染循环（旧实现播放器会终止）。
         """
-        if self._skybox is None:
+        try:
+            eff = getattr(self, 'effective_skybox', None)
+            cube = eff() if callable(eff) else getattr(self, '_skybox', None)
+        except Exception as e:
+            self._sky_warn('effective', '取生效天空盒失败 (%r)' % (e,))
+            cube = getattr(self, '_skybox', None)
+        if cube is None:
             return
-        # 2026-10-19 修复：编译失败用 False 哨兵（不是 None），避免每帧重试刷屏；
-        # 同时不 nuke _skybox（保留数据，用户改 shader 后可 _sky_prog=None 恢复）。
+        # P-04: 哨兵与"生效天空盒对象"绑定 —— 换天空盒/场景即复位并重试一次
+        if getattr(self, '_sky_prog_for', None) is not cube:
+            self._sky_prog_for = cube
+            self._sky_prog = None
+            self._sky_vao = None
+            self._sky_vbo = None
         if self._sky_prog is False:
             return
         if self._sky_prog is None:
@@ -59,62 +90,62 @@ class RenderMixin:
             try:
                 self._sky_prog = self.ctx.program(
                     vertex_shader=_SKY_VERT, fragment_shader=_SKY_FRAG)
-                # 2026-10-20 Bug C 根因修复（天空盒一直黑的第二层问题）：
-                # 之前以为是 VAO 绑了未声明的 in_uv，改成 '2f 2x' 后创建不报错，
-                # 但实测渲染是黑的 —— moderngl 的 '2f 2x' 不是 padding 语义！
-                # 它把格式解析为"2 个属性"，第二个 2x 无对应属性名导致整个
-                # VAO 数据布局错乱，顶点坐标读到垃圾数据 -> quad 不覆盖屏幕。
-                # 正确做法：给天空盒独立建一个只含 position (2f/顶点) 的 VBO。
-                import numpy as _np
-                sky_quad = _np.array([
+                # 2026-10-20 Bug C: 天空盒独立 2f VBO（不要给 VAO 传 '2f 2x'）
+                sky_quad = np.array([
                     0.0, 0.0,   1.0, 0.0,   1.0, 1.0,
                     0.0, 0.0,   1.0, 1.0,   0.0, 1.0,
                 ], dtype='f4')
                 self._sky_vbo = self.ctx.buffer(sky_quad.tobytes())
                 self._sky_vao = self.ctx.vertex_array(
                     self._sky_prog, [(self._sky_vbo, '2f', 'in_pos')])
-                # sampler 单元固定 0（program 建后设一次即可）
                 try:
                     self._sky_prog['u_skybox'].value = 0
-                except Exception:
-                    pass
+                except Exception as e:
+                    self._sky_warn('sampler', '设定 sampler 单元失败 (%r)' % (e,))
             except Exception as e:
-                print("[渲染] 天空盒 shader 编译失败: %r" % (e,))
-                self._sky_prog = False   # 哨兵：永久跳过，但保留 _skybox 数据
+                self._sky_warn('program', 'shader 编译失败 (%r) -> 本次跳过; 换天空盒/场景会重试'
+                                % (e,))
+                self._sky_prog = False
                 return
-        # 反投影矩阵: inv(VP) —— numpy 行主序 tobytes 后 GLSL 按列解读 = M^T
-        # 配合 GLSL 的 u_inv_view_proj * clip（列向量乘）恰好等价 numpy 行向量 v @ M
         try:
             inv_vp = np.linalg.inv(self._vp)
-        except Exception:
-            return
-        self._sky_prog['u_inv_view_proj'].write(
-            np.ascontiguousarray(inv_vp.astype('f4')).tobytes())
-        cam_pos = (self.camera.x, self.camera.y, self.camera.z)
-        self._sky_prog['u_camera_pos'].value = cam_pos
-        self._sky_prog['u_skybox_tint'].value = self._skybox_tint
-        # 绑定 cubemap 到单元 0
-        try:
-            self._skybox.ensure_gl(self.ctx)
-            self._skybox.use(0)
         except Exception as e:
-            print("[渲染] 天空盒 cubemap 绑定失败: %r" % (e,))
+            self._sky_warn('inv', 'inv(VP) 失败 (%r), 本帧跳过' % (e,))
             return
-        # 保存状态并临时修改
+        try:
+            self._sky_prog['u_inv_view_proj'].write(
+                np.ascontiguousarray(inv_vp.astype('f4')).tobytes())
+            self._sky_prog['u_camera_pos'].value = (self.camera.x, self.camera.y,
+                                                   self.camera.z)
+            self._sky_prog['u_skybox_tint'].value = getattr(
+                self, '_skybox_tint', (1.0, 1.0, 1.0))
+            cube.ensure_gl(self.ctx)
+            cube.use(0)
+        except Exception as e:
+            self._sky_warn('bind', 'uniform/纹理绑定失败 (%r), 本帧跳过' % (e,))
+            return
+        # 旧状态读取必须容错: 探针/桩 Context 可能没有 depth_mask（旧实现就是拿默认值）
         try:
             old_depth_mask = self.ctx.depth_mask
             old_depth_func = self.ctx.depth_func
-        except Exception:
+        except Exception as e:
+            self._sky_warn('state', '读 depth 状态失败 (%r) -> 用默认值' % (e,))
             old_depth_mask, old_depth_func = True, '<'
         try:
             self.ctx.depth_mask = False
             self.ctx.depth_func = '<='
             self.ctx.disable(moderngl.CULL_FACE)
             self._sky_vao.render(moderngl.TRIANGLES, vertices=6)
+        except Exception as e:
+            self._sky_warn('draw', '绘制失败 (%r), 本帧跳过' % (e,))
         finally:
-            self.ctx.depth_mask = old_depth_mask
-            self.ctx.depth_func = old_depth_func
-            self.ctx.enable(moderngl.CULL_FACE)
+            try:
+                self.ctx.depth_mask = old_depth_mask
+                self.ctx.depth_func = old_depth_func
+                self.ctx.enable(moderngl.CULL_FACE)
+            except Exception as e:
+                self._sky_warn('restore', '恢复渲染状态失败 (%r)' % (e,))
+
 
     # ================ World Space UI（2026-10-19 第1档序3阶段4）================
     def _draw_world_canvases(self):
@@ -521,6 +552,34 @@ class RenderMixin:
                 except Exception:
                     env[key] = None
             self._bucket_env = env
+            # 2026-11-09 (01 号 Q8=A): 全局桶计划 —— 一次 gather 服务全部桶。
+            # 旧实现每桶 1 次 np.take(+ctypes pack 6 次 ascontiguousarray/1 次
+            # get_fn), 38 个桶实测 4.3~4.9 ms/帧、全在渲染主线程持 GIL。
+            # 现在按分组 stamp 预生成: order=全部桶 idx 拼接, offs=每桶偏移,
+            # sat_all/col_all=逐实例材质列 (与 order 对齐)。每帧只做一次
+            # fw32[order] 全局 gather, 桶内退化为小切片拷贝 (逐位同一字节)。
+            _order = []
+            _sat = []
+            _col = []
+            for key, idxs in self._render_buckets:
+                _order.extend(idxs)
+                mc = mats.get(key)
+                kk = len(idxs)
+                if mc is not None and mc[0].shape[0] == kk:
+                    _sat.append(mc[0])
+                    _col.append(mc[1])
+                else:
+                    _sat.append(np.zeros(kk, dtype='f4'))
+                    _col.append(np.zeros((kk, 4), dtype='f4'))
+            offs = [0]
+            for _s in _sat:
+                offs.append(offs[-1] + len(_s))
+            self._bucket_order = np.asarray(_order, dtype=np.intp)
+            self._bucket_offs = offs
+            self._bucket_sat_all = (np.concatenate(_sat) if _sat
+                                    else np.zeros(0, dtype='f4'))
+            self._bucket_col_all = (np.concatenate(_col) if _col
+                                    else np.zeros((0, 4), dtype='f4'))
         mats = getattr(self, '_bucket_mat_cache', None) or {}
         for key, idxs in self._render_buckets:
             ent = self._bucket_geo.get(key)
@@ -777,7 +836,8 @@ class RenderMixin:
 
         _t = self._prof_t0()
         self._screen_fb().use()
-        self._clear_main_fbo(0.05, 0.05, 0.1, 1.0)
+        # 2026-11-09 人类裁决 Q2=A: 清屏底色与编辑器/VK 统一到 loom_shaders.CLEAR_COLOR_RGBA
+        self._clear_main_fbo(*CLEAR_COLOR_RGBA)
         # MVP: 每帧 CPU 算一次 view_proj, 每模型 model.
         # uniform 上传: matlib 是行向量约定 v@M (numpy M 存的是标准矩阵的转置),
         # 要 GLSL 的 u*v 等价 numpy 的 v@M, GPU 需得 M^T = 行主序 M 直接 tobytes (不转置).
@@ -811,8 +871,11 @@ class RenderMixin:
         # A2: 主 pass 实例化批绘制 (桶已在 _prepare_bucket_frame 备好)
         self._draw_main_buckets()
         # 2026-10-19 第1档序13 天空盒: 几何后、HUD 前（B1 depth==1.0 才画）
-        if self._skybox is not None:
+        # 2026-11-09 (P-05): 统一为"告警一次 + 跳过本帧" —— 播放循环不得因此终止。
+        try:
             self._draw_skybox()
+        except Exception as e:
+            self._sky_warn('loop', '绘制异常 (%r), 本帧跳过' % (e,))
         # 2026-10-19 第1档序3阶段4 World Space UI: 天空盒后、HUD 前
         self._draw_world_canvases()
         self._prof_add('mt_main_pass', _t)
@@ -925,6 +988,3 @@ class RenderMixin:
             self.audio.shutdown()
         except Exception:
             pass
-        # 2026-10-18 A2: GLFW terminate（原 pygame.quit）
-        self._glfw_shutdown()
-

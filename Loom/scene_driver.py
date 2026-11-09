@@ -557,15 +557,21 @@ class SceneDriver:
             self.load_from_data(data)
 
     # ---------------- 加载 ----------------
-    def load_from_data(self, data):
+    def load_from_data(self, data, base_dir=None):
         # 2026-11-06 对齐 GL (双后端一致): 先建材质资产库, 再建物体并挂 material_id,
         # 否则 Vk 播放器里所有 PBR/共享材质都会静默退化成默认材质。
         # 2026-11-06 天空盒 (与 GL 对齐): 场景级 skybox -> Cubemap 实例
+        # 2026-11-09 (Q1=A / Q3=A / Q5=A): 与 GL/编辑器**逐条一致** —— 复用 sceneio 的解析
+        # 入口: 缺 skybox 键 / null -> **默认蓝**; 失败出声并记 valid/error（不静默、不回退成无天空）。
+        # 相机级优先见下方 effective_skybox()。base_dir = 场景文件目录（六面图相对路径用）。
         try:
             import sceneio as _sio
-            self.skybox = _sio._apply_skybox(data.get('skybox'))
-        except Exception:
-            self.skybox = None
+            self.skybox, self._skybox_valid, self._skybox_error = \
+                _sio._scene_skybox_from_data(data, base_dir)
+        except Exception as e:
+            self.skybox, self._skybox_valid = None, False
+            self._skybox_error = '天空盒解析入口不可用: %r' % (e,)
+            print('[驱动] 天空盒加载失败: %s' % (self._skybox_error,))
         # 2026-11-06 Canvas UI (与 GL scene_from_dict._apply_ui 同源同序):
         # 场景 'ui' 段 -> self.ui (保留模式元素树)。此前 driver 只建了默认空
         # Canvas, 播放器 (Vk) 永远拿不到场景里的 UI —— 数据层无 GPU 依赖,
@@ -588,6 +594,19 @@ class SceneDriver:
         # 2026-11-06 相机实体: 与 sceneio._apply_cameras + _link_camera_parents 同序
         # (先建相机, 物体建好后再连父) —— 顺序影响不到本函数 (父链只改 parent 指针).
         self.cameras = build_cameras(data)
+        # 2026-11-09 Q3=A: 相机级 skybox（与 sceneio._apply_cameras 同口径、同 base_dir）
+        try:
+            import sceneio as _sio3
+            _cams_d = data.get('cameras') or []
+            for _i, _c in enumerate(self.cameras):
+                _cd = _cams_d[_i] if _i < len(_cams_d) else None
+                _raw = _cd.get('skybox') if isinstance(_cd, dict) else None
+                _cube, _v, _r = _sio3.skybox_from_dict(_raw, base_dir)
+                _c.skybox = _cube
+                _c._skybox_valid = bool(_v)
+                _c._skybox_error = _r
+        except Exception as e:
+            print('[驱动] 相机天空盒解析失败 (%r) -> 该相机沿用场景级' % (e,))
         link_camera_parents(self.cameras, data.get('cameras'), self.models)
         self.active_camera = data.get('active_camera')
         # 2026-11-07 P-05 修复 (相机段坏值不崩 + 默认值不分叉): 场景是外部输入,
@@ -1360,6 +1379,22 @@ class SceneDriver:
             if cam.guid == guid:
                 return cam
         return None
+
+    def effective_skybox(self):
+        """生效天空盒（Q3=A，与 GLEngine.effective_skybox 同口径）: 相机级优先, 否则场景级。
+
+        2026-11-09 与 GL/编辑器对齐: 上层（命令层/场景运行期）把"当前相机天空盒"写在
+        CameraState.skybox，VK 侧不再各写一套优先级。
+        """
+        try:
+            cam = self.active_camera_object()
+        except Exception as e:
+            print('[驱动] 取激活相机失败 (%r) -> 天空盒回退场景级' % (e,))
+            cam = None
+        cube = getattr(cam, 'skybox', None) if cam is not None else None
+        if cube is not None:
+            return cube
+        return getattr(self, 'skybox', None)
 
     def active_camera_object(self):
         """当前玩家视角摄像机对象 (无则 None)."""
