@@ -803,6 +803,9 @@ class RenderMixin:
             if not is_async_active:
                 if not getattr(self, '_advanced_this_frame', False):
                     if getattr(self, '_logic_paused', False):
+                        # 2026-11-09 P1-A: 暂停期不推进时钟, 但必须把墙钟锚点清掉
+                        # (重新锚定), 否则恢复首帧 wall_dt = 停顿时长 -> 补欠账。
+                        self._logic_wall_last = None
                         if getattr(self, '_step_requested', False):
                             self._step_requested = False
                             self._profile('logic_step', lambda: clk.step_once())
@@ -1002,21 +1005,33 @@ class RenderMixin:
             _elapsed = time.perf_counter() - _frame_start
             if _elapsed < _frame_dur:
                 time.sleep(_frame_dur - _elapsed)
-        # 2026-11-07: 退出前强制释放鼠标捕获 (防异常退出把玩家光标留在锁定态)
+        # 2026-11-09 (P1 回归修复): 退出清理统一放进 try/finally —— 上面任何一步抛异常也
+        # **保证** GLFW 被 terminate。5042d68（天空盒提交）把基线末尾的
+        # `self._glfw_shutdown()` 连同注释一起删掉了：播放器正常退出时 glfw 从不 terminate
+        # -> 资源泄漏 / 可能挂住进程（_glfw_shutdown 本体仍在 loom_glfw_window.py:402）。
+        # 顺序与基线一致: 鼠标 -> 应用钩子 -> 并行池 -> 音频 -> GLFW；每步失败出声（不静默）。
         try:
-            self.set_mouse_locked(False)
-        except Exception:
-            pass
-        # 2026-10-19 第1档序7 应用级钩子：退出前派发 on_application_quit
-        # （脚本存档/清理）。必须在 _stop_parallel 前 —— 脚本线程还在, 引擎可用。
-        try:
-            self._dispatch_application_quit()
-        except Exception as ex:
-            print("[engine] on_application_quit 派发异常 (忽略): %r" % (ex,))
-        self._stop_parallel()          # 多核优化: 停脚本线程/碰撞池
-        # B2 (2026-08-30): 音频后端 shutdown —— miniaudio 设备线程不关会挂死进程
-        # (pygame.mixer 无此问题, 但 shutdown 幂等对两种情况都安全)
-        try:
-            self.audio.shutdown()
-        except Exception:
-            pass
+            try:
+                self.set_mouse_locked(False)     # 防异常退出把玩家光标留在锁定态
+            except Exception as e:
+                print("[engine] 退出释放鼠标失败: %r" % (e,))
+            # 2026-10-19 第1档序7 应用级钩子（脚本存档/清理）: 必须在 _stop_parallel 前
+            try:
+                self._dispatch_application_quit()
+            except Exception as ex:
+                print("[engine] on_application_quit 派发异常 (忽略): %r" % (ex,))
+            try:
+                self._stop_parallel()            # 多核优化: 停脚本线程/碰撞池
+            except Exception as e:
+                print("[engine] 退出停并行池失败: %r" % (e,))
+            # B2 (2026-08-30): 音频后端 shutdown —— miniaudio 设备线程不关会挂死进程
+            try:
+                self.audio.shutdown()
+            except Exception as e:
+                print("[engine] 退出音频 shutdown 失败: %r" % (e,))
+        finally:
+            # 2026-10-18 A2: GLFW terminate（原 pygame.quit）—— 放 finally 保证一定执行
+            try:
+                self._glfw_shutdown()
+            except Exception as e:
+                print("[engine] 退出 GLFW terminate 失败: %r" % (e,))
