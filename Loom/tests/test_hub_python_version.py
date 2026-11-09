@@ -181,8 +181,8 @@ def t_dead_fallback_fixed():
     src = open(os.path.join(REPO, 'LoomHub', 'hub_config.py'), encoding='utf-8').read()
     check("① 旧的错误载荷（%%d.%%d + %% sys.version_info）已不在代码里",
           '%d.%%d" %% sys.version_info' not in src)
-    check("① 新载荷是正常字面量",
-          'print("%d.%d" % sys.version_info[:2])' in src)
+    check("① 兜底改为直接读 sys.version_info（Q5=B，不再起子进程）",
+          "'%d.%d' % (sys.version_info[0], sys.version_info[1])" in src)
     r = subprocess.run([sys.executable, '-c',
                         'import sys;print("%d.%d" % sys.version_info[:2])'],
                        capture_output=True, text=True, timeout=20)
@@ -278,6 +278,114 @@ def t_scene_version_consistent():
             cfg.PROJECTS_FILE = old
 
 
+# ---------------- Q2=A：包内 Python 权威 ----------------
+def _make_release(root, with_bundled=True, exe_ok=True):
+    """造一个发布包布局: <root>/Loom/... + <root>/python/python.exe"""
+    eng = os.path.join(root, 'Loom')
+    os.makedirs(eng, exist_ok=True)
+    with open(os.path.join(eng, cfg.META_NAME), 'w', encoding='utf-8') as fh:
+        json.dump({'name': 'Loom', 'version': '0.1.0.beta6',
+                   'main': 'Loom.py', 'main_exe': None,
+                   'python_version': '3.13.15'}, fh)
+    open(os.path.join(eng, 'Loom.py'), 'w').close()
+    py = os.path.join(root, 'python')
+    if with_bundled:
+        os.makedirs(os.path.join(py, 'Lib', 'site-packages'), exist_ok=True)
+        if exe_ok:
+            open(os.path.join(py, 'python.exe'), 'w').close()
+        else:
+            os.makedirs(py, exist_ok=True)     # 目录在但没有 python.exe
+    return eng
+
+
+def _sys_python_stub():
+    """伪"系统里有个 3.13"（用于证明它**不能**顶掉包内 python）。"""
+    def _fake(spec, use_cache=True):
+        return r'C:\Python313\python.exe'
+    return _fake
+
+
+def t_bundled_python_authoritative():
+    with tempfile.TemporaryDirectory() as root:
+        eng = _make_release(root, with_bundled=True, exe_ok=True)
+        info = cfg.discover_interpreter(eng)
+        bundled = os.path.join(root, 'python', 'python.exe')
+        old = cfg.resolve_python_for
+        cfg.resolve_python_for = _sys_python_stub()
+        try:
+            cmd = _launch(info)
+            src = cfg.python_source(info)
+            note = cfg.interp_python_note(info)
+            check("① 包内 python 存在 -> 命令首段 = 包内路径（不被系统顶替）",
+                  os.path.normcase(cmd[0]) == os.path.normcase(bundled), cmd[:1])
+            check("① python_source = bundled", src == 'bundled', src)
+            check("① 包内自足时不打扰用户（note 空）", note == '', note)
+        finally:
+            cfg.resolve_python_for = old
+
+
+def t_bundled_missing_fallback():
+    with tempfile.TemporaryDirectory() as root:
+        eng = _make_release(root, with_bundled=True, exe_ok=False)   # python/ 在但没 exe
+        info = cfg.discover_interpreter(eng)
+        old = cfg.resolve_python_for
+        cfg.resolve_python_for = lambda spec, use_cache=True: None
+        try:
+            cmd = _launch(info)
+            note = cfg.interp_python_note(info)
+            check("② 包内不可用 -> 回退系统解释器", cmd[0] == 'python', cmd[:1])
+            check("② 回退时提示包内 python 不可用",
+                  '包内 python 不可用' in (note or ''), note)
+        finally:
+            cfg.resolve_python_for = old
+    # 开发工作区（压根没有 python/ 目录）不误报
+    with tempfile.TemporaryDirectory() as root:
+        d = _make_engine(root, python_version='3.13.15')
+        info = cfg.discover_interpreter(d)
+        check("② 开发工作区（无包内运行时）不误报",
+              '包内' not in (cfg.interp_python_note(info) or ''),
+              cfg.interp_python_note(info))
+
+
+def t_frozen_fallback_no_subprocess():
+    """Q5=B: 冻结版兜底不拉子进程（否则会再开一个 LoomHub 抢焦点）。"""
+    calls = []
+
+    def _fake_run(cmd, **kw):
+        calls.append(cmd)
+        raise AssertionError('冻结态不应调用 subprocess.run')
+
+    old_run = cfg.subprocess.run
+    old_which = cfg.shutil.which
+    old_frozen = getattr(sys, 'frozen', None)
+    env_keys = ('LOCALAPPDATA', 'ProgramFiles', 'ProgramFiles(x86)', 'ProgramW6432')
+    old_env = {k: os.environ.get(k) for k in env_keys}
+    empty_root = tempfile.mkdtemp(prefix='hub_pyver_empty_')
+    cfg.subprocess.run = _fake_run
+    cfg.shutil.which = lambda name: None        # 不让 py 启动器兜底
+    for k in env_keys:                          # 让①的安装目录搜索也落空
+        os.environ[k] = empty_root
+    sys.frozen = True
+    cfg._PY_RESOLVE_CACHE.clear()
+    try:
+        got = cfg.resolve_python_for('3.13.15')
+    finally:
+        cfg.subprocess.run = old_run
+        cfg.shutil.which = old_which
+        cfg._PY_RESOLVE_CACHE.clear()
+        for k, v in old_env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        if old_frozen is None:
+            del sys.frozen
+        else:
+            sys.frozen = old_frozen
+    check("③ 冻结态兜底不产生子进程调用", calls == [], calls)
+    check("③ 冻结态不把 Hub 自己当 Python（返回 None）", got is None, got)
+
+
 if __name__ == "__main__":
     print("========== LoomHub 源码引擎 Python 版本选择 ==========")
     t_ledger_records_python_version()
@@ -290,6 +398,9 @@ if __name__ == "__main__":
     t_cache_invalidates()
     t_probe_started()
     t_scene_version_consistent()
+    t_bundled_python_authoritative()
+    t_bundled_missing_fallback()
+    t_frozen_fallback_no_subprocess()
     if _FAILS:
         print("总结果: FAIL ❌", _FAILS)
         sys.exit(1)

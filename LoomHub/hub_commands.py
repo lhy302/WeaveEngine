@@ -502,7 +502,9 @@ def launch_spec(args, info=None):
             'env': env, 'prefer': prefer, 'mode': mode,
             'interpreter': info,
             # 2026-11-09: 源码引擎要求的 Python 版本匹配不上时的提示（空 = 无）
-            'python_note': cfg.interp_python_note(info)}, None
+            'python_note': cfg.interp_python_note(info),
+            # 2026-11-10 Q2=A: 这次启动用的是哪种 python（bundled/declared/default/exe）
+            'python_source': cfg.python_source(info)}, None
 
 
 @command('launch_engine', '启动 Loom: {scene?, mode?(open|run), agent?(false)} '

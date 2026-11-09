@@ -594,9 +594,12 @@ class HubController:
             # 2026-11-09 A-04③: 文案要说实话 —— 命令实际用的是哪个解释器就写哪个。
             # 以前一律写"系统默认 Python"（=3.12），而实际可能已按引擎要求用了 3.13。
             if interp['kind'] == 'py':
-                want = str(interp.get('python_version') or '').strip()
-                matched = cfg.resolve_python_for(want) if want else None
-                if matched:
+                # Q2=A: 包内 python 优先（自足运行时），文案要说清楚用的是哪一个
+                src = cfg.python_source(interp)
+                if src == 'bundled':
+                    note = "用引擎包内 Python 启动（自足运行时）"
+                elif src == 'declared':
+                    want = str(interp.get('python_version') or '').strip()
                     note = "用 Python %s（引擎要求）启动" % (
                         cfg.python_xy(want) or want)
                 else:

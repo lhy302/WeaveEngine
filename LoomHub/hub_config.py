@@ -552,6 +552,30 @@ def _py_launcher_python():
 _PY_RESOLVE_CACHE = {}
 
 
+def bundled_python(engine_dir):
+    r"""源码包布局下的**包内解释器**：<发布根>pythonpython.exe。
+
+    发布包结构（package_engine 产出）:
+        <发布根>LoomLoom.py      <- 登记的解释器目录 engine_dir
+        <发布根>pythonpython.exe <- 自足运行时（pip --target 装的依赖都在里面）
+
+    2026-11-10 Q2=A 人类裁决：包内 Python 是**权威** —— 以前系统解释器会把它顶掉，
+    结果包内依赖（pip --target 装进 pythonLibsite-packages 的）用不到，
+    engine.py 直接 ModuleNotFoundError；再叠上 pythonw + LOOM_QUIET，
+    用户只看到「已启动」。只有包内缺失/不可执行时才回退系统解释器。
+    """
+    if not engine_dir:
+        return None
+    root = os.path.dirname(os.path.abspath(engine_dir))   # <发布根>
+    exe = os.path.join(root, 'python', 'python.exe')
+    if not os.path.isfile(exe):
+        return None
+    # 自足性判据：必须带 site-packages（依赖装在这里）；明明是空壳就别当权威
+    if not os.path.isdir(os.path.join(root, 'python', 'Lib', 'site-packages')):
+        return None
+    return exe
+
+
 def python_xy(spec):
     """'3.13.15' / '3.13' / 'python3.13' -> '3.13'；认不出返回 ''。"""
     m = re.search(r'(\d+)\.(\d+)', str(spec or ''))
@@ -605,18 +629,19 @@ def resolve_python_for(spec, use_cache=True):
                 return lines[-1]
         except (OSError, subprocess.SubprocessError):
             pass
-    # ③ 当前进程解释器正好是该版本。
-    # 2026-11-09 A-04①: 以前载荷写成 '%%d.%%d' %% ...，Py 侧直接 SyntaxError ->
-    # 这条兜底结构上不可达（"看起来三条、实际只有两条"）。现在用正常字面量。
+    # ③ 当前解释器是否正好是该版本。
+    # 2026-11-10 Q5=B 人类裁决：**不再起子进程询问版本** —— 冻结版里
+    # sys.executable 指向 LoomHub.exe，拉起它等于再开一个 Hub 抢焦点。
+    # 直接读 sys.version_info；冻结态更不能用 Hub 自己当 Python（返回 None）。
+    if getattr(sys, 'frozen', False):
+        return None
     try:
-        r = subprocess.run([sys.executable, '-c',
-                            'import sys;print("%d.%d" % sys.version_info[:2])'],
-                           capture_output=True, text=True, timeout=5)
-        if (r.stdout or '').strip() == xy:
-            _PY_RESOLVE_CACHE[xy] = sys.executable
-            return sys.executable
-    except (OSError, subprocess.SubprocessError):
-        pass
+        cur = '%d.%d' % (sys.version_info[0], sys.version_info[1])
+    except (AttributeError, TypeError, IndexError):
+        return None
+    if cur == xy and os.path.isfile(sys.executable):
+        _PY_RESOLVE_CACHE[xy] = sys.executable
+        return sys.executable
     return None
 
 
@@ -649,6 +674,28 @@ def probe_started(proc, wait=1.5):
         time.sleep(0.05)
 
 
+def python_source(info):
+    """这次启动会用哪种 Python：'exe' / 'bundled' / 'declared' / 'default'。
+
+    供 UI/命令层说明用（也是 Q2=A 的断言锚点）。
+    """
+    if not info or info.get('kind') == 'exe':
+        return 'exe'
+    if bundled_python(info.get('dir')):
+        return 'bundled'
+    want = str(info.get('python_version') or '').strip()
+    if want and resolve_python_for(want):
+        return 'declared'
+    return 'default'
+
+
+def _release_python_dir(engine_dir):
+    if not engine_dir:
+        return None
+    d = os.path.join(os.path.dirname(os.path.abspath(engine_dir)), 'python')
+    return d if os.path.isdir(d) else None
+
+
 def interp_python_note(info):
     """启动源码引擎时的 Python 版本提示（空串 = 无需提示）。
 
@@ -656,6 +703,14 @@ def interp_python_note(info):
     """
     if not info or info.get('kind') == 'exe':
         return ''
+    if bundled_python(info.get('dir')):
+        return ''                    # 包内自足运行时，不需要任何提示
+    # 发布布局里 python/ 目录在，但不可用（缺 python.exe / 缺 site-packages）
+    # -> 明确告知"包内运行时不可用，已回退"，否则用户只会看到「已启动」
+    _pydir = _release_python_dir(info.get('dir'))
+    if _pydir and not bundled_python(info.get('dir')):
+        return ('引擎包内 python 不可用（%s），已回退系统解释器 —— '
+                '依赖可能缺失，建议用 LoomHub 重装该引擎版本' % _pydir)
     want = str(info.get('python_version') or '').strip()
     if not want:
         # 元数据没声明版本：仍按系统默认 Python 启动，但要让用户知道原因
@@ -739,11 +794,15 @@ def build_launch_command(info, scene_path=None, mode='open', prefer=None):
     main_exe = resolve_runtime_path(info.get('main_exe'))
     main_path = resolve_runtime_path(info.get('path'))
     # 2026-10-19: 传 engine_dir 让 default_python 优先用引擎自带嵌入式 Python
-    py_exe = default_python(engine_dir=info.get('dir'))
-    # 2026-11-09: 源码版引擎按 解释器.json 的 python_version 精确挑解释器
-    # （新版源码引擎要 3.13，系统 .py 关联仍是 3.12；**不改系统默认**）。
+    # 顺序（2026-11-10 Q2=A + 11-09 python_version 口径合并）：
+    #   ① 包内 pythonpython.exe（自足包）—— **权威**，系统解释器不得顶替
+    #   ② 否则系统默认 python
+    #   ③ 源码版声明了 python_version 且能解析 -> 用匹配版本
+    #   ④ 都拿不到 -> 系统默认（并给提示）
     # 编译版（kind=exe）走 main_exe，与 Python 版本无关，不受影响。
-    if str(info.get('kind') or 'py') != 'exe':
+    _bundled = bundled_python(info.get('dir'))
+    py_exe = _bundled or default_python(engine_dir=info.get('dir'))
+    if not _bundled and str(info.get('kind') or 'py') != 'exe':
         _want = str(info.get('python_version') or '').strip()
         if _want:
             _matched = resolve_python_for(_want)
