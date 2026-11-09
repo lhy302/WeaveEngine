@@ -33,6 +33,9 @@ class TargetDecl:
     fixed: tuple[int, int] | None = None
     depth: Literal['none', 'own', 'shared'] = 'own'
     depth_format: str = "depth32float"
+    # True = 该目标由绘制源自己分配/绑定（如阴影：每光源每面一个 FBO）。
+    # 迁移期用它保住「GL 阴影循环一行不改」；S3b 再把逐面目标显式化。
+    owned_by_provider: bool = False
 
 
 @dataclass(frozen=True)
@@ -72,7 +75,8 @@ class ParamField:
 @dataclass(frozen=True)
 class DrawCmd:
     """绘制源。S0-S2 只登记语义名，实际绘制仍由引擎现有实现提供（见 loom_pass_gl）。"""
-    source: Literal['buckets', 'skybox', 'world_canvas', 'fullscreen']
+    source: Literal['buckets', 'skybox', 'world_canvas', 'fullscreen',
+                   'shadow_maps', 'hud', 'screen_ui']
     key: str | None = None
     count: int | None = None
     instances: int | None = None
@@ -157,30 +161,54 @@ _PLAN_CACHE: dict[tuple, FramePlan] = {}
 
 def frame_plan(clear_color: Sequence[float] = CLEAR_COLOR_RGBA,
                include_sky: bool = True,
-               include_world_canvas: bool = False) -> FramePlan:
+               include_world_canvas: bool = False,
+               include_shadow: bool = False,
+               include_hud: bool = False,
+               include_ui: bool = False) -> FramePlan:
     """构造一帧的 Pass 列表（编辑器 / 播放器共用）——**按参数缓存**，返回同一 frozen 对象。"""
     if clear_color is CLEAR_COLOR_RGBA:      # 两条渲染路径都用默认常量 -> 走极速键
-        key = (True, bool(include_sky), bool(include_world_canvas))
+        key = (True, bool(include_sky), bool(include_world_canvas),
+               bool(include_shadow), bool(include_hud), bool(include_ui))
     else:
         key = (tuple(round(float(c), 6) for c in clear_color),
-               bool(include_sky), bool(include_world_canvas))
+               bool(include_sky), bool(include_world_canvas),
+               bool(include_shadow), bool(include_hud), bool(include_ui))
     plan = _PLAN_CACHE.get(key)
     if plan is None:
-        plan = _build_plan(clear_color, include_sky, include_world_canvas)
+        plan = _build_plan(clear_color, include_sky, include_world_canvas,
+                           include_shadow, include_hud, include_ui)
         _PLAN_CACHE[key] = plan
     return plan
 
 
 def _build_plan(clear_color: Sequence[float],
                 include_sky: bool,
-                include_world_canvas: bool) -> FramePlan:
+                include_world_canvas: bool,
+                include_shadow: bool = False,
+                include_hud: bool = False,
+                include_ui: bool = False) -> FramePlan:
     """构造一帧的 Pass 列表（编辑器 / 播放器共用）。
 
     顺序与迁移前逐位同序：主 pass（清屏 + 几何） -> 天空 -> World Canvas。
     天空的深度/剔除语义 = 「几何后画 + LEQUAL 等值通过 + 不剔除」（GL 现状）。
     """
     targets = (TargetDecl(SCREEN_TARGET, format='rgba8unorm', size='screen', depth='own'),)
-    passes = [
+    passes = []
+    if include_shadow:
+        # S3：阴影 pass 的**语义**进描述（真深度目标、深度写、不剔除）。
+        # GL 的逐光源/逐面 FBO 仍由 loom_shadow 分配（owned_by_provider=True）；
+        # VK 的 r32float + 手工比较是另一套编码，本轮**不动**（S3b 再谈统一）。
+        passes.append(
+            PassSpec('shadow_maps', shader='shadow', target='shadow.depth',
+                     load='dontcare',
+                     depth=DepthState(test=True, write=True, func='less', clear=1.0),
+                     raster=RasterState(cull='none'),
+                     draws=(DrawCmd('shadow_maps'),))
+        )
+        targets = targets + (TargetDecl('shadow.depth', format='depth32float',
+                                        size='shadow', depth='own',
+                                        owned_by_provider=True),)
+    passes += [
         PassSpec('main', shader='main', target=SCREEN_TARGET, load='clear',
                  clear=tuple(clear_color),
                  depth=DepthState(test=True, write=True, func='less', clear=1.0),
@@ -208,5 +236,19 @@ def _build_plan(clear_color: Sequence[float],
                      depth=DepthState(test=True, write=False, func='less'),
                      raster=RasterState(cull='none', blend='alpha'),
                      draws=(DrawCmd('world_canvas'),))
+        )
+    # S4：HUD 文本与世界 UI 是同一条 LDR 目标上的叠加层（顺序: HUD 先, Canvas UI 后）。
+    # depth=None = 不改深度状态（两者各自的 ctx.scope 会自己关深度/开混合）。
+    if include_hud:
+        passes.append(
+            PassSpec('hud', shader='hud', target=SCREEN_TARGET, load='load',
+                     depth=None, raster=RasterState(cull='none', blend='alpha'),
+                     draws=(DrawCmd('hud'),))
+        )
+    if include_ui:
+        passes.append(
+            PassSpec('ui', shader='ui', target=SCREEN_TARGET, load='load',
+                     depth=None, raster=RasterState(cull='none', blend='alpha'),
+                     draws=(DrawCmd('screen_ui'),))
         )
     return FramePlan(targets=targets, passes=tuple(passes))

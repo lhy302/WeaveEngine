@@ -82,8 +82,10 @@ def t_shared():
           loom_render.frame_plan is frame_plan, loom_render.frame_plan)
     src_e = open(os.path.join(ROOT, 'editor.py'), encoding='utf-8').read()
     src_p = open(os.path.join(ROOT, 'loom_render.py'), encoding='utf-8').read()
-    check('B3 编辑器调用 frame_plan(...)', 'frame_plan(include_sky=' in src_e, '')
-    check('B4 播放器调用 frame_plan(...)', 'frame_plan(include_sky=' in src_p, '')
+    check('B3 编辑器调用 frame_plan(include_shadow=..., ...)',
+          'frame_plan(include_shadow=' in src_e, '')
+    check('B4 播放器调用 frame_plan(include_shadow=..., ...)',
+          'frame_plan(include_shadow=' in src_p, '')
     check('B5 编辑器不再手写清屏字面量 0.10, 0.12, 0.16',
           '0.10, 0.12, 0.16' not in src_e, '')
 
@@ -159,6 +161,15 @@ class _FakeEngine:
     def _draw_world_canvases(self):
         self.log.append('draw.world')
 
+    def _render_shadow_maps(self):
+        self.log.append('draw.shadow')
+        self.shadow_bound_own_target = True
+
+    def _draw_hud(self):
+        self.log.append('draw.hud')
+
+    ui = None
+
 
 def t_executor():
     print('=== C. GLFrameExecutor ===')
@@ -216,6 +227,64 @@ def t_executor():
     check('C9 非法 FramePlan -> ValueError', isinstance(err4, ValueError), err4)
 
 
+# ---------------- S3/S4: 阴影与 HUD/UI 进描述 ----------------
+class _FakeUI:
+    def __init__(self, log):
+        self.log = log
+
+    def draw_all(self, engine):
+        self.log.append('draw.ui')
+
+
+def t_s3s4():
+    print('=== E. S3 阴影 / S4 HUD+UI ===')
+    p = frame_plan(include_shadow=True, include_world_canvas=True,
+                   include_hud=True, include_ui=True)
+    check('E1 全量顺序 = 阴影->主->天空->WorldUI->HUD->UI',
+          [x.id for x in p.passes] == ['shadow_maps', 'main', 'sky',
+                                       'world_ui', 'hud', 'ui'],
+          [x.id for x in p.passes])
+    check('E2 全量 plan 通过结构校验', p.validate() == [], p.validate())
+    sh = p.pass_by_id('shadow_maps')
+    tsh = p.target_by_name('shadow.depth')
+    check('E3 阴影 = 真深度目标 + 深度写 + 不剔除',
+          sh.target == 'shadow.depth' and sh.depth.func == 'less'
+          and sh.depth.write is True and sh.raster.cull == 'none',
+          (sh.target, sh.depth.func, sh.depth.write, sh.raster.cull))
+    check('E4 阴影目标标记 owned_by_provider（逐面 FBO 归 loom_shadow）',
+          tsh is not None and tsh.owned_by_provider is True
+          and tsh.format == 'depth32float', None if tsh is None else tsh.owned_by_provider)
+    hud = p.pass_by_id('hud')
+    ui = p.pass_by_id('ui')
+    check('E5 HUD/UI 都是 LDR 目标叠加层且不插手深度',
+          hud.load == 'load' and ui.load == 'load'
+          and hud.depth is None and ui.depth is None,
+          (hud.load, ui.load, hud.depth, ui.depth))
+    check('E6 HUD/UI 声明 alpha 混合、不剔除',
+          hud.raster.blend == 'alpha' and ui.raster.blend == 'alpha'
+          and hud.raster.cull == 'none' and ui.raster.cull == 'none', '')
+
+    log = []
+    eng = _FakeEngine(log)
+    eng.ui = _FakeUI(log)
+    ex = LPGL.GLFrameExecutor(eng)
+    ex.execute(p)
+    check('E7 执行顺序与描述一致（含阴影/HUD/UI）',
+          [x for x in log if x != 'fb.use']
+          == ['draw.shadow', ('clear', tuple(CLEAR_COLOR_RGBA)), 'draw.main',
+              'draw.sky', 'draw.world', 'draw.hud', 'draw.ui'], log)
+    check('E8 provider 自有目标不触发执行器绑定/清屏（阴影自己清）',
+          log.index('draw.shadow') < log.index(('clear', tuple(CLEAR_COLOR_RGBA))), log)
+    check('E9 阴影 pass 的深度状态被应用（深度写/比较不抛）',
+          ('depth_func', '<') in eng.ctx.calls, eng.ctx.calls[:6])
+
+    # 只挂 HUD 不挂 UI 也合法（ui 为 None 时）
+    p2 = frame_plan(include_hud=True, include_ui=False)
+    check('E10 仅 HUD 时 plan 合法',
+          [x.id for x in p2.passes] == ['main', 'sky', 'hud'] and p2.validate() == [],
+          [x.id for x in p2.passes])
+
+
 # ---------------- D. 真实 GL ----------------
 def t_real_gl():
     print('=== D. 真实 GL 4.3 跑一帧 PlayerApp ===')
@@ -249,6 +318,7 @@ def main():
     t_spec()
     t_shared()
     t_executor()
+    t_s3s4()
     t_real_gl()
     print('')
     if _fails:

@@ -50,9 +50,13 @@ class GLTargetPool:
     def resolve(self, decl):
         if decl is None:
             raise KeyError('目标声明缺失')
+        # owned_by_provider: 该 pass 自己分配/绑定目标（阴影逐光源逐面），返回 None 表示
+        # 执行器不要 use/clear —— 迁移期用它保住「阴影循环一行不改」（S3b 再显式化）。
+        if getattr(decl, 'owned_by_provider', False):
+            return None
         if decl.name == SCREEN_TARGET:
             return self.engine._screen_fb()
-        raise KeyError('GL 后端暂不支持的目标: %s（S0-S2 只做 %s）'
+        raise KeyError('GL 后端暂不支持的目标: %s（S0-S3 只做 %s 与 provider 自有目标）'
                        % (decl.name, SCREEN_TARGET))
 
 
@@ -64,31 +68,43 @@ class GLFrameExecutor:
         self.ctx = engine.ctx
         self.pool = GLTargetPool(engine)
         self.draws = dict(_DEFAULT_DRAWS) if draws is None else dict(draws)
+        # 每个 plan 的 (pass, 目标声明, 绘制源名) 只解析一次：帧缓存之外的第二层热路径优化。
+        self._row_cache: dict[int, tuple] = {}
 
     # ---------- 对外 ----------
-    def execute(self, plan, prepare=None):
-        """执行一帧。prepare 只在第一个 pass 清屏后调用一次（相机/VP/uniform 上传）。"""
+    def execute(self, plan, prepare=None, before_pass=None, after_pass=None):
+        """执行一帧。
+
+        prepare    : 只在第一个绑定屏幕目标的 pass 清屏后调用一次（相机/VP/uniform）。
+        before_pass: 每个 pass **执行前**（用于剖面分段，如 HUD 起点）。
+        after_pass : 每个 pass **执行后**（用于剖面收口，如阴影段）。
+        """
         errs = plan.validate()
         if errs:
             raise ValueError('FramePlan 非法: %s' % '; '.join(errs))
         ctx = self.ctx
         func_before = _safe_get(ctx, 'depth_func', '<')   # 迁移前稳态默认 '<'
         first = True
-        for spec in plan.passes:
-            fb = self.pool.resolve(plan.target_by_name(spec.target))
-            fb.use()
-            if spec.load == 'clear':
-                self.engine._clear_main_fbo(*spec.clear)
+        for spec, decl, srcs in self._rows(plan):
+            if before_pass is not None:
+                before_pass(spec)
+            fb = self.pool.resolve(decl)
+            if fb is not None:               # provider 自有目标的 pass 自己绑定（阴影）
+                fb.use()
+                if spec.load == 'clear':
+                    self.engine._clear_main_fbo(*spec.clear)
             if first and prepare is not None:
                 prepare()
             first = False
             self._apply(spec)
-            for cmd in spec.draws:
-                fn = self.draws.get(cmd.source)
+            for src in srcs:
+                fn = self.draws.get(src)
                 if fn is None:
-                    raise KeyError('未注册的绘制源: %s' % (cmd.source,))
-                fn(self.engine, cmd)
+                    raise KeyError('未注册的绘制源: %s' % (src,))
+                fn(self.engine, None)
             self._restore(spec)
+            if after_pass is not None:
+                after_pass(spec)
         # 帧末恢复迁移前稳态: 深度测试/剔除开启, depth_func 复位, 前脸 cw。
         # （旧代码在 main 里 enable 两者, 天空 finally 里 enable 剔除并复位 depth_func）
         ctx.enable(moderngl.DEPTH_TEST)
@@ -97,6 +113,16 @@ class GLFrameExecutor:
             pass
         _safe_set(ctx, 'front_face', 'cw')
         return plan
+
+    def _rows(self, plan):
+        """解析并缓存 (pass, 目标声明, 绘制源名) —— 目标解析与绘制源名每帧都要用。"""
+        ent = self._row_cache.get(id(plan))
+        if ent is not None and ent[0] is plan:
+            return ent[1]
+        rows = tuple((spec, plan.target_by_name(spec.target),
+                      tuple(c.source for c in spec.draws)) for spec in plan.passes)
+        self._row_cache[id(plan)] = (plan, rows)
+        return rows
 
     # ---------- 状态 ----------
     def _apply(self, spec):
@@ -124,18 +150,18 @@ class GLFrameExecutor:
                 ctx.blend_func = bl
 
     def _restore(self, spec):
-        """pass 结束恢复「旧代码退出时」的状态：深度测试/剔除开, 混合关, 前脸 cw。
+        """pass 结束恢复「旧代码退出时」的状态（**只补真正改过的项**，省 GL 调用）。
 
-        旧代码：main 之后 depth+cull 都开；天空 finally 里 enable 剔除 + 复位 depth_func；
-        world quad 之后 disable 混合。这里按 spec 的退出语义还原（GL 无状态查询可用）。
+        旧代码的退出状态：main 之后 depth+cull 都开（apply 已开，无需重复）；
+        天空 finally 里 enable 剔除 + 复位 depth_func；world/HUD/UI 之后混合关。
+        阴影段旧代码就是「深度开 + 剔除关」并且**不恢复剔除** —— 这里保持一致。
         """
         ctx = self.ctx
-        if spec.depth is not None:
-            ctx.enable(moderngl.DEPTH_TEST)
+        if spec.depth is not None and not spec.depth.test:
+            ctx.enable(moderngl.DEPTH_TEST)      # 只有 apply 关过才需要恢复
         if spec.raster.blend != 'none':
             ctx.disable(moderngl.BLEND)
-        # 天空是唯一会关剔除的 3D pass；其余 pass 退出时剔除保持开启（旧代码如此）
-        if spec.id == 'sky' or spec.raster.cull != 'none':
+        if spec.id == 'sky':                     # apply 关过剔除 -> 恢复开启（旧 finally 同款）
             ctx.enable(moderngl.CULL_FACE)
             _safe_set(ctx, 'front_face', 'cw')
 
@@ -152,8 +178,27 @@ def _draw_world_canvas(engine, cmd):
     engine._draw_world_canvases()
 
 
+def _draw_shadow_maps(engine, cmd):
+    # S3: 阴影的逐光源/逐面 FBO 与绘制循环仍在 loom_shadow（行为零变化）
+    engine._render_shadow_maps()
+
+
+def _draw_hud(engine, cmd):
+    engine._draw_hud()
+
+
+def _draw_screen_ui(engine, cmd):
+    # 与迁移前 `if self.ui is not None: self.ui.draw_all(self)` 同语义
+    ui = getattr(engine, 'ui', None)
+    if ui is not None:
+        ui.draw_all(engine)
+
+
 _DEFAULT_DRAWS = {
     'buckets': _draw_buckets,
     'skybox': _draw_skybox,
     'world_canvas': _draw_world_canvas,
+    'shadow_maps': _draw_shadow_maps,
+    'hud': _draw_hud,
+    'screen_ui': _draw_screen_ui,
 }

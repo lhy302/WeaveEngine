@@ -2244,6 +2244,12 @@ class EditorApp(GLEngine):
         return True
 
     # ================ 渲染 (覆写) ================
+    def _after_pass_prof(self, spec):
+        """2B1: 阴影段收口，并把「主 pass 计时起点」定在阴影之后（与迁移前一致）。"""
+        if spec.id == 'shadow_maps':
+            self._prof_add('mt_shadow_maps', getattr(self, '_t_shadow', 0))
+            self._t_mp = self._prof_t0()
+
     def _prepare_main_pass(self):
         """编辑器主 pass 的 CPU 侧准备（相机 / VP / uniform），由 FramePlan 执行器调用。
 
@@ -2338,18 +2344,13 @@ class EditorApp(GLEngine):
         # A2 (2026-08-29): 当帧实例数据准备 (f32 矩阵 + 桶重排 + 桶级实例缓冲),
         # 阴影/主 pass 共享 (逐物体 uniform/upload 循环已取消)
         self._profile('buckets', lambda: self._prepare_bucket_frame())
-        # M29: 先画完全部阴影贴图, 主 pass 再采样到物理遮挡
-        _t = self._prof_t0()
-        self._render_shadow_maps()
-        self._prof_add('mt_shadow_maps', _t)
-
-        _t_mp = self._prof_t0()
-        # 2026-11-10 阶段 2A（S0-S2）: 与播放器**同一份** FramePlan 描述。
-        # 清屏底色从此走 loom_shaders.CLEAR_COLOR_RGBA（值与原字面量完全相同，
-        # 消除第二份来源）；天空门判仍是「生效天空盒」（Q3=A 相机级优先）。
-        plan = frame_plan(include_sky=(self.effective_skybox() is not None))
-        self._t_mp = _t_mp
-        self._frame_executor.execute(plan, prepare=self._prepare_main_pass)
+        # 2026-11-10 阶段 2B1（S3）: 阴影也进 FramePlan（GL 侧是真深度目标；
+        # 逐光源/逐面 FBO 仍归 loom_shadow，描述里标 owned_by_provider）。
+        self._t_shadow = self._prof_t0()
+        plan = frame_plan(include_shadow=bool(self.lights),
+                          include_sky=(self.effective_skybox() is not None))
+        self._frame_executor.execute(plan, prepare=self._prepare_main_pass,
+                                     after_pass=self._after_pass_prof)
         # MVP (轨道相机已由 engine.render 逻辑处理, 但此处复算供 gizmo/拾取用)
         # M41: "用此相机预览"时每帧重应用该摄像机 (含 roll), 拖 gizmo 实时跟
         # ★2026-09-06 相机统一 (用户定案): 播放态 = 编辑态同一轨道相机 —
@@ -2359,8 +2360,8 @@ class EditorApp(GLEngine):
         # 不再写相机, 无双驱动源, WASD/滚轮/右键语义与编辑态完全一致。
         # 相机/VP/uniform/绘制/天空全部由 FramePlan 执行（见 _prepare_main_pass 与
         # loom_pass_gl 的绘制源）。这里只补记迁移前同名的阶段耗时。
-        self._prof_add('mt_mp_draws', getattr(self, '_t_mp_draws', _t_mp))
-        self._prof_add('mt_main_pass', _t_mp)
+        self._prof_add('mt_mp_draws', getattr(self, '_t_mp_draws', 0))
+        self._prof_add('mt_main_pass', getattr(self, '_t_mp', 0))
 
         # UI 层 (IEditorView): 视口叠加 + 全部面板 + 播放期游戏 HUD. 播放期不画编辑辅助
         _t = self._prof_t0()

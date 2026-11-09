@@ -855,6 +855,37 @@ class RenderMixin:
             self._uniform('u_view_pos').value = campos
             self._u_last['u_view_pos'] = campos
 
+    # ---- 2026-11-10 阶段 2B1: 剖面分段（阶段名与迁移前一致，口径也一致）----
+    def _before_pass_prof(self, spec):
+        if spec.id == 'hud':
+            self._close_main_prof()          # 主 pass 段 = 阴影之后 ~ HUD 之前
+            self._t_hud = self._prof_t0()
+
+    def _after_pass_prof(self, spec):
+        pid = spec.id
+        if pid == 'shadow_maps':
+            self._prof_add('mt_shadow_maps', getattr(self, '_t_shadow', 0))
+            self._t_main = self._prof_t0()
+        elif pid == 'ui':
+            self._prof_hud_close()
+
+    def _close_main_prof(self):
+        t = getattr(self, '_t_main', None)
+        if t is not None:
+            self._prof_add('mt_main_pass', t)
+            self._t_main = None
+
+    def _prof_hud_close(self):
+        t = getattr(self, '_t_hud', None)
+        if t is not None:
+            self._prof_add('mt_hud', t)
+            self._t_hud = None
+
+    def _close_frame_prof(self):
+        """兜底收口（plan 没包含 HUD/UI 时也要把未结的段补上）。"""
+        self._close_main_prof()
+        self._prof_hud_close()
+
     def _draw_skybox_guarded(self):
         """FramePlan 的 skybox 绘制源：异常只告警一次并跳过本帧（迁移前 try/except 同语义）。"""
         try:
@@ -957,27 +988,23 @@ class RenderMixin:
         # 主 pass 共享同一批桶 (旧逐物体 uniform/upload 循环已取消)
         # 2026-09-01 组8 插桩: buckets 子阶段 (原未插桩, 残段口径闭合用)
         self._profile('buckets', lambda: self._prepare_bucket_frame())
-        # M29: 先画完全部阴影贴图, 主 pass 再采样到物理遮挡
-        _t = self._prof_t0()
-        self._render_shadow_maps()
-        self._prof_add('mt_shadow_maps', _t)
-
-        _t = self._prof_t0()
-        # 2026-11-10 阶段 2A（S0-S2）: 主 pass（清屏+几何）与天空收进 FramePlan。
-        # 同一份描述（loom_pass.frame_plan）编辑器与播放器共用；天空仍是
-        # 「几何后画 + LEQUAL 等值通过 + 不剔除」的 GL 语义（loom_pass 模块头写明）。
-        # 清屏底色仍唯一来自 loom_shaders.CLEAR_COLOR_RGBA（2026-11-09 Q2=A）。
-        plan = frame_plan(include_sky=True)
-        self._frame_executor.execute(plan, prepare=self._prepare_main_pass)
-        # 2026-10-19 第1档序3阶段4 World Space UI: 天空盒后、HUD 前
-        self._draw_world_canvases()
-        self._prof_add('mt_main_pass', _t)
-
-        _t = self._prof_t0()
-        self._draw_hud()
-        if getattr(self, 'ui', None) is not None:
-            self.ui.draw_all(self)  # 2026-10-18: Canvas UI (保留模式, 元素树渲染)
-        self._prof_add('mt_hud', _t)
+        # 2026-11-10 阶段 2B1（S3+S4）: 阴影 -> 主 pass -> 天空 -> World UI -> HUD/UI
+        # 全部收进**同一个** FramePlan。
+        #   · 阴影：描述里是「真深度目标 + 深度写 + 不剔除」，但逐光源/逐面 FBO 仍归
+        #     loom_shadow 分配（TargetDecl.owned_by_provider=True）—— GL 阴影循环一行未改；
+        #     VK 的 r32float + 手工比较是另一套编码，本轮不动（S3b 再谈统一）。
+        #   · HUD/UI：仍是 LDR 目标上的叠加层，顺序（HUD 先、Canvas UI 后）与混合状态不变
+        #     （两者各自的 ctx.scope 负责开关，FramePlan 里 depth=None 表示不插手深度）。
+        self._t_shadow = self._prof_t0()
+        # include_shadow 随「有没有光源」变：无光源时 _render_shadow_maps 本来就是空转，
+        # 不挂这个 pass 省一次调度（行为零变化）。
+        plan = frame_plan(include_shadow=bool(self.lights), include_sky=True,
+                          include_world_canvas=True, include_hud=True,
+                          include_ui=getattr(self, 'ui', None) is not None)
+        self._frame_executor.execute(plan, prepare=self._prepare_main_pass,
+                                     before_pass=self._before_pass_prof,
+                                     after_pass=self._after_pass_prof)
+        self._close_frame_prof()
         _t = self._prof_t0()
         self._update_fps()
         # TPS 缓冲 (2026-09-06): 渲染帧尾富余预取 (与 editor.render 同款挂点);
