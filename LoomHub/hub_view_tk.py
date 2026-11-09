@@ -161,7 +161,9 @@ class TkHubView(IHubView):
         import hub_console
         hub_console.attach_console(self.root)
         # 2026-11-09 P1-4: 启动期钩子（上次失败提示 + 延迟 10s 的后台检查，24h 一次）
-        self.ctrl.start_background_tasks()
+        # 2026-11-09: 视图不得硬依赖控制器的新方法（第三方 GUI / 测试桩可能没实现）。
+        if hasattr(self.ctrl, 'start_background_tasks'):
+            self.ctrl.start_background_tasks()
 
     def _btn_row(self, parent, pairs):
         """一行等宽按钮: pairs = [(文本, 命令), ...]"""

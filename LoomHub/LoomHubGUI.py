@@ -142,7 +142,9 @@ class LoomHubGUI(IHubView):
             self._main_core_sched = None
         # 2026-11-09 P1-4: 启动期钩子（pygame 视图同样接上自更新启动流程）
         try:
-            self.ctrl.start_background_tasks()
+            # 2026-11-09: 视图不得硬依赖控制器的新方法（第三方 GUI / 测试桩可能没实现）。
+            if hasattr(self.ctrl, 'start_background_tasks'):
+                self.ctrl.start_background_tasks()
         except (OSError, ValueError, RuntimeError) as e:
             print('[LoomHub] 启动期自更新钩子失败: %r' % (e,))
 
