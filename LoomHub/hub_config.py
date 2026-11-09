@@ -288,6 +288,14 @@ def refresh_interpreters():
         d = it.get('dir')
         info = discover_interpreter(d) if d and os.path.isdir(d) else None
         if info is not None:
+            # 2026-11-09 Bug1 修复: 保留"默认"标记。
+            # discover_interpreter() 只从 解释器.json 取 name/version/kind/main，
+            # **天生没有 default 键**；以前这里直接 out.append(info) 会把
+            # set_default 刚写下的 default 抹掉（set_default -> _refresh -> 被自己擦），
+            # 于是 UI 永远看不到 ★、default_interpreter() 退回"取第一条"。
+            if it.get('default'):
+                info['default'] = True
+            # 重新识别成功即"新鲜"：旧条目的 stale 标记随之清除（info 无此键）
             out.append(info)                    # 目录还在且元数据有效 -> 按现状重写 kind/main
         else:
             keep = dict(it)

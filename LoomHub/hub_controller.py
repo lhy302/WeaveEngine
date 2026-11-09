@@ -436,12 +436,48 @@ class HubController:
         except Exception:
             pass
 
-    def open_project(self, project):
-        """用默认解释器启动编辑器打开项目场景 (subprocess, 不阻塞)."""
+    def interp_for_project(self, project):
+        """为项目挑解释器（Bug2 修复）：显式 > 项目归属引擎 > 默认。
+
+        projects.json 里本来就有 engine_dir（场景所在的 <引擎根>）；这样"项目记得
+        自己用哪个引擎版本"，多版本并存时不会一律拿默认引擎去开别人的项目。
+        """
+        ed = (project or {}).get('engine_dir')
+        if ed:
+            try:
+                want = os.path.normcase(os.path.abspath(ed))
+            except (OSError, ValueError):
+                want = None
+            if want:
+                lst = self.interpreters or cfg.load_interpreters()
+                # ① engine_dir 就是解释器目录（<引擎根>/Loom）
+                for it in lst:
+                    if it.get('stale'):
+                        continue
+                    d = it.get('dir')
+                    if d and os.path.normcase(os.path.abspath(d)) == want:
+                        return it
+                # ② engine_dir 是解释器目录的父目录（Projects/ 在 <引擎根>/ 下）
+                for it in lst:
+                    if it.get('stale'):
+                        continue
+                    d = it.get('dir')
+                    if d and os.path.normcase(
+                            os.path.abspath(os.path.dirname(d))) == want:
+                        return it
+        return cfg.default_interpreter()
+
+    def open_project(self, project, interp=None):
+        """启动编辑器打开项目场景 (subprocess, 不阻塞).
+
+        interp 显式传入就用传入的（UI「用选中引擎打开项目」走这条）；
+        未传时按 interp_for_project()：项目 engine_dir 命中的已登记解释器 > 默认。
+        """
         if not project:
             self.set_msg("请先选一个项目", 'err')
             return
-        interp = cfg.default_interpreter()
+        if interp is None:
+            interp = self.interp_for_project(project)
         if interp is None:
             self.set_msg("还没有解释器: 请先扫描/导入/安装一个", 'err')
             return

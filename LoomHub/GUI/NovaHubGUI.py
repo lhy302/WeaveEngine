@@ -196,6 +196,8 @@ class NovaHubView(IHubView):
         self._btn_row(card, [("设为默认", self._set_default),
                              ("移除", self._remove_interp),
                              ("改安装根", self._change_root)])
+        # 2026-11-09 Bug2: 多版本并存时用"选中的解释器"打开"选中的项目"
+        self._btn_row(card, [("用选中引擎打开项目", self._open_project_with_interp)])
         self._note(card, "说明: .zip 解压到安装根/<版本号>; 版本目录下须含 解释器.json")
 
     def _build_card_project(self, parent):
@@ -209,7 +211,7 @@ class NovaHubView(IHubView):
         self.proj_list, _ = self._list_area(card)
         self._hint(card, 'project')
         self.proj_list.bind('<Double-Button-1>', self._on_project_double)
-        self._note(card, "打开项目 = 用默认解释器启动编辑器 (--open)")
+        self._note(card, "打开项目 = 用项目归属引擎启动编辑器；归属不明时用默认引擎 (--open)")
 
     def _build_footer(self):
         """底栏: 界面切换 + open_py + 默认解释器状态 / 消息 + python 版本提示."""
@@ -288,6 +290,18 @@ class NovaHubView(IHubView):
 
     def _open_project(self):
         self.ctrl.open_project(self._selected(self.proj_list))
+
+    def _open_project_with_interp(self):
+        """Bug2 的 UI 入口：用选中的解释器打开选中的项目。"""
+        interp = self._selected(self.interp_list)
+        proj = self._selected(self.proj_list)
+        if not interp:
+            self.ctrl.set_msg("请先在左侧选择一个解释器", 'dim')
+            return
+        if not proj:
+            self.ctrl.set_msg("请先在右侧选择一个项目", 'dim')
+            return
+        self.ctrl.open_project(proj, interp=interp)
 
     def _remove_project(self):
         self.ctrl.remove_project(self._selected(self.proj_list))

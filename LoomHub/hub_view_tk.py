@@ -78,6 +78,9 @@ class TkHubView(IHubView):
                              ("从 GitHub 安装", self._github_install)])
         self._btn_row(left, [("设为默认", self._set_default),
                              ("移除", self._remove_interp)])
+        # 2026-11-09 Bug2: 用"选中的解释器"打开"选中的项目"（多版本并存必需入口）。
+        # 双击项目仍按 controller 的归属规则（engine_dir > 默认）。
+        self._btn_row(left, [("用选中引擎打开项目", self._open_project_with_interp)])
         # 2026-10-19 D1: 双击解释器 = 切换（自动扫描该引擎项目目录）
         self.interp_list.bind('<Double-Button-1>', self._on_interp_dblclick)
 
@@ -215,6 +218,18 @@ class TkHubView(IHubView):
 
     def _open_project(self):
         self.ctrl.open_project(self._selected(self.proj_list))
+
+    def _open_project_with_interp(self):
+        """用选中的解释器打开选中的项目（Bug2 的 UI 入口）。"""
+        interp = self._selected(self.interp_list)
+        proj = self._selected(self.proj_list)
+        if not interp:
+            self.ctrl.set_msg("请先在左侧选择一个解释器", 'dim')
+            return
+        if not proj:
+            self.ctrl.set_msg("请先在右侧选择一个项目", 'dim')
+            return
+        self.ctrl.open_project(proj, interp=interp)
 
     def _remove_project(self):
         self.ctrl.remove_project(self._selected(self.proj_list))
