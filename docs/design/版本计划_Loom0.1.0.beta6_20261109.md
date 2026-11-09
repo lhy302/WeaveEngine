@@ -223,3 +223,10 @@ GL 主 pass 是否永远 HDR、阴影编码是否统一、点光 6 面是否合�
   1. 批次 D（物理桥 SoA + `loom_pose_sync`）验收里**必须**包含"满载 FPS ≥ 85"，即把 3.13 的退化补回来；
   2. 开一个 **1 会话的定位任务**：cProfile 对比 3.12/3.13 同一场景，找出 `logic_step`/`pipe_wait` 变慢的具体函数；找到就可低成本修，不找到则并入批次 D。
 - 回滚手段保留：`C:\loom_build\pre_py313_freeze.txt` 与三件 `__py312` 备份。
+
+
+### 9.5 构建档位（2026-11-09 人类裁决）
+
+- **内部开发：编「带控制台」版本**（`--windows-console-mode=force`）——错误、bench 退出码、异常栈都能看见，避免静默失败。
+- **发布：编「不带控制台」版本**（`--windows-console-mode=disable`）。
+- 两条命令落成工具 `tools/build_engine.py --mode dev|release`，不靠记忆；**发布产物必须来自 release 档**，dev 产物明确标注不可发布。
