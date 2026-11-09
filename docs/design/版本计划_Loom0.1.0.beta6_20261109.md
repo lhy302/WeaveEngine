@@ -341,3 +341,7 @@ R04 复核时发现两件事，直接推翻了它自己的一条证据，也暴�
 - `DepthState.write` 在 GL 仍无法真正执行（moderngl 无 depth_mask）→ 标注 advisory
 
 **下一步**：2B1（阴影 + HUD/UI 迁入，仍要求 GL/参考 MAE=0）→ 2B2（tonemap + bloom，画面会**故意变化**，闸门改为「人工确认新基线 + 双后端一致」）。
+
+### 9.12 Q-REQ-1 裁决（2026-11-10）
+
+**A：源码包 requirements.txt 补 `culverin>=0.14.0` / `game-audio>=2.1.0`**（缺了源码版物理/音频会静默降级）；同时把 `py -3.12` 安装提示改为 `py -3.13`。
