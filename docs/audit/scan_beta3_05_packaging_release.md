@@ -1607,3 +1607,71 @@ P2-② 引入「同根多版本取最高版本」后，旧用例 `test_hub_inter
 
     样例（用户级）：start "" /wait "%SETUP%" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /DIR="C:\Users\...\AppData\Local\Programs\LoomHub"
     样例（Program Files）：... /NORESTART /SP- /ALLUSERS /DIR="C:\Program Files\LoomHub"
+
+---
+
+## 15. 源码版引擎按 python_version 选解释器（2026-11-09，版本仍 0.1.4）
+
+> 背景：系统 .py 关联仍是 3.12，新版 Loom 源码引擎要求 3.13；Hub 靠注册表关联找 python → 启动源码引擎可能跑 3.12。
+> 约束：**不改系统默认解释器/文件关联**（只影响「启动这一个引擎」）。
+
+| 改动 | 内容 |
+|---|---|
+| hub_config.discover_interpreter | 台账新增 python_version 字段（读 解释器.json，如 3.13.15）；refresh_interpreters() 走同一函数，刷新后仍保留 |
+| hub_config.resolve_python_for / python_xy | 按 3.13.15 → 3.13 解析：① 常见安装目录（%LOCALAPPDATA%\Programs\Python\Python313、%ProgramFiles%\Python313 等）② py -3.13 -c 问 sys.executable ③ 当前解释器正好匹配；带进程内缓存 |
+| hub_config.build_launch_command | 源码版（kind != exe）且声明了 python_version → 用解析到的解释器；**编译版走 main_exe，完全不受影响** |
+| hub_config.interp_python_note | 供调用方提示：匹配成功 → 空；解析不到 → 「要求 3.13.15 …已回退默认 Python」；未声明 → 「元数据未声明 python_version，使用系统默认 Python」 |
+| hub_controller.open_project | 启动消息追加该提示（不阻塞启动） |
+| hub_commands.launch_spec | 返回值新增 python_note（命令层/Agent 可见） |
+| hub_view_tk / NovaHubGUI | 解释器列表行显示 , py3.13.15（台账里展示 python_version） |
+
+### 15.1 新增断言（test_hub_python_version.py，11 条，全 PASS）
+
+    ① discover 记录 python_version=3.13.15；refresh_interpreters 后仍在
+    ② 有 3.13 → 启动命令第一段是 3.13 的 python.exe（不是默认 python）；匹配成功时 note 为空
+    ③ 解析不到 → 回退默认 python，note 点名 3.13 与「回退」
+    ④ 缺 python_version → 回退默认 python，note 点名「未声明」
+    ⑤ 编译版（kind=exe）命令就是 exe，无 python 前缀、无提示
+
+### 15.2 实跑
+
+    test_hub_python_version.py / test_hub.py / test_hub_controller.py / test_hub_eai.py /
+    test_hub_interp_switch.py / test_hub_interp_cache.py / test_hub_update.py 全部 exit=0 FAIL=0；py_compile 五模块通过
+
+---
+
+## 16. A-04 复核修复（LoomHub 0.1.4 内修，2026-11-09，不发布）
+
+> 只修不需要人类裁决的部分。「包内 python 被系统顶替」「源码包 embed 版本」「冻结版兜底代价」
+> 三条按指示**未动**（已缓存进 docs/design/待裁决清单_beta6.md）。
+
+| 编号 | 修法 |
+|---|---|
+| ① 死分支 | resolve_python_for 的第三条兜底载荷由 '%%d.%%d' %% …（Py 侧 SyntaxError，结构不可达）改为正常字面量 “%d.%d” % sys.version_info[:2]；实跑该载荷返回 3.12 证明可执行 |
+| ② note 丢失 | cmd_launch_engine 返回体补 python_note（来自 launch_spec），Agent/命令层能看到「已回退默认 Python」 |
+| ③ 文案不说实话 | hub_controller 启动消息按**实际使用的解释器**生成：匹配到声明版本 → 「用 Python 3.13（引擎要求）启动」，否则「用系统默认 Python 启动」；NovaHubGUI 底部提示改为「源码引擎优先用其声明的 Python；回退默认 → X」 |
+| ④ 缓存永不失效 | resolve_python_for 命中缓存时先 os.path.isfile 复核，失效即剔除并重新解析（Python 卸载/移动后不再返回死路径） |
+| ⑤ 启动不查存活 | 新增 cfg.probe_started(proc, wait=1.5)：controller 后台线程探、命令层同步探并回传 alive/exit_code，失败时状态栏/返回体出声（pythonw 立即崩溃不再显示「已启动」） |
+| ⑥ 注释声称无副作用 | 选择**改注释**（不改结构）：build_launch_command / launch_spec docstring 写明「非零副作用：源码版解析解释器，最多 2 个子进程，8s/5s 上限，结果缓存并复核」，并解释为何必须同步（解析须与本次启动绑定）；同时启动器超时 20s→8s、兜底 10s→5s |
+| ⑦ 版本口径残留 | README（3.12→3.13、py -3.12→py -3.13）、Loom.py shebang/提示、release_github 的 VK 旧表述与 or '3.12'→'3.13'、LoomHub 5 处启动说明统一到 3.13；相关 docstring 改为「源码引擎按 python_version 精确挑、回退默认」 |
+| ⑧ 场景版本不一致 | 新增 cfg.scene_version()（以 sceneio.SCENE_VERSION 为单一事实源）；controller.new_scene_file 由 8 → scene_version()，commands 的 EMPTY_SCENE 写入时覆盖为 scene_version() |
+
+### 16.1 新增断言（test_hub_python_version.py 扩到 22 条）
+
+    ① 旧错误载荷不在代码里 + 新载荷真能跑出 x.y
+    ② launch_spec 返回 python_note、launch_engine 透传、启动后回报 alive/exit_code
+    ③ 文案区分「引擎要求」与系统默认（旧文案已消失）+ NovaHubGUI 同步
+    ④ 缓存指向已删除文件 -> 绝不返回死路径（本机真装了 3.13，则返回真实路径）
+    ⑤ 立即退出 -> alive=False/exit_code=1；存活 -> alive=True
+    ⑧ controller 与 commands 新建场景版本都 == sceneio.SCENE_VERSION（实跑 10）
+
+### 16.2 实跑
+
+    test_hub_python_version.py / test_hub.py / test_hub_controller.py / test_hub_eai.py /
+    test_hub_interp_switch.py / test_hub_interp_cache.py / test_hub_update.py
+    全部 exit=0 FAIL=0，且无 Traceback 噪音；py_compile 通过
+
+### 16.3 因 ⑧ 需要同步的旧断言（登记）
+
+test_hub.py / test_hub_controller.py 里 3 条「v8 空场景」断言改为 cfg.scene_version()：
+它们原本把 controller 的 v8 写死为契约，而 sceneio 现行是 v10；现在以 sceneio 为单一事实源。

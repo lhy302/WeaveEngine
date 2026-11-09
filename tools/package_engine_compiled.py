@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""打「编译版」引擎包（2026-11-08 新增）。
+r"""打「编译版」引擎包（2026-11-08 新增）。
 
 与 package_engine.py 的区别：**不含嵌入式 Python、不含 .py 源码**，主程序是 Nuitka 编出的
 Loom.exe（编辑器）+ build_game.exe（游戏构建器）。运行时通过 Hub 的 main_exe 字段识别。
@@ -86,6 +86,16 @@ def main():
               '  Nuitka 构建必须显式带 --enable-plugin=pyside6（漏了 Loom.exe 启动即崩）\n'
               '  dist: %s' % (', '.join(_bad), args.editor_dist))
 
+    _mode_bad = PE.build_info_problems(os.path.dirname(os.path.abspath(args.builder_exe)))
+    if _mode_bad:
+        _fail('构建器产物档位不合格: %s\n  exe: %s'
+              % ('; '.join(_mode_bad), args.builder_exe))
+
+    _mode_bad = PE.build_info_problems(args.editor_dist)
+    if _mode_bad:
+        _fail('编辑器 dist 档位不合格: %s\n  dist: %s'
+              % ('; '.join(_mode_bad), args.editor_dist))
+
     _bloat = PE.editor_dist_bloat(args.editor_dist)
     if _bloat:
         _fail('编辑器 dist 含可选重包: %s\n'
@@ -98,6 +108,10 @@ def main():
               '显式传 --allow-missing-runtime 才允许出不带运行时的精简探针包')
     slim = runtime is None
     if runtime is not None:
+        _mode_bad = PE.build_info_problems(runtime)
+        if _mode_bad:
+            _fail('播放器运行时档位不合格: %s\n  dist: %s'
+                  % ('; '.join(_mode_bad), runtime))
         _bad = PE.runtime_layout_problems(runtime)
         if _bad:
             _fail('播放器运行时布局不符: %s\n  dist: %s'

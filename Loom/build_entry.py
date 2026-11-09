@@ -335,9 +335,25 @@ if __name__ == "__main__":
             bench_scene = os.path.join(
                 os.path.dirname(os.path.abspath(sys.argv[0])), bench_scene)
         if not os.path.isfile(bench_scene):
-            print("[错误] 场景不存在: %s" % bench_scene)
+            print("[错误] 场景不存在: %s" % bench_scene, file=sys.stderr)
             sys.exit(1)
-        _bench_scene(bench_scene, n_frames=bench_frames)
+        # 2026-11-09: release 档无控制台, 失败曾"静默 exit 1"。这里强制:
+        # traceback → stderr + 退出码 2 + bench_error.txt (用户目录), 三处留证。
+        try:
+            _bench_scene(bench_scene, n_frames=bench_frames)
+        except Exception:
+            import traceback as _tb
+            _text = _tb.format_exc()
+            print(_text, file=sys.stderr)
+            try:
+                _bench_dir = os.path.dirname(_bench_result_path()[0])
+                _err = os.path.join(_bench_dir, 'bench_error.txt')
+                with open(_err, 'w', encoding='utf-8') as _f:
+                    _f.write(_text)
+                print('[bench] 失败详情已写: %s' % _err, file=sys.stderr)
+            except Exception:
+                pass
+            sys.exit(2)
         sys.exit(0)
 
     try:

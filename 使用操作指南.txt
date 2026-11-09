@@ -31,7 +31,13 @@ Loom 使用操作指南 (2026-08-11, 原名 3D引擎)
   停止启动** (打印 GL 版本/显卡/驱动 + 提示, 编辑器还会弹窗), 不会黑屏空转;
   启动时看到 [GL] 开头的诊断, 先更新显卡驱动; 显卡确实不支持则改用 Vulkan 后端:
     py -3.13 "Loom\Loom.py" --backend vulkan        (或设置 render_api=vulkan)
-  (Vulkan 后端需驱动支持 Vulkan 1.1+; 两条后端的场景/脚本/UI 契约完全一致)
+  Vulkan 后端要求 Vulkan 1.1+ (wgpu-native 地板; Intel 核显需 Skylake 6 代+,
+  且驱动为 2018 年之后的版本)。VK 初始化失败时 (无 loader / 无适配器 /
+  apiVersion < 1.1 / 设备创建失败): 打印 [VK] 诊断 (设备/驱动/apiVersion) + 弹窗,
+  并把 游戏设置.json 的 render_api 自动改写为 opengl, **同进程**改用 OpenGL 4.3
+  继续运行 (旧行为"崩一次"已废止); GL 也不可用则打印两条原因后退出。
+  想固定回 VK: 设置面板或 游戏设置.json 把 render_api 改回 vulkan 即可。
+  (两条后端的场景/脚本/UI 契约完全一致; 一次启动内只会自动降级一次)
 
 启动 Loom 解释器 (在项目根下运行):
   py -3.13 "Loom\Loom.py"                    打开编辑器 (默认 = LoomGUI, Qt 原生界面)
@@ -423,6 +429,23 @@ LoomHub = 项目管理器 ("解释器名 + Hub", 类似 Unity -> Unity Hub)。
               ModuleNotFoundError: filedialog 的教训; 记忆
               3d-engine-packaging-nuitka 有完整命令)
     玩家运行时 py -3.13 build_game.py --build-runtime (内部用 sys.executable 调同样命令)
+
+  两档构建 (2026-11-09 定案; 日常别再手敲上面长命令, 用工具):
+    dev     py -3.13 tools/build_engine.py --mode dev
+            → --windows-console-mode=force (带控制台: print / traceback 可见)
+            → C:\loom_build\engine_dev / builder_dev / runtime_dev
+            → 只供内部诊断; 产物 build_info.json 标 mode=dev, 不可发布
+    release py -3.13 tools/build_engine.py --mode release
+            → --windows-console-mode=disable (无控制台)
+            → C:\loom_build\engine / builder / Loom\player_runtime
+            → 可被 tools/package_engine_compiled.py 消费 (打包器只收 mode=release)
+    工具自己进 vcvars64, 打印 档位 / cl / python / nuitka, 旧 dist 自动挪 .__prev;
+    dev 与 release 目录物理分开 → 不会出现"拿诊断版当发布包"。
+    工具还会把 ckernels / core_components / scripts / GUI / assets / 设置.json 一并
+    塞进 dist（--include-data-dir + 构建后补拷 *.dll），保证**裸 dist 自洽**：手敲
+    上面命令漏了这些，编译版 `--bench` 会 "loom_kernels.dll 未找到" 直接退出。
+    `--bench` 失败约定（2026-11-09）：traceback 打 stderr + 退出码 2 +
+    详情写 %LOCALAPPDATA%\Loom\bench\bench_error.txt（release 无控制台也能查）。
 
   回滚到 Python 3.12 (2026-11-09 主线迁 3.13 的配套):
     三件产物用同参数 + py -3.12 重打即可; 3.12 依赖快照见

@@ -85,6 +85,8 @@ QT_REQUIRED_PATHS = (
     'PySide6',
     os.path.join('PySide6', 'qt-plugins'),
     os.path.join('PySide6', 'qt-plugins', 'platforms', 'qwindows.dll'),
+    os.path.join('ckernels', 'loom_kernels.dll'),
+    'core_components',
 )
 PYGAME_MIN_DLLS = 15
 
@@ -102,6 +104,27 @@ def editor_dist_bloat(dist):
             if os.path.isdir(os.path.join(dist, name))]
 
 
+def build_info_problems(directory, require_mode='release'):
+    """产物档位校验：dev 产物（带控制台）不允许进发布包。
+
+    2026-11-09 两档构建: tools/build_engine.py 会在产物目录写 build_info.json，
+    打包器只接受 mode=release 的产物；缺失同样拒绝（防止手工编的 dev 版混入）。
+    """
+    path = os.path.join(directory, 'build_info.json')
+    if not os.path.isfile(path):
+        return ['缺 build_info.json（请用 tools/build_engine.py --mode release 构建）']
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            info = json.load(f)
+    except Exception as e:
+        return ['build_info.json 读取失败: %r' % (e,)]
+    mode = info.get('mode')
+    if mode != require_mode:
+        return ['产物档位是 %r（要求 %r；dev 带控制台，不可发布）'
+                % (mode, require_mode)]
+    return []
+
+
 def runtime_layout_problems(dist):
     """播放器运行时 dist 的 pygame 依赖布局，返回问题列表（空=通过）。"""
     problems = []
@@ -115,6 +138,9 @@ def runtime_layout_problems(dist):
                             % (len(dlls), PYGAME_MIN_DLLS))
     if os.path.isfile(os.path.join(dist, 'SDL2.dll')):
         problems.append('SDL2.dll 仍在 dist 根 (旧布局残留)')
+    for rel in (os.path.join('ckernels', 'loom_kernels.dll'), 'core_components'):
+        if not os.path.exists(os.path.join(dist, rel)):
+            problems.append('缺 %s（原生组件未随 dist，裸 dist 跑不起来）' % rel)
     return problems
 
 

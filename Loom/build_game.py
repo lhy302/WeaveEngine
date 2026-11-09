@@ -131,7 +131,14 @@ def _resolve_runtime(runtime_arg):
 
 
 def _build_runtime():
-    """Nuitka 打包玩家运行时 (game_player.py -> 玩家运行时/MyGame.exe + 运行库)."""
+    """Nuitka 打包玩家运行时 (game_player.py -> 玩家运行时/MyGame.exe + 运行库).
+
+    2026-11-09 两档构建: 环境变量覆盖（由 tools/build_engine.py 设置）——
+      LOOM_BUILD_CONSOLE_MODE : force(dev, 带控制台) | disable(release)
+      LOOM_BUILD_RUNTIME_DIR  : 产物根目录（dev 进 C:\loom_build\runtime_dev）
+    """
+    console_mode = os.environ.get('LOOM_BUILD_CONSOLE_MODE', 'disable')
+    out_root = os.environ.get('LOOM_BUILD_RUNTIME_DIR') or DEFAULT_RUNTIME_DIR
     cmd = [sys.executable, '-m', 'nuitka', '--mode=standalone', '--msvc=latest',
            '--assume-yes-for-downloads', '--enable-plugin=tk-inter',
            # 2026-11-07: wgpu(Vulkan) 需要 resources/combined_header.h 等数据文件，
@@ -140,8 +147,8 @@ def _build_runtime():
            # 4.x 会对它报 "Failed to locate package directory"，已移除（数据在 wgpu 里）。
            '--include-package-data=wgpu',
            # Nuitka 2.7 起 --windows-disable-console 已弃用，4.x 将删
-           '--windows-console-mode=disable',
-           '--output-dir=%s' % DEFAULT_RUNTIME_DIR,
+           '--windows-console-mode=%s' % console_mode,
+           '--output-dir=%s' % out_root,
            '--output-filename=MyGame.exe',
            os.path.join(BIN_DIR, 'game_player.py')]
     # 2026-11-07: wgpu-native 的 DLL 不是 package-data, 必须显式带进 dist,
@@ -155,11 +162,27 @@ def _build_runtime():
             print('包含 wgpu-native DLL:', _dll)
     except Exception as _e:
         print('警告: 未包含 wgpu-native DLL (%r)' % (_e,))
+    # 2026-11-09 产物自洽: 原生组件目录随 dist 分发, 裸 dist 也能跑
+    # (游戏发布时 build_game 仍会再拷一份到发布根, 幂等)。
+    for _d in ('ckernels', 'core_components'):
+        _p = os.path.join(BIN_DIR, _d)
+        if os.path.isdir(_p):
+            cmd.append('--include-data-dir=%s=%s' % (_p, _d))
     print("打包玩家运行时:", ' '.join(cmd))
     subprocess.check_call(cmd)
-    exe = os.path.join(DEFAULT_RUNTIME_DIR, 'game_player.dist', 'MyGame.exe')
+    # Nuitka 4.x --include-data-dir 会跳过 *.dll, 构建后补拷原生目录, 保证裸 dist 自洽
+    for _d in ('ckernels', 'core_components'):
+        _src = os.path.join(BIN_DIR, _d)
+        if os.path.isdir(_src):
+            _dst = os.path.join(out_root, 'game_player.dist', _d)
+            shutil.copytree(_src, _dst, dirs_exist_ok=True)
+    exe = os.path.join(out_root, 'game_player.dist', 'MyGame.exe')
     if not os.path.isfile(exe):
         raise SystemExit("打包意外, 未找到: %s" % exe)
+    for _need in ('ckernels\\loom_kernels.dll', 'core_components'):
+        if not os.path.exists(os.path.join(out_root, 'game_player.dist', _need)):
+            raise SystemExit("打包产物不自洽, 缺 %s（ckernels/core_components 未随 dist）"
+                             % _need)
     print("玩家运行时已生成:", exe)
 
 
@@ -194,6 +217,12 @@ def main():
 
     if args.build_runtime:
         _build_runtime()
+        # 2026-11-09: 只给了 --build-runtime 时, 构建完运行时即结束。
+        # 旧行为会继续走游戏打包 (缺 场景.json -> exit 1), 让
+        # tools/build_engine.py 误判"运行时构建失败"。
+        if args.output is None and args.scene is None and args.game_scripts is None:
+            print("[build_game] 仅构建运行时完成（未指定 --output/--scene，跳过游戏打包）")
+            return
 
     # 1) 场景 (明文开发者文件 -> 读入内存)
     scene_json = args.scene or os.path.join(BIN_DIR, '场景.json')

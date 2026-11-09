@@ -413,6 +413,34 @@ python -m nuitka --standalone --msvc=latest --assume-yes-for-downloads --enable-
 
 **回滚点**：`C:\loom_build\pre_py313_freeze.txt`（3.12 依赖+产物路径）、`C:\loom_build\post_py313_freeze.txt`、`C:\loom_build\engine\build_entry.dist.__py312`、`C:\loom_build\builder\build_game.exe.__py312`、`Loom/player_runtime/game_player.dist.__py312`、`tools/dist/Loom-0.1.0.beta6.zip`（3.13 版）。
 
-**裁决（2026-11-09）**：人类**接受 −6%~−9% 物理 FPS 换 Python 3.13**，3.13 主线保留，不整体回滚；FPS 门禁记为"有条件豁免"。遗留观察项：物理桥（`physics_bridge` / culverin 步进）在 3.13 下的 1ms 级开销未定位，后续若做性能专项可 profile 后补回；产物与当前工作树一致（业务文件最后修改 21:06–21:09，三件产物 21:45–22:13 之后生成，无需重打）。
+**裁决（2026-11-09）**：人类**接受 −6%~−9% 物理 FPS 换 Python 3.13**，3.13 主线保留，不整体回滚；FPS 门禁记为"有条件豁免"。
+
+---
+
+## 附录 E：构建档位落地 + 编译版 bench 静默失败根因（2026-11-09）
+
+**根因（已实锤）**：Nuitka standalone **不会**把运行期数据目录打包进 dist。编辑器 dist 缺 `ckernels/loom_kernels.dll`，而 `fastpath.py`（B1 退役后）是**硬加载** → `RuntimeError: ckernels 官方组件加载失败` → 进程 exit 1。release 档 `--windows-console-mode=disable` 无控制台，traceback 无人接收，于是表现为"静默 exit 1"。
+- 源码版能跑：仓库 `Loom/ckernels` 就在旁边；
+- 安装版能跑：`package_engine_compiled` 的 `DATA_DIRS` 会把 ckernels 复制进 zip；
+- **裸 dist 是唯一断点** → 只有"直接跑 dist 里的 Loom.exe --bench"会炸。
+
+**修复（构建/打包/断言，未动引擎业务逻辑）**
+1. `tools/build_engine.py`（新增）：两档构建 + 自己进 vcvars64 + 打印档位/cl/python/nuitka + 旧 dist 挪 `.__prev` + **数据目录内嵌**（ckernels/core_components/core_plugins/plugins/scripts/GUI/assets/设置.json/输入配置.default.json）。
+2. Nuitka 4.x 的 `--include-data-dir` 会**跳过 `*.dll`**（实测 core_components 6 个 DLL 全丢）→ 构建后再整目录补拷一次，并以 `ckernels/loom_kernels.dll`、`core_components`、`PySide6/qt-plugins/platforms/qwindows.dll` 作硬断言。
+3. `Loom/build_game.py`：运行时 dist 同样内嵌 ckernels/core_components（构建后补拷 + 断言）；`--build-runtime` 单独使用时构建完即返回（旧行为会继续走游戏打包而 exit 1，导致工具误判）。
+4. 档位隔离：dev 产物写 `C:\loom_build\*_dev`、`--windows-console-mode=force`；release 写正式目录、`disable`。每个产物目录写 `build_info.json`（mode/console/packageable/python/nuitka/built_at）。
+5. `package_engine_compiled.py` 只接受 `mode=release`（编辑器/构建器/运行时三处都校验；dev 实测被拒 exit 1）。
+6. `--bench` 失败契约：traceback → stderr + **退出码 2** + `%LOCALAPPDATA%\Loom\bench\bench_error.txt`（release 无控制台也能查）。
+
+**实测（编译版，300 帧）：**
+| 档位 | 验证 | FPS | TPS |
+|---|---|---|---|
+| dev（控制台） | stdout 完整输出阶段表，exit 0 | **75.9** | **30.21** |
+| release（无控制台） | 写 bench_result.txt，exit 0 | **76.7** | **30.22** |
+| 失败路径（坏场景） | stderr traceback + exit **2** + bench_error.txt | — | — |
+| 负向打包（dev dist） | 被拒：档位 'dev' 要求 'release'，exit 1 | — | — |
+
+**产物变化**：编辑器 dist 141.6→**144.1MB**、运行时 139.8→**142.3MB**（内嵌数据目录 +2.5MB×2）、构建器 22.77MB；发布包 127.65→**129.72MB**（+1.6%，仍含包根 DATA_DIRS 的一份冗余，属可接受冗余）。
+遗留观察项：物理桥（`physics_bridge` / culverin 步进）在 3.13 下的 1ms 级开销未定位，后续若做性能专项可 profile 后补回；产物与当前工作树一致（业务文件最后修改 21:06–21:09，三件产物 21:45–22:13 之后生成，无需重打）。
 
 
