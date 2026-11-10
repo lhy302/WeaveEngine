@@ -12,6 +12,7 @@ mixin 只通过 self 按需访问 (语义与拆分前逐位一致)。
 """
 
 import math
+import weakref
 
 from loom_components import evaluate_animations, physics_disabled_by_env
 
@@ -100,8 +101,15 @@ class FrameComponentMixin:
         stats = evaluate_animations(self.models, dt, physics_available=phys_ok)
         # R6 V-08: 回退驱动的这批物体要在**同一帧**的物理步里被排除,
         # 否则动画位姿 + legacy 物理位姿叠加 (偏移每帧线性增长)。
-        self._anim_fallback_models = stats.get('fallback_models') or ()
+        # R6 F-03: 用 WeakSet 而非 list —— 播放中删掉的模型不会因为这张名单
+        # 被强引用而滞留 (物理侧 set(weakset) 只取仍存活的对象)。
+        self._anim_fallback_models = weakref.WeakSet(
+            stats.get('fallback_models') or ())
         return stats
+
+    def _clear_anim_fallback(self):
+        """清空"动画回退驱动"名单 (F-03: 播放开始/停止时调用, 不留跨会话引用)."""
+        self._anim_fallback_models = ()
 
     def _call_collision_cb(self, m, hook, other):
         """调物体上所有脚本的碰撞回调 (坏脚本标记不崩帧)."""

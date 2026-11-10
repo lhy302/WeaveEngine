@@ -265,8 +265,13 @@ for _ in range(20):
 ms_old = (time.perf_counter() - t0) / 20 * 1000.0
 print('     500 动画物体: 旧逐物体 %.3f ms / 新批量 %.3f ms (%.1fx)'
       % (ms_old, ms_new, ms_old / ms_new if ms_new > 0 else 0.0))
-check('② 500 动画物体 ≤ 2.0 ms/逻辑帧 (旧实现 12.7ms 量级)', ms_new <= 2.0,
-      'new=%.3f ms' % ms_new)
+# R6 F-02: 门禁口径与实测/承诺统一 —— 设计目标是 ≤1.0ms/逻辑帧，实测
+# 1.42-1.69ms **未达成**（剩余成本=两个不可向量化的逐物体 Python 循环
+# ≈0.80ms + GC ≈0.24ms；要真到 ≤1ms 需 animator 状态 SoA + 活跃集缓存，
+# 属批次2 重构）。因此这里只做"稳定门禁"2.0ms + 相对旧实现 ≥5x 的双重断言，
+# 不再用 2.0ms 冒充 1.0ms 的承诺。
+check('② 500 动画物体 ≤ 2.0ms 稳定门禁 (实测≈1.5ms; ≤1.0ms 目标未达成, 见上)',
+      ms_new <= 2.0, 'new=%.3f ms' % ms_new)
 check('② 批量至少快 5x', ms_new * 5.0 <= ms_old, '%.2fx' % (ms_old / ms_new))
 
 # ============================================================================
@@ -664,7 +669,8 @@ check('⑥ 版本比较: beta6 < beta7 < beta10 < 0.1.0',
       and S.version_lt('0.1.0.beta10', '0.1.0'))
 check('⑥ 版本比较: 正式版 0.1.0 不 < beta6',
       S.version_lt('0.1.0', '0.1.0.beta6') is False)
-check('⑥ 无法解析的版本号不拦 (只告警)', S.version_lt('abc', '99.0.0') is False)
+check('⑥ version_lt 对不可解析返回 False (低层判定; 要求侧由闸门拒绝, 见 ⑨)',
+      S.version_lt('abc', '99.0.0') is False)
 
 # ============================================================================
 print('---- ⑦ R5-02 审查回归 (P-01/P-02/P-04/P-05/P-06/P-07) ----')
@@ -1097,6 +1103,81 @@ _nested3.frames[0]['position'][0][0] = 77.0
 check('⑧ V-12 改模型嵌套数组不污染快照',
       abs(float(_cp62.frames[0]['position'][0][0]) - 1.0) < 1e-12,
       str(_cp62.frames[0]['position'][0]))
+
+print()
+print('---- ⑨ R6 F-02/F-03 (版本解析 fail-open + 回退名单弱引用) ----')
+
+# ---- F-02: '0.1.0-beta6' 可解析; 不可解析的要求侧必须拒绝 (不再 fail-open) ----
+check('⑨ F-02 连字符版本可解析 (= 点分版本)',
+      S.parse_version('0.1.0-beta6') == S.parse_version('0.1.0.beta6'),
+      '%r vs %r' % (S.parse_version('0.1.0-beta6'),
+                    S.parse_version('0.1.0.beta6')))
+check('⑨ F-02 连字符版本参与比较 (beta5 < beta6)',
+      S.version_lt('0.1.0.beta5', '0.1.0-beta6') is True)
+_ok92 = True
+try:
+    S.check_engine_version({'min_engine_version': '0.1.0-beta6'})
+except Exception as exc:                        # noqa: BLE001
+    _ok92 = False
+    print('    连字符版本闸门异常:', exc)
+check('⑨ F-02 连字符版本闸门放行 (当前 beta6 >= 要求)', _ok92)
+_rej92 = False
+try:
+    S.check_engine_version({'min_engine_version': 'banana'})
+except S.SceneVersionError:
+    _rej92 = True
+check('⑨ F-02 不可解析的 min_engine_version -> 拒绝 (不再静默 fail-open)',
+      _rej92)
+_buf92 = io.StringIO()
+with contextlib.redirect_stdout(_buf92):
+    _r92 = S.check_engine_version({'min_engine_version': '0.1.0.beta6'},
+                                  engine_version='weird')
+check('⑨ F-02 引擎自身版本不可解析 -> 显式告警后放行 (不静默)',
+      _r92 is True and '无法解析' in _buf92.getvalue(),
+      _buf92.getvalue().strip()[:100])
+check('⑨ F-02 无版本要求的旧场景仍放行',
+      S.check_engine_version({'version': 11}) is True)
+
+# ---- F-03: 回退名单用 WeakSet; 删除模型不被强引用; 播放边界清空 ----
+import gc
+import weakref
+
+C.reset_anim_warn()
+e93 = make_engine()
+m93 = e93.add_model(create_cube(1.0), E.Point3D(0, 0, 0), E.Point3D(0, 0, 0))
+a93 = m93.add_animator(clips={'c': E.AnimationClip(once.frames, loop_mode='loop')},
+                       current='c')
+a93.playing = True
+m93.rigidbody = E.RigidbodyComponent()
+e93.update_animations(0.25)
+_fb93 = getattr(e93, '_anim_fallback_models', None)
+check('⑨ F-03 回退名单是弱引用容器',
+      isinstance(_fb93, weakref.WeakSet), type(_fb93).__name__)
+check('⑨ F-03 当前含 1 个被回退驱动的物体', len(_fb93) == 1,
+      str(len(_fb93) if _fb93 is not None else None))
+e93.models.remove(m93)          # 模拟"播放中删除物体"
+del m93, a93
+gc.collect()
+check('⑨ F-03 删除模型后名单不再强引用 (自动释放)', len(_fb93) == 0,
+      'len=%d' % len(_fb93))
+e94 = make_engine()
+m94 = e94.add_model(create_cube(1.0), E.Point3D(0, 0, 0), E.Point3D(0, 0, 0))
+a94 = m94.add_animator(clips={'c': E.AnimationClip(once.frames, loop_mode='loop')},
+                       current='c')
+a94.playing = True
+m94.rigidbody = E.RigidbodyComponent()
+e94.update_animations(0.25)
+e94._clear_anim_fallback()
+check('⑨ F-03 _clear_anim_fallback 清空名单 (停播/开播调用)',
+      getattr(e94, '_anim_fallback_models', None) == (),
+      str(getattr(e94, '_anim_fallback_models', 'missing')))
+# 掩码仍生效 (WeakSet -> set 后按对象身份匹配)
+e94._anim_fallback_models = weakref.WeakSet([m94])
+_y_before94 = m94.position.y
+e94.update_physics(0.25, events=False)      # 掩码命中 -> 位姿不动
+check('⑨ F-03 物理掩码按对象匹配 (WeakSet 输入不打偏)',
+      m94.position.y == _y_before94 and m94.rigidbody.velocity.y == 0.0,
+      'y=%r before=%r' % (m94.position.y, _y_before94))
 
 print()
 print('总结果:', 'ALL PASS ✅' if ok else '有 FAIL ❌')

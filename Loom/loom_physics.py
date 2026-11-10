@@ -514,12 +514,14 @@ class PhysicsMixin:
         # 选"掩码"而不是"把动画位姿当载荷喂给物理"的理由: 物理不可用时桥/解算
         # 本身已不可信, 只做"谁拥有位姿"的划分, 不改积分与碰撞语义, 其它刚体
         # 的步进逐位不变; 空名单时零开销。
-        skip = {id(x) for x in skip_models} if skip_models else None
+        # 名单是 WeakSet/list -> 这里取一次"仍存活对象"的集合 (强引用只在本次
+        # 物理调用内, 不跨帧; 已删模型不会被 WeakSet 迭代出来)。
+        skip = set(skip_models) if skip_models else None
         for m in self.models:
             rb = m.rigidbody
             if rb is None or rb.is_kinematic:
                 continue
-            if skip is not None and id(m) in skip:
+            if skip is not None and m in skip:
                 rb.velocity = Point3D(0.0, 0.0, 0.0)   # 防物理恢复时突跳
                 continue
             if rb.use_gravity:

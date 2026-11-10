@@ -117,6 +117,20 @@ check("A8 停止后物体数不变", len(app.models) == 1)
 check("A8 停止后脚本保留", m.scripts[0].script_id == 'rotate')
 check("A8 停止后脚本实例缓存已清", m.scripts[0]._script is None)
 
+# ---- A8-1b R6 F-03: 播放边界清空"动画回退驱动"名单 ----
+app.toggle_play()                                     # 进入
+app._anim_fallback_models = ('stale-model',)          # 模拟上一帧残留
+app.toggle_play()                                     # 退出
+check("A8-1b 停止播放清空动画回退名单",
+      getattr(app, '_anim_fallback_models', None) == (),
+      str(getattr(app, '_anim_fallback_models', 'missing')))
+app._anim_fallback_models = ('stale-model',)
+app.toggle_play()                                     # 再次进入
+check("A8-1b 进入播放也从空名单开始",
+      getattr(app, '_anim_fallback_models', None) == (),
+      str(getattr(app, '_anim_fallback_models', 'missing')))
+app.toggle_play()                                     # 退回编辑态, 不影响后续用例
+
 # ---- A8-2 播放期新增物体 -> 停止被移除 (绕过 guard 也清理) ----
 app.toggle_play()
 extra = add(app, create_cube(1.0), (9, 0, 0))

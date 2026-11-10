@@ -794,8 +794,14 @@ def evaluate_animations(models, dt, physics_available=True):
       · False = 物理后端缺失/被禁 (culverin 缺失、桥僵死): **回退动画驱动**,
                 否则这些物体会永久冻结 (审计 R5-02 P-06 / Q-C1-3=A)。
     单遍扫描 + 同片段分组批量求值; 慢路径与旧实现逐位一致 (对拍见
-    tests/test_animation_base.py)。性能: 500 动画物体 ~1ms/逻辑帧
-    (旧逐物体实现 12.7ms, docs/design/research_beta6_03_animation.md §1.11)。
+    tests/test_animation_base.py)。
+
+    性能 (R6 F-02 诚实口径, 不再写"≤1ms"): 500 动画物体实测 **1.42-1.69ms/
+    逻辑帧** (旧逐物体实现 12.7-13.1ms, 约 8-9x)。剩余成本是**两个无法向量化
+    的 Python 逐物体循环** (扫描推进 ~0.35ms + 写回 Point3D ~0.45ms) + GC
+    ~0.24ms; 想真到 ≤1ms 需要 animator 状态也 SoA + 活跃集缓存 (批次2 重构,
+    会动 play/stop 与 undo 链路), 不在本批风险面内。原始目标见
+    docs/design/research_beta6_03_animation.md §③ S2 (已标注未达成)。
     """
     global _ANIM_WARNED_DYNAMIC, _ANIM_WARNED_NO_PHYSICS, _ANIM_WARNED_BAD_SPEED
     stats = {'advanced': 0, 'blocked_dynamic': 0, 'fallback_dynamic': 0}

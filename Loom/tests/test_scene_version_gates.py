@@ -42,6 +42,10 @@ def _newer_scene_file(tmp):
 def _run_entry(args, timeout=90):
     env = dict(os.environ)
     env['LOOM_NO_DIALOG'] = '1'
+    # 子进程的 print 默认按控制台 codepage (GBK) 编码, 而本测试按 UTF-8 解码
+    # -> 中文断言 ("当前引擎"/"引擎版本") 在 run_all 管道下假失败。钉死子进程
+    # 输出编码 (与各测试自己的 stdout reconfigure 同款)。
+    env['PYTHONIOENCODING'] = 'utf-8'
     env.pop('LOOM_POST', None)
     p = subprocess.run([sys.executable] + args, cwd=ROOT, capture_output=True,
                        text=True, encoding='utf-8', errors='replace',
@@ -100,6 +104,7 @@ def t_remote_on_entry(tmp):
     scene = _newer_scene_file(tmp)
     env = dict(os.environ)
     env['LOOM_NO_DIALOG'] = '1'
+    env['PYTHONIOENCODING'] = 'utf-8'      # 同 _run_entry: 子进程输出按 UTF-8 编码
     env['LOOM_REMOTE_MODE'] = 'on'
     t0 = time.time()
     try:

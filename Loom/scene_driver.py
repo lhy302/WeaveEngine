@@ -22,6 +22,8 @@ from mesh import spec_to_mesh
 from engine import GameObject, Point3D, LightState, DEFAULT_ACTIONS
 # 2026-11-07 (_fix_summary §5 遗留): LOD 配置代 —— 只在 renderer.lod_* 变化时
 # 重建"配了 LOD 的模型"集合, 无 LOD 场景每帧 O(1) 早退 (不再全量扫描).
+import weakref
+
 from loom_components import (MeshRendererComponent, animator_from_dict,
                             evaluate_animations, physics_disabled_by_env)
 # 2026-11-06 相机对齐 (双后端): CameraState 实体 (纯数据类, 无 GL 依赖) ——
@@ -1345,7 +1347,9 @@ class SceneDriver:
         """
         stats = evaluate_animations(self.models, dt,
                                     physics_available=self._physics_available())
-        self._anim_fallback_models = stats.get('fallback_models') or ()
+        # R6 F-03: 弱引用容器 (播放中删模型不滞留; VK 侧无 legacy 物理, 仅留观测量)
+        self._anim_fallback_models = weakref.WeakSet(
+            stats.get('fallback_models') or ())
         return stats
 
     # ================ B1: 脚本 "引擎 API 最小面" (修 Vk 播放器脚本 broken) ================
