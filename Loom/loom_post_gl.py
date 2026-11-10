@@ -4,8 +4,9 @@
 链路（与 VK 侧逐公式一致，见 loom_post.py 模块头为什么 main/sky 不用改）：
   color.hdr(rgba16f, 含深度) -> bloom.half(0.5) [bright]
                              -> bloom.quarter(0.25) [down 4-tap]
-                             -> bloom.half [up, 加法混合]
                              -> color.ldr [tonemap: pow2.2 -> Reinhard -> pow(1/2.2)]
+  注：**没有独立 up pass** —— 上采样合成在 tonemap 里做（双线性读 0.25 目标）。
+  早先写的「up 加法混合」已删（GL blend_func 在该场景读不到也还原不了，会污染后续 UI）。
 
 所有目标都是全屏 quad 全覆盖写；size 变化时自动重建（ensure）。
 """
@@ -51,14 +52,6 @@ void main() {
            + texture(u_tex, v_uv + vec2(-o.x,  o.y)).rgb
            + texture(u_tex, v_uv + vec2( o.x,  o.y)).rgb;
     frag_color = vec4(c * 0.25, 1.0);
-}"""
-
-_UP = """#version 330
-in vec2 v_uv;
-out vec4 frag_color;
-uniform sampler2D u_tex;
-void main() {
-    frag_color = vec4(texture(u_tex, v_uv).rgb, 1.0);   // 目标用加法混合
 }"""
 
 _TONEMAP = """#version 330
@@ -185,10 +178,6 @@ class GLPostChain:
             # 4-tap 偏移按**源**（half）一个像素
             prog['u_texel'].value = (1.0 / max(1, half.width),
                                      1.0 / max(1, half.height))
-        elif source == 'post.up':
-            prog = self._program('up', _UP)
-            self.tex(QUARTER_TARGET).use(0)
-            prog['u_tex'].value = 0
         elif source == 'post.tonemap':
             prog = self._program('tonemap', _TONEMAP)
             self.tex(HDR_TARGET).use(0)
@@ -200,5 +189,5 @@ class GLPostChain:
         else:
             raise KeyError('未知后处理绘制源: %s' % (source,))
         self._vao[{'post.bright': 'bright', 'post.down': 'down',
-                   'post.up': 'up', 'post.tonemap': 'tonemap'}[source]].render(
+                   'post.tonemap': 'tonemap'}[source]].render(
             moderngl.TRIANGLES, vertices=6)

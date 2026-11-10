@@ -176,15 +176,15 @@ class RenderMixin:
                 self._skybox_valid, self._skybox_error = False, 'GL 纹理创建/绑定失败: %r' % (e,)
             self._sky_warn('bind', 'uniform/纹理绑定失败 (%r), 本帧跳过' % (e,))
             return
-        # 旧状态读取必须容错: 探针/桩 Context 可能没有 depth_mask（旧实现就是拿默认值）
+        # 2026-11-11 F-02: 删掉假 depth_mask 写（moderngl 5.12/5.13 没有该属性，旧代码
+        # 每帧 AttributeError 被吞，还留下「不写深度」的错觉）。天空靠「几何后画 +
+        # depth_func '<=' + z=1.0」通过，不依赖 depth mask。
         try:
-            old_depth_mask = self.ctx.depth_mask
             old_depth_func = self.ctx.depth_func
         except Exception as e:
-            self._sky_warn('state', '读 depth 状态失败 (%r) -> 用默认值' % (e,))
-            old_depth_mask, old_depth_func = True, '<'
+            self._sky_warn('state', '读 depth_func 失败 (%r) -> 用默认值' % (e,))
+            old_depth_func = '<'
         try:
-            self.ctx.depth_mask = False
             self.ctx.depth_func = '<='
             self.ctx.disable(moderngl.CULL_FACE)
             self._sky_vao.render(moderngl.TRIANGLES, vertices=6)
@@ -192,7 +192,6 @@ class RenderMixin:
             self._sky_warn('draw', '绘制失败 (%r), 本帧跳过' % (e,))
         finally:
             try:
-                self.ctx.depth_mask = old_depth_mask
                 self.ctx.depth_func = old_depth_func
                 self.ctx.enable(moderngl.CULL_FACE)
             except Exception as e:
@@ -340,10 +339,10 @@ class RenderMixin:
         self._world_ui_vbo.write(verts)
         self._world_ui_prog['u_view_proj'].write(
             np.ascontiguousarray(self._vp.astype('f4')).tobytes())
-        # 绘制（透明像素不遮挡场景 + 双面可见 + 不写深度）
-        old_depth_mask = self.ctx.depth_mask
+        # 绘制（透明像素不遮挡场景 + 双面可见）
+        # 2026-11-11 F-02: 删掉假 depth_mask 写（moderngl 无该 API）。不写深度由管线
+        # 状态与绘制顺序保证，不再靠一个永远无效的属性赋值。
         try:
-            self.ctx.depth_mask = False
             self.ctx.disable(moderngl.CULL_FACE)
             self.ctx.enable(moderngl.BLEND)
             self.ctx.blend_func = (moderngl.SRC_ALPHA,
@@ -351,7 +350,6 @@ class RenderMixin:
             c._gl_tex.use(0)
             self._world_ui_vao.render(moderngl.TRIANGLE_STRIP, vertices=4)
         finally:
-            self.ctx.depth_mask = old_depth_mask
             self.ctx.enable(moderngl.CULL_FACE)
             self.ctx.disable(moderngl.BLEND)
 

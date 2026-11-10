@@ -327,11 +327,12 @@ R04 复核时发现两件事，直接推翻了它自己的一条证据，也暴�
 
 ### 9.11 批次 A 阶段 2A 验收（2026-11-10）
 
-**产物**：`Loom/loom_pass.py`（PassSpec/FramePlan 纯数据 + 按参数缓存）、`Loom/loom_pass_gl.py`（GLTargetPool + GLFrameExecutor）、`Loom/tests/test_frame_plan.py`（27 项）；`loom_render.py` / `editor.py` 两条路径统一走 `frame_plan()` + 执行器，编辑器清屏字面量删除统一 `CLEAR_COLOR_RGBA`。
+**产物**：`Loom/loom_pass.py`（PassSpec/FramePlan 纯数据 + 按参数缓存）、`Loom/loom_pass_gl.py`（GLTargetPool + GLFrameExecutor）、`Loom/tests/test_frame_plan.py`（**现 49 项**，后续 2B1/2B2/崩溃回归持续追加）；`loom_render.py` / `editor.py` 两条路径统一走 `frame_plan()` + 执行器，编辑器清屏字面量删除统一 `CLEAR_COLOR_RGBA`。
 
 **验收（硬门）**：
 - 22 场景 **GL/参考 MAE 恒 0.000000**（逐像素与迁移前相同）；VK/参考、GL/VK 逐值等于旧基线；22/22 PASS、0 SKIP
-- 313 项测试 FAIL=0（frame_plan 27 / render_api 60 / ui 13 / vk_ui_input 32 / skybox_parity 23 / ab_gl_vk 23 / fallback_policy 44 / user_config 60 / wheel_backend 31）
+  （**现口径**：2B2 起场景集含 `ab_bloom` 共 **23 场景**，闸门数 24 项含 UI 子项）
+- 313 项测试 FAIL=0（frame_plan **现 49** / render_api 60 / ui 13 / vk_ui_input 32 / skybox_parity 23 / ab_gl_vk 23 / fallback_policy 44 / user_config 60 / wheel_backend 31；测试文件总数 **133**）
 - 抽象层单帧开销 **6.7 us**（plan 取缓存 0.3 us），约 0.8% 帧时
 - 编辑器 `--auto-close 3` 正常；主审复跑 frame_plan / ab_gl_vk / render_api / skybox_parity 全绿
 
@@ -369,7 +370,7 @@ R04 复核时发现两件事，直接推翻了它自己的一条证据，也暴�
 - **打包带资产**：`build_game.copy_project_assets` 拷 `Assets/`；runtime/run_player/vk_player/game_player 传 `assets_base`，包内场景不再按 CWD 解析
 - `agent_commands` 新增 asset_import/get/list/scene_assets_check；`set_texture/set_env` 项目内自动登记 guid
 
-**验收**：test_asset_guid 46 项 ALL PASS；test_sceneio / test_skybox_scene（beta5 语义未破）/ test_eai_real（102 命令）全绿；全量 **126 文件**绿；老 v8 场景仍可加载（bench FPS 74.0）。
+**验收**：test_asset_guid 46 项 ALL PASS；test_sceneio / test_skybox_scene（beta5 语义未破）/ test_eai_real（102 命令）全绿；全量 **133 个 test_*.py 文件**（数字随批次增长；本轮实测 13 套核心套件全绿）；老 v8 场景仍可加载（bench FPS 74.0）。
 
 **越界说明**：为双后端一致与包内 base_dir，实际改动含 `scene_driver/run_player/vk_player/game_player`（超出派单清单，主审复核后接受）。
 

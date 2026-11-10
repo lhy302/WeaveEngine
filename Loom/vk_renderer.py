@@ -30,6 +30,9 @@ from collections import OrderedDict
 import numpy as np
 
 from loom_shaders import CLEAR_COLOR_RGBA   # 2026-11-09 Q2=A
+# 2026-11-11 阶段 2a/2b: 目标语义名与后处理阶段/参数都来自**共享描述**（模块级导入，
+# 供 _ensure_post_targets / _record_post / draw_frame 共用；之前误放在 __init__ 局部）。
+from loom_post import HALF_TARGET, HDR_TARGET, QUARTER_TARGET, post_enabled, post_stage
 # 2026-11-09 C5=B: 上屏健康计数**唯一实现**在 loom_render.PresentHealth（阈值不复制）
 try:
     from loom_render import PresentHealth as _PresentHealth
@@ -472,7 +475,7 @@ struct SkyC {
 
 
 _POST_WGSL = """
-// 2026-11-10 阶段 2B2: bloom + tonemap（与 GL loom_post_gl 的 4 段逐公式一致）
+// 2026-11-10 阶段 2B2: bloom + tonemap（与 GL loom_post_gl 的三段链逐公式一致）
 // 目标里存的是 gamma 编码值 -> 统一先 pow(2.2) 反线性，最后 tonemap 再编码。
 struct P { p0: vec4f, p1: vec4f }
 @group(0) @binding(0) var t0: texture_2d<f32>;
@@ -515,10 +518,6 @@ fn to_linear(c: vec3f) -> vec3f {
           + textureSample(t0, samp, uv + vec2f(-o.x,  o.y)).rgb
           + textureSample(t0, samp, uv + vec2f( o.x,  o.y)).rgb;
     return vec4f(c * 0.25, 1.0);
-}
-
-@fragment fn fs_up(inp: FragIn) -> @location(0) vec4f {
-    return vec4f(textureSample(t0, samp, uv_of(inp.pos.xy)).rgb, 1.0);
 }
 
 @fragment fn fs_tonemap(inp: FragIn) -> @location(0) vec4f {
@@ -733,7 +732,6 @@ class VkRenderer:
         # 见 pbr_enabled property。
         self._pbr_enabled = (True if pbr_enabled is None else bool(pbr_enabled))
         # 2026-11-10 阶段 2B2: 后处理（HDR + bloom + tonemap）。LOOM_POST=0 时保持旧路径。
-        from loom_post import post_enabled
         self._post_on = post_enabled()
         self._frame_fmt = self.format        # 当前帧主链目标格式（post 开=rgba16float）
         self._post_t = None                  # HDR / 半 / 四分之一 目标（按尺寸懒建）
@@ -893,31 +891,66 @@ class VkRenderer:
                       'targets': [{'format': 'r32float'}]})
 
     # ---------------- 2026-11-10 阶段 2B2: 后处理（HDR + bloom + tonemap） ----------------
-    def _ensure_main_pipe(self, fmt):
-        """主链管线按**目标格式**缓存（HDR 化后不能用 self.format 那份）。"""
-        if getattr(self, '_main_pipe_fmt', None) == fmt and self._pipeline is not None:
+    _DEPTH_CMP = {'less': 'less', 'lequal': 'less-equal', 'always': 'always'}
+
+    def _ensure_main_pipe(self, fmt, depth=None, raster=None):
+        """主链管线按 (目标格式, depth 声明, raster 声明) 缓存。
+
+        2a: depth/raster 来自共享描述的 DepthState/RasterState —— VK 只把它们**烘焙**成
+        不可变管线（这是实现差异，不是语义重复）。
+        """
+        dkey = None if depth is None else (bool(depth.write),
+                                           self._DEPTH_CMP.get(depth.func, 'less'))
+        rkey = None if raster is None else (raster.cull, raster.front_face,
+                                            raster.topology)
+        if (getattr(self, '_main_pipe_fmt', None) == fmt
+                and getattr(self, '_main_pipe_dkey', None) == dkey
+                and getattr(self, '_main_pipe_rkey', None) == rkey and self._pipeline is not None):
             return
         d = self.device
         if getattr(self, '_pipeline_base', None) is None:
             self._pipeline_base = self._pipeline
             self._main_pipe_fmt = self.format
-        if fmt == self.format:
+        di = {'format': 'depth32float',
+              'depth_write_enabled': (True if dkey is None else dkey[0]),
+              'depth_compare': ('less' if dkey is None else dkey[1])}
+        pr = self._prim(raster)
+        if fmt == self.format and dkey is None and rkey is None:
             self._pipeline = self._pipeline_base
         else:
             shader = d.create_shader_module(code=_MAIN_VERT + _MAIN_FRAG)
             self._pipeline = d.create_render_pipeline(
                 layout=d.create_pipeline_layout(bind_group_layouts=[self._bgl]),
                 vertex=self._vertex_desc(shader, 'vs', inst=_INST_BYTES, nattr=10),
-                primitive=self._prim(),
-                depth_stencil={'format': 'depth32float',
-                               'depth_write_enabled': True, 'depth_compare': 'less'},
+                primitive=pr,
+                depth_stencil=di,
                 fragment={'module': shader, 'entry_point': 'fs',
                           'targets': [{'format': fmt}]})
         self._main_pipe_fmt = fmt
+        self._main_pipe_dkey = dkey
+        self._main_pipe_rkey = rkey
 
-    def _ensure_post_targets(self, w, h):
-        """HDR(全) / half(0.5) / quarter(0.25) 三张 rgba16float 目标（尺寸变化重建）。"""
-        if self._post_t is not None and self._post_t['size'] == (w, h):
+    def _ensure_post_targets_for(self, plan, w, h):
+        """2a: 目标尺寸来自**共享描述**的 TargetDecl.scale（不再由 VK 自己写 0.5/0.25）。"""
+        sizes = {}
+        for t in plan.targets:
+            try:
+                sc = float(getattr(t, 'scale', 1.0) or 1.0)
+            except (TypeError, ValueError):
+                sc = 1.0
+            sizes[t.name] = (max(1, int(round(w * sc))), max(1, int(round(h * sc))))
+        self._ensure_post_targets(w, h, sizes)
+
+    def _ensure_post_targets(self, w, h, sizes=None):
+        """HDR / half / quarter 三张 rgba16float 目标（尺寸变化重建）。
+
+        sizes: {语义目标名: (w,h)}，缺省 = HDR 全尺寸 / half 0.5 / quarter 0.25。
+        """
+        if sizes is None:
+            sizes = {HDR_TARGET: (w, h), HALF_TARGET: (max(1, w // 2), max(1, h // 2)),
+                     QUARTER_TARGET: (max(1, w // 4), max(1, h // 4))}
+        key = (w, h, tuple(sorted((k, tuple(v)) for k, v in sizes.items())))
+        if self._post_t is not None and self._post_t.get('key') == key:
             return
         d = self.device
         usage = wgpu.TextureUsage.RENDER_ATTACHMENT | wgpu.TextureUsage.TEXTURE_BINDING
@@ -927,12 +960,13 @@ class VkRenderer:
                                  format='rgba16float', usage=usage)
             return t, t.create_view()
 
-        hdr, hdr_v = _mk(w, h)
-        half, half_v = _mk(w // 2, h // 2)
-        quar, quar_v = _mk(w // 4, h // 4)
-        self._post_t = {'size': (w, h), 'hdr': hdr, 'hdr_view': hdr_v,
+        hdr, hdr_v = _mk(*sizes.get(HDR_TARGET, (w, h)))
+        half, half_v = _mk(*sizes.get(HALF_TARGET, (max(1, w // 2), max(1, h // 2))))
+        quar, quar_v = _mk(*sizes.get(QUARTER_TARGET, (max(1, w // 4), max(1, h // 4))))
+        self._post_t = {'key': key, 'size': (w, h), 'hdr': hdr, 'hdr_view': hdr_v,
                         'half': half, 'half_view': half_v,
-                        'quarter': quar, 'quarter_view': quar_v}
+                        'quarter': quar, 'quarter_view': quar_v,
+                        'sizes': sizes}
 
     def _ensure_post_pipes(self):
         if self._post_pipes is not None:
@@ -961,14 +995,10 @@ class VkRenderer:
                 primitive={'topology': 'triangle-list', 'cull_mode': 'none'},
                 fragment={'module': sh, 'entry_point': entry, 'targets': [tgt]})
 
-        add = {'color': {'src_factor': 'one', 'dst_factor': 'one',
-                         'operation': 'add'},
-               'alpha': {'src_factor': 'one', 'dst_factor': 'one',
-                         'operation': 'add'}}
+        # 无独立 up pass（上采样合成在 tonemap 里做，与 GL 同口径）
         self._post_pipes = {
             'bright': _pipe('fs_bright', 'rgba16float'),
             'down': _pipe('fs_down', 'rgba16float'),
-            'up': _pipe('fs_up', 'rgba16float', blend=add),
             'tonemap': _pipe('fs_tonemap', self.format),
         }
         self._post_layout = bgl
@@ -998,48 +1028,76 @@ class VkRenderer:
         self._post_groups = {
             'bright': _grp(t['hdr_view'], t['hdr_view'], self._post_bufs[0]),
             'down': _grp(t['half_view'], t['half_view'], self._post_bufs[1]),
-            'up': _grp(t['quarter_view'], t['quarter_view'], self._post_bufs[2]),
             # 缓冲索引必须与 _record_post 的 rows 顺序一致（bright=0, down=1, tonemap=2）
             'tonemap': _grp(t['hdr_view'], t['quarter_view'], self._post_bufs[2]),
         }
 
-    def _record_post(self, enc, view, w, h):
-        """在**同一个 encoder** 里追加 bloom + tonemap（最后一步写交换链 texture）。"""
+    def _record_post(self, enc, view, w, h, plan=None, post_specs=None):
+        """2a/2b: 后处理段由**共享描述**驱动（pass 顺序、目标语义名、参数都来自 loom_post）。
+
+        post_specs: plan 里 bloom.bright/down/tonemap 三个 pass（顺序即执行序）；
+        每个 pass 的目标视图按其 spec.target 语义名解析，绘制源按其 draws[0].source 选管线。
+        """
         import numpy as _np
         from loom_post import params as _params
         p = _params()
         t = self._post_t
         self._ensure_post_pipes()
         self._ensure_post_groups()
-        hw, hh = max(1, w // 2), max(1, h // 2)
-        qw, qh = max(1, w // 4), max(1, h // 4)
+        sizes = (t or {}).get('sizes') or {}
+        hw, hh = sizes.get(HALF_TARGET, (max(1, w // 2), max(1, h // 2)))
+        qw, qh = sizes.get(QUARTER_TARGET, (max(1, w // 4), max(1, h // 4)))
+        if post_specs is None:
+            post_specs = []
+        def _view_for(name):
+            if name == HDR_TARGET:
+                return t['hdr_view']
+            if name == HALF_TARGET:
+                return t['half_view']
+            if name == QUARTER_TARGET:
+                return t['quarter_view']
+            return view          # color.ldr -> 交换链纹理
+
+        _KEY = {'post.bright': 'bright', 'post.down': 'down', 'post.tonemap': 'tonemap'}
+        _BUF = {'bright': 0, 'down': 1, 'tonemap': 2}
         # params: (thr, knee, strength, exposure) + (target_w, target_h, src_texel_x, src_texel_y)
-        rows = [
-            ('bright', t['half_view'], (p['threshold'], p['knee'], p['exposure'], 0.0),
-             (hw, hh, 0.0, 0.0)),
-            ('down', t['quarter_view'], (0.0, 0.0, 0.0, 0.0),
-             (qw, qh, 1.0 / hw, 1.0 / hh)),
-            # 没有独立 up pass：tonemap 直接双线性上采样 quarter（与 GL 同口径）
-            ('tonemap', view, (0.0, 0.0, p['strength'], p['exposure']),
-             (w, h, 0.0, 0.0)),
-        ]
-        for i, (name, target, p0, p1) in enumerate(rows):
+        rows = []
+        for spec in post_specs:
+            src = spec.draws[0].source if spec.draws else ''
+            key = _KEY.get(src)
+            if key is None:
+                print('[vk] 未识别的后处理绘制源（跳过）:', src)
+                continue
+            if key == 'bright':
+                p0 = (p['threshold'], p['knee'], p['exposure'], 0.0)
+                p1 = (hw, hh, 0.0, 0.0)
+            elif key == 'down':
+                p0 = (0.0, 0.0, 0.0, 0.0)
+                p1 = (qw, qh, 1.0 / hw, 1.0 / hh)
+            else:                      # tonemap：直接双线性上采样 quarter（与 GL 同口径）
+                p0 = (0.0, 0.0, p['strength'], p['exposure'])
+                p1 = (w, h, 0.0, 0.0)
+            rows.append((key, _view_for(spec.target), _BUF[key], p0, p1))
+        for _key, _target, _buf, p0, p1 in rows:
             data = _np.array(list(p0) + list(p1), dtype='f4')
-            self.device.queue.write_buffer(self._post_bufs[i], 0, data.tobytes())
-        for i, (name, target, p0, p1) in enumerate(rows):
+            self.device.queue.write_buffer(self._post_bufs[_buf], 0, data.tobytes())
+        for _key, _target, _buf, p0, p1 in rows:
             rp = enc.begin_render_pass(color_attachments=[{
-                'view': target,
-                'load_op': wgpu.LoadOp.load if name == 'up' else wgpu.LoadOp.clear,
+                'view': _target, 'load_op': wgpu.LoadOp.clear,
                 'clear_value': (0.0, 0.0, 0.0, 1.0),
                 'store_op': wgpu.StoreOp.store}])
-            rp.set_pipeline(self._post_pipes[name])
-            rp.set_bind_group(0, self._post_groups[name], [], 0, 1)
+            rp.set_pipeline(self._post_pipes[_key])
+            rp.set_bind_group(0, self._post_groups[_key], [], 0, 1)
             rp.draw(3, 1, 0, 0)
             rp.end()
 
-    def _prim(self):
-        return {'topology': 'triangle-list', 'cull_mode': 'back',
-                'front_face': 'cw'}     # 引擎网格绕序 (ccw 会剔除 plane)
+    def _prim(self, raster=None):
+        """2a: 顶点装配/剔除来自共享描述的 RasterState（缺省 = 引擎既有约定）。"""
+        cull = 'back' if raster is None else raster.cull
+        front = 'cw' if raster is None else raster.front_face
+        return {'topology': 'triangle-list',
+                'cull_mode': None if cull == 'none' else cull,
+                'front_face': front}     # 引擎网格绕序 (ccw 会剔除 plane)
 
     def _vertex_desc(self, shader, entry, inst, nattr=12):
         bufs = [{'array_stride': _VERT_BYTES, 'step_mode': 'vertex',
@@ -1171,8 +1229,12 @@ class VkRenderer:
     def _ensure_sky(self, cube):
         """懒建天空盒 pipeline/bind group/cube 纹理 (cube 变化才重建)."""
         d = self.device
+        _sk = getattr(self, '_frame_sky_spec', None)
+        _dkey = None if (_sk is None or _sk.depth is None) else (
+            bool(_sk.depth.write), self._DEPTH_CMP.get(_sk.depth.func, 'always'))
+        _rkey = None if _sk is None else (_sk.raster.cull, _sk.raster.front_face)
         key = (id(cube), getattr(cube, 'guid', None), getattr(cube, 'size', 0),
-               getattr(self, '_frame_fmt', self.format))
+               getattr(self, '_frame_fmt', self.format), _dkey, _rkey)
         if self._sky_pipe is not None and self._sky_cube_key == key:
             return True
         faces = getattr(cube, '_faces', None)
@@ -1191,10 +1253,11 @@ class VkRenderer:
             self._sky_pipe = d.create_render_pipeline(
                 layout=d.create_pipeline_layout(bind_group_layouts=[bgl]),
                 vertex={'module': shader, 'entry_point': 'vs', 'buffers': []},
-                primitive={'topology': 'triangle-list', 'cull_mode': 'none',
-                           'front_face': 'cw'},
-                depth_stencil={'format': 'depth32float', 'depth_write_enabled': False,
-                               'depth_compare': 'always'},
+                # 2a: 天空的 depth/raster 也来自共享描述（缺省 = 原 VK 语义）
+                primitive=self._prim(_sk.raster if _sk is not None else None),
+                depth_stencil={'format': 'depth32float',
+                               'depth_write_enabled': (False if _dkey is None else _dkey[0]),
+                               'depth_compare': ('always' if _dkey is None else _dkey[1])},
                 fragment={'module': shader, 'entry_point': 'fs',
                           'targets': [{'format': getattr(self, '_frame_fmt', self.format)}]})
             self._sky_bgl = bgl
@@ -2029,6 +2092,17 @@ class VkRenderer:
                        if ui is not None else [])
         world_all = None
         world_id2i = None
+        # 2026-11-11 阶段 2a: 本帧由**共享描述** loom_pass.frame_plan() 驱动 ——
+        # 目标语义名 / pass 顺序 / depth-raster 声明 / 绘制源名都读同一份；VK 只保留实现
+        # （WGSL、r32float 阴影、f32[352] 参数块、天空在主 pass 内先画）。
+        from loom_pass import frame_plan
+        plan = frame_plan(include_shadow=bool(lights),
+                          include_sky=(sky is not None),
+                          include_world_canvas=bool(world_items),
+                          include_hud=bool(hud_lines),
+                          include_ui=(ui is not None),
+                          include_post=self._post_on)
+        self._frame_plan = plan
         if world_items:
             try:
                 world_all = world_matrices(models, interp=interp)
@@ -2135,8 +2209,9 @@ class VkRenderer:
             d.queue.write_buffer(self._inst_sha_buf2, 0,
                                  (_sha2 if _ident else _sha2[_order]).tobytes())
 
-        # ---- 阴影 pass (2026-11-07: 2 个槽位各烘一张 1024²) ----
-        if _dir_maps and vis:
+        # ---- 阴影 pass（2a：是否执行由 plan 的 shadow_maps pass 决定）----
+        _has_shadow = plan.pass_by_id('shadow_maps') is not None
+        if _has_shadow and _dir_maps and vis:
             enc = d.create_command_encoder()
             _u = np.zeros(24, dtype=np.float32)
             _u[0:16] = np.eye(4, dtype=np.float32).reshape(16)   # 平行光: 实例已含 VP
@@ -2165,7 +2240,7 @@ class VkRenderer:
 
         # ---- 点光 6 面阴影 pass (2026-11-06 对齐 GL) ----
         _psg = getattr(self, '_point_shadow_guid', None)
-        if _psg is not None and vis:
+        if _has_shadow and _psg is not None and vis:
             pv6 = self._light_vps.get(_psg)
             if pv6:
                 enc = d.create_command_encoder()
@@ -2228,16 +2303,21 @@ class VkRenderer:
                 self._present_err_logged = True
                 print('[vk] 上屏失败 (本局只报一次, 本帧跳过):', repr(_e))
             return
-        # 2026-11-10 阶段 2B2: 开后处理时主链写 HDR(rgba16float)，最后在**同一 encoder**
-        # 里追加 bloom + tonemap 写回交换链；LOOM_POST=0 时逐位保持旧路径。
-        if self._post_on:
-            self._ensure_post_targets(w, h)
+        # 2026-11-11 阶段 2a: 主链目标由 plan 的 main pass 声明决定（color.hdr / color.ldr），
+        # 尺寸与格式也来自 TargetDecl（scale/format），VK 不再自己判断「要不要 HDR」。
+        self._frame_sky_spec = plan.pass_by_id('sky')
+        _main_spec = plan.pass_by_id('main')
+        _main_decl = plan.target_by_name(_main_spec.target) if _main_spec else None
+        if _main_decl is not None and _main_decl.name == HDR_TARGET:
+            self._ensure_post_targets_for(plan, w, h)
             color_view = self._post_t['hdr_view']
-            self._frame_fmt = 'rgba16float'
+            self._frame_fmt = _main_decl.format
         else:
             color_view = view
             self._frame_fmt = self.format
-        self._ensure_main_pipe(self._frame_fmt)
+        self._ensure_main_pipe(self._frame_fmt,
+                              depth=(_main_spec.depth if _main_spec else None),
+                              raster=(_main_spec.raster if _main_spec else None))
         enc = d.create_command_encoder()
         rp = enc.begin_render_pass(color_attachments=[{
             'view': color_view, 'load_op': wgpu.LoadOp.clear,
@@ -2262,7 +2342,7 @@ class VkRenderer:
                         sky = _c
                 except Exception as e:
                     print('[vk] 取生效天空盒失败 (改用上层传入值):', repr(e))
-        if sky is not None:
+        if plan.pass_by_id('sky') and sky is not None:   # 2a: 天空 pass 由共享描述决定
             try:
                 if self._draw_sky(ctx, rp, vp, camera_pos, sky, w, h, tint=_tint,
                                   engine=engine):
@@ -2283,15 +2363,18 @@ class VkRenderer:
             rp.draw(nv, len(idxs), 0, _bstart[k])
         # 2026-11-06 R1: world Canvas quad, 与 GL 同位置 (几何/天空之后, HUD 之前).
         # 同 pass 深度附件 = 可被 3D 物体遮挡; 管线 depth_write=False (GL 同).
-        if world_items and world_all is not None:
+        if plan.pass_by_id('world_ui') and world_items and world_all is not None:
             try:
                 self._draw_world_quads(rp, world_items, world_all, world_id2i,
                                        vp, camera_pos, cam_basis)
             except Exception as e:
                 print('[vk] world Canvas quad 绘制失败 (跳过):', repr(e))
         rp.end()
-        if self._post_on:
-            self._record_post(enc, view, w, h)   # 同一 encoder, 帧内仍只 submit 一次
+        _post_specs = [p for p in plan.passes
+                       if p.id in ('bloom.bright', 'bloom.down', 'tonemap')]
+        if _post_specs:
+            # 2a: 后处理段的存在/顺序/目标也来自 plan（同一 encoder，帧内仍只 submit 一次）
+            self._record_post(enc, view, w, h, plan, _post_specs)
         d.queue.submit([enc.finish()])
         # 2026-11-09 C5=B: 主 pass 提交成功 -> 记一次上屏成功（连续失败清零）
         try:
@@ -2305,5 +2388,11 @@ class VkRenderer:
         # _draw_hud() -> ui.draw_all() 次序); 独立 pass/管线, 不与 3D 组混绑。
         # 2026-11-07 修复(P0): engine(脚本宿主) 必须透传 —— 否则 UI 事件派发
         # 拿不到 driver, 打包版(VK) 所有按钮点击无效。
-        self.draw_ui(view, w, h, ui=ui, hud_lines=hud_lines, hud=hud,
-                     engine=engine)
+        # 2a: HUD / UI 是否绘制由 plan 的 hud / ui pass 决定（顺序仍是 HUD 先、UI 后）
+        _want_hud = plan.pass_by_id('hud') is not None
+        _want_ui = plan.pass_by_id('ui') is not None
+        if _want_hud or _want_ui:
+            self.draw_ui(view, w, h,
+                         ui=(ui if _want_ui else None),
+                         hud_lines=(hud_lines if _want_hud else None),
+                         hud=hud, engine=engine)

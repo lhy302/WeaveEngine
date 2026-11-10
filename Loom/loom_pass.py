@@ -52,7 +52,7 @@ class RasterState:
     cull: Literal['none', 'back', 'front'] = 'back'
     front_face: Literal['cw', 'ccw'] = 'cw'
     topology: Literal['triangle-list', 'triangle-strip'] = 'triangle-list'
-    blend: Literal['none', 'alpha', 'additive'] = 'none'
+    blend: Literal['none', 'alpha'] = 'none'
 
 
 @dataclass(frozen=True)
@@ -78,7 +78,7 @@ class DrawCmd:
     """绘制源。S0-S2 只登记语义名，实际绘制仍由引擎现有实现提供（见 loom_pass_gl）。"""
     source: Literal['buckets', 'skybox', 'world_canvas', 'fullscreen',
                    'shadow_maps', 'hud', 'screen_ui',
-                   'post.bright', 'post.down', 'post.up', 'post.tonemap']
+                   'post.bright', 'post.down', 'post.tonemap']
     key: str | None = None
     count: int | None = None
     instances: int | None = None
@@ -169,7 +169,9 @@ def frame_plan(clear_color: Sequence[float] = CLEAR_COLOR_RGBA,
                include_ui: bool = False,
                include_post: bool = False) -> FramePlan:
     """构造一帧的 Pass 列表（编辑器 / 播放器共用）——**按参数缓存**，返回同一 frozen 对象。"""
-    _stage = post_stage() if include_post else 0     # 诊断分级（见 loom_post.post_stage）
+    _stage = post_stage() if include_post else 0     # 分级（见 loom_post.post_stage；0 = 关）
+    if _stage <= 0:
+        include_post = False                         # LOOM_POST_STAGE=0 -> 与 LOOM_POST=0 同义
     flags = (bool(include_sky), bool(include_world_canvas), bool(include_shadow),
              bool(include_hud), bool(include_ui), bool(include_post), _stage)
     if clear_color is CLEAR_COLOR_RGBA:      # 两条渲染路径都用默认常量 -> 走极速键
