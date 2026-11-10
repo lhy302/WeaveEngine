@@ -312,6 +312,22 @@ def t_post():
           all(p.pass_by_id(k).depth is not None
               and p.pass_by_id(k).depth.test is False
               for k in ('bloom.bright', 'bloom.down', 'tonemap')), '')
+    # 2026-11-10 发布阻塞项回归：moderngl 的 depth_func setter 只认符号（'<' '<=' '>' '>='）。
+    # 传 'less'/'always' 会在 C++ 层「返回错误但没设异常」-> 源码版 SystemError、
+    # 编译版(Nuitka) access violation。这里锁住：① 映射表只含符号；② 关深度时不设 depth_func。
+    check('F7a depth_func 映射只含 moderngl 认的符号',
+          set(LPGL._DEPTH_FUNC.values()) <= {'<', '<=', '>', '>='},
+          LPGL._DEPTH_FUNC)
+    log_f = []
+    eng_f = _FakeEngine(log_f)
+    ex_f = LPGL.GLFrameExecutor(eng_f)
+    ex_f._apply(frame_plan(include_post=True).pass_by_id('tonemap'))
+    check('F7b 后处理 pass（depth.test=False）不设置 depth_func',
+          not [c for c in eng_f.ctx.calls if c[0] == 'depth_func'],
+          eng_f.ctx.calls)
+    check('F7c 关深度时确实禁用了 DEPTH_TEST',
+          ('disable', moderngl.DEPTH_TEST) in eng_f.ctx.calls, eng_f.ctx.calls)
+
     p0 = frame_plan(include_post=False)
     check('F8 LOOM_POST 关闭时回到旧路径（主链直写 LDR）',
           p0.pass_by_id('main').target == 'color.ldr'

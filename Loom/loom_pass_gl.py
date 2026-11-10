@@ -17,7 +17,11 @@ import moderngl
 
 from loom_pass import SCREEN_TARGET
 
-_DEPTH_FUNC = {'less': '<', 'lequal': '<=', 'always': '*'}
+# moderngl 5.13 的 depth_func setter 只认符号（'<' '<= ' '>' '>='）；传 'less'/'always' 这类
+# 名字会在 C++ 层「返回错误但没设 Python 异常」-> SystemError；**编译版（Nuitka）下这一步
+# 直接 access violation（beta6 发布阻塞项根因，2026-11-10 实测栈：_safe_set -> depth_func）。
+# 因此只允许符号，且「深度测试关闭」时根本不设 depth_func（此时该值无意义）。
+_DEPTH_FUNC = {'less': '<', 'lequal': '<=', 'greater': '>', 'gequal': '>='}
 # moderngl 只有 CULL_FACE 开关 + front_face(绕序), **没有**「剔除前面」的独立开关
 # （无 moderngl.BACK/FRONT 常量）。S0-S2 只用到 none/back；front 明确拒绝而不是假装支持。
 _CULL_SUPPORTED = ('none', 'back')
@@ -139,9 +143,10 @@ class GLFrameExecutor:
         if spec.depth is not None:
             if spec.depth.test:
                 ctx.enable(moderngl.DEPTH_TEST)
+                # 只转发 moderngl 认的符号；声明里的 'always' 等语义在「关深度」时不需要落地。
+                _safe_set(ctx, 'depth_func', _DEPTH_FUNC.get(spec.depth.func, '<'))
             else:
                 ctx.disable(moderngl.DEPTH_TEST)
-            _safe_set(ctx, 'depth_func', _DEPTH_FUNC.get(spec.depth.func, '<'))
             # depth.write 是 advisory: moderngl 无 depth_mask，故意不处理（见模块头）
         cull = spec.raster.cull
         if cull == 'none':

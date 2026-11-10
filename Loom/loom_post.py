@@ -41,7 +41,18 @@ def _env_float(name, default):
 def post_enabled():
     """LOOM_POST=0/off/false/no 关闭（默认开启）。"""
     v = (os.environ.get('LOOM_POST') or '').strip().lower()
-    return v not in ('0', 'off', 'false', 'no')
+    return v not in ('0', 'off', 'false', 'no') and post_stage() > 0
+
+
+def post_stage():
+    """**诊断用**分级开关（2026-11-10 编译版崩溃二分；定稿前清理）。
+
+    LOOM_POST_STAGE: 1 = 只 HDR 目标 + tonemap；2 = +bright；3 = +down（全链，默认）。
+    """
+    try:
+        return max(1, min(3, int(os.environ.get('LOOM_POST_STAGE', '3'))))
+    except (TypeError, ValueError):
+        return 3
 
 
 def params():
