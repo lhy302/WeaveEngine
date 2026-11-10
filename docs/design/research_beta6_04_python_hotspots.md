@@ -763,4 +763,39 @@ AVX2 分派 `730671ac…` → **最终（provides + v1 + 边界修正）`7bf7a77
 `registry.json` provides = `['ckernels.aabbs', 'ckernels.collide', 'ckernels.bucket_pack']`，
 `official_manifest.py` 同批重生成。
 
+---
+
+## 附录 I：P0 修复 —— Nuitka 4.3.5 onefile 下 loom_kernels.dll 定位（2026-11-11）
+
+### I.1 现象与根因（实测）
+
+旧构建器（onefile）在本机装好 ckernels 的目录里跑 `--help` → **EXIT=1**，报错里两个候选路径
+都是 `%TEMP%\\onefile_245960_198233_*\\ckernels\\loom_kernels.dll`。
+根因：`fastpath` 只用 `sys.executable` 推安装目录；Nuitka 4.3.5 的 onefile 让
+`sys.executable` 指向**临时解包 exe**。对照 beta5 同目录 EXIT=0 ⇒ beta6 回归。
+
+### I.2 修法（`Loom/fastpath.py`，+83/−8）
+
+新增两个纯目录函数（可单测，不碰文件系统）：
+- `ckernels_search_dirs()` → `(dirs, dll_env)`，优先级：
+  ① `LOOM_CKERNELS_DIR`（可指目录或 DLL 本体；指向 DLL 且父目录名是 `ckernels` 时上跳到安装目录）
+  ② `__compiled__.containing_dir`（Nuitka 编译产物里的**原始 exe 目录**；走 `globals().get("__compiled__")`，防 Nuitka 常量折叠）
+  ③ `dirname(argv[0])` ④ `dirname(sys.executable)` ⑤ 模块目录（源码树兜底）
+- `ckernels_candidates()` → 逐目录两种投放形式（`<d>/ckernels/loom_kernels.dll` 与 `<d>/loom_kernels.dll`）
+- 启动失败信息改为三段：**搜索目录（按优先级）/ 尝试路径 / onefile 线索 + LOOM_CKERNELS_DIR 提示**
+
+> 另：构建器的 `build_game._bin_dir()` 已有同款 `__compiled__.containing_dir` 候选（HEAD 23b81c4 已含），本轮无需再改。
+
+### I.3 验证（真实编译产物）
+
+| 用例 | 命令 | 结果 |
+|---|---|---|
+| 安装布局 `--help` | `C:\\loom_build\\builder\\build_game.exe --help`（ckernels 同级） | **EXIT=0** |
+| 缺 DLL 的错误质量 | 同 exe 复制到空目录再跑 | EXIT=1，打印「搜索目录 ['C:\\loom_build\\p0bad', '…\\onefile_…']」+ 尝试路径 + 提示 |
+| 最小出包 | `build_game.exe --scene scene.json --output out --runtime <game_player.dist> --force --protection open --no-encrypt-content` | **EXIT=0**，产出 `MyGame.exe` + `游戏包.lsc` + `ckernels/` + `core_components/` |
+| 单测 | `tests/test_kernel_dll_lookup.py`（13 断言） | ALL PASS（含 onefile 模拟、env 目录/DLL 两写法、顺序与去重、错误文案） |
+
+构建命令：`py -3.13 tools/build_engine.py --mode release --what builder`（254 s，23.5 MB，console=disable）。
+
+
 
