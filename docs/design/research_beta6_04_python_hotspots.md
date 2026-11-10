@@ -716,3 +716,51 @@ scalar / avx2 / 分派版三路 min/max **逐字节相同**（max|diff|=0）。
 AVX2 分派 `730671ac…` → **最终（provides + v1 + 边界修正）`7bf7a7710e6479f034a264317c76ccbe6aecc1ccc7605e706ab65b2d05b8270f`**
 （registry.json 与 official_manifest.py 已同批重生成；`LOOM_DEV=1` 可跳过校验）。
 
+---
+
+## 附录 H：V-02 倒查补强（入口级对拍 + LOOM_NO_SIMD + 性能门禁，2026-11-10）
+
+> 倒查结论接受：D 批三个性能测试此前都是 **helper-only**（只调 `fastpath.*` / 私有 `_pose_rows`），
+> 既不经过生产入口、也不测回退开关、更没有性能门禁。本附录记录补强后的**两种口径**。
+
+### H.1 入口级对拍（新增，全部可复跑）
+
+| 测试 | 入口 | 断言 |
+|---|---|---|
+| `test_bucket_pack` | `loom_render.RenderMixin._prepare_bucket_frame`（真方法；仅 GL 资源用假 buffer/VAO） | `LOOM_BUCKET_PACK=1` vs `0` 下 main/sha **逐字节一致**（35 桶 / 490 实例）；剔除开启/关闭两档都比；并断言"确有桶 n_main<k"证明剔除真生效 |
+| `test_aabb_simd` | `loom_lighting.LightingMixin._aabbs_batched`（真方法；stub 只给 `_homogeneous_vertices` 与 thread-local staging） | scalar / avx2 / 分派三路 AABB 列表**逐位相等** |
+| `test_physics_pose_soa` | `PhysicsWorldBridge._dirty_mask_batch`（真方法；120 节点 + 父子树） | pose 开/关两路 **掩码 dict 全等 + 后态 `_last_sync` 全等**；并断言祖先传播真的发生 |
+
+### H.2 两种口径的实测（同机）
+
+| 指标 | helper 级（D1-D3 原口径） | 入口级（本次） |
+|---|---|---|
+| 桶打包 | 播放器 `buckets` 1.435 → 0.693 ms/帧（−52%） | `_prepare_bucket_frame` **0.366 → 0.247 ms/次**（比值 0.67） |
+| AABB | 微基准 V=2035,n=90：1.06 → 0.46 ms（2.29x） | `_aabbs_batched` **0.184 → 0.145 ms/批**（比值 0.79） |
+| 位姿脏检测 | 真场景 `_dirty_mask_batch` 2.47 → 1.74 ms/次 | 120 节点桩：**0.59 ms/次**（入口可达、掩码与属性链路径全等） |
+
+> 入口级比值不如 helper 级亮眼是正常的：入口还包含 gather / 视锥 / 逐桶循环等不随实现改变的部分。
+
+### H.3 `LOOM_NO_SIMD=1`（设计承诺已落地）
+
+`loom_kernels.c::_simd_impl()` 首次探测时读一次 `getenv("LOOM_NO_SIMD")`：
+等于 `"1"` 时强制标量，否则走 CPUID+XGETBV 判定（**运行中改 env 无效**，热路径零 getenv）。
+测试用子进程验证：`LOOM_NO_SIMD=1` → `aabbs_simd_impl()==0`；无该 env → 与 CPUID 判定一致。
+
+### H.4 性能门禁（CI 可抓回退）
+
+| 测试 | 门禁 | 实测/余量 |
+|---|---|---|
+| `test_bucket_pack` | 入口级 C ≤ **0.80×** Python 路径；绝对上限 12 ms | 0.67×（余量 ~20%） |
+| `test_aabb_simd` | 入口级 AVX2 ≤ **0.90×** 标量；绝对上限 40 ms | 0.79×（余量 ~12%） |
+| `test_physics_pose_soa` | `_dirty_mask_batch` ≤ **3.0 ms/次**（120 节点） | 0.59 ms（余量 5x） |
+
+门禁均为"同进程相邻测量"的相对值或宽松绝对值，避免机器负载误报；回退 20-40% 即被抓。
+
+### H.5 统一重钉
+
+最终 DLL（含 `LOOM_NO_SIMD`）：`95bc00bfeb9ca4fda67f3231afffd07a00aadae436abb01a145dd31df0bd0e5b`；
+`registry.json` provides = `['ckernels.aabbs', 'ckernels.collide', 'ckernels.bucket_pack']`，
+`official_manifest.py` 同批重生成。
+
+

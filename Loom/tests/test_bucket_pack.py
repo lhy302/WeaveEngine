@@ -166,6 +166,179 @@ def main():
         names.append(nm.decode('utf-8', 'replace'))
     check('⑧ provides 列表含 ckernels.bucket_pack', 'ckernels.bucket_pack' in names, names)
 
+    # ---------------- 入口级 (V-02 补): loom_render._prepare_bucket_frame ----------------
+    # 只替换 GL 资源 (假 buffer/VAO) —— 被验证的打包/上传逻辑走**真实**代码路径。
+    import time as _t
+    import types as _types
+    import loom_render
+
+    class _FakeBuf:
+        def __init__(self, size=0):
+            self.data = bytearray(size)
+
+        def write(self, src, offset=0):
+            b = bytes(memoryview(src)) if not isinstance(src, (bytes, bytearray)) else bytes(src)
+            need = offset + len(b)
+            if need > len(self.data):
+                self.data.extend(bytes(need - len(self.data)))
+            self.data[offset:need] = b
+
+        def read(self):
+            return bytes(self.data)
+
+    class _FakeCtx:
+        def buffer(self, data=None, reserve=None):
+            return _FakeBuf(reserve if reserve else (len(data) if data else 0))
+
+        def vertex_array(self, *a, **k):
+            return object()
+
+        def texture(self, *a, **k):
+            return None
+
+    class _Mat:
+        _sat_f32 = 1.0
+        _rgba = None
+        albedo = None
+        normal_map = None
+        env_map = None
+
+    class _Mesh:
+        def __init__(self, V, seed):
+            self.vertices = np.random.RandomState(seed).rand(V, 3)
+
+    class _Model:
+        def __init__(self, mesh, pos):
+            self.mesh = mesh
+            self.renderer = _types.SimpleNamespace(material=_Mat())
+            self.visible = True
+            self.normal_mode = 'flat'
+            self._pos = pos
+
+    class _Eng(loom_render.RenderMixin):
+        def __init__(self, models):
+            self.models = models
+            self.ctx = _FakeCtx()
+            self.prog = object()
+            self._shadow_prog = object()
+            self._render_buckets = []
+            self._bucket_geo = {}
+            self._bucket_inst = {}
+            self._bucket_frame_sig = None
+            self._bucket_grp_sig = None
+            self._fw32 = None
+            self._main_bucket_n = {}
+            self._struct_gen = 0
+            self._soa_last_keys = None
+            self._interp = None
+            self._frustum_cull = True
+            self._vp = np.eye(4)
+            self.camera = _types.SimpleNamespace(x=0.0, y=0.0, z=5.0)
+            self.camera_yaw = 0.0
+            self.camera_pitch = 0.0
+            self.camera_roll = 0.0
+            self._stage_times = {}
+            self._stage_calls = {}
+            self._bucket_pack_state = 0
+            n = len(models)
+            fw = np.tile(np.eye(4), (n, 1, 1)).astype(np.float64)
+            for i, m in enumerate(models):
+                fw[i, 3, 0:3] = m._pos
+            self._render_world = fw
+
+        def _prof_t0(self):
+            return 0.0
+
+        def _prof_add(self, *a):
+            return None
+
+        def _mesh_key(self, m):
+            return (id(m.mesh), 'flat')
+
+        def _build_bucket_geo(self, key, model):
+            ent = {'vbo': _FakeBuf(16), 'sha_vbo': _FakeBuf(16),
+                   'nv': model.mesh.vertices.shape[0], 'vao': object(), 'sha_vao': object()}
+            self._bucket_geo[key] = ent
+            self._bucket_inst[key] = {'main': None, 'sha': None, 'n': 0}
+            self._grow_bucket_inst(key, 1)
+            return ent
+
+        def _grow_bucket_inst(self, key, k):
+            inst = self._bucket_inst[key]
+            if k <= inst['n'] and inst['main'] is not None:
+                return
+            cap = max(64, k)
+            inst['main'] = _FakeBuf(cap * 96)
+            inst['sha'] = _FakeBuf(cap * 64)
+            inst['n'] = cap
+            inst.pop('stage', None)
+            inst.pop('gath', None)
+
+        def _build_bucket_vaos(self, ent, inst):
+            return None
+
+    # 规模贴近真实场景 (35 桶 / 490 实例): 每桶多实例 (k>1 才走剔除路径),
+    # 后 5 桶整体落在远平面外 (identity VP) -> 剔除路径真实生效。
+    meshes = [_Mesh(24 + (i % 5) * 7, 100 + i) for i in range(35)]
+    ms = []
+    for i, mesh in enumerate(meshes):
+        far = (i >= 30)
+        ms.extend(_Model(mesh, (0.0, 0.0, 50.0) if far else (0.0, 0.0, 0.0))
+                  for _ in range(14))
+    eng = _Eng(ms)
+
+    def _snap(cull):
+        eng._frustum_cull = cull
+        mbn = eng._main_bucket_n or {}
+        out = {}
+        for key, idxs in eng._render_buckets:
+            k = len(idxs)
+            nm = int(mbn.get(key, k))
+            inst = eng._bucket_inst[key]
+            out[key] = (nm, inst['main'].read()[:nm * 96], inst['sha'].read()[:k * 64])
+        return out
+
+    def _run(pack, cull=True):
+        eng._bucket_pack_state = 1 if pack else -1
+        eng._frustum_cull = cull          # 必须在 prep 之前设置 (决定 planes 是否为 None)
+        eng._bucket_frame_sig = None
+        eng._prepare_bucket_frame()
+        return _snap(cull)
+
+    a = _run(True)
+    b = _run(False)
+    ok_entry = (set(a) == set(b) and all(a[k] == b[k] for k in a)
+                and any(v[0] < len([i for _, i in eng._render_buckets]) for v in a.values())
+                if a else False)
+    check('入口级: _prepare_bucket_frame 在 LOOM_BUCKET_PACK=1/0 下逐字节一致',
+          bool(ok_entry), 'buckets=%d' % len(a))
+    check('入口级: 剔除确实生效 (存在 n_main < k 的桶)',
+          any(v[0] < len(dict(eng._render_buckets)[k]) for k, v in a.items()) if a else False)
+
+    a2 = _run(True, cull=False)
+    b2 = _run(False, cull=False)
+    check('入口级: 剔除关闭档同样逐字节一致',
+          bool(a2) and set(a2) == set(b2) and all(a2[k] == b2[k] for k in a2))
+
+    # 性能门禁 (2-3x 余量): C 打包 <= 0.80x Python 路径 (实测 ~0.48x), 绝对上限 12ms
+    def _timed(pack, reps=20):
+        eng._bucket_pack_state = 1 if pack else -1
+        for _ in range(3):
+            eng._bucket_frame_sig = None
+            eng._prepare_bucket_frame()
+        t0 = _t.perf_counter()
+        for _ in range(reps):
+            eng._bucket_frame_sig = None
+            eng._prepare_bucket_frame()
+        return (_t.perf_counter() - t0) / reps * 1000.0
+
+    t_c = _timed(True)
+    t_py = _timed(False)
+    print('  入口耗时: C=%.3f ms  Python=%.3f ms  (比值 %.2f)' % (t_c, t_py, t_c / max(t_py, 1e-9)))
+    check('性能门禁: 入口级 C 打包 <= 0.80x Python', t_c <= t_py * 0.80,
+          'ratio=%.2f' % (t_c / max(t_py, 1e-9)))
+    check('性能门禁: 入口级绝对上限 <= 12ms', t_c <= 12.0)
+
     print()
     print('test_bucket_pack:', 'ALL PASS' if ok else 'HAS FAILURES')
     return 0 if ok else 1
