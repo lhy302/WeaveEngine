@@ -1699,3 +1699,40 @@ test_hub.py / test_hub_controller.py 里 3 条「v8 空场景」断言改为 cfg
     test_hub_python_version(32) / test_hub / test_hub_controller / test_hub_eai /
     test_hub_interp_switch / test_hub_interp_cache / test_hub_update
     全部 exit=0 FAIL=0，无 Traceback 噪音；py_compile 通过
+
+---
+
+## 18. 引擎安装根：可自由选 / 持久化 / 非管理员可用 / 扫描覆盖双根（2026-11-10，a~g）
+
+| 项 | 实现 |
+|---|---|
+| a 持久化 | `DEFAULT_HUB_SETTINGS` 增 `install_root: ''`；`__init__` 取 `saved_install_root() or default_install_root()`；`set_install_root` 成功后写用户层 delta（`%LOCALAPPDATA%\Loom\hub\settings.json` 的 values） |
+| b 自适应 | 新增 `user_install_root()` / `root_writable()` / `default_install_root()`：Program Files 不可写（或根不存在时探测最近的已存在祖先）→ 自动落到 `%LOCALAPPDATA%\Programs\Loom`；`install_root_note()` 给 UI「（用户目录，无需管理员）」 |
+| c 扫描用当前根 | `scan_interpreters()` 改用 `self.scan_roots()`（见 f） |
+| d 发布包布局 | `scan_install_root()` 先找 `<root>/<ver>/解释器.json`，再找 `<root>/<ver>/Loom/解释器.json`（实测旧实现对自己发布包返回 []） |
+| e 权限归类+清理 | `hub_install` 失败时先 `rmtree(target)` 再抛；`PermissionError`/WinError 5 单独归类为「权限不足…需要管理员，或点『改安装根』切到用户目录」 |
+| f 双根扫描 | `scan_install_roots()` 合并 `[Program Files, %LOCALAPPDATA%\Programs\Loom, self.install_root]`，按 dir 去重、版本升序；「扫描」按钮一次扫全部 |
+| g 真目录选择器 | 三个视图 `_change_root` 改 `filedialog.choose_directory()`（失败回退手输）；选到不存在的目录 → `askyesno`/`_confirm_yes_no` 询问创建 → `set_install_root(create=True)`；创建失败给明确原因 |
+
+### 18.1 验收实测（探针 Loom/tests/_tmp/acc_install_root.py + 新测试）
+
+    1) 持久化: 设到 Temp\acc_user_xxx -> 重新构造 HubController 后 install_root 仍是该目录；
+       settings.install_root 已写入；UI 说明 = 「当前安装根：…（用户目录，无需管理员）」
+    2) 双根扫描: 两个临时根各放一个引擎（beta4 用 <ver>/Loom 发布布局、beta6 用 <ver> 平铺）
+       -> 一次扫描登记 ['0.1.0.beta4', '0.1.0.beta6']
+    3) 不存在目录: 不带 create -> False +「目录不存在…（可勾选自动创建）」；create=True -> 目录被创建且 install_root 生效
+    4) 真实 ACL 不可写: InstallError「权限不足：无法写入 … 需要管理员权限，或点『改安装根』切到用户目录
+       （如 C:\Users\…\AppData\Local\Programs\Loom）」；残留半成品 = False
+
+### 18.2 套件
+
+    test_hub_install_root.py（新增）/ test_hub / test_hub_controller / test_hub_eai /
+    test_hub_interp_switch / test_hub_interp_cache / test_hub_update / test_hub_python_version
+    全部 exit=0 FAIL=0、无 Traceback；py_compile 六模块通过
+
+### 18.3 过程中修掉的两个问题（登记）
+
+1. 我自己加的清理分支最初触发 `UnboundLocalError: shutil`：`_install_from_zip_impl` 函数体内有一句
+   `import shutil`，把 shutil 变成局部变量。已删掉函数内 import（模块顶部已有），清理分支才生效。
+2. `test_hub_controller.py` 的 `scan_install_root` 桩是 0 参 lambda，多根扫描后会被以 `(root)` 调用 ->
+   已改为 `lambda root=None`（多根结果本来就会按 dir 去重，断言不变）。

@@ -470,6 +470,10 @@ embeddable 是隔离模式（`python3xx._pth` 禁 site、且**脚本目录不进
 
 **已修（2026-11-10 Q-PKG-4）**：源码包/编译包加 `--kind source|compiled`（默认各自脚本自动取），产物名 `Loom-<ver>-source.zip` / `Loom-<ver>-compiled.zip`，不再互相覆盖；`package_engine._verify_zip` 与 `release_github.engine_zip()`（优先 compiled → source → 旧名）同步；`test_release_version` 的包名断言更新。实测：compiled 129.70MB、source 346.60MB 并存。
 
+**R6-03 复核修复（2026-11-10）**：① 源码包接线 `meta_version_problems`（源码 Loom/解释器.json、预置运行时嵌套 meta 都必须 == 目标版本，`--version` 不再覆盖不一致 meta）；② `_verify_zip` 增加嵌套 `Loom/player_runtime/game_player.dist/解释器.json` 与顶层版本一致性校验；③ 编译包校验 `build_info.json` 字段（mode=release、python=x.y.z、nuitka、built_at 可解析），写 zip 前校验 dist meta == `--version`、写后回读 + zip 内再验。
+负向实测全部 exit 1：源码 dist meta=beta10×--version=beta6；顶层 beta6+嵌套运行时 beta5；--version=beta10 vs meta beta6；编译包 editor meta=beta10；编译包运行时 meta=beta5；build_info mode=dev。
+**源码包已删除（原 07:35 的 SCENE_VERSION=10 旧包）**，发布前用当前代码重建：`py -3.13 tools/package_engine.py --version 0.1.0.beta6 --allow-missing-runtime` → `tools/dist/Loom-0.1.0.beta6-source.zip`。
+
 **遗留**：① （已修，见上）；② 源码包 `requirements.txt` 未含 `culverin`/`game-audio`（源码版物理/音频降级，编译版不受影响），是否补进 requirements 待裁决。
 
 
