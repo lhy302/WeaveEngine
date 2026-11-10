@@ -502,6 +502,8 @@ embeddable 是隔离模式（`python3xx._pth` 禁 site、且**脚本目录不进
 ### G.4 V2-02 修订（2026-11-10，按审计纠正）
 
 1. **compiled 判据改为"祖先 + 引擎零 diff"**：`git_head` 必须是 HEAD 的祖先，且 `git diff --name-only <git_head> HEAD -- Loom/` 为空才判 OK。理由：审计实测 `dea1f4f..HEAD` 只动 `.gitignore/docs/tools` 6 个文件、`Loom/` 零改动，旧"必须相等"会因每次改文档误红。工具 `tools/verify_pkg_vs_head.py` 已实现并实测：当前包 `git_head=dea1f4f` vs HEAD 更新后判 **OK（引擎等价）**。
+2a. **打包卫生（2026-11-11）**：发布包排除 `.agent_port.json`（含 port/token/pid）、`editor_state.json`、`崩溃日志/`、`*.log`、`tests/_tmp/`；source/compiled 两个打包器都做 staging 清理 + zip 写入过滤 + zip 自检断言（单元实测：状态/日志/崩溃目录被移除，正常文件保留）。
+2b. **冒烟覆盖**：由 5 项扩到 7 项（新增构建器 `--help` exit 0、运行时 `MyGame.exe` 最小启动）；超预算默认失败、`--allow-slow` 放行；`--stamp` 只盖本次真跑过且通过的产物（"一次冒烟盖三件"废止）。实测该门立刻抓到**当前构建器 onefile 缺 ckernels → `--help` exit 1**，已修 `build_engine` 的构建器命令（补 `--include-data-dir=ckernels/core_components` + 解释器.json）。
 2. **门序硬门 `smoke_passed_at`**：`build_info.json` 新增该字段（build_engine 初值 null；`tools/smoke.py` 通过后盖章，支持 `--stamp <dir|file>`，`--dist` 时自动盖该 dist）。打包脚本要求它**存在且晚于 built_at**，否则 exit 1（实测：未盖章 → 拒绝打包；冒烟通过后三件盖章 → 打包通过）。审计证据：本包 built_at=21:23:42，而 `tools/smoke.py` 首个提交 21:36 → 该包从未执行"编译→冒烟→打包→对拍"。
 3. **口径纠正**：`build_info` 无 `version` 字段 → version 可比 **2 处**（顶层/嵌套运行时 meta）+ `--version`；python 可比 **3 处**（editor/runtime 两份 build_info + meta.python_version）。
 4. **工具收编**：自证脚本已在仓库 `tools/verify_pkg_vs_head.py`（原 `C:\loom_build\toolchain_probe` 版本仅作历史）；用法见上。

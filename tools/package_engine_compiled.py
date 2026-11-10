@@ -226,6 +226,12 @@ def main():
     except Exception as e:
         _fail('包内 解释器.json 回读失败: %r' % (e,))
 
+    # 2026-11-11 打包卫生: 清掉运行时状态/日志（smoke 会在 dist 里留 .agent_port.json）
+    _removed = PE.purge_forbidden(tmp)
+    if _removed:
+        print('[编译包] 排除运行时状态/日志 %d 项: %s'
+              % (len(_removed), ', '.join(_removed[:5])))
+
     PE.write_launcher(tmp)
     PE.write_meta_readme(tmp, version, slim=slim, compiled=True)
 
@@ -238,10 +244,18 @@ def main():
                 if fn.endswith(('.pyc', '.pyo', '.tmp', '.log')):
                     continue
                 full = os.path.join(dp, fn)
-                zf.write(full, os.path.relpath(full, tmp).replace(os.sep, '/'))
+                _rel = os.path.relpath(full, tmp).replace(os.sep, '/')
+                if PE.packaging_excluded(_rel):
+                    continue
+                zf.write(full, _rel)
     # zip 自检: Loom/解释器.json 必须在且版本一致（否则版本闸走常量兜底）
     try:
         with zipfile.ZipFile(zip_path) as _zf:
+            _names = set(_zf.namelist())
+            _forbidden = [n for n in _names if PE.packaging_excluded(n)]
+            if _forbidden:
+                _fail('zip 内含运行时状态/日志文件: %s'
+                      % ', '.join(sorted(_forbidden)[:5]))
             _m = json.loads(_zf.read('Loom/解释器.json').decode('utf-8'))
         if str(_m.get('version')) != version:
             _fail('zip 内 解释器.json version=%r != %r'

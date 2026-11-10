@@ -164,7 +164,12 @@ def _bin_dir():
     """
     exe_dir = os.path.dirname(os.path.abspath(sys.argv[0] or '')) if sys.argv else ''
     here = os.path.dirname(os.path.abspath(__file__))
-    for cand in (exe_dir, here):
+    # beta6 回归 (2026-11-11): Nuitka 4.3.5 onefile 下 argv[0]/__file__ 都可能落在
+    # %TEMP%\onefile_xxx；__compiled__.containing_dir 才是**原始 exe 所在目录**。
+    # 走 globals() 运行时取 (Nuitka 常量折叠防御), 未编译时为 None。
+    _comp = globals().get('__compiled__')
+    cdir = getattr(_comp, 'containing_dir', None) if _comp is not None else None
+    for cand in (cdir, exe_dir, here):
         if cand and (os.path.isdir(os.path.join(cand, 'player_runtime'))
                      or os.path.isdir(os.path.join(cand, 'scripts'))):
             return cand
@@ -353,6 +358,10 @@ def main():
     if not isinstance(data, dict):
         raise SystemExit("场景读取失败: %s" % scene_json)
     print("[1/5] 场景已读入:", scene_json)
+    # P4: 资产守卫**前移到建发布夹之前** —— 只做判定、不拷贝。旧实现在步骤 5
+    # 拷完运行时后才抛，失败会留下半成品（实测残留 MyGame.exe）。
+    _assets_src = project_assets_dir(scene_json)
+    _nref = require_assets_or_exit(scene_json, data, _assets_src is not None)
 
     # 2) 游戏脚本源码 (内存收集, 只进包不出明文)
     scripts = _collect_scripts(args.game_scripts or DEFAULT_SCRIPTS_DIR)
@@ -431,12 +440,9 @@ def main():
         config['plugins_sha256'] = ''   # open 模式: 无防修改校验
 
     # beta6 B1: 项目资产随包（Assets/ 与 游戏包.lsc 同夹；缺它 = 贴图/六面图全丢）
+    # P4: guard 已在步骤 1 之后判过（失败时不建发布夹），这里只拷贝。
     _has_assets = copy_project_assets(scene_json, out)
     config['assets'] = bool(_has_assets)
-    # beta6 轮6 D-02: 校验提到**公共路径**（无论有没有拷到资产都过一遍）。
-    # 旧实现只在 else 分支调用 -> "资产夹在但索引坏了"在真实 main() 永远走不到，
-    # 会产出带坏索引/死 guid 的包。
-    _nref = require_assets_or_exit(scene_json, data, _has_assets)
     if _has_assets:
         print("  资产: Assets/ 已随包 (%d 个文件, %d 条托管引用)"
               % (_count_files(os.path.join(out, 'Assets')), _nref))

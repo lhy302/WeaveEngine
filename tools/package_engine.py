@@ -200,6 +200,52 @@ def runtime_layout_problems(dist):
     return problems
 
 
+# 2026-11-11 打包卫生: 运行时状态/日志绝不许进发布包（.gitignore 但工作树会被拷）
+RUNTIME_STATE_FILES = {'.agent_port.json', 'editor_state.json'}
+RUNTIME_STATE_DIRS = {'崩溃日志'}
+
+
+def packaging_excluded(rel):
+    """发布包排除清单（对 zip 内相对路径判定）。
+
+    运行时状态文件: .agent_port.json（含 port/token/pid）、editor_state.json（指向临时目录）；
+    崩溃日志/ 目录、*.log、tests/_tmp/（本机探针与夹具）。
+    """
+    rel = rel.replace('\\', '/').lstrip('./')
+    name = rel.rsplit('/', 1)[-1]
+    if name in RUNTIME_STATE_FILES:
+        return True
+    if name.lower().endswith('.log'):
+        return True
+    segs = rel.split('/')
+    if any(seg in RUNTIME_STATE_DIRS for seg in segs):
+        return True
+    if 'tests/_tmp' in rel:
+        return True
+    return False
+
+
+def purge_forbidden(root):
+    """从 staging 目录删除运行时状态/日志（返回删除的相对路径列表）。"""
+    removed = []
+    for dp, dns, fns in os.walk(root, topdown=True):
+        for d in list(dns):
+            rd = os.path.relpath(os.path.join(dp, d), root).replace(os.sep, '/')
+            if packaging_excluded(rd + '/'):
+                shutil.rmtree(os.path.join(dp, d), ignore_errors=True)
+                dns.remove(d)
+                removed.append(rd + '/')
+        for f in fns:
+            rf = os.path.relpath(os.path.join(dp, f), root).replace(os.sep, '/')
+            if packaging_excluded(rf):
+                try:
+                    os.remove(os.path.join(dp, f))
+                except OSError:
+                    pass
+                removed.append(rf)
+    return removed
+
+
 def collect_files(src_dir):
     out = []
     for dirpath, dirnames, filenames in os.walk(src_dir):
@@ -213,6 +259,8 @@ def collect_files(src_dir):
                 continue
             abs_p = os.path.join(dirpath, fn)
             rel_p = os.path.relpath(abs_p, src_dir).replace('\\', '/')
+            if packaging_excluded(rel_p):
+                continue
             out.append((abs_p, rel_p))
     return out
 
@@ -566,6 +614,9 @@ def make_zip(version, allow_missing_runtime=False, kind='source'):
             for fn in filenames:
                 abs_p = os.path.join(dirpath, fn)
                 rel_p = os.path.relpath(abs_p, tmp_dir).replace('\\', '/')
+                if packaging_excluded(rel_p):
+                    print('[打包] 排除运行时状态/日志: %s' % rel_p)
+                    continue
                 zf.write(abs_p, rel_p)
     # beta4 / P-05-05/06: 收尾自检 —— 从**已写好的 zip** 里读回元数据，交给
     # LoomHub 的同一份判据验一遍；同时验"包名版本 == 元数据版本"与运行时到位性。
@@ -600,6 +651,12 @@ def _verify_zip(zip_path, version, slim=False):
     try:
         with zipfile.ZipFile(zip_path) as zf:
             names = set(zf.namelist())
+            # 2026-11-11 打包卫生: 状态/日志文件必须不在包里（含 token/pid 的
+            # .agent_port.json、指向临时目录的 editor_state.json 等）
+            _forbidden = [n for n in names if packaging_excluded(n)]
+            if _forbidden:
+                _fail('包内含运行时状态/日志文件: %s'
+                      % ', '.join(sorted(_forbidden)[:5]))
             try:
                 _meta = json.loads(zf.read('Loom/解释器.json').decode('utf-8'))
             except Exception as e:

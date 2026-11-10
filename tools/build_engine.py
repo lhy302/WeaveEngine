@@ -230,6 +230,23 @@ def build_editor(mode, cfg, info):
     return {'path': exe, 'size_mb': _dir_mb(dist), 'seconds': round(secs, 1)}
 
 
+def _builder_includes():
+    """构建器 onefile 也要带原生组件与版本元数据。
+
+    2026-11-11 冒烟抓到: onefile 解包到 %TEMP%，fastpath 在 dirname(sys.executable)
+    找 ckernels/loom_kernels.dll —— 不带就 import 即崩（build_game.exe --help exit 1）。
+    """
+    inc = []
+    for d in ('ckernels', 'core_components'):
+        p = os.path.join(LOOM, d)
+        if os.path.isdir(p):
+            inc.append('--include-data-dir=%s=%s' % (p, d))
+    meta = os.path.join(LOOM, '解释器.json')
+    if os.path.isfile(meta):
+        inc.append('--include-data-files=%s=解释器.json' % meta)
+    return inc
+
+
 def build_builder(mode, cfg, info):
     out = cfg['builder']
     exe = os.path.join(out, 'build_game.exe')
@@ -240,7 +257,7 @@ def build_builder(mode, cfg, info):
         os.rename(exe, prev)
     cmd = [sys.executable, '-m', 'nuitka', '--mode=onefile', '--msvc=latest',
            '--assume-yes-for-downloads',
-           '--windows-console-mode=%s' % cfg['console'],
+           '--windows-console-mode=%s' % cfg['console']] + _builder_includes() + [
            '--output-dir=%s' % out, '--output-filename=build_game.exe',
            os.path.join(LOOM, 'build_game.py')]
     secs = _run(cmd, cwd=LOOM)

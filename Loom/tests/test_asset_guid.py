@@ -939,12 +939,18 @@ def t_d02_build_main_e2e():
             err = e
         return err, out
 
+    def _no_leftover(outdir):
+        """P4: 失败后不得留下半成品（发布夹不存在或为空）。"""
+        return (not os.path.isdir(outdir)) or (os.listdir(outdir) == [])
+
     try:
         err, out = _build('noidx_guid', guid_scene)
         check('main(): 无资产库 + guid 引用 -> SystemExit', isinstance(err, SystemExit),
               (type(err).__name__, str(err)[:100]))
         check('main(): 失败先于 pack（无游戏包）',
               not os.path.isfile(os.path.join(out, '游戏包.lsc')))
+        check('P4: 守卫失败后发布夹不存在/为空', _no_leftover(out),
+              (os.path.isdir(out), os.listdir(out) if os.path.isdir(out) else None))
         err2, out2 = _build('noidx_path', path_scene)
         check('main(): 只有 path/纯色 -> 正常出包（不误伤）',
               err2 is None and os.path.isfile(os.path.join(out2, '游戏包.lsc')),
@@ -960,6 +966,8 @@ def t_d02_build_main_e2e():
               isinstance(errc, SystemExit), (type(errc).__name__, str(errc)[:120]))
         check('E2E main(): 拒绝发生在 pack 前（不产出带坏索引的包）',
               not os.path.isfile(os.path.join(outc, '游戏包.lsc')))
+        check('P4: 坏索引失败后发布夹不存在/为空', _no_leftover(outc),
+              (os.path.isdir(outc), os.listdir(outc) if os.path.isdir(outc) else None))
         # D) 索引可用 + guid -> 正常，且发布夹带 Assets
         projd = os.path.join(tmp, 'projd')
         os.makedirs(projd)
@@ -978,6 +986,8 @@ def t_d02_build_main_e2e():
               (type(erre).__name__, str(erre)[:100]))
         check('E2E main(): 材质引用缺失时无包产出',
               not os.path.isfile(os.path.join(oute, '游戏包.lsc')))
+        check('P4: 材质引用失败后发布夹不存在/为空', _no_leftover(oute),
+              (os.path.isdir(oute), os.listdir(oute) if os.path.isdir(oute) else None))
     finally:
         build_game.BIN_DIR = old_bin
         sys.argv = old_argv
