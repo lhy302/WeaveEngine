@@ -531,3 +531,20 @@ normalmap 8×8、checker 16×16、ui_tex_rgba 8×8）；② 场景内路径改**
 **新增 P1**：D 批三个性能测试**全是 helper-only、0 处生产入口证据**（`test_bucket_pack`/`test_aabb_simd`/`test_physics_pose_soa`），且设计要求的 `LOOM_NO_SIMD=1` 全仓 0 实现。
 
 → 处置：R01 真正实现 plan 遍历；R04 补入口级对拍与 `LOOM_NO_SIMD`；05 修文档数字与 env；R06 在所有代码定稿后重打两包。
+
+### 9.26 门序首次全绿（2026-11-11，包 = 代码有机器证据）
+
+流程：干净树（HEAD d1674fa，dirty=False）→ 重编三件 → 冒烟盖章（编辑器/运行时/构建器）→ 打两包 → 对拍。
+
+| 判据 | 结果 |
+|---|---|
+| source 包与 HEAD 逐文件 sha256（CRLF 归一） | **0 不一致 / 93 文件** |
+| compiled `build_info.git_head` | **= HEAD（相等，非祖先）** |
+| `git_dirty` | **false** |
+| `smoke_passed_at` | 23:50:54 **> built_at 23:35:20**（门序真实执行） |
+| meta（顶层/嵌套/--version） | 0.1.0.beta6 一致 |
+| 装机冒烟 | **5/5 PASS，6.2s**（models=126, fps=209, tps=30.18） |
+
+产物：`Loom-0.1.0.beta6-compiled.zip` **132.09 MB**、`Loom-0.1.0.beta6-source.zip` **348.5 MB**。
+
+**门序拦截实录**：首次打编译包被拒——「构建器产物档位不合格: build_info 缺 smoke_passed_at」，补章后通过。说明「编译→冒烟→打包」不是形式。
