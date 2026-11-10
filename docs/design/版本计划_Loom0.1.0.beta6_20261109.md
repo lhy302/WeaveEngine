@@ -168,6 +168,23 @@ GL 主 pass 是否永远 HDR、阴影编码是否统一、点光 6 面是否合�
 
 ## 9. 人类裁决记录（2026-11-09 第二批）
 
+### 9.1 本节编号约定（2026-11-11 补，回应"引用了不存在的 §9.1"）
+
+第 9 章按「一次裁决 = 一个 9.x 小节」追加，编号只增不改：
+
+| 小节 | 内容 |
+|---|---|
+| **9.1** | 本约定与章内索引（就是本节） |
+| 9.2 | Vulkan 门槛裁决（第四批） |
+| 9.3 | VK 不兼容处置（第五批） |
+| 9.4 | 批次 0.5 裁决（第六批） |
+| 9.5 | 构建档位 |
+| 9.6–9.10 | 3.13 物理退化 / 测量纪律 / 第三轮复核 / 集中裁决 / 3.12 vs 3.13 空闲重测 |
+| 9.11–9.21 | 批次 A 2A 验收起至最终验收 F-01 |
+
+> 历史正文里若出现「§9.1」而语义指向某次裁决，以本表定位到真实小节（旧文不改写，避免破坏引用链）；
+> 新写文档请只引上表里存在的小节号。
+
 | 项 | 裁决 |
 |---|---|
 | B 组范围 | **A+B+C+D 全做**，顺序 A 渲染 → B 资产 → C 动画 → D 热点 |
@@ -327,12 +344,14 @@ R04 复核时发现两件事，直接推翻了它自己的一条证据，也暴�
 
 ### 9.11 批次 A 阶段 2A 验收（2026-11-10）
 
-**产物**：`Loom/loom_pass.py`（PassSpec/FramePlan 纯数据 + 按参数缓存）、`Loom/loom_pass_gl.py`（GLTargetPool + GLFrameExecutor）、`Loom/tests/test_frame_plan.py`（**现 49 项**，后续 2B1/2B2/崩溃回归持续追加）；`loom_render.py` / `editor.py` 两条路径统一走 `frame_plan()` + 执行器，编辑器清屏字面量删除统一 `CLEAR_COLOR_RGBA`。
+**产物**：`Loom/loom_pass.py`（PassSpec/FramePlan 纯数据 + 按参数缓存）、`Loom/loom_pass_gl.py`（GLTargetPool + GLFrameExecutor）、`Loom/tests/test_frame_plan.py`（**现 55 项**，后续 2B1/2B2/崩溃回归持续追加）；`loom_render.py` / `editor.py` 两条路径统一走 `frame_plan()` + 执行器，编辑器清屏字面量删除统一 `CLEAR_COLOR_RGBA`。
 
 **验收（硬门）**：
 - 22 场景 **GL/参考 MAE 恒 0.000000**（逐像素与迁移前相同）；VK/参考、GL/VK 逐值等于旧基线；22/22 PASS、0 SKIP
+  > **诚实口径（2026-11-11 补）**：这里的「参考图」是 **GL 自己渲染的基线图**，MAE=0 只证明「迁移后 GL 输出没漂移」，
+  > **不证明 GL 与设计意图/Unity 一致**。GL 与设计的对齐要靠人工观感与设计文档比对，不能拿这条断言当证据。
   （**现口径**：2B2 起场景集含 `ab_bloom` 共 **23 场景**，闸门数 24 项含 UI 子项）
-- 313 项测试 FAIL=0（frame_plan **现 49** / render_api 60 / ui 13 / vk_ui_input 32 / skybox_parity 23 / ab_gl_vk 23 / fallback_policy 44 / user_config 60 / wheel_backend 31；测试文件总数 **133**）
+- 合计项数随各文件增长（2A 时口径 313，现以当次跑测为准）；本次分组（frame_plan **实测 55** / render_api 60 / ui 13 / vk_ui_input 32 / skybox_parity 23 / ab_gl_vk 23 / fallback_policy 44 / user_config 60 / wheel_backend 31；测试文件总数 **133**）
 - 抽象层单帧开销 **6.7 us**（plan 取缓存 0.3 us），约 0.8% 帧时
 - 编辑器 `--auto-close 3` 正常；主审复跑 frame_plan / ab_gl_vk / render_api / skybox_parity 全绿
 
@@ -341,7 +360,7 @@ R04 复核时发现两件事，直接推翻了它自己的一条证据，也暴�
 - 未共享：WGSL/GLSL 双份着色器、天空时机与几何、VK 的 `f32[352]` 参数块、阴影目标编码（S3 处理）、VK submit 粒度
 - `DepthState.write` 在 GL 仍无法真正执行（moderngl 无 depth_mask）→ 标注 advisory
 
-**下一步**：2B1（阴影 + HUD/UI 迁入，仍要求 GL/参考 MAE=0）→ 2B2（tonemap + bloom，画面会**故意变化**，闸门改为「人工确认新基线 + 双后端一致」）。
+**下一步**：2B1（阴影 + HUD/UI 迁入，仍要求 GL/参考 MAE=0 —— 同上：MAE=0 只等于「没漂移」）→ 2B2（tonemap + bloom，画面会**故意变化**，闸门改为「人工确认新基线 + 双后端一致」）。
 
 ### 9.12 Q-REQ-1 裁决（2026-11-10）
 
