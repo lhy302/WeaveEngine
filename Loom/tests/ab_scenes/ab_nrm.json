@@ -21,7 +21,7 @@
    "pbr": false,
    "normal_map": {
     "guid": "nrm_wave",
-    "path": "D:\\my-project - 副本\\Loom(py源代码-工作区)\\Loom\\tests\\_tmp\\normalmap.png",
+    "path": "assets/tex/normalmap.png",
     "name": "nrm"
    }
   }

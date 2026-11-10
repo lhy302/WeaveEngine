@@ -23,12 +23,12 @@
     "guid": "envcub",
     "name": "env",
     "paths": [
-     "D:\\my-project - 副本\\Loom(py源代码-工作区)\\Loom\\tests\\_tmp\\env_0.png",
-     "D:\\my-project - 副本\\Loom(py源代码-工作区)\\Loom\\tests\\_tmp\\env_1.png",
-     "D:\\my-project - 副本\\Loom(py源代码-工作区)\\Loom\\tests\\_tmp\\env_2.png",
-     "D:\\my-project - 副本\\Loom(py源代码-工作区)\\Loom\\tests\\_tmp\\env_3.png",
-     "D:\\my-project - 副本\\Loom(py源代码-工作区)\\Loom\\tests\\_tmp\\env_4.png",
-     "D:\\my-project - 副本\\Loom(py源代码-工作区)\\Loom\\tests\\_tmp\\env_5.png"
+     "assets/env/env_0.png",
+     "assets/env/env_1.png",
+     "assets/env/env_2.png",
+     "assets/env/env_3.png",
+     "assets/env/env_4.png",
+     "assets/env/env_5.png"
     ]
    }
   }

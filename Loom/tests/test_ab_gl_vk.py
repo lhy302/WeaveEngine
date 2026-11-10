@@ -160,7 +160,8 @@ def render_gl(data, with_ui=False):
     else:
         ed.models[:] = []
         ed.lights[:] = []
-    sceneio.scene_from_dict(ed, data)
+    # 密闭夹具：相对资源路径按**场景目录**解析（与 VK/生产加载同基准）
+    sceneio.scene_from_dict(ed, data, base_dir=SCENES_DIR)
     cam = data.get('camera') or {}
     if cam:
         ed.camera_target = tuple(cam.get('target', (0, 0, 0)))
@@ -218,7 +219,8 @@ def render_vk(data, with_ui=False):
             return tex
 
     drv = sd.SceneDriver()
-    drv.load_from_data(data)
+    # 密闭夹具：相对路径（assets/env/*.png）按**场景目录**解析，与 GL 路径一致
+    drv.load_from_data(data, base_dir=SCENES_DIR)
     r = vr.VkRenderer(device, fmt)
     vp, cam_pos = drv.render_pose(aspect=W / H)
     kw = {}

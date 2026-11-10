@@ -21,7 +21,7 @@
    "pbr": false,
    "albedo": {
     "guid": "tex_checker",
-    "path": "D:\\my-project - 副本\\Loom(py源代码-工作区)\\Loom\\tests\\_tmp\\checker.png",
+    "path": "assets/tex/checker.png",
     "name": "checker"
    }
   }

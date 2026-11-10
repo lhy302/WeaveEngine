@@ -402,7 +402,7 @@
                   220,
                   46
                 ],
-                "texture_path": "tests/_tmp/ui_tex_rgba.png",
+                "texture_path": "assets/tex/ui_tex_rgba.png",
                 "tint": [
                   255,
                   255,

@@ -142,6 +142,12 @@ def _asset_tex(ref, ctx):
         except Exception as e:
             return None, '贴图解析失败 (%r)' % (e,)
     p = ref.get('path')
+    if p:
+        try:
+            from sceneio import _resolve_scene_rel
+            p = _resolve_scene_rel(p, ctx)
+        except Exception:
+            pass
     if not p:
         if guid:
             return None, '只有 guid 但解析不到资产（缺 assets.json 或条目已删）'
@@ -175,7 +181,12 @@ def _asset_env(ref, ctx):
     try:
         from loom_cubemap import Cubemap
         if ref.get('paths'):
-            cube = Cubemap.from_files(ref['paths'], name=ref.get('name'), guid=guid)
+            try:
+                from sceneio import _resolve_scene_rel
+                _paths = [_resolve_scene_rel(p, ctx) for p in ref['paths']]
+            except Exception:
+                _paths = list(ref['paths'])
+            cube = Cubemap.from_files(_paths, name=ref.get('name'), guid=guid)
             return cube, ('旧路径引用（6 面路径，beta6 兼容期）' if ctx is not None else None)
         if ref.get('solid_color'):
             return Cubemap.from_solid(tuple(ref['solid_color']),
@@ -617,6 +628,7 @@ class SceneDriver:
         ctx = None
         try:
             import sceneio as _sio
+            _sio._CUR_BASE_DIR = base_dir        # 密闭夹具：相对资源路径按场景目录解析
             if ctx is None:
                 ctx = _sio.asset_context(base_dir)
             self._asset_errors = []
@@ -632,7 +644,7 @@ class SceneDriver:
         # 这里恢复数据, 绘制由渲染层 (VkRenderer.draw_frame(ui=...)) 负责。
         try:
             import sceneio as _sio
-            _sio._apply_ui(self, data.get('ui'))
+            _sio._apply_ui(self, data.get('ui'), base_dir)
         except Exception as _e:
             print('[driver] UI 恢复失败 (保留现状):', repr(_e))
         # P-05（双端一致）: 天空盒失败也进本驱动资产问题表（GL 侧已进 engine._asset_errors）

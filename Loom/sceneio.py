@@ -1316,7 +1316,7 @@ def _apply_material_texture(engine, mat, slot, ref, ctx):
             if why:
                 record_asset_error(engine, 'materials.%s' % slot, guid, why)
             return
-        path = ref.get('path')
+        path = _resolve_scene_rel(ref.get('path'), ctx) if ref.get('path') else None
         if path:
             record_asset_error(engine, 'materials.%s' % slot, guid,
                                '旧路径引用（beta6 兼容期；建议 asset_import 迁移为 guid）: %s'
@@ -1354,6 +1354,28 @@ def _apply_material_texture(engine, mat, slot, ref, ctx):
                            '资产解析异常 (%r)' % (e,))
 
 
+# 当前正在加载的场景目录（场景内相对资源路径的解析基准）。
+# 有资产上下文时用 ctx.root；没有项目资产库（如 tests/ab_scenes 这种密闭夹具）时用这个。
+_CUR_BASE_DIR = None
+
+
+def _resolve_scene_rel(p, ctx=None):
+    """2026-11-11: 旧式相对路径按**场景目录**解析（ctx.root = 场景目录）。
+
+    密闭夹具（tests/ab_scenes/assets/...）靠这条生效；绝对路径原样返回。
+    """
+    try:
+        s = str(p)
+    except Exception:
+        return p
+    if not s or os.path.isabs(s):
+        return s
+    root = getattr(ctx, 'root', None) or _CUR_BASE_DIR
+    if root:
+        return os.path.join(root, s.replace('/', os.sep))
+    return s
+
+
 def _apply_material_env(engine, mat, ref, ctx):
     """材质环境贴图: guid 优先；旧 6 面 paths / 纯色兼容读。失败保留原引用。"""
     if not isinstance(ref, dict) or not ref:
@@ -1375,8 +1397,9 @@ def _apply_material_env(engine, mat, ref, ctx):
             record_asset_error(engine, 'materials.env_map', guid,
                                '旧路径引用（6 面路径，beta6 兼容期；建议 asset_import）')
             try:
-                mat.env_map = Cubemap.from_files(ref['paths'], name=ref.get('name'),
-                                                 guid=guid)
+                mat.env_map = Cubemap.from_files(
+                    [_resolve_scene_rel(p, ctx) for p in ref['paths']],
+                    name=ref.get('name'), guid=guid)
                 _clear_slot_ref(mat, 'env_map')
             except Exception as e:
                 _keep_slot_ref(mat, 'env_map', ref)
@@ -1699,7 +1722,7 @@ def _emit_ui(ui_manager):
     return {'canvases': canvases}
 
 
-def _apply_ui_element(d):
+def _apply_ui_element(d, base_dir=None):
     """dict -> UIElement (按 type 分发). 未知类型返回 None + 警告."""
     if not isinstance(d, dict):
         return None
@@ -1726,7 +1749,10 @@ def _apply_ui_element(d):
                             align=d.get('align', 'left'),
                             wrap_width=int(d.get('wrap_width', 0)), **kw)
     elif typ == 'image':
-        elem = loom_ui.Image(texture_path=str(d.get('texture_path', '')),
+        _tp = str(d.get('texture_path', ''))
+        if _tp and not os.path.isabs(_tp) and base_dir:
+            _tp = os.path.join(base_dir, _tp.replace('/', os.sep))
+        elem = loom_ui.Image(texture_path=_tp,
                              tint=tuple(d.get('tint') or (255, 255, 255, 255)),
                              fit=d.get('fit', 'stretch'), **kw)
     elif typ == 'button':
@@ -1826,7 +1852,7 @@ def _apply_ui_element(d):
         except Exception:
             pass
     for cd in (d.get('children') or []):
-        ch = _apply_ui_element(cd)
+        ch = _apply_ui_element(cd, base_dir)
         if ch is not None:
             elem.add_child(ch)
     # GridLayout: 加载完成后强制 reflow (序列化恢复的 child.rect 被自动排列覆盖)
@@ -1838,7 +1864,7 @@ def _apply_ui_element(d):
     return elem
 
 
-def _apply_ui(engine, ui_data):
+def _apply_ui(engine, ui_data, base_dir=None):
     """dict -> engine.ui (清空重建). 缺/空 -> 保留一个空默认 Canvas."""
     if not hasattr(engine, 'ui') or engine.ui is None:
         return
@@ -1867,7 +1893,7 @@ def _apply_ui(engine, ui_data):
         if typ == 'world':
             canvas._pending_target_id = cd.get('target_id')
         for ed in (cd.get('elements') or []):
-            root_el = _apply_ui_element(ed)
+            root_el = _apply_ui_element(ed, base_dir)
             if root_el is not None:
                 # 第一层元素替换 root (而非作为 root 的子元素)
                 canvas.root = root_el
@@ -1994,6 +2020,8 @@ def scene_from_dict(engine, data, camera_out=None, base_dir=None, ctx=None):
     camera_out: dict 则把相机字段写进去 (编辑器/运行时自行应用).
     base_dir: 场景文件目录（Q6=A: skybox 相对路径按它解析；也用于探测项目资产库）。
     ctx: 资产上下文（beta6 B1）。None 时按 base_dir 自动探测；探测不到 = 旧路径模式。"""
+    global _CUR_BASE_DIR
+    _CUR_BASE_DIR = base_dir          # 密闭夹具：无项目资产库时相对资源路径仍按场景目录解析
     data = migrate(data)
     if ctx is None:
         ctx = asset_context(base_dir)
@@ -2028,7 +2056,7 @@ def scene_from_dict(engine, data, camera_out=None, base_dir=None, ctx=None):
         engine._skybox_ref = None
     if not _sb_valid and isinstance(_sb_raw, dict) and _sb_raw:
         record_asset_error(engine, 'skybox', _sb_raw.get('guid'), _sb_reason)
-    _apply_ui(engine, data.get('ui'))                # 2026-10-18: Canvas UI (清空重建)
+    _apply_ui(engine, data.get('ui'), base_dir)                # 2026-10-18: Canvas UI (清空重建)
     _apply_lights(engine, data.get('lights', []))   # M21: 场景光源 (清空重建)
     try:
         cam_links = _apply_cameras(engine, data.get('cameras', []), base_dir, ctx)  # 场景摄像机 (清空重建)

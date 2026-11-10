@@ -361,6 +361,18 @@ R04 复核时发现两件事，直接推翻了它自己的一条证据，也暴�
 
 **结论：批次 A（渲染 FramePlan + tonemap + bloom）全部完成**。
 
+### 9.14b ab 夹具密闭化（2026-11-11）
+
+**问题**：`ab_env.json` 的 6 面 env 贴图（以及 `ab_nrm`/`ab_tex`/`ab_ui_scene` 的贴图）指向
+`tests/_tmp/*.png` 的**绝对路径**，这些图从未提交 —— 清理 `_tmp` 后夹具不可复现。
+
+**修法**：① 新增 `tests/ab_scenes/assets/`（`make_assets.py` 确定性生成 env_0..5 纯色 4×4、
+normalmap 8×8、checker 16×16、ui_tex_rgba 8×8）；② 场景内路径改**相对场景目录**
+（`assets/env/env_N.png`），sceneio/scene_driver 对旧式相对 path/paths 按场景目录解析
+（无项目资产库时用 `_CUR_BASE_DIR`）；③ 参考图按新夹具**全量重生成**（新旧两套基线各 23 场景，
+旧口径基线同时纳入 `ab_bloom` 的 POST=0 参考）；④ 删除整个 `tests/_tmp` 后
+`test_ab_gl_vk` 仍全绿（实测）。
+
 ### 9.15 批次 B1 资产管线验收（2026-11-10）
 
 **产物**：`Loom/loom_assets.py`（Assets/assets.json：schema/guid/指纹 sha256+size+mtime/越界拒绝/去重/冲突；AssetContext 三层解析；热路径只 stat）、`tools/migrate_scene_assets_v11.py`（一次性路径→guid，幂等，支持 --dry-run/--report/--no-create）、`test_asset_guid.py`（46 项）。
