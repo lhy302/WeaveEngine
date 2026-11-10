@@ -22,6 +22,7 @@ import json
 import os
 import re
 import shutil
+import threading
 import time
 import uuid
 
@@ -41,6 +42,7 @@ DEFAULT_IMPORT = {'mipmaps': True, 'wrap': 'repeat', 'filter_mode': 'trilinear',
 
 # 索引读缓存: (index_path, mtime_ns, size) -> index dict（只读共享；save 时清）
 _CACHE = {}
+_INDEX_LOCK = threading.RLock()      # 同进程多写者串行（跨进程靠写前重读+合并）
 # 旧路径告警去重（同一进程同一 ref 只告警一次，避免刷屏）
 _WARNED = set()
 
@@ -53,18 +55,36 @@ def new_guid():
 _ILLEGAL_NAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
 
+# D-06: Windows 保留设备名（含带扩展名形态）+ 文件名长度上限
+_WIN_RESERVED = set(['CON', 'PRN', 'AUX', 'NUL']
+                    + ['COM%d' % i for i in range(1, 10)]
+                    + ['LPT%d' % i for i in range(1, 10)])
+_NAME_STEM_MAX = 100        # 远低于 Win32 的 255，避免 OSError(22)
+
+
 def safe_asset_name(name, default='asset'):
-    """把用户给的 name 净化成安全文件名（P2-①: 不允许写出 Assets/ 之外）。
+    """把用户给的 name 净化成安全文件名（P2-①/D-06）。
 
     只取 basename（去掉任何目录部分）、替换 Windows 非法字符、去掉首尾点/空格、
-    '..' 折叠。返回值不会是 '' / '.' / '..'。
+    '..' 折叠、保留名加后缀、截断超长 stem。返回值不会是 '' / '.' / '..'。
     """
     s = str(name or '').replace('\\', '/')
     s = s.rsplit('/', 1)[-1].strip()
     s = _ILLEGAL_NAME.sub('_', s)
     s = s.strip(' .')
     s = s.replace('..', '_')
-    return s or default
+    if not s:
+        return default
+    stem, ext = os.path.splitext(s)
+    if not stem:                     # '.png' 这类形态：整串当 stem
+        stem, ext = s, ''
+    if stem.upper() in _WIN_RESERVED:
+        stem = stem + '_'            # LPT1 -> LPT1_（可正常 stat/copy）
+    if len(stem) > _NAME_STEM_MAX:
+        stem = stem[:_NAME_STEM_MAX]
+    if len(ext) > 16:
+        ext = ext[:16]
+    return (stem + ext) or default
 
 
 def warn_once(key, msg):
@@ -310,19 +330,43 @@ def validate_index(index, root=None):
     return True, warnings
 
 
+def _entry_is_valid(gid, entry, root):
+    """单条校验（供合并时过滤：坏条目不得因"写前重读"被复活）。"""
+    probe = {'schema': SCHEMA, 'assets': {gid: entry}}
+    ok, warns = validate_index(probe, root)
+    return ok and not warns and gid in probe['assets']
+
+
 def save_index(root, index):
-    """原子写项目层索引（tmp + fsync + replace）。返回路径。"""
+    """原子写项目层索引（tmp + fsync + replace）。返回路径。
+
+    D-04 / Q-R6A-3=A: 写前**重新加载并合并**（按 guid 并集）——
+    两个写者先后保存时不会互相覆盖丢条目（lost update），我方案里没有删除语义，
+    所以并集是安全的；合并进来的条目要过单条校验，坏条目不会被自愈后的写回"复活"。
+    """
     os.makedirs(assets_dir(root), exist_ok=True)
     p = index_path(root)
-    index = dict(index or {})
-    index['schema'] = SCHEMA
-    index.setdefault('assets', {})
-    tmp = '%s.tmp.%d' % (p, os.getpid())
-    with open(tmp, 'w', encoding='utf-8') as f:
-        json.dump(index, f, ensure_ascii=False, indent=2, sort_keys=True)
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp, p)
+    with _INDEX_LOCK:
+        merged = dict(index or {})
+        merged['schema'] = SCHEMA
+        merged.setdefault('assets', {})
+        try:
+            with open(p, 'r', encoding='utf-8') as f:
+                cur = json.load(f)
+        except (OSError, ValueError):
+            cur = None
+        if isinstance(cur, dict) and isinstance(cur.get('assets'), dict):
+            for gid, e in cur['assets'].items():
+                if gid in merged['assets']:
+                    continue
+                if _entry_is_valid(gid, e, root):
+                    merged['assets'][gid] = e
+        tmp = '%s.tmp.%d' % (p, os.getpid())
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(merged, f, ensure_ascii=False, indent=2, sort_keys=True)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, p)
     _CACHE.clear()
     return p
 
@@ -596,6 +640,78 @@ class AssetContext(object):
                 return gid
         return None
 
+    def _entry_abs(self, entry):
+        src = (entry or {}).get('src')
+        if not src:
+            return None
+        return os.path.join(self.root, str(src).replace('/', os.sep))
+
+    def _entry_body_ok(self, entry, kind):
+        """索引条目指向的正文是否真的在盘上（D-05 去重/修复的前置检查）。"""
+        abs_p = self._entry_abs(entry)
+        if not abs_p:
+            return False
+        if kind == 'cubemap':
+            if not os.path.isdir(abs_p):
+                return False
+            files = (entry or {}).get('files') or []
+            return bool(files) and all(
+                os.path.isfile(os.path.join(abs_p, f)) for f in files)
+        return os.path.isfile(abs_p)
+
+    def _repair_texture(self, guid, entry, src, fp):
+        """D-05 / Q-R6A-2=A: 正文缺失 -> 按**同 guid** 重写，created=True。"""
+        if self.readonly:
+            return guid, False, '只读模式：正文缺失但未写盘'
+        abs_p = self._entry_abs(entry)
+        if abs_p and is_inside(assets_dir(self.root), abs_p):
+            dest = abs_p
+        else:
+            dest = self._unique_dest('texture',
+                                     os.path.basename(str((entry or {}).get('src') or src)),
+                                     create=True)
+        try:
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            shutil.copy2(src, dest)
+        except OSError as e:
+            return None, False, '资产正文缺失且重写失败 (%r)' % (e,)
+        entry['src'] = os.path.relpath(dest, self.root).replace(os.sep, '/')
+        entry['fingerprint'] = fp
+        self._dirty = True
+        self.save()
+        return guid, True, '资产正文缺失，已按同 guid 重新落盘'
+
+    def _repair_cubemap(self, guid, entry, abses, face_src, sha, total_bytes):
+        """D-05: 六面图正文缺失 -> 按同 guid 重写六面。"""
+        if self.readonly:
+            return guid, False, '只读模式：六面图正文缺失但未写盘'
+        from loom_cubemap import Cubemap
+        abs_p = self._entry_abs(entry)
+        if abs_p and is_inside(assets_dir(self.root), abs_p):
+            dest = abs_p
+        else:
+            dest = os.path.join(assets_dir(self.root), KIND_DIRS['cubemap'],
+                                safe_asset_name(guid, 'cubemap'))
+        try:
+            os.makedirs(dest, exist_ok=True)
+            files, face_stats = [], {}
+            for i, fname in enumerate(Cubemap.FACES):
+                ext = os.path.splitext(abses[i])[1] or '.png'
+                out = '%s%s' % (fname, ext)
+                shutil.copy2(abses[i], os.path.join(dest, out))
+                files.append(out)
+                face_stats[out] = face_src[i]
+        except OSError as e:
+            return None, False, '六面图正文重写失败 (%r)' % (e,)
+        entry['src'] = os.path.relpath(dest, self.root).replace(os.sep, '/')
+        entry['files'] = files
+        entry['face_stats'] = face_stats
+        entry['fingerprint'] = {'sha256': sha, 'size': total_bytes,
+                                'mtime': max(m['mtime'] for m in face_src)}
+        self._dirty = True
+        self.save()
+        return guid, True, '六面图正文缺失，已按同 guid 重新落盘'
+
     def import_texture(self, src, name=None, import_settings=None, guid=None):
         """导入贴图（复制进项目）-> (guid|None, created, reason)。"""
         src = os.path.abspath(src)
@@ -603,25 +719,38 @@ class AssetContext(object):
             return None, False, '源文件不存在: %s' % (src,)
         if os.path.splitext(src)[1].lower() not in IMAGE_EXTS:
             return None, False, '不支持的图片格式: %s' % (os.path.splitext(src)[1],)
-        fp = fingerprint(src)
+        try:
+            fp = fingerprint(src)
+        except OSError as e:
+            return None, False, '源文件读取失败 (%r)' % (e,)
         sha = fp['sha256']
-        if guid:
-            e = self.entry(guid)
-            if e is not None:
-                if (e.get('fingerprint') or {}).get('sha256') != sha:
-                    return None, False, ('同 guid 指向不同内容（%s 已存在且内容不同）' % guid)
-                return guid, False, None
-        same = self._find_by_sha('texture', sha)
-        if same is not None:
-            return same, False, None
         base_name = name or os.path.basename(src)
         if not os.path.splitext(base_name)[1]:
             # name 不带扩展名时补源文件扩展名（否则 Assets/Textures/<name> 没有后缀，
             # 解码器只能靠猜 -> 资产文件名不可读且易被误判）
             base_name += os.path.splitext(src)[1] or '.png'
-        dest = self._unique_dest('texture', base_name, create=not self.readonly)
-        if not self.readonly:
-            shutil.copy2(src, dest)
+        if guid:
+            e = self.entry(guid)
+            if e is not None:
+                if (e.get('fingerprint') or {}).get('sha256') != sha:
+                    return None, False, ('同 guid 指向不同内容（%s 已存在且内容不同）' % guid)
+                if self._entry_body_ok(e, 'texture'):
+                    return guid, False, None
+                # D-05: 正文缺失 -> 修复而不是假成功
+                return self._repair_texture(guid, e, src, fp)
+        same = self._find_by_sha('texture', sha)
+        if same is not None:
+            e = self.entry(same) or {}
+            if self._entry_body_ok(e, 'texture'):
+                return same, False, None
+            return self._repair_texture(same, e, src, fp)
+        try:
+            dest = self._unique_dest('texture', base_name, create=not self.readonly)
+            if not self.readonly:
+                shutil.copy2(src, dest)
+        except (OSError, ValueError) as e:
+            # D-06: 非法/超长名字等统一转成结构化 reason（不让调用方吃异常）
+            return None, False, '资产写入失败 (%r): %s' % (e, os.path.basename(src))
         gid = guid or new_guid()
         imp = dict(DEFAULT_IMPORT)
         imp.update(import_settings or {})
@@ -642,18 +771,33 @@ class AssetContext(object):
             if not os.path.isfile(p):
                 return None, False, '第 %d 面源文件不存在: %s' % (i, p)
         sha = hashlib.sha256()
-        for p in abses:
-            sha.update(sha256_file(p).encode('ascii'))
+        face_src = []
+        total_bytes = 0
+        for i, p in enumerate(abses):
+            try:
+                s = sha256_file(p)
+                st = os.stat(p)
+            except OSError as e:
+                return None, False, '第 %d 面读取失败 (%r)' % (i, e)
+            sha.update(s.encode('ascii'))
+            total_bytes += int(st.st_size)
+            face_src.append({'sha256': s, 'size': int(st.st_size),
+                             'mtime': float(st.st_mtime)})
         sha = sha.hexdigest()
         if guid:
             e = self.entry(guid)
             if e is not None:
                 if (e.get('fingerprint') or {}).get('sha256') != sha:
                     return None, False, ('同 guid 指向不同内容（%s 已存在且内容不同）' % guid)
-                return guid, False, None
+                if self._entry_body_ok(e, 'cubemap'):
+                    return guid, False, None
+                return self._repair_cubemap(guid, e, abses, face_src, sha, total_bytes)
         same = self._find_by_sha('cubemap', sha)
         if same is not None:
-            return same, False, None
+            e = self.entry(same) or {}
+            if self._entry_body_ok(e, 'cubemap'):
+                return same, False, None
+            return self._repair_cubemap(same, e, abses, face_src, sha, total_bytes)
         stem = safe_asset_name(
             name or os.path.basename(os.path.dirname(abses[0]))
             or os.path.splitext(os.path.basename(abses[0]))[0], 'cubemap')
@@ -671,24 +815,23 @@ class AssetContext(object):
         from loom_cubemap import Cubemap
         files = []
         face_stats = {}
-        total_bytes = 0
-        for i, fname in enumerate(Cubemap.FACES):
-            ext = os.path.splitext(abses[i])[1] or '.png'
-            out = '%s%s' % (fname, ext)
-            if not self.readonly:
-                shutil.copy2(abses[i], os.path.join(dest, out))
-            files.append(out)
-            st = os.stat(abses[i])
-            total_bytes += int(st.st_size)
-            # P2-③: 逐面指纹（内容/时间戳），供 resolve 检测六面图被替换
-            face_stats[out] = {'sha256': sha256_file(abses[i]),
-                               'size': int(st.st_size), 'mtime': float(st.st_mtime)}
+        try:
+            for i, fname in enumerate(Cubemap.FACES):
+                ext = os.path.splitext(abses[i])[1] or '.png'
+                out = '%s%s' % (fname, ext)
+                if not self.readonly:
+                    shutil.copy2(abses[i], os.path.join(dest, out))
+                files.append(out)
+                # P2-③: 逐面指纹（内容/时间戳），供 resolve 检测六面图被替换
+                face_stats[out] = face_src[i]
+        except OSError as e:
+            return None, False, '六面图写入失败 (%r)' % (e,)
         gid = guid or new_guid()
         self.index.setdefault('assets', {})[gid] = {
             'type': 'cubemap', 'src': os.path.relpath(dest, self.root).replace(os.sep, '/'),
             'name': stem, 'files': files, 'face_stats': face_stats,
             'fingerprint': {'sha256': sha, 'size': total_bytes,
-                            'mtime': max(os.stat(p).st_mtime for p in abses)}}
+                            'mtime': max(m['mtime'] for m in face_src)}}
         self._dirty = True
         self.save()
         return gid, True, None

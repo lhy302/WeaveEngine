@@ -1312,6 +1312,16 @@ class EditorApp(GLEngine):
         # 颜色单点在 sceneio.DEFAULT_SKYBOX_COLOR, 这里不写字面量）
         self._scene_skybox = sceneio.default_skybox()
         self._skybox = self._scene_skybox   # 场景级（engine 侧字段保持"场景默认"语义）
+        # beta6 轮6 D-01: 新建场景 = 换场景，必须与 scene_from_dict 同口径重置资产状态。
+        # 否则上一场景的 _skybox_ref（失效引用）会在保存时被 scene_to_dict 写回新场景，
+        # 并把上一场景的资产问题谎报成新场景的（跨场景污染）。
+        self._skybox_valid = True
+        self._skybox_error = None
+        self._skybox_ref = None
+        try:
+            self._asset_errors = []
+        except Exception:
+            pass
         self._sky_eff_last = None           # 强制下一次 refresh 走"变更"分支
         self._refresh_effective_skybox()    # -> reset_sky_state()（幂等）
         self.undo.clear()

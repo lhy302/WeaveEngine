@@ -147,12 +147,18 @@ def migrate_scene(scene_path, dry_run=False, create=True):
         rep['failures'].append('版本闸门拒绝: %s' % (e,))
         return rep
     # P2-④: 与编辑器保存产物等价 —— 写出 min_engine_version（D7 闸门才对迁移场景生效）
+    _orig_mev = data.get('min_engine_version')
     data['min_engine_version'] = sceneio.ENGINE_VERSION
+    # D-07: 已迁移过（n=0）但缺闸门字段时也必须落盘，否则报告与磁盘不一致且字段永远补不上
+    _gate_added = (_orig_mev != sceneio.ENGINE_VERSION)
     rep['version_after'] = data.get('version')
     rep['min_engine_version'] = data.get('min_engine_version')
+    rep['gate_added'] = bool(_gate_added)
     rep['changed'] = n
-    if n and not dry_run:
+    rep['written'] = False
+    if (n or _gate_added) and not dry_run:
         sceneio.save_json_atomic(scene_path, data)
+        rep['written'] = True
     return rep
 
 

@@ -96,9 +96,10 @@ def require_assets_or_exit(scene_json, data, has_assets):
     root = loom_assets.find_project_root(os.path.dirname(os.path.abspath(scene_json))) \
         if loom_assets is not None else None
     if has_assets:
-        # 资产夹在、但索引坏了 -> 包里仍是死 guid（玩家侧同样丢图），必须拦
-        if loom_assets is not None and root is not None:
-            _idx, _ok, _why = loom_assets.load_index(root)
+        # 资产夹在、但索引坏了/没索引 -> 包里仍是死 guid（玩家侧同样丢图），必须拦
+        if loom_assets is not None:
+            _root = root or os.path.dirname(os.path.abspath(scene_json))
+            _idx, _ok, _why = loom_assets.load_index(_root)
             if not _ok:
                 raise SystemExit(
                     "场景引用了 %d 条项目资产，但资产索引不可用: %s\n"
@@ -407,14 +408,16 @@ def main():
     # beta6 B1: 项目资产随包（Assets/ 与 游戏包.lsc 同夹；缺它 = 贴图/六面图全丢）
     _has_assets = copy_project_assets(scene_json, out)
     config['assets'] = bool(_has_assets)
+    # beta6 轮6 D-02: 校验提到**公共路径**（无论有没有拷到资产都过一遍）。
+    # 旧实现只在 else 分支调用 -> "资产夹在但索引坏了"在真实 main() 永远走不到，
+    # 会产出带坏索引/死 guid 的包。
+    _nref = require_assets_or_exit(scene_json, data, _has_assets)
     if _has_assets:
-        print("  资产: Assets/ 已随包 (%d 个文件)"
-              % _count_files(os.path.join(out, 'Assets')))
+        print("  资产: Assets/ 已随包 (%d 个文件, %d 条托管引用)"
+              % (_count_files(os.path.join(out, 'Assets')), _nref))
     else:
-        # P2-⑤: 有托管引用却没有资产库 -> 硬失败（在 pack 之前，避免产出死 guid 包）
-        _nref = require_assets_or_exit(scene_json, data, _has_assets)
         print("  资产: 场景无项目资产库 (Assets/assets.json) -> 不携带资产"
-              "（场景无 guid 引用: %d 条托管引用）" % (_nref,))
+              "（托管引用 %d 条）" % (_nref,))
 
     game_pack.pack(out, config, data, scripts,
                    encrypt=not args.no_encrypt_content)
