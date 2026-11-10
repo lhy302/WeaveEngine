@@ -7,6 +7,7 @@
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -64,6 +65,45 @@ def find_iscc():
     return None
 
 
+def write_version_info(version):
+    """生成 PyInstaller 版本资源（VSVersionInfo），让 LoomHub.exe 有版本信息。"""
+    nums = [int(x) for x in re.findall(r'\d+', version)[:4]]
+    while len(nums) < 4:
+        nums.append(0)
+    v = tuple(nums[:4])
+    txt = '''VSVersionInfo(
+  ffi=FixedFileInfo(filevers=%(v)r, prodvers=%(v)r, mask=0x3f, flags=0x0,
+                    OS=0x40004, fileType=0x1, subtype=0x0, date=(0,0)),
+  kids=[StringFileInfo([StringTable('040904B0', [
+    StringStruct('CompanyName', 'lhy302'),
+    StringStruct('FileDescription', 'LoomHub Project Manager'),
+    StringStruct('FileVersion', '%(ver)s'),
+    StringStruct('InternalName', 'LoomHub'),
+    StringStruct('OriginalFilename', 'LoomHub.exe'),
+    StringStruct('ProductName', 'LoomHub'),
+    StringStruct('ProductVersion', '%(ver)s')])]),
+    VarFileInfo([VarStruct('Translation', [1033, 1200])])]
+)''' % {'v': v, 'ver': version}
+    path = os.path.join(BUILD_DIR, 'version_info.txt')
+    with open(path, 'w', encoding='ascii') as f:
+        f.write(txt)
+    return path
+
+
+def assert_version_resource(exe_path, version):
+    """断言 exe 里真有版本资源（UTF-16 资源串）。"""
+    with open(exe_path, 'rb') as f:
+        blob = f.read()
+    for key in ('ProductVersion', 'FileVersion'):
+        if key.encode('utf-16-le') not in blob:
+            raise SystemExit('[错误] LoomHub.exe 缺版本资源字段 %s: %s'
+                             % (key, exe_path))
+    if version.encode('utf-16-le') not in blob:
+        raise SystemExit('[错误] LoomHub.exe 版本资源里没有 %r（--version 与资源不符？）'
+                         % version)
+    print('[打包] 版本资源 OK: ProductVersion/FileVersion = %s' % version)
+
+
 def run_pyinstaller(version):
     os.makedirs(BUILD_DIR, exist_ok=True)
     entry = os.path.join(HUB_DIR, 'LoomHub.py')
@@ -101,6 +141,8 @@ def run_pyinstaller(version):
     # （hub_update.local_version() 从 _MEIPASS/版本身边找 版本.json）。
     if os.path.isfile(VERSION_FILE):
         cmd += ['--add-data', '%s%s%s' % (VERSION_FILE, os.pathsep, '.')]
+    # 2026-11-11 P3: exe 版本资源（此前装出来的 LoomHub.exe 没有版本信息）
+    cmd += ['--version-file', write_version_info(version)]
     # splash 图存在才加（缺图也能打，只是没启动画面）
     if os.path.isfile(splash_path):
         cmd += ['--splash', splash_path]
@@ -112,6 +154,7 @@ def run_pyinstaller(version):
     if not os.path.isfile(exe_path):
         raise SystemExit('[错误] PyInstaller 未产出 exe: %s' % exe_path)
     print('[打包] LoomHub.exe: %.2f MB' % (os.path.getsize(exe_path) / (1024 * 1024)))
+    assert_version_resource(exe_path, version)
     return exe_path
 
 

@@ -217,6 +217,12 @@ def packaging_excluded(rel):
         return True
     if name.lower().endswith('.log'):
         return True
+    # 2026-11-11 软残渣: 源码包内嵌 python 的 site-packages 带 844 个 __pycache__
+    # （含 cp312/cp314 混档），两个包各有 2 个 *.c.bak
+    if name == '__pycache__':
+        return True
+    if name.lower().endswith(('.pyc', '.c.bak')):
+        return True
     segs = rel.split('/')
     if any(seg in RUNTIME_STATE_DIRS for seg in segs):
         return True
