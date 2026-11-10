@@ -359,3 +359,16 @@ R04 复核时发现两件事，直接推翻了它自己的一条证据，也暴�
 **A：接受 2B2 调参后的观感与参数**（exposure=1.70、bloom threshold=1.15/knee=0.35/strength=0.70；平均亮度 0.5700 vs 旧基线 0.5735；bloom 晕圈 +42.5%；后处理约 +8% 帧时）。
 
 **结论：批次 A（渲染 FramePlan + tonemap + bloom）全部完成**。
+
+### 9.15 批次 B1 资产管线验收（2026-11-10）
+
+**产物**：`Loom/loom_assets.py`（Assets/assets.json：schema/guid/指纹 sha256+size+mtime/越界拒绝/去重/冲突；AssetContext 三层解析；热路径只 stat）、`tools/migrate_scene_assets_v11.py`（一次性路径→guid，幂等，支持 --dry-run/--report/--no-create）、`test_asset_guid.py`（46 项）。
+
+**关键落地**：
+- `SCENE_VERSION` 10 → **11**；材料 albedo/normal/env 与 skybox/相机 skybox 托管时只写 guid，旧 path/paths 兼容读并告警（一个 beta 周期 fallback）；无项目索引时行为与 beta5 一致
+- **打包带资产**：`build_game.copy_project_assets` 拷 `Assets/`；runtime/run_player/vk_player/game_player 传 `assets_base`，包内场景不再按 CWD 解析
+- `agent_commands` 新增 asset_import/get/list/scene_assets_check；`set_texture/set_env` 项目内自动登记 guid
+
+**验收**：test_asset_guid 46 项 ALL PASS；test_sceneio / test_skybox_scene（beta5 语义未破）/ test_eai_real（102 命令）全绿；全量 **126 文件**绿；老 v8 场景仍可加载（bench FPS 74.0）。
+
+**越界说明**：为双后端一致与包内 base_dir，实际改动含 `scene_driver/run_player/vk_player/game_player`（超出派单清单，主审复核后接受）。
