@@ -58,7 +58,7 @@ def _bench_once(scene, frames, extra_env):
 
 
 def _summ(vals):
-    vals = [v for v in vals if v]
+    vals = [v for v in vals if v is not None]
     if not vals:
         return None
     return {'n': len(vals), 'median': round(statistics.median(vals), 1),
@@ -120,14 +120,19 @@ def main(argv=None):
         print('\n已写入 %s' % a.json)
 
     if a.min_fps is not None:
-        med = (summary.get('default', {}).get('fps') or {}).get('median')
-        if med is None:
-            print('门禁失败：拿不到 FPS')
+        # 门禁对**每个**配置都判（含 --ab 对照组），任一下降都算失败
+        bad = []
+        for name, s in summary.items():
+            med = (s.get('fps') or {}).get('median')
+            if med is None:
+                bad.append('%s: 拿不到 FPS' % name)
+            elif med < a.min_fps:
+                bad.append('%s: 中位 %.1f < %.1f' % (name, med, a.min_fps))
+        if bad:
+            for b in bad:
+                print('门禁失败：' + b)
             return 1
-        if med < a.min_fps:
-            print('门禁失败：中位 FPS %.1f < %.1f' % (med, a.min_fps))
-            return 1
-        print('门禁通过：中位 FPS %.1f >= %.1f' % (med, a.min_fps))
+        print('门禁通过：全部配置中位 FPS >= %.1f' % a.min_fps)
     return 0
 
 
