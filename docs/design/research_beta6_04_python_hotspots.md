@@ -562,3 +562,92 @@ Python 密集段与"跨线程汇合点"（`pipe_wait` +7.9%/次）同向变差�
 
 **建议 R06 复测口径**：同一台机、同一次会话内交替跑 async/sync 各 3 轮取中位数，且记录
 `threads` 快照与 `p50/p99`；否则 ±10 FPS 的负载噪声足以把结论翻面（本次已实证）。
+
+---
+
+## 附录 F：批次 D1 落地记录（P0 插桩闭账 + P1 loom_bucket_pack，2026-11-10）
+
+> 口径：所有数字同机实测（3.13.15 主线）。性能为**交替采样**（L/C/L/C 多轮取均值），
+> 单次数字不作结论；正确性以逐字节对拍 + 像素门 + 全量测试为准。
+
+### F.1 改了什么
+
+| 文件 | 改动 | 说明 |
+|---|---|---|
+| `Loom/ckernels/loom_kernels.c` | +92 行，新导出 `loom_bucket_pack` | 逐桶 main/sha 实例打包（世界 16f + sat + 常量 pad + col）；语义 = Python 路径逐字节等价；桶内 n<=1 时不做剔除（同 Python 的 k>1 守卫） |
+| `Loom/fastpath.py` | +72 行，`bucket_pack_available()` / `bucket_pack()` | **可选件**语义（与 aabbs/collide 的硬加载不同）：旧 DLL 无该导出 → 返回 None，调用方大声回退 |
+| `Loom/loom_render.py` | 分段插桩 + C 打包快路径 | `buckets_gather/frustum/pack/write`、`mt_mp_draws_uniform/tex/render`；`_bucket_pack_ready/_staging/_frame`；`LOOM_BUCKET_PACK=0` 强制旧路径；缺导出时打印一行并回退 |
+| `Loom/loom_profiler.py` | `_prof_count()` + `profile_snapshot()` 扩字段 | 新增 `per_call_us` / `handoffs`（交接次数，批次 D 因果证据） |
+| `Loom/engine.py` / `Loom/loom_logic_thread.py` | 计数点 | `hm_pipe_post` / `hm_pipe_wait` / `hm_logic_wake` |
+| `core_components/registry.json` + `official_manifest.py` | ckernels sha256 重钉 | 新 DLL `c5d3e271584f6b71…`（生成脚本 refresh/gen 各跑一次） |
+| `Loom/tests/test_bucket_pack.py` | 新增单测 | 16 断言（见 F.2） |
+
+**回退/降级**：`LOOM_BUCKET_PACK=0` → 打印一行并走旧 Python 路径；DLL 缺该导出 → 同样打印
+`[buckets] ckernels.loom_bucket_pack 不可用 (...) -> 回退 Python 打包路径`；C 返回非 0 → 硬 raise
+（官方件契约违约，沿用 aabbs/collide 纪律）。
+
+### F.2 逐字节对拍（正确性硬门）
+
+- 单测 `tests/test_bucket_pack.py`：无剔除 / 带空洞剔除 / 单实例桶守卫 / 全剔除桶 /
+  契约错误码（offs[0]!=0、区间越界、K=0）→ **16/16 PASS**。
+- 真场景（`压测500混合`，501 模型 / 35 桶）：同一帧同一世界状态下先后跑两条路径，
+  直接比 **GPU 实例缓冲前缀字节**（main `n_main*96B` / sha `k*64B`）+ 每桶实例数；
+  相机逐帧转动制造不同 keep 集合，**30 帧 × 35 桶，不一致 0 处**；剔除关闭档（planes=None）同样全等。
+
+### F.3 性能（交替采样）
+
+**A) 播放器进程内 3 轮交替（每轮 120 帧，ms/帧）**
+
+| 指标 | Python 路径 | C 内核 | Δ |
+|---|---:|---:|---:|
+| `buckets` 合计 | 1.435 | **0.693** | **−0.742（−52%）** |
+| ├ `buckets_gather` | 0.049 | 0.048 | −0.001 |
+| ├ `buckets_frustum` | 0.234 | 0.231 | — |
+| ├ `buckets_pack` | 0.865 | **0.066** | **−0.799** |
+| └ `buckets_write` | 0.107 | 0.160 | +0.053（改为大 staging 切片写） |
+| FPS | 77.3 | **86.9** | **+9.7** |
+| p50 帧时间 | 7.58 ms | 6.73 ms | −0.86 |
+
+**B) `--bench` 4 轮交替（300 帧，压测500混合）**
+
+| 轮次 | 打包 | FPS | buckets |
+|---|---|---:|---:|
+| 1 | Python | 79.6 | 1.36 |
+| 1 | C | **85.3** | **0.70** |
+| 2 | Python | 79.2 | 1.41 |
+| 2 | C | **87.1** | **0.71** |
+
+### F.4 P0 闭账：mt_mp_draws 的 5.8x 是什么（编辑器 102 FPS，1226 帧）
+
+编辑器 `mt_mp_draws` = 2.691 ms/帧（这是 FramePlan 执行总时长），拆开：
+
+| 子段 | ms/帧 | 占比 | 说明 |
+|---|---:|---:|---|
+| `mt_mp_draws_render` | **1.035** | 38% | 35 次 `vao.render` → **29.6 µs/次** |
+| `mt_mp_draws_uniform` | 0.255 | 9.5% | 每桶 6 次 uniform 赋值 |
+| `mt_mp_draws_tex` | 0.048 | 1.8% | 每桶 2–3 次纹理绑定 |
+| 其余（天空盒/后处理/状态应用/执行器） | ~1.35 | 50% | 不属于桶绘制 |
+
+**结论**：Python 侧（uniform + tex）每帧只占 **0.30 ms**；同一份 `vao.render` 在播放器里
+35 次合计 0.026 ms（**0.75 µs/次**），编辑器里 1.035 ms（**29.6 µs/次**）——**40x 差额在
+驱动/宿主 FBO 的提交路径上（GPU 队列深度相关），不是语言层**。因此"把绘制循环下沉 C"无效；
+多绘间接只有在能真正摊薄"每次提交的驱动成本"时才值得（本轮不做）。
+
+另：`mt_mp_fbo` 在本次探针里报 8.85 ms/帧，但同一帧 `mt_main_pass` 只有 1.89 ms —
+这是既有的 `_t_mp` 取点问题（阴影 pass 缺席时计时起点不刷新），与 D1 无关，登记待后续修。
+
+### F.5 交接次数口径（编辑器播放态，每帧 / 每秒）
+
+| 计数 | 每帧 | 每秒（102 FPS） |
+|---|---:|---:|
+| `hm_pipe_post` | 0.587 | ~60 |
+| `hm_pipe_wait` | 0.294 | ~30 |
+| `hm_logic_wake` | 0.593 | ~60 |
+| `pipe_wait` 单次 | — | **12.6 ms/次**（`per_call_us`） |
+
+### F.6 验收
+
+- 逐字节对拍：单测 16/16 PASS；真场景 30 帧 × 35 桶 **0 不一致**（含剔除关闭档）。
+- 像素门 `test_ab_gl_vk.py`：**23 通过 / 0 失败 / 0 跳过**（GL/VK MAE 与迁移前同量级）。
+- `test_render_api.py` / `test_ui.py` / `test_vk_bucket_order.py`：ALL PASS。
+- 全量 `tests/run_all.py`（128 文件）：见本次回报（若本轮未跑完则由下一轮补记）。

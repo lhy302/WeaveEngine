@@ -336,6 +336,96 @@ __declspec(dllexport) int64_t loom_collide_pairs(
 }
 
 /* ==========================================================================
+ * Kernel 4: loom_bucket_pack (2026-11-10, 批次 D1 / P1)
+ * ==========================================================================
+ * 目的: 把渲染主线程里「逐桶 staging 打包 + 视锥重排 + 阴影行拷贝」收编成
+ *       **一次 C 调用** (调研 04 号 §③ 步骤 1)。Python 侧由每帧 ~250-350 次
+ *       小数组 numpy 调用退化为 1 次 C 调用 + 每桶 2 次 buffer.write。
+ *
+ * 语义 = loom_render._prepare_bucket_frame 现行 Python 路径的**逐字节等价**:
+ *   · sha 缓冲 = 桶内**全量**实例世界矩阵 (4x4 f32 原样拷贝, 不受剔除影响)
+ *   · main 缓冲 = 桶内**可见**实例, 顺序 = 原顺序按 keep 过滤 (等价 np.where(sel))
+ *     main 行布局 24xf32: [0..15]=world  [16]=sat  [17..19]=0(常量 padding)
+ *                         [20..23]=col
+ *   · 桶内实例数 n<=1 时**不做剔除** (与 Python 的 k>1 守卫一致):
+ *     keep 指针非 NULL 也照 n<=1 跳过过滤。
+ *
+ * 数据布局 (全部 caller-owned, C 连续):
+ *   world16  : (n,16) f32   —— 全局 gather 后的世界矩阵 (Python: fw32[order])
+ *   sat      : (n,)   f32   —— 逐实例饱和度 (与 order 对齐)
+ *   col      : (n,4)  f32   —— 逐实例颜色 (与 order 对齐)
+ *   offs     : (K+1,) i64   —— 每桶在 world16 中的区间 [offs[b], offs[b+1])
+ *   keep     : (n,)   u8    —— 可见标记 (0/1); NULL = 全可见 (未开视锥剔除)
+ *   out_main : (n,24) f32   —— 每桶从 a 起连续写 main_n[b] 行
+ *   out_sha  : (n,16) f32   —— 每桶从 a 起连续写 n 行
+ *   out_main_n: (K,) i32    —— 每桶 main pass 实例数 (剔除后)
+ *
+ * 返回: 0 成功; 1 参数/越界非法 (Python 侧硬 raise: 官方件契约违约, 不静默)。
+ * ========================================================================== */
+__declspec(dllexport) int loom_bucket_pack(const float *world16,
+                                           const float *sat,
+                                           const float *col,
+                                           const int64_t *offs,
+                                           int32_t K,
+                                           const uint8_t *keep,
+                                           int64_t n_total,
+                                           float *out_main,
+                                           float *out_sha,
+                                           int32_t *out_main_n)
+{
+    int32_t b;
+    if (world16 == NULL || sat == NULL || col == NULL || offs == NULL ||
+        out_main == NULL || out_sha == NULL || out_main_n == NULL) {
+        return 1;
+    }
+    if (K < 0 || n_total < 0) return 1;
+    if (K == 0 || n_total == 0) return 0;
+    if (offs[0] != 0) return 1;
+    for (b = 0; b < K; ++b) {
+        int64_t a = offs[b];
+        int64_t e = offs[b + 1];
+        int64_t n, i, q;
+        if (a < 0 || e < a || e > n_total) return 1;
+        n = e - a;
+        /* 阴影: 全量实例 (与剔除无关) */
+        if (n > 0) {
+            memcpy(out_sha + a * 16, world16 + a * 16,
+                   (size_t)n * 16 * sizeof(float));
+        }
+        if (keep == NULL || n <= 1) {
+            for (i = 0; i < n; ++i) {
+                const int64_t idx = a + i;
+                float *dst = out_main + (a + i) * 24;
+                memcpy(dst, world16 + idx * 16, 16 * sizeof(float));
+                dst[16] = sat[idx];
+                dst[17] = 0.0f;
+                dst[18] = 0.0f;
+                dst[19] = 0.0f;
+                memcpy(dst + 20, col + idx * 4, 4 * sizeof(float));
+            }
+            out_main_n[b] = (int32_t)n;
+        } else {
+            q = 0;
+            for (i = 0; i < n; ++i) {
+                const int64_t idx = a + i;
+                float *dst;
+                if (!keep[idx]) continue;
+                dst = out_main + (a + q) * 24;
+                memcpy(dst, world16 + idx * 16, 16 * sizeof(float));
+                dst[16] = sat[idx];
+                dst[17] = 0.0f;
+                dst[18] = 0.0f;
+                dst[19] = 0.0f;
+                memcpy(dst + 20, col + idx * 4, 4 * sizeof(float));
+                ++q;
+            }
+            out_main_n[b] = (int32_t)q;
+        }
+    }
+    return 0;
+}
+
+/* ==========================================================================
  * M1-4 契约化无侵入追加 (2026-09-08, DLL 化战役 M1)
  * ==========================================================================
  * 本段为向文件末尾"无侵入追加"的 loom_module.h v1.0 契约导出 (最小函数集

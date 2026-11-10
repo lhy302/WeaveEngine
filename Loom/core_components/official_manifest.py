@@ -11,7 +11,7 @@
 
 LOOM_DEV=1 时跳过校验 (开发期天天重编, SHA 一直在变).
 """
-# 生成时间: 2026-10-16T14:14:04
+# 生成时间: 2026-11-10T12:29:50
 OFFICIAL_MANIFEST = {
     'module_ref': {
         "path": 'core_components/module_ref.dll',
@@ -19,7 +19,7 @@ OFFICIAL_MANIFEST = {
     },
     'ckernels': {
         "path": 'ckernels/loom_kernels.dll',
-        "sha256": 'df810fc5652ee238d020c448b2c6e06dce745a2b59acb2542f37a26d1d45d37b',
+        "sha256": 'c5d3e271584f6b71a52638c6c292444e732d2e5b02f0eadc371e2f6fab2abb3e',
     },
     'pipeline': {
         "path": 'core_components/pipeline/pipeline.dll',

@@ -40,12 +40,33 @@ class ProfilerMixin:
         self._stage_times[name] = self._stage_times.get(name, 0.0) + dt
         self._stage_calls[name] = self._stage_calls.get(name, 0) + 1
 
+    def _prof_count(self, name, n=1):
+        """D1/P0: 交接/事件计数 (非耗时观测量; 仅 LOOM_PROFILE=1, 未开时零开销).
+        hm_pipe_post / hm_pipe_wait / hm_logic_wake —— 跨线程交接次数的因果证据
+        (3.13 GIL 交接变贵, 见 docs/design/research_beta6_04_python_hotspots.md 附录 E)."""
+        if os.environ.get('LOOM_PROFILE') != '1':
+            return
+        c = getattr(self, '_prof_counts', None)
+        if c is None:
+            c = self._prof_counts = {}
+        c[name] = c.get(name, 0) + n
+
     def profile_snapshot(self):
         """M3: 一次性导出插桩快照 (累计 ms / 调用数 / 帧数), 供探针做 per-frame 归一化."""
+        _times = dict(getattr(self, '_stage_times', {}) or {})
+        _calls = dict(getattr(self, '_stage_calls', {}) or {})
+        # D1/P0: 单次耗时 (µs) 与交接计数 —— 批次 D 的因果证据口径
+        _per_call_us = {}
+        for _k, _v in _times.items():
+            _n = _calls.get(_k)
+            if _n:
+                _per_call_us[_k] = _v / _n * 1000.0
         return {
             'frames': getattr(self, '_stage_frames', 0),
-            'times': dict(getattr(self, '_stage_times', {}) or {}),
-            'calls': dict(getattr(self, '_stage_calls', {}) or {}),
+            'times': _times,
+            'calls': _calls,
+            'per_call_us': _per_call_us,
+            'handoffs': dict(getattr(self, '_prof_counts', {}) or {}),
             # M3-P5: 计数类观测量 (非耗时) —— 主 pass draw 批次数, 用于判断
             # GL 提交开销是"批次多"还是"每批贵"。
             'counts': {'draw_calls': getattr(self, '_draw_calls_total', 0),

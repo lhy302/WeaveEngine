@@ -25,7 +25,7 @@
         "ckernels.collide"
       ],
       "depends": [],
-      "sha256": "df810fc5652ee238d020c448b2c6e06dce745a2b59acb2542f37a26d1d45d37b",
+      "sha256": "c5d3e271584f6b71a52638c6c292444e732d2e5b02f0eadc371e2f6fab2abb3e",
       "note": "C 数值内核 (aabbs/collide), 2026-09-08 M1-4 契约化: loom_module.h v1.0 七导出末尾无侵入追加, 原三内核签名/求和序不动, fastpath ctypes 直调链不受影响"
     },
     {

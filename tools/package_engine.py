@@ -110,6 +110,25 @@ def editor_dist_bloat(dist):
             if os.path.isdir(os.path.join(dist, name))]
 
 
+def meta_version_problems(directory, version):
+    """产物目录里的 解释器.json 必须存在且 version == 发布版本。
+
+    2026-11-10: sceneio.ENGINE_VERSION 的单一事实源就是这个文件；Nuitka dist
+    缺它 -> 引擎自报版本走常量兜底（漏改 = 误拒新场景），所以打包前硬校验。
+    """
+    path = os.path.join(directory, '解释器.json')
+    if not os.path.isfile(path):
+        return ['缺 解释器.json（会静默走 sceneio 常量兜底）: %s' % path]
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            got = (json.load(f).get('version') or '').strip()
+    except Exception as e:
+        return ['解释器.json 读取失败: %r' % (e,)]
+    if got != version:
+        return ['解释器.json version=%r != 发布版本 %r' % (got, version)]
+    return []
+
+
 def build_info_problems(directory, require_mode='release'):
     """产物档位校验：dev 产物（带控制台）不允许进发布包。
 

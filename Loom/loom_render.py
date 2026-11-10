@@ -543,6 +543,7 @@ class RenderMixin:
         if bk is not None and bk == sig and self._render_buckets:
             return
         self._bucket_frame_sig = sig
+        _t_seg = self._prof_t0()           # D1/P0: buckets 分段 (gather: f32 化 + 全局 gather)
         buf = self._fw32
         if buf is None or buf.shape[0] < n:
             cap = max(64, n) if buf is None else max(n, buf.shape[0] * 2)
@@ -628,6 +629,8 @@ class RenderMixin:
                 offs.append(offs[-1] + len(_s))
             self._bucket_order = np.asarray(_order, dtype=np.intp)
             self._bucket_offs = offs
+            # D1/P1: C 打包内核入参 (int64 连续; 与 offs 同源同序)
+            self._bucket_offs_np = np.asarray(offs, dtype=np.int64)
             self._bucket_sat_all = (np.concatenate(_sat) if _sat
                                     else np.zeros(0, dtype='f4'))
             self._bucket_col_all = (np.concatenate(_col) if _col
@@ -665,6 +668,8 @@ class RenderMixin:
         if order is not None and os.environ.get('LOOM_BUCKET_LEGACY') == '1':
             order = None                        # A/B 取证开关: 强制走旧逐桶路径
         G_all = fw32[order] if order is not None else None
+        self._prof_add('buckets_gather', _t_seg)
+        _t_seg = self._prof_t0()           # 下一段: 视锥
         # 2026-11-09 (01 号 Q8=A): 视锥测试**一次覆盖全部实例** (旧实现每桶一次
         # _frustum_keep; 38 桶时 numpy 逐调用固定开销 ≈ 4 ms/帧, 与实例数无关)。
         # 算法与逐桶版逐项同源: f64 cast -> 行 3 取中心 -> 各轴缩放取最大 ->
@@ -679,9 +684,21 @@ class RenderMixin:
                 s2 = np.einsum('kij,kij->ki', basis, basis).max(axis=1)
                 rad = np.maximum(np.sqrt(s2), 1e-9) * _rall
                 keep_all = self._spheres_in_frustum(G64[:, 3, :3], rad, planes)
+        self._prof_add('buckets_frustum', _t_seg)
+        _t_seg = self._prof_t0()           # 下一段: 打包/写入
         mbn = getattr(self, '_main_bucket_n', None)
         if mbn is None:
             mbn = self._main_bucket_n = {}
+        # ---- D1/P1: 一次 C 调用打包 (loom_bucket_pack) ----
+        # 覆盖条件: 全局计划可用 + 内核可用 + (未开剔除 或 全局 keep 已算好)。
+        # 逐桶 _frustum_keep 回退场景 (单桶/半径数组不匹配) 仍走下方 Python 路径。
+        if (G_all is not None and (planes is None or keep_all is not None)
+                and self._bucket_pack_ready()):
+            self._bucket_pack_frame(G_all, sat_all, col_all, keep_all, mbn,
+                                    with_frustum=(planes is not None))
+            return
+        _prof_b = os.environ.get('LOOM_PROFILE') == '1'
+        _w_ms = 0.0                            # 本帧缓冲写入耗时 (ms, 仅 profiling)
         for bi, (key, idxs) in enumerate(self._render_buckets):
             ent = self._bucket_geo.get(key)
             if ent is None:                    # 防御: 桶资源未建 (attach 路径遗漏)
@@ -729,20 +746,121 @@ class RenderMixin:
                     keep = self._frustum_keep(g[:k], planes, r)
                 n_main = int(keep.sum())
                 mbn[key] = n_main
-                inst['sha'].write(g[:k], 0)        # 阴影: 全量实例 (不动)
+                if _prof_b:
+                    _w0 = time.perf_counter()
+                    inst['sha'].write(g[:k], 0)
+                    _w_ms += (time.perf_counter() - _w0) * 1000.0
+                else:
+                    inst['sha'].write(g[:k], 0)        # 阴影: 全量实例 (不动)
                 if n_main:
                     sel = np.where(keep)[0]
                     st[:n_main, 0:16] = g[:k][sel].reshape(n_main, 16)
                     st[:n_main, 16] = sat_k[sel]
                     st[:n_main, 20:24] = col_k[sel]
-                    inst['main'].write(st[:n_main], 0)
+                    if _prof_b:
+                        _w0 = time.perf_counter()
+                        inst['main'].write(st[:n_main], 0)
+                        _w_ms += (time.perf_counter() - _w0) * 1000.0
+                    else:
+                        inst['main'].write(st[:n_main], 0)
             else:
                 st[:k, 0:16] = g[:k].reshape(k, 16)
                 st[:k, 16] = sat_k
                 st[:k, 20:24] = col_k                # color=None 的实例留 0 (旧语义)
                 mbn[key] = k
-                inst['main'].write(st[:k], 0)      # moderngl 吃 buffer 协议, 部分写入
-                inst['sha'].write(g[:k], 0)        # 同一 gather 缓冲 = 旧 _fw32[idxs] 同字节
+                if _prof_b:
+                    _w0 = time.perf_counter()
+                    inst['main'].write(st[:k], 0)
+                    inst['sha'].write(g[:k], 0)
+                    _w_ms += (time.perf_counter() - _w0) * 1000.0
+                else:
+                    inst['main'].write(st[:k], 0)  # moderngl 吃 buffer 协议, 部分写入
+                    inst['sha'].write(g[:k], 0)    # 同一 gather 缓冲 = 旧 _fw32[idxs] 同字节
+        if _prof_b:
+            # D1/P0: buckets 内部三段口径 —— write 实测累加, 其余 = 逐桶 numpy 小数组
+            _tot_ms = (time.perf_counter() - _t_seg) * 1000.0 if _t_seg else 0.0
+            _st = self._stage_times
+            _st['buckets_write'] = _st.get('buckets_write', 0.0) + _w_ms
+            _st['buckets_pack'] = _st.get('buckets_pack', 0.0) + max(0.0, _tot_ms - _w_ms)
+
+    # ============ D1/P1: 桶实例打包 C 内核 (loom_bucket_pack) 接线 ============
+    def _bucket_pack_ready(self):
+        """C 打包内核可用? LOOM_BUCKET_PACK=0 强制旧路径; 缺导出则**大声**回退一次."""
+        st = getattr(self, '_bucket_pack_state', 0)
+        if st != 0:
+            return st > 0
+        if os.environ.get('LOOM_BUCKET_PACK') == '0':
+            self._bucket_pack_state = -1
+            print('[buckets] LOOM_BUCKET_PACK=0 -> 强制走 Python 打包路径 (A/B 或故障回退)')
+            return False
+        try:
+            import fastpath
+            ok = bool(fastpath.bucket_pack_available())
+        except Exception as e:
+            ok = False
+            self._bucket_pack_err = '%s: %s' % (type(e).__name__, e)
+        self._bucket_pack_state = 1 if ok else -1
+        if not ok:
+            print('[buckets] ckernels.loom_bucket_pack 不可用 (%s) -> 回退 Python 打包路径'
+                  % (getattr(self, '_bucket_pack_err', '旧 DLL 无该导出')))
+        return ok
+
+    def _bucket_pack_staging(self, n, K):
+        """C 打包输出暂存 (grow-only): main (n,24) f32 / sha (n,16) f32 / 计数 (K,) i32."""
+        m = getattr(self, '_bp_main', None)
+        if m is None or m.shape[0] < n:
+            cap = max(64, n, (m.shape[0] * 2 if m is not None else 0))
+            self._bp_main = np.empty((cap, 24), dtype='f4')
+            self._bp_sha = np.empty((cap, 16), dtype='f4')
+        c = getattr(self, '_bp_cnt', None)
+        if c is None or c.shape[0] < K:
+            self._bp_cnt = np.empty((max(8, K),), dtype='i4')
+        return self._bp_main, self._bp_sha, self._bp_cnt
+
+    def _bucket_pack_frame(self, G_all, sat_all, col_all, keep_all, mbn,
+                           with_frustum=False):
+        """一次 C 调用把全部桶的 main/sha 实例字节打包, 再逐桶 buffer.write.
+
+        逐字节等价 = 旧 Python 路径 (同一 gather 源 + 同一 staging 行布局);
+        覆盖剔除开/关两档; 桶内 n<=1 由 C 侧同款守卫跳过剔除 (= Python k>1)."""
+        import fastpath
+        n = int(G_all.shape[0])
+        K = len(self._render_buckets)
+        offs_np = getattr(self, '_bucket_offs_np', None)
+        if offs_np is None or offs_np.shape[0] != K + 1:
+            offs_np = np.asarray(getattr(self, '_bucket_offs', [0]), dtype=np.int64)
+        main_st, sha_st, cnt = self._bucket_pack_staging(n, K)
+        keep = None
+        if with_frustum and keep_all is not None:
+            keep = np.ascontiguousarray(keep_all, dtype=np.uint8)
+        _prof_b = os.environ.get('LOOM_PROFILE') == '1'
+        _t0 = time.perf_counter() if _prof_b else 0.0
+        rc = fastpath.bucket_pack(G_all, sat_all, col_all, offs_np, keep,
+                                  main_st[:n], sha_st[:n], cnt[:K])
+        if _prof_b:
+            _st = self._stage_times
+            _st['buckets_pack'] = _st.get('buckets_pack', 0.0) +                 (time.perf_counter() - _t0) * 1000.0
+        if rc is None:
+            raise RuntimeError('loom_bucket_pack 不可用 (可用性判定与调用不一致)')
+        if rc != 0:
+            raise RuntimeError('loom_bucket_pack 失败 rc=%d (形参/区间越界?)' % rc)
+        _w0 = time.perf_counter() if _prof_b else 0.0
+        a = 0
+        for bi, (key, idxs) in enumerate(self._render_buckets):
+            k = len(idxs)
+            ent = self._bucket_geo.get(key)
+            if ent is None:                    # 防御: 桶资源未建 (attach 路径遗漏)
+                ent = self._build_bucket_geo(key, self.models[idxs[0]])
+            self._grow_bucket_inst(key, k)
+            inst = self._bucket_inst[key]
+            n_main = int(cnt[bi])
+            mbn[key] = n_main
+            if n_main:
+                inst['main'].write(main_st[a:a + n_main], 0)
+            inst['sha'].write(sha_st[a:a + k], 0)
+            a += k
+        if _prof_b:
+            self._stage_times['buckets_write'] =                 self._stage_times.get('buckets_write', 0.0) +                 (time.perf_counter() - _w0) * 1000.0
 
     def _draw_main_buckets(self):
         """A2: 主 pass 实例化批绘制 —— 每桶一次 draw (旧法: 每物体
@@ -766,6 +884,12 @@ class RenderMixin:
         except Exception:
             pass
         white = self._white_gl_tex()
+        # D1/P0: mt_mp_draws 三段口径 (uniform / 纹理绑定 / render) —— 仅 LOOM_PROFILE=1
+        # 统计, 零开销时不做任何计时; 语句顺序与迁移前逐条一致 (保证像素不变)。
+        _p = os.environ.get('LOOM_PROFILE') == '1'
+        _acc_uni = 0.0
+        _acc_tex = 0.0
+        _acc_rnd = 0.0
         for key, idxs in self._render_buckets:
             ent = self._bucket_geo.get(key)
             if ent is None or ent['vao'] is None:
@@ -773,16 +897,24 @@ class RenderMixin:
             cnt = mbn.get(key, len(idxs))
             if cnt <= 0:
                 continue
+            if _p:
+                _c0 = time.perf_counter()
             tex = alb.get(key) or white
             if tex is not None:
                 tex.use(0)
+            if _p:
+                _c1 = time.perf_counter(); _acc_tex += _c1 - _c0; _c0 = _c1
             ntex = nrm.get(key)
             try:
                 self.prog['u_has_normal_map'].value = 1.0 if ntex is not None else 0.0
             except Exception:
                 pass
+            if _p:
+                _c1 = time.perf_counter(); _acc_uni += _c1 - _c0; _c0 = _c1
             if ntex is not None:
                 ntex.use(1)
+            if _p:
+                _c1 = time.perf_counter(); _acc_tex += _c1 - _c0; _c0 = _c1
             # M36 PBR: 每桶设材质级 PBR uniform (从桶键取, 同桶一致)
             try:
                 _pbr = key[5] if len(key) > 5 else (0.0, 0.5, 0)
@@ -797,6 +929,8 @@ class RenderMixin:
                 self.prog['u_has_env'].value = 1.0 if etex is not None else 0.0
             except Exception:
                 pass
+            if _p:
+                _c1 = time.perf_counter(); _acc_uni += _c1 - _c0; _c0 = _c1
             if etex is not None:
                 etex.use(2)
                 try:
@@ -805,7 +939,16 @@ class RenderMixin:
                         max(0, int(_m.log2(etex.size[0]))))
                 except Exception:
                     pass
+            if _p:
+                _c1 = time.perf_counter(); _acc_tex += _c1 - _c0; _c0 = _c1
             ent['vao'].render(moderngl.TRIANGLES, instances=cnt)
+            if _p:
+                _c1 = time.perf_counter(); _acc_rnd += _c1 - _c0
+        if _p:
+            _st = self._stage_times
+            _st['mt_mp_draws_uniform'] = _st.get('mt_mp_draws_uniform', 0.0) + _acc_uni * 1000.0
+            _st['mt_mp_draws_tex'] = _st.get('mt_mp_draws_tex', 0.0) + _acc_tex * 1000.0
+            _st['mt_mp_draws_render'] = _st.get('mt_mp_draws_render', 0.0) + _acc_rnd * 1000.0
 
     def _white_gl_tex(self):
         """M36: 1x1 白纹理 GPU 资源 (延迟创建, 需 current context)。"""

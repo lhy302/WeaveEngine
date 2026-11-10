@@ -444,3 +444,75 @@ def collide_extract_local(ci, bmn, bmx, scn, rad, kind):
     return (np.ascontiguousarray(cmn), np.ascontiguousarray(cmx),
             bmn_l, bmx_l, scn_l, rad_l, kind_l,
             np.asarray(ci, dtype=np.int64))
+
+
+# ---------------------------------------------------------------------------
+# f) 桶实例打包内核 (2026-11-10, 批次 D1 / P1)
+#    loom_render._prepare_bucket_frame 的逐桶 staging 打包 (世界矩阵 16f +
+#    饱和度 + 颜色 + 视锥重排 + 阴影行) 收编为**一次** C 调用:
+#      Python 每帧 ~250-350 次小数组 numpy 调用 -> 1 次 C 调用 + 每桶 2 次 write
+#    调研依据: docs/design/research_beta6_04_python_hotspots.md §1.4/§1.6
+#    (逐桶花式索引在争用下从 2.5µs 膨胀到 110µs; 单次 gather 合并后只剩一次)。
+#
+#    ★可用性是**可选**的 (与 aabbs/collide 的硬加载不同): 旧 DLL 没有该导出时
+#      available() 返回 False, loom_render 打印一行并回退现有 Python 路径 ——
+#      不静默、不硬 raise (打包不是正确性必需件, 只是性能路径)。
+#    ★Nuitka 折叠防御: 函数指针存 _BK dict (容器内容不会被常量传播裁掉)。
+_BK = {'pack': None}
+if _CK['dll'] is not None:
+    _dll_bk = _CK['dll']
+    _ct_bk = _CK['ctypes']
+    if hasattr(_dll_bk, 'loom_bucket_pack'):
+        _fn_bk = _dll_bk.loom_bucket_pack
+        _fn_bk.restype = _ct_bk.c_int
+        _fn_bk.argtypes = [
+            _ct_bk.POINTER(_ct_bk.c_float),    # world16 (n,16) f32
+            _ct_bk.POINTER(_ct_bk.c_float),    # sat     (n,)   f32
+            _ct_bk.POINTER(_ct_bk.c_float),    # col     (n,4)  f32
+            _ct_bk.POINTER(_ct_bk.c_int64),    # offs    (K+1,) i64
+            _ct_bk.c_int32,                    # K
+            _ct_bk.POINTER(_ct_bk.c_uint8),    # keep    (n,) u8 或 NULL
+            _ct_bk.c_int64,                    # n_total
+            _ct_bk.POINTER(_ct_bk.c_float),    # out_main (n,24) f32
+            _ct_bk.POINTER(_ct_bk.c_float),    # out_sha  (n,16) f32
+            _ct_bk.POINTER(_ct_bk.c_int32),    # out_main_n (K,) i32
+        ]
+        _BK['pack'] = _fn_bk
+
+
+def bucket_pack_available():
+    """C 打包内核是否可用 (旧 DLL / 非官方件 → False, 调用方回退 Python)."""
+    return _BK.get('pack') is not None
+
+
+def bucket_pack(world16, sat, col, offs_np, keep, out_main, out_sha, out_main_n):
+    """一次打包全部桶 (语义 = loom_render 现行 Python 路径的逐字节等价).
+
+    参数 (全部 C 连续):
+      world16  (n,16) f32 / sat (n,) f32 / col (n,4) f32
+      offs_np  (K+1,) int64 (offs[0]==0, offs[-1]==n)
+      keep     (n,) uint8 或 None (None = 全可见)
+      out_main (n,24) f32 / out_sha (n,16) f32 / out_main_n (K,) int32
+    返回 rc (0 成功; 非 0 = 契约违约, 调用方硬 raise)。内核不可用返回 None。"""
+    fn = _BK.get('pack')
+    if fn is None:
+        return None
+    ct = _CK['ctypes']
+    _pf = ct.POINTER(ct.c_float)
+    _pi64 = ct.POINTER(ct.c_int64)
+    _pu8 = ct.POINTER(ct.c_uint8)
+    _pi32 = ct.POINTER(ct.c_int32)
+    n_total = int(world16.shape[0])
+    K = int(offs_np.shape[0] - 1)
+    rc = fn(world16.ctypes.data_as(_pf),
+            sat.ctypes.data_as(_pf),
+            col.ctypes.data_as(_pf),
+            offs_np.ctypes.data_as(_pi64),
+            K,
+            (keep.ctypes.data_as(_pu8) if keep is not None else None),
+            n_total,
+            out_main.ctypes.data_as(_pf),
+            out_sha.ctypes.data_as(_pf),
+            out_main_n.ctypes.data_as(_pi32))
+    return int(rc)
+

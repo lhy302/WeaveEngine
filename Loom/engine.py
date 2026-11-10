@@ -1239,6 +1239,7 @@ class GLEngine(ShadowMixin, FrameComponentMixin, PhysicsMixin, InputMixin, HudMi
             self.update_audio(fixed_dt)
             self._prof_add('mt_audio', _t)
             try:
+                self._prof_count('hm_pipe_wait')   # D1/P0: 跨线程交接计数 (S1 汇合点)
                 self._profile('pipe_wait', lambda: pipe.wait_pending())
             except Exception as e:
                 print("[物理] 管线异常 (%r) -> 降级主线程直跑" % (e,))
@@ -1285,6 +1286,7 @@ class GLEngine(ShadowMixin, FrameComponentMixin, PhysicsMixin, InputMixin, HudMi
 
     def _pipe_post(self, pipe, sdt, g):
         """批6: 段B 指令投递 (异常降级: 本帧起主线程直跑, 游戏不崩)."""
+        self._prof_count('hm_pipe_post')       # D1/P0: 跨线程交接计数
         try:
             pipe.post(self.models, sdt, g, False)
         except Exception as e:

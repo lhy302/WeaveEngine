@@ -98,6 +98,7 @@ class LogicThreadMixin:
             stop_ev = threading.Event()
         last = time.perf_counter()
         while not stop_ev.is_set():
+            self._prof_count('hm_logic_wake')   # D1/P0: 逻辑线程唤醒次数 (交接证据)
             try:
                 now = time.perf_counter()
                 dt = now - last
