@@ -25,8 +25,7 @@ _DEPTH_FUNC = {'less': '<', 'lequal': '<=', 'greater': '>', 'gequal': '>='}
 # moderngl 只有 CULL_FACE 开关 + front_face(绕序), **没有**「剔除前面」的独立开关
 # （无 moderngl.BACK/FRONT 常量）。S0-S2 只用到 none/back；front 明确拒绝而不是假装支持。
 _CULL_SUPPORTED = ('none', 'back')
-_BLEND = {'alpha': (moderngl.SRC_ALPHA, moderngl.ONE_MINUS_SRC_ALPHA),
-          'additive': (moderngl.SRC_ALPHA, moderngl.ONE)}
+_BLEND = {'alpha': (moderngl.SRC_ALPHA, moderngl.ONE_MINUS_SRC_ALPHA)}
 
 
 def _safe_get(obj, name, default):
