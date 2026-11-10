@@ -102,6 +102,8 @@ class GLFrameExecutor:
                          max(1, int(round(_h * float(t.scale)))))
                 for t in plan.targets
             }
+            # TargetDecl.format 也要真的落地（否则改了格式两端都不变 = 装饰字段）
+            self.engine._post_formats = {t.name: str(t.format) for t in plan.targets}
         except Exception:
             pass
         ctx = self.ctx

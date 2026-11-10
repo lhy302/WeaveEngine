@@ -194,6 +194,12 @@ def require_vulkan_api(where='Vulkan 渲染', adapter_info=None):
         raise VkBackendInitError(msg)
     # B1: adapter 版本也要过闸（loader 通过不等于显卡/驱动支持）
     aver = adapter_api_version(adapter_info)
+    if aver is None and adapter_info:
+        # 诚实处理：wgpu 0.32 的 AdapterInfo **没有** api_version 字段 —— 拿不到就不许
+        # 假装拦住了，必须留下可见警告（goal_01 Q2）。
+        print('[VK] 警告: 适配器信息未提供 api_version，无法校验显卡端 Vulkan 版本；'
+              '当前只校验了加载器 %d.%d.%d（地板 %d.%d）。'
+              % (ver[0], ver[1], ver[2], VK_MIN_API_MAJOR, VK_MIN_API_MINOR))
     if aver is not None and (aver[0], aver[1]) < (VK_MIN_API_MAJOR, VK_MIN_API_MINOR):
         lines = [
             ('[VK] %s 不可用：显卡驱动的 Vulkan API 为 %d.%d.%d，低于地板 %d.%d'

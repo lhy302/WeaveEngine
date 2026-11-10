@@ -937,45 +937,72 @@ class VkRenderer:
         self._main_pipe_rkey = rkey
 
     def _ensure_post_targets_for(self, plan, w, h):
-        """2a: 目标尺寸来自**共享描述**的 TargetDecl.scale（不再由 VK 自己写 0.5/0.25）。"""
-        sizes = {}
+        """2a: 尺寸/格式都来自**共享描述**（TargetDecl.scale / format）。"""
+        sizes, fmts = {}, {}
         for t in plan.targets:
             try:
                 sc = float(getattr(t, 'scale', 1.0) or 1.0)
             except (TypeError, ValueError):
                 sc = 1.0
             sizes[t.name] = (max(1, int(round(w * sc))), max(1, int(round(h * sc))))
-        self._ensure_post_targets(w, h, sizes)
+            fmts[t.name] = str(getattr(t, 'format', 'rgba16float'))
+        self._ensure_post_targets(w, h, sizes, fmts)
 
-    def _ensure_post_targets(self, w, h, sizes=None):
-        """HDR / half / quarter 三张 rgba16float 目标（尺寸变化重建）。
+    def _ensure_post_targets(self, w, h, sizes=None, fmts=None):
+        """HDR / half / quarter 目标（尺寸或**格式**变化都重建）。
 
-        sizes: {语义目标名: (w,h)}，缺省 = HDR 全尺寸 / half 0.5 / quarter 0.25。
+        sizes: {语义目标名: (w,h)}；fmts: {语义目标名: wgpu 格式}。
+        缺省 = HDR 全尺寸 rgba16float / half 0.5 / quarter 0.25。
         """
         if sizes is None:
             sizes = {HDR_TARGET: (w, h), HALF_TARGET: (max(1, w // 2), max(1, h // 2)),
                      QUARTER_TARGET: (max(1, w // 4), max(1, h // 4))}
-        key = (w, h, tuple(sorted((k, tuple(v)) for k, v in sizes.items())))
+        if fmts is None:
+            fmts = {}
+        key = (w, h, tuple(sorted((k, tuple(v)) for k, v in sizes.items())),
+               tuple(sorted(fmts.items())))
         if self._post_t is not None and self._post_t.get('key') == key:
             return
         d = self.device
         usage = wgpu.TextureUsage.RENDER_ATTACHMENT | wgpu.TextureUsage.TEXTURE_BINDING
 
-        def _mk(tw, th):
+        def _mk(name, tw, th):
+            # 2026-11-11: 格式来自 TargetDecl.format（改格式两端都真的变，不再是装饰字段）
             t = d.create_texture(size=(max(1, tw), max(1, th), 1),
-                                 format='rgba16float', usage=usage)
+                                 format=fmts.get(name, 'rgba16float'), usage=usage)
             return t, t.create_view()
 
-        hdr, hdr_v = _mk(*sizes.get(HDR_TARGET, (w, h)))
-        half, half_v = _mk(*sizes.get(HALF_TARGET, (max(1, w // 2), max(1, h // 2))))
-        quar, quar_v = _mk(*sizes.get(QUARTER_TARGET, (max(1, w // 4), max(1, h // 4))))
+        hdr, hdr_v = _mk(HDR_TARGET, *sizes.get(HDR_TARGET, (w, h)))
+        half, half_v = _mk(HALF_TARGET, *sizes.get(HALF_TARGET, (max(1, w // 2), max(1, h // 2))))
+        quar, quar_v = _mk(QUARTER_TARGET, *sizes.get(QUARTER_TARGET, (max(1, w // 4), max(1, h // 4))))
         self._post_t = {'key': key, 'size': (w, h), 'hdr': hdr, 'hdr_view': hdr_v,
                         'half': half, 'half_view': half_v,
                         'quarter': quar, 'quarter_view': quar_v,
-                        'sizes': sizes}
+                        'sizes': sizes, 'fmts': fmts}
+        self._post_groups = None      # 视图变了，bind group 必须重建
 
-    def _ensure_post_pipes(self):
-        if self._post_pipes is not None:
+    def _ensure_post_pipes(self, fmts=None):
+        """按 (half 格式, quarter 格式, LDR 格式) 建/缓存后处理管线。"""
+        fmts = tuple(fmts or ('rgba16float', 'rgba16float', self.format))
+        if self._post_pipes is not None and getattr(self, '_post_pipe_key', None) == fmts:
+            return
+        if getattr(self, '_post_layout', None) is not None and self._post_pipes is not None:
+            # 只重建管线（layout/sampler/params 缓冲复用）
+            d = self.device
+            sh = self._post_shader
+            lay = self._post_lay
+
+            def _pipe2(entry, fmt):
+                return d.create_render_pipeline(
+                    layout=lay,
+                    vertex={'module': sh, 'entry_point': 'vs', 'buffers': []},
+                    primitive={'topology': 'triangle-list', 'cull_mode': 'none'},
+                    fragment={'module': sh, 'entry_point': entry,
+                              'targets': [{'format': fmt}]})
+            self._post_pipes = {'bright': _pipe2('fs_bright', fmts[0]),
+                                'down': _pipe2('fs_down', fmts[1]),
+                                'tonemap': _pipe2('fs_tonemap', fmts[2])}
+            self._post_pipe_key = fmts
             return
         d = self.device
         sh = d.create_shader_module(code=_POST_WGSL)
@@ -1002,11 +1029,14 @@ class VkRenderer:
                 fragment={'module': sh, 'entry_point': entry, 'targets': [tgt]})
 
         # 无独立 up pass（上采样合成在 tonemap 里做，与 GL 同口径）
+        self._post_shader = sh
+        self._post_lay = lay
         self._post_pipes = {
-            'bright': _pipe('fs_bright', 'rgba16float'),
-            'down': _pipe('fs_down', 'rgba16float'),
-            'tonemap': _pipe('fs_tonemap', self.format),
+            'bright': _pipe('fs_bright', fmts[0]),
+            'down': _pipe('fs_down', fmts[1]),
+            'tonemap': _pipe('fs_tonemap', fmts[2]),
         }
+        self._post_pipe_key = fmts
         self._post_layout = bgl
         self._post_samples = d.create_sampler(mag_filter='linear', min_filter='linear',
                                               address_mode_u='clamp-to-edge',
@@ -2316,7 +2346,10 @@ class VkRenderer:
         import numpy as _np
         from loom_post import params as _params
         p = _params()
-        self._ensure_post_pipes()
+        _fm = {t.name: str(getattr(t, 'format', 'rgba16float')) for t in plan.targets}
+        self._ensure_post_pipes((_fm.get(HALF_TARGET, 'rgba16float'),
+                                 _fm.get(QUARTER_TARGET, 'rgba16float'),
+                                 _fm.get('color.ldr', self.format)))
         self._ensure_post_groups()
         sizes = (self._post_t or {}).get('sizes') or {}
         hw, hh = sizes.get(HALF_TARGET, (max(1, w // 2), max(1, h // 2)))

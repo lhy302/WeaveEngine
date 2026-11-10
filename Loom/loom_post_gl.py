@@ -103,14 +103,29 @@ class GLPostChain:
     # ---------- 资源 ----------
     def ensure(self, w, h):
         w, h = max(1, int(w)), max(1, int(h))
-        if self.size == (w, h):
+        # 缓存键必须含「每个目标的尺寸 + 格式」：只比屏幕尺寸会让同一引擎内动态改
+        # TargetDecl.scale/format 时 GL 不重建（VK 会重建）—— 两端行为不一致（goal_01 反例）。
+        _sz = getattr(self.engine, '_post_sizes', None) or {}
+        _fm = getattr(self.engine, '_post_formats', None) or {}
+        _key = (w, h,
+                tuple(sorted((k, tuple(v)) for k, v in _sz.items())),
+                tuple(sorted(_fm.items())))
+        if getattr(self, '_key', None) == _key and self._fbo:
             return
+        self._key = _key
         self.release()
         self.size = (w, h)
         ctx = self.ctx
 
+        _fmts = getattr(self.engine, '_post_formats', None) or {}
+
         def _mk_fbo(name, tw, th, with_depth):
-            tex = ctx.texture((tw, th), 4, dtype='f2')
+            # 2026-11-11: 纹理格式来自 TargetDecl.format（rgba16float -> f2；8 位 -> u1）
+            _fmt = str(_fmts.get(name, 'rgba16float'))
+            if _fmt.endswith('16float'):
+                tex = ctx.texture((tw, th), 4, dtype='f2')
+            else:
+                tex = ctx.texture((tw, th), 4)      # 8 位（u1）
             tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
             tex.repeat_x = False
             tex.repeat_y = False

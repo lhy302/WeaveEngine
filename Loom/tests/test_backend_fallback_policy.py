@@ -411,6 +411,18 @@ def t_vk_floor_gate(tmp):
     check('K2 拒绝原因里同时给 adapter 与 loader 版本',
           err is not None and '1.0.0' in str(err) and '1.1.0' in str(err),
           '' if err is None else str(err)[:80])
+    # K2b: 真机 wgpu 0.32 的 AdapterInfo 没有 api_version —— 必须留可见警告（不许静默放行）
+    import contextlib
+    import io as _io
+    buf = _io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        ret = G.require_vulkan_api('测试', adapter_info={'device': 'realGPU',
+                                                        'backend': 'vulkan'})
+    out = buf.getvalue()
+    check('K2b 无 api_version 时打印可见警告', '无法校验' in out and 'api_version' in out,
+          out.strip()[-90:])
+    check('K2b 无 api_version 时不伪造拦截（返回 loader 版本）', ret == (1, 1, 0), ret)
+
     # K3: adapter 版本够 -> 通过
     ok = G.require_vulkan_api('测试', adapter_info={'api_version': '1.2.0'}) == (1, 1, 0)
     check('K3 adapter 1.2 通过地板', ok, ok)

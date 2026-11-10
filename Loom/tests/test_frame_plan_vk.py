@@ -166,6 +166,54 @@ def main():
     check('双 dir 阴影：每槽位独立 uniform 缓冲（2 个）',
           len(getattr(r2, '_dir_shadow_bufs', ())) == 2,
           len(getattr(r2, '_dir_shadow_bufs', ())))
+    # F2-02 新反例①：TargetDecl.format 必须两端真生效（改 bloom.half 格式 -> 两端都变）
+    def _fmt8(plan):
+        from loom_post import HALF_TARGET as _HT
+        return dataclasses.replace(plan, targets=tuple(
+            dataclasses.replace(t, format='rgba8unorm') if t.name == _HT else t
+            for t in plan.targets))
+    data3 = AB._load_scene(os.path.join(AB.SCENES_DIR, 'ab_bloom.json'))  # 有亮部才看得到格式差异
+    g3_0 = AB.render_gl(data3)
+    v3_0 = AB.render_vk(data3)
+    try:
+        def _w(*a, **k):
+            return _fmt8(orig[0](*a, **k))
+        loom_pass.frame_plan = loom_render.frame_plan = editor.frame_plan = _w
+        g3 = AB.render_gl(data3)
+        v3 = AB.render_vk(data3)
+    finally:
+        loom_pass.frame_plan, loom_render.frame_plan, editor.frame_plan = orig
+    mf_g = _mae(g3, g3_0)
+    mf_v = _mae(v3, v3_0)
+    check('bloom.half.format 两端真生效（GL 变化）', mf_g > 1e-4, mf_g)
+    check('bloom.half.format 两端真生效（VK 变化）', mf_v > 1e-4, mf_v)
+    check('format 反例幅度比在 [0.5, 2.0]', 0.5 <= (mf_v / mf_g) <= 2.0,
+          'VK/GL=%.3f' % (mf_v / max(1e-9, mf_g)))
+
+    # F2-02 新反例②：同一引擎内动态改 scale，GL 后处理链必须重建（缓存键含尺寸/格式）
+    import moderngl as _mg
+    import loom_post_gl as _LPG
+
+    class _E:
+        width, height = 480, 320
+
+        def __init__(self):
+            self.ctx = _mg.create_standalone_context(require=430)
+            self._post_sizes = {'color.hdr': (480, 320),
+                                'bloom.half': (240, 160), 'bloom.quarter': (120, 80)}
+            self._post_formats = {'color.hdr': 'rgba16float',
+                                  'bloom.half': 'rgba16float', 'bloom.quarter': 'rgba16float'}
+
+    e = _E()
+    ch = _LPG.GLPostChain(e)
+    ch.ensure(480, 320)
+    s1 = tuple(ch._tex['bloom.half'].size)
+    e._post_sizes['bloom.half'] = (192, 128)
+    ch.ensure(480, 320)
+    s2 = tuple(ch._tex['bloom.half'].size)
+    check('同引擎内 scale 0.5->0.4 时 GL 目标重建', s1 == (240, 160) and s2 == (192, 128),
+          (s1, s2))
+
     check('双 dir 阴影：两槽位贴图视图不同',
           getattr(r2, '_shadow_view', None) is not getattr(r2, '_shadow_view2', None),
           (id(getattr(r2, '_shadow_view', None)), id(getattr(r2, '_shadow_view2', None))))
