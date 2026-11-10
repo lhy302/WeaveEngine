@@ -605,14 +605,19 @@ d20 = S.scene_to_dict(e20)
 check('⑥ 场景写出 min_engine_version (= 当前引擎版本)',
       d20.get('min_engine_version') == S.ENGINE_VERSION,
       '%r vs %r' % (d20.get('min_engine_version'), S.ENGINE_VERSION))
-check('⑥ 未抬 SCENE_VERSION (仍是 11)', S.SCENE_VERSION == 11 and d20['version'] == 11,
-      'version=%r' % (d20.get('version'),))
+# C1 自身不抬版本号; 版本号由后续批次决定 (R02 材质真相源已到 12) —— 只断言
+# "写出的 version 与 SCENE_VERSION 同源", 不钉死具体数字。
+check('⑥ 场景 version 与 SCENE_VERSION 同源 (C1 未自行抬版)',
+      d20['version'] == S.SCENE_VERSION and S.SCENE_VERSION >= 11,
+      'version=%r SCENE_VERSION=%r' % (d20.get('version'), S.SCENE_VERSION))
 
 # 旧场景 (无该字段) -> 照常加载 (向后兼容)
 old_ok = True
 try:
     S.migrate({'version': 11, 'objects': []})
-    S.scene_from_dict(e20, dict(d20, min_engine_version=None))
+    _old_scene = dict(d20)
+    _old_scene.pop('min_engine_version', None)   # U-02=B: 字段缺失=旧场景;
+    S.scene_from_dict(e20, _old_scene)            # 字段存在但为 None 现在算非法值
 except Exception as exc:                     # noqa: BLE001
     old_ok = False
     print('    旧场景加载异常:', exc)
@@ -1137,6 +1142,34 @@ check('⑨ F-02 引擎自身版本不可解析 -> 显式告警后放行 (不静�
       _buf92.getvalue().strip()[:100])
 check('⑨ F-02 无版本要求的旧场景仍放行',
       S.check_engine_version({'version': 11}) is True)
+
+# ---- U-02=B: 字段存在但类型不对/空串/乱码 -> 一律拒绝 (不静默放行) ----
+_bad_cases = [('int', 11), ('list', ['a']), ('bool', True), ('null', None),
+              ('空串', ''), ('全空白', '   '), ('乱码串', 'banana')]
+_rej_all = True
+_msgs_ok = True
+for _label, _val in _bad_cases:
+    try:
+        S.check_engine_version({'min_engine_version': _val})
+        _rej_all = False
+        check('⑨ U-02 非法值 %s -> 拒绝' % _label, False, repr(_val))
+    except S.SceneVersionError as _e:
+        _msg = str(_e)
+        # 原因必须"可读": 带字段值 + 期望格式 (发布版无 print, 只能靠这条消息)
+        if ('期望形如' not in _msg) or (repr(_val) not in _msg and str(_val) not in _msg):
+            _msgs_ok = False
+            print('    %s 的拒绝原因缺值/格式:', _msg)
+check('⑨ U-02 非 str(int/list/bool/null)/空串/乱码 全部被拒绝', _rej_all)
+check('⑨ U-02 拒绝原因含 字段值 + 期望格式', _msgs_ok)
+check('⑨ U-02 字段缺失 (旧场景) 仍放行',
+      S.check_engine_version({'version': 11, 'objects': []}) is True)
+_rej_scene = False
+try:
+    S.scene_from_dict(make_engine(), {'version': 11, 'min_engine_version': 7,
+                                      'objects': []})
+except S.SceneVersionError:
+    _rej_scene = True
+check('⑨ U-02 加载链 (scene_from_dict) 对非法类型同样拒绝', _rej_scene)
 
 # ---- F-03: 回退名单用 WeakSet; 删除模型不被强引用; 播放边界清空 ----
 import gc
