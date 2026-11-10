@@ -215,12 +215,19 @@ def t_roundtrip(tmp, proj, g1, gc):
     m.renderer.material = mat
     ed._scene_skybox = cube
     ed._skybox = cube
-    data = S.scene_to_dict(ed, base_dir=proj)
+    # Q-B1-3=A: 材质真相源 = Assets/assets.json（场景只写引用）
+    _g, _mig, _mwhy = ctx.sync_material(mat)
+    check('材质登记进资产库', _g == mat.guid and ctx.owns(mat.guid, 'material'),
+          _mwhy)
+    # 真实保存路径（camera 非 None）会把未登记材质同步进资产库
+    data = S.scene_to_dict(ed, camera={'target': [0, 0, 0], 'distance': 10.0,
+                                       'yaw': 0.0, 'pitch': 0.0}, base_dir=proj)
     md = data['materials'][0]
-    check('场景 albedo 只写 guid（无 path）',
-          md['albedo'].get('guid') == g1 and 'path' not in md['albedo'], md['albedo'])
-    check('场景 env_map 只写 guid（无 paths）',
-          md['env_map'].get('guid') == gc and 'paths' not in md['env_map'], md['env_map'])
+    check('场景 materials[] 只写引用（无内联定义）',
+          set(md.keys()) <= {'id', 'name'} and md['id'] == mat.guid, md)
+    _libv = ctx.material_value(mat.guid) or {}
+    check('资产库 value 记录贴图/环境 guid',
+          _libv.get('albedo') == g1 and _libv.get('env_map') == gc, _libv)
     check('场景 skybox 只写 guid（无 paths）',
           (data.get('skybox') or {}).get('guid') == gc
           and 'paths' not in (data.get('skybox') or {}), data.get('skybox'))
@@ -256,18 +263,22 @@ def t_roundtrip(tmp, proj, g1, gc):
 # ---------------------------------------------------------------- ⑧⑨⑩ 失败可见
 def t_failure_visible(tmp, proj2, data):
     print('---- ⑧ 缺文件回退+reason / ⑨ 旧路径 fallback / ⑩ 重复材质 guid ----')
-    bad = json.loads(json.dumps(data))
-    bad['materials'][0]['albedo'] = {'guid': 'deadbeef' * 4}
+    mat_id = data['materials'][0]['id']
+    ctx = loom_assets.AssetContext.open_root(proj2)
+    libv = ctx.material_value(mat_id) or {}
+    # Q-B1-3=A: 场景只有引用、资产库缺该材质 -> 必须出声（不许静默）
+    bad = {'version': S.SCENE_VERSION, 'objects': [],
+           'materials': [{'id': 'deadmat'}]}
     ed = _ed()
     _, out = _cap(lambda: S.scene_from_dict(ed, bad, base_dir=proj2))
     errs = S.asset_errors(ed)
-    check('未知 guid -> 有 reason、不崩',
-          bool(errs) and any('未在项目索引' in r for _w, _g, r in errs), errs)
-    check('未知 guid -> 出声（[资产]）', '[资产]' in out)
+    check('场景只有引用且资产库缺该材质 -> reason',
+          any('不存在该材质' in r for _w, _g, r in errs), errs)
+    check('未知材质引用 -> 出声（[资产]）', '[资产]' in out)
 
-    # 缺文件: 把导入的贴图源文件删掉
+    # 缺文件: 把资产库材质引用的贴图源文件删掉
     idx = loom_assets.load_index(proj2)[0]
-    victim_guid = (data['materials'][0]['albedo'] or {}).get('guid')
+    victim_guid = libv.get('albedo')
     victim_entry = idx['assets'].get(victim_guid) or {}
     victim = (victim_guid, os.path.join(proj2, str(victim_entry.get('src', '')).replace('/', os.sep)))
     _backup = open(victim[1], 'rb').read()
@@ -281,7 +292,7 @@ def t_failure_visible(tmp, proj2, data):
     check('源文件缺失 -> 出声', '[资产]' in out2)
     check('源文件缺失 -> 贴图回退为 None（不崩）',
           all(getattr(x, 'albedo', None) is None for x in ed2.materials
-              if x.guid == data['materials'][0]['id']))
+              if x.guid == mat_id))
     # 内容变更检测: 写不同字节 -> 软告警（valid 仍 True，提示 asset_reimport）
     with open(victim[1], 'wb') as f:
         f.write(_backup + bytes(8))
@@ -375,9 +386,14 @@ def t_migrate():
     check('迁移: 有改动、无失败', rep['changed'] >= 2 and not rep['failures'], rep)
     check('迁移: 版本升到 SCENE_VERSION', rep['version_after'] == S.SCENE_VERSION)
     new = json.load(open(sp, encoding='utf-8'))
-    check('迁移: 材质 albedo 变 guid',
-          'path' not in new['materials'][0]['albedo']
-          and new['materials'][0]['albedo']['guid'])
+    check('迁移: 场景材质只剩引用（内联定义已抽库）',
+          set(new['materials'][0].keys()) <= {'id', 'name'}
+          and new['materials'][0]['id'])
+    _midx = loom_assets.load_index(proj)[0]
+    _mv = (_midx['assets'].get(new['materials'][0]['id']) or {}).get('value') or {}
+    check('迁移: 资产库 value 带贴图 guid（且索引内存在该贴图）',
+          isinstance(_mv.get('albedo'), str)
+          and _mv['albedo'] in (_midx.get('assets') or {}), _mv)
     check('迁移: 场景天空盒变 guid',
           'paths' not in (new.get('skybox') or {}) and (new.get('skybox') or {}).get('guid'))
     check('迁移: 相机天空盒变 guid',
@@ -490,22 +506,27 @@ def t_p1_1_preserve_refs():
     check('A 打开后贴图确实没解析出来（前置成立）',
           any(x.guid == mat_id and getattr(x, 'albedo', None) is None
               for x in ed2.materials))
-    data2 = S.scene_to_dict(ed2, base_dir=proj)
+    data2 = S.scene_to_dict(ed2, camera={'target': [0, 0, 0], 'distance': 10.0,
+                                         'yaw': 0.0, 'pitch': 0.0}, base_dir=proj)
     md = data2['materials'][0]
-    check('A 保存后 albedo guid 仍在（旧行为: 整键消失）',
-          (md.get('albedo') or {}).get('guid') == guid, md.get('albedo'))
-    check('A 保存后 albedo 仍是 guid 引用（无 path）',
-          'path' not in (md.get('albedo') or {}))
-    check('A 保存后 env_map 仍在', (md.get('env_map') or {}).get('guid') == cg)
+    _ctx2 = loom_assets.AssetContext.open_root(proj)
+    _libv2 = _ctx2.material_value(md['id']) or {}
+    check('A 保存后场景只写材质引用（无内联定义）',
+          set(md.keys()) <= {'id', 'name'}, md)
+    check('A 资产库仍保留失效贴图 guid（旧行为: 整键消失）',
+          _libv2.get('albedo') == guid, _libv2)
+    check('A 资产库仍保留环境贴图 guid', _libv2.get('env_map') == cg, _libv2)
     p2 = os.path.join(proj, 'scene2.json')
     S.save_json_atomic(p2, data2)
     ed3 = _ed(p2)
     _, out3 = _cap(lambda: S.scene_from_dict(
         ed3, json.load(open(p2, encoding='utf-8')), base_dir=proj))
     check('A 重开后仍告警（持续可见）', bool(S.asset_errors(ed3)), S.asset_errors(ed3))
-    data3 = S.scene_to_dict(ed3, base_dir=proj)
-    check('A 连续两次保存 guid 不漂移',
-          (data3['materials'][0].get('albedo') or {}).get('guid') == guid)
+    data3 = S.scene_to_dict(ed3, camera={'target': [0, 0, 0], 'distance': 10.0,
+                                         'yaw': 0.0, 'pitch': 0.0}, base_dir=proj)
+    _libv3 = (loom_assets.AssetContext.open_root(proj)
+              .material_value(data3['materials'][0]['id']) or {})
+    check('A 连续两次保存 guid 不漂移', _libv3.get('albedo') == guid, _libv3)
 
     # B) 整个项目没有资产索引（天空盒/贴图都是纯 guid）-> 保存必须保留原 guid
     plain = os.path.join(tmp, 'plain')
@@ -1182,6 +1203,131 @@ def t_f02_error_cap():
           S.asset_errors(ed) == [] and S.asset_error_count(ed) == 0)
 
 
+
+
+# ================================================================ Q-B1-3=A 材质真相源
+def t_qb13_material_truth():
+    print('---- Q-B1-3=A: 材质真相源收敛到 Assets/assets.json ----')
+    import importlib.util
+    tmp = tempfile.mkdtemp(prefix='loom_qb13_')
+    proj = os.path.join(tmp, 'proj')
+    os.makedirs(proj)
+    ctx = loom_assets.AssetContext.for_dir(proj, create=True)
+    png = _png(os.path.join(tmp, 'src', 'g.png'), (255, 136, 0, 255))
+    texg, _c, why = ctx.import_texture(png, name='g')
+    tex, _ok, _w = ctx.texture(texg)
+    ed = _ed(os.path.join(proj, 's.json'))
+    mat = ed.add_material(color='#FF8800', name='金')
+    mat.pbr = True
+    mat.metallic = 0.9
+    mat.roughness = 0.2
+    mat.albedo = tex
+    gid, migrated, mwhy = ctx.sync_material(mat)
+    check('前置: 材质已登记资产库', gid == mat.guid and ctx.owns(gid, 'material'), mwhy)
+    libv = ctx.material_value(gid) or {}
+    check('前置: 库 value 含 PBR 与贴图 guid',
+          libv.get('pbr') is True and libv.get('albedo') == texg, libv)
+
+    inline_same = {'id': gid, 'name': '金', 'color': '#FF8800', 'saturation': 1.0,
+                   'metallic': 0.9, 'roughness': 0.2, 'pbr': True,
+                   'albedo': {'guid': texg}}
+    ed2 = _ed()
+    _, out2 = _cap(lambda: S.scene_from_dict(
+        ed2, {'version': S.SCENE_VERSION, 'objects': [],
+              'materials': [inline_same]}, base_dir=proj))
+    got = [x for x in ed2.materials if x.guid == gid][0]
+    check('内联定义被忽略（以资产库为准）',
+          got.color == '#FF8800' and got.albedo is not None
+          and got.albedo.guid == texg)
+    check('内联内容相同 -> 不报冲突',
+          not any('不一致' in r for _w, _g, r in S.asset_errors(ed2)))
+    check('内联被忽略有聚合告警（迁移期可见）', '内联定义已忽略' in out2, out2.strip()[-120:])
+
+    # 冲突：同 guid，场景副本颜色不同 -> 资产库胜 + 告警（不许静默）
+    inline_bad = dict(inline_same, color='#00FF00')
+    ed3 = _ed(os.path.join(proj, 's3.json'))
+    _, out3 = _cap(lambda: S.scene_from_dict(
+        ed3, {'version': S.SCENE_VERSION, 'objects': [],
+              'materials': [inline_bad]}, base_dir=proj))
+    got3 = [x for x in ed3.materials if x.guid == gid][0]
+    check('冲突: 按资产库加载（颜色仍 #FF8800）', got3.color == '#FF8800', got3.color)
+    check('冲突: 告警"场景副本与资产不一致"',
+          any('场景副本与资产不一致' in r for _w, _g, r in S.asset_errors(ed3)),
+          S.asset_errors(ed3))
+    r = _cmd('scene_assets_check', ed3)
+    check('冲突: 进 scene_assets_check（ok=False，不静默）',
+          (r.get('result') or {}).get('ok') is False, r)
+
+    # 保存只写 guid；未登记材质保存时自动迁移
+    ed4 = _ed(os.path.join(proj, 's4.json'))
+    m4 = ed4.add_model(__import__('mesh').create_cube(1.0), E.Point3D(0, 0, 0),
+                       E.Point3D(0, 0, 0))
+    m4.renderer.material = got3
+    newm = ed4.add_material(color='#112233', name='新材质')
+    m4b = ed4.add_model(__import__('mesh').create_cube(1.0), E.Point3D(2, 0, 0),
+                        E.Point3D(0, 0, 0))
+    m4b.renderer.material = newm
+    ed4.materials = [got3, newm]
+    cam = {'target': [0, 0, 0], 'distance': 10.0, 'yaw': 0.0, 'pitch': 0.0}
+    data4 = S.scene_to_dict(ed4, camera=cam, base_dir=proj)
+    check('保存: materials[] 只写引用（无内联定义）',
+          all(set(md.keys()) <= {'id', 'name'} for md in data4['materials']),
+          data4['materials'])
+    check('保存: 未登记材质被自动迁移进资产库',
+          int(getattr(ed4, '_materials_migrated', 0)) >= 1
+          and loom_assets.AssetContext.open_root(proj).owns(newm.guid, 'material'),
+          getattr(ed4, '_materials_migrated', None))
+
+    # 迁移脚本：内联 -> 库 + 同内容去重 + 对象 material_id 重写 + 幂等
+    spec = importlib.util.spec_from_file_location(
+        'migrate_qb13', os.path.join(os.path.dirname(LOOM), 'tools',
+                                     'migrate_scene_assets_v11.py'))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    lproj = os.path.join(tmp, 'legacy')
+    os.makedirs(lproj)
+    m1 = {'id': 'm1', 'name': 'm', 'color': '#FF0000', 'saturation': 1.0,
+          'metallic': 0.5, 'roughness': 0.5, 'pbr': True}
+    m2 = dict(m1, id='m2')
+    lscene = {'version': 10, 'materials': [m1, m2],
+              'objects': [
+                  {'id': 'o1', 'type': 'cube', 'params': {'size': 1.0},
+                   'material_id': 'm1'},
+                  {'id': 'o2', 'type': 'cube', 'params': {'size': 1.0},
+                   'material_id': 'm2'}]}
+    lsp = os.path.join(lproj, 'scene.json')
+    S.save_json_atomic(lsp, lscene)
+    rep = mod.migrate_scene(lsp, dry_run=True)
+    check('迁移 dry-run: 可预演且不写盘',
+          rep['changed'] >= 2 and rep['materials_migrated'] >= 1
+          and not rep['failures'] and not os.path.isdir(os.path.join(lproj, 'Assets')),
+          rep)
+    rep2 = mod.migrate_scene(lsp)
+    new = json.load(open(lsp, encoding='utf-8'))
+    check('迁移: 场景材质全为引用',
+          all(set(md.keys()) <= {'id', 'name'} for md in new['materials']),
+          new['materials'])
+    check('迁移: 同内容材质去重（两条 -> 同一个 guid）',
+          rep2['materials_deduped'] >= 1
+          and {o['material_id'] for o in new['objects']} == {'m1'}
+          and len(new['materials']) == 2
+          and new['materials'][0]['id'] == new['materials'][1]['id'] == 'm1',
+          (rep2.get('materials_deduped'), new['materials'],
+           [o['material_id'] for o in new['objects']]))
+    lidx = loom_assets.load_index(lproj)[0]
+    check('迁移: 资产库里有该材质且值正确',
+          (lidx['assets'].get('m1') or {}).get('type') == 'material'
+          and ((lidx['assets']['m1'].get('value') or {}).get('color') == '#FF0000'),
+          lidx['assets'].get('m1'))
+    edl = _ed()
+    _, outl = _cap(lambda: S.scene_from_dict(edl, json.load(open(lsp, encoding='utf-8')),
+                                             base_dir=lproj))
+    check('迁移后加载无资产问题', not S.asset_errors(edl), S.asset_errors(edl))
+    rep3 = mod.migrate_scene(lsp)
+    check('迁移幂等（再跑 changed=0）', rep3['changed'] == 0
+          and rep3['materials_migrated'] == 0, rep3)
+
+
 def main():
     tmp, proj, g1, gc = t_import()
     proj2, data = t_roundtrip(tmp, proj, g1, gc)
@@ -1208,6 +1354,7 @@ def main():
     t_f02_delta_effective()
     t_f02_no_root_save()
     t_f02_error_cap()
+    t_qb13_material_truth()
     print('\n总结果: %s' % ('ALL PASS' if ok else 'FAIL'))
     sys.exit(0 if ok else 1)
 

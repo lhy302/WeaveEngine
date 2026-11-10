@@ -55,7 +55,7 @@ from engine import Point3D, wrap_deg
 from loom_components import animator_from_dict, animator_to_dict
 from mesh import create_cube, spec_to_mesh
 
-SCENE_VERSION = 11  # v11 (beta6 B1 资产 guid): 贴图/六面图引用只写 guid (旧路径字段可读+告警)
+SCENE_VERSION = 12  # v12 (Q-B1-3=A 材质真相源): 场景 materials[] 只写引用, 定义在资产库
 PREFAB_VERSION = 1
 
 # ============================================================================
@@ -146,27 +146,38 @@ def version_lt(current, required):
     return a < b
 
 
+_VERSION_EXPECTED = '期望形如 "0.1.0.beta6" 的版本字符串 (支持 x.y.z 与 x.y.z-betaN)'
+
+
 def check_engine_version(data, engine_version=None):
     """加载前版本闸门. 不满足抛 SceneVersionError(带原因), 通过返回 True.
 
-    - 无 min_engine_version (旧场景 / Hub 写出的场景) -> 不设闸 (向后兼容);
-    - min_engine_version **不可解析** -> 拒绝 (R6 F-02: 旧实现"解析失败即放行"
+    - **无该字段** (旧场景 / Hub 写出的场景) -> 不设闸 (向后兼容);
+    - 字段**存在**但类型不对 (非 str: int/list/bool/null) 或为空串
+      -> **拒绝** (R6 U-02=B: 发布版看不到 print, 静默放行等于埋雷);
+    - 字段存在但**不可解析** -> 拒绝 (R6 F-02: 旧实现"解析失败即放行"
       等于闸门静默 fail-open —— 更旧的引擎会带着未知字段静默加载);
     - 引擎自身版本不可解析 -> 显式告警后放行 (无法比较; 但不静默, 打一行);
     - 当前引擎低于要求 -> 拒绝, 原因里同时给出"要求版本 / 当前版本".
     """
     if not isinstance(data, dict):
         return True
+    if 'min_engine_version' not in data:
+        return True                     # 旧场景/无字段 -> 不加闸
     need = data.get('min_engine_version')
     if not isinstance(need, str) or not need.strip():
-        return True
+        raise SceneVersionError(
+            '场景 min_engine_version=%r 非法 (类型=%s): %s; 拒绝加载'
+            ' (字段存在就必须合法, 旧场景请删掉该字段)'
+            % (need, type(need).__name__, _VERSION_EXPECTED))
     need = need.strip()
     cur = engine_version if engine_version is not None else ENGINE_VERSION
     need_p = parse_version(need)
     if need_p is None:
         raise SceneVersionError(
-            '场景 min_engine_version=%r 无法解析: 拒绝加载 (无法判定版本要求时'
-            '不放行, 以免旧引擎静默丢字段; 请修正该字段或删掉它)' % (need,))
+            '场景 min_engine_version=%r 无法解析: %s; 拒绝加载'
+            ' (无法判定版本要求时不放行, 以免旧引擎静默丢字段)'
+            % (need, _VERSION_EXPECTED))
     cur_p = parse_version(cur)
     if cur_p is None:
         print('[场景] 当前引擎版本 %r 无法解析: 无法比较 min_engine_version=%r,'
@@ -1385,27 +1396,98 @@ def _apply_material_env(engine, mat, ref, ctx):
                            '环境贴图加载失败 (%r)' % (e,))
 
 
+def _emit_material_refs(mats, ctx, engine=None, sync=False):
+    """Q-B1-3=A: 场景只写材质**引用**（id/name），定义在资产库。
+
+    sync=True（真正保存时）把未登记/被编辑的材质写回资产库；ctx 为 None
+    （无项目资产库）退化为旧的内联定义写入 —— 兼容闸门。
+    返回 (materials_list, migrated_count)。
+    """
+    if ctx is None:
+        return [_emit_material(m, ctx) for m in mats], 0
+    out, migrated = [], 0
+    for m in mats:
+        gid = getattr(m, 'guid', None) or generate_guid()
+        try:
+            m.guid = gid
+        except Exception:
+            pass
+        if sync:
+            _g, _mig, _why = ctx.sync_material(m)
+            if not (_g and ctx.owns(gid, 'material')):
+                # 登记失败 -> 退化为内联定义（宁可写冗余，不可丢数据），并出声
+                out.append(_emit_material(m, None))
+                if _why:
+                    print('[资产] 材质 %r 无法登记资产库 (%s) -> 本次写内联定义'
+                          % (getattr(m, 'name', '?'), _why))
+                continue
+            if _mig:
+                migrated += 1
+        elif not ctx.owns(gid, 'material'):
+            # digest/预览路径不写盘：未登记材质先按内联发射（保存后收敛为引用）
+            out.append(_emit_material(m, None))
+            continue
+        out.append({'id': gid, 'name': getattr(m, 'name', None)})
+    return out, migrated
+
+
 def _apply_materials(engine, mat_dicts, ctx=None):
-    """材质 dict 列表 -> engine.materials (清空重建; 文件 id 覆盖 guid).
-    必须在创建物体之前调用, 这样物体才能通过 material_id 引用库中材质.
-    v11: 贴图/环境贴图按 guid 从项目资产解析；旧 path 字段兼容读并告警。"""
+    """材质 -> engine.materials (清空重建).
+
+    Q-B1-3=A（2026-11-10 人类裁决）: **资产库 Assets/assets.json 是唯一真相源**。
+      · ctx 存在 + 库里有该 guid -> 一律用库定义；场景内联定义忽略，
+        内容不一致 -> 告警「场景副本与资产不一致，已按资产库加载」（不静默）。
+      · ctx 存在 + 库里没有 -> 迁移期回退内联定义 + 告警「尚未登记，保存时会迁移」。
+      · ctx 为 None（无项目资产库）-> 旧路径模式，行为与 beta5 一致（兼容闸门）。
+    """
     engine.materials.clear()
+    try:
+        from loom_assets import material_has_inline as _has_inline
+    except Exception:
+        def _has_inline(_d):
+            return False
+    _ignored = 0
     for d in mat_dicts:
         if not isinstance(d, dict):
             print('[场景] 材质段不是对象 (%s) -> 跳过该段' % (type(d).__name__,))
             continue
-        _warn_dup_guid(engine, 'material', d.get('id'), 'materials[]')
+        guid = d.get('id') or d.get('guid')
+        _warn_dup_guid(engine, 'material', guid, 'materials[]')
+        _inline = _has_inline(d)
+        if ctx is not None and guid and ctx.owns(guid, 'material'):
+            mat, _ok, _why = ctx.material(guid)
+            if mat is not None:
+                if _inline:
+                    if ctx.material_matches(guid, d):
+                        _ignored += 1
+                    else:
+                        record_asset_error(
+                            engine, 'materials[]', guid,
+                            '场景副本与资产不一致，已按资产库加载')
+                engine.materials.append(mat)
+                if _why:
+                    record_asset_error(engine, 'materials[]', guid, _why)
+                continue
+            record_asset_error(engine, 'materials[]', guid,
+                               '资产库材质构造失败 (%s) -> 回退场景内联定义' % (_why,))
+        elif ctx is not None and guid:
+            if _inline:
+                record_asset_error(engine, 'materials[]', guid,
+                                   '该材质尚未登记资产库（保存时会自动迁移）')
+            else:
+                record_asset_error(engine, 'materials[]', guid,
+                                   '资产库中不存在该材质（场景只有引用）')
         try:
             mat = engine.add_material(color=d.get('color'),
                                       saturation=d.get('saturation', 1.0),
                                       name=d.get('name'),
-                                      guid=d.get('id'))
+                                      guid=guid)
         except Exception as _e:
-            record_asset_error(engine, 'materials[]', d.get('id'),
+            record_asset_error(engine, 'materials[]', guid,
                                '材质创建失败 (%r)' % (_e,))
             continue
-        if d.get('id'):
-            mat.guid = d['id']
+        if guid:
+            mat.guid = guid
         # M36 PBR: 恢复金属度/粗糙度/PBR 开关
         try:
             mat.metallic = d.get('metallic', 0.0)
@@ -1416,6 +1498,8 @@ def _apply_materials(engine, mat_dicts, ctx=None):
         for slot, key in (('albedo', 'albedo'), ('normal_map', 'normal_map')):
             _apply_material_texture(engine, mat, slot, d.get(key), ctx)
         _apply_material_env(engine, mat, d.get('env_map'), ctx)
+    if _ignored:
+        print('[资产] materials[]: %d 条内联定义已忽略（以资产库为准）' % (_ignored,))
 
 
 def _is_default_material(mat):
@@ -1872,6 +1956,17 @@ def scene_to_dict(engine, camera=None, base_dir=None, ctx=None):
         if isinstance(_sb_ref, dict) and _sb_ref:
             _sb_dict = dict(_sb_ref)
     # Q-B1-1=A: 保存时若有"保留的失效引用"，出声告知（不静默、不删除）
+    # Q-B1-3=A: 材质只写引用；真正保存（camera 非 None）时把未登记/被编辑的
+    # 材质同步回资产库（digest 模式 camera=None 不写盘、不产生副作用）。
+    _mats_out, _mats_migrated = _emit_material_refs(
+        mats, ctx, engine, sync=(ctx is not None and camera is not None))
+    try:
+        engine._materials_migrated = _mats_migrated
+    except Exception:
+        pass
+    if _mats_migrated and camera is not None:
+        print('[资产] 本次保存已把 %d 个材质迁移到资产库（场景只写引用）'
+              % (_mats_migrated,))
     _kept = asset_refs_kept(engine)
     if _kept and camera is not None:
         print('[资产] 本次保存保留了 %d 条失效引用（原样写回，未改写；修复资产/缺文件后自动恢复）'
@@ -1882,7 +1977,7 @@ def scene_to_dict(engine, camera=None, base_dir=None, ctx=None):
             "min_engine_version": ENGINE_VERSION,
             "camera": camera,
             "gravity": getattr(engine, 'gravity', -9.8),   # 2026-08-30: 场景重力加速度
-            "materials": [_emit_material(m, ctx) for m in mats],
+                    "materials": _mats_out,
             "lights": [_emit_light(l) for l in engine.lights],
             "cameras": [_emit_camera(c, base_dir, ctx) for c in engine.cameras],
             "active_camera": engine.active_camera,
@@ -2040,6 +2135,12 @@ def migrate(data):
         # v9 -> v10 (2026-08-16 相机物体化): 旧摄像机无父, 补 parent_id=None
         for cm in data.get('cameras', []):
             cm.setdefault('parent_id', None)
+    if v < 12:
+        # v11 -> v12 (Q-B1-3=A 材质真相源收敛到 Assets/assets.json):
+        # migrate 保持纯函数 —— 不改写数据。加载侧按"资产库权威"解释：
+        # 场景内联定义被忽略（不一致才告警），保存时只写引用。
+        # 一次性抽出由 tools/migrate_scene_assets_v11.py（材质段）完成。
+        pass
     if v < 11:
         # v10 -> v11 (beta6 B1 资产 guid): **不在 migrate 里改写数据**（保持纯函数、可重复）。
         # 旧 path/paths 字段由加载侧兼容读并告警（一个 beta 周期的 fallback）；

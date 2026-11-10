@@ -47,7 +47,9 @@ def migrate_scene(scene_path, dry_run=False, create=True):
     """单场景迁移 -> 报告 dict。"""
     scene_path = os.path.abspath(scene_path)
     rep = {'scene': scene_path, 'changed': 0, 'failures': [], 'skipped': [],
-           'version_before': None, 'version_after': None, 'dry_run': bool(dry_run)}
+           'version_before': None, 'version_after': None, 'dry_run': bool(dry_run),
+           # Q-B1-3=A: 材质内联定义 -> 资产库（场景只留引用）
+           'materials_migrated': 0, 'materials_deduped': 0, 'conflicts': []}
     data = sceneio.load_scene_data(scene_path)
     if not isinstance(data, dict):
         rep['failures'].append('场景读不出/不是对象')
@@ -140,8 +142,72 @@ def migrate_scene(scene_path, dry_run=False, create=True):
         if isinstance(params, dict) and params.get('obj'):
             rep['skipped'].append('objects[%d].params.obj（模型引用留到 B2）' % oi)
 
+    # ---------------- Q-B1-3=A: 材质真相源收敛到 Assets/assets.json ----------------
+    # 场景 materials[] 只写引用；内联定义抽进资产库（同 guid/同内容去重）。
+    # 幂等：已是引用（无内联字段）的条目原样保留。
+    _mats_in = data.get('materials')
+    if isinstance(_mats_in, list):
+        canon_map = {}
+        remap = {}
+        refs = []
+
+        def _unresolved(ref):
+            return (isinstance(ref, dict) and ref.get('path')
+                    and not ref.get('guid'))
+
+        for mi, mat in enumerate(_mats_in):
+            if not isinstance(mat, dict):
+                refs.append(mat)
+                continue
+            gid = mat.get('id') or mat.get('guid') or loom_assets.new_guid()
+            if not loom_assets.material_has_inline(mat):
+                refs.append({'id': gid, 'name': mat.get('name')})
+                continue
+            env = mat.get('env_map')
+            if (_unresolved(mat.get('albedo')) or _unresolved(mat.get('normal_map'))
+                    or (isinstance(env, dict) and env.get('paths')
+                        and not env.get('guid'))):
+                rep['failures'].append(
+                    'materials[%d]: 仍有未迁移的贴图路径 -> 保留内联定义' % mi)
+                refs.append(mat)
+                continue
+            value = loom_assets.material_value_from_dict(mat)
+            canon = loom_assets.material_canon(value)
+            first = canon_map.get(canon)
+            if first is not None and first != gid:
+                remap[gid] = first
+                rep['materials_deduped'] += 1
+                n += 1
+                refs.append({'id': first, 'name': mat.get('name')})
+                continue
+            canon_map[canon] = gid
+            entry = ctx.entry(gid)
+            if entry is not None and entry.get('type') == 'material':
+                if not loom_assets.material_matches(entry.get('value') or {}, mat):
+                    rep['conflicts'].append(
+                        'materials[%d]: 资产库与场景副本不一致 -> 以资产库为准' % mi)
+                refs.append({'id': gid, 'name': mat.get('name')})
+                continue
+            _g, _created, why = ctx.register_material_value(
+                gid, value, name=mat.get('name'))
+            if _g:
+                n += 1
+                rep['materials_migrated'] += 1
+                refs.append({'id': gid, 'name': mat.get('name')})
+            else:
+                rep['failures'].append(
+                    'materials[%d]: 登记资产库失败 (%s) -> 保留内联定义' % (mi, why))
+                refs.append(mat)
+        data['materials'] = refs
+        if remap:
+            for obj in data.get('objects') or []:
+                if isinstance(obj, dict):
+                    mid = obj.get('material_id')
+                    if isinstance(mid, str) and mid in remap:
+                        obj['material_id'] = remap[mid]
+
     try:
-        data = sceneio.migrate(data)    # 版本升到 11（纯函数）
+        data = sceneio.migrate(data)    # 版本升到 12（纯函数）
     except Exception as e:
         # P-13: 高版本/坏版本场景只记 failure，不中断整批
         rep['failures'].append('版本闸门拒绝: %s' % (e,))
@@ -200,8 +266,10 @@ def main(argv=None):
                    'dry_run': bool(a.dry_run)}
         reports.append(rep)
         total += rep['changed']
-        print('[迁移] %s -> 改动 %d, 失败 %d%s' %
+        print('[迁移] %s -> 改动 %d, 失败 %d, 材质入库 %d/去重 %d, 冲突 %d%s' %
               (_rel(t), rep['changed'], len(rep['failures']),
+               rep.get('materials_migrated', 0), rep.get('materials_deduped', 0),
+               len(rep.get('conflicts', [])),
                ' (dry-run)' if a.dry_run else ''))
         for f in rep['failures'][:5]:
             print('        失败:', f)

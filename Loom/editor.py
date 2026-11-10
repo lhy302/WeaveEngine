@@ -1177,9 +1177,16 @@ class EditorApp(GLEngine):
         save_last_dir(STATE_FILE, path)   # 记住这次保存的目录
         data = sceneio.scene_to_dict(self, camera=self._camera_dict(),
                                     base_dir=self._scene_dir())
+        _mats_migrated = int(getattr(self, '_materials_migrated', 0) or 0)
         try:
             sceneio.save_json_atomic(path, data)
             print("[编辑器] 场景已保存到", os.path.abspath(path))
+            # Q-B1-3=A: 内联材质已抽到资产库（场景只写引用）—— 明确告知用户
+            if _mats_migrated:
+                _notify = getattr(self, '_notify', None)
+                if callable(_notify):
+                    _notify('已保存：%d 个材质已迁移到资产库（场景只保留引用）'
+                            % (_mats_migrated,), (150, 200, 235))
             # P2-⑥ + Q-B1-1=A: 保存后若仍有失效引用，明确告知"已原样保留"
             _notice = sceneio.asset_issue_notice(self, '保存')
             if _notice:

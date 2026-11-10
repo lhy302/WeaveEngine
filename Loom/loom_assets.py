@@ -40,6 +40,89 @@ IMPORT_KEYS = ('mipmaps', 'wrap', 'filter_mode', 'aniso', 'max_size', 'compressi
 DEFAULT_IMPORT = {'mipmaps': True, 'wrap': 'repeat', 'filter_mode': 'trilinear',
                   'aniso': 1.0, 'max_size': 0, 'compression': 'none'}
 
+# ---- 材质真相源 (Q-B1-3=A): 资产库 value 与场景内联定义的规范化/比较 ----
+MATERIAL_INLINE_KEYS = ('color', 'saturation', 'metallic', 'roughness', 'pbr',
+                        'albedo', 'normal_map', 'env_map')
+
+
+def _slot_key(ref):
+    """材质贴图槽 -> 可比较键：('g', guid) / ('p', path) / ('s', solid) / None。"""
+    if isinstance(ref, dict):
+        g = ref.get('guid')
+        if isinstance(g, str) and g:
+            return ('g', g)
+        p = ref.get('path')
+        if p:
+            return ('p', str(p))
+        sc = ref.get('solid_color')
+        if sc:
+            return ('s', tuple(int(x) for x in sc))
+        return None
+    if isinstance(ref, str) and ref:
+        return ('g', ref)          # 资产库 value 里贴图槽存的是裸 guid
+    return None
+
+
+def _num(v, default):
+    try:
+        return round(float(v), 6)
+    except (TypeError, ValueError):
+        return round(float(default), 6)
+
+
+def material_canon(d):
+    """材质定义（库 value 或场景内联 dict）-> 可比较的规范元组。"""
+    if not isinstance(d, dict):
+        return None
+    color = d.get('color')
+    if isinstance(color, str):
+        color = color.strip().lower() or None
+    return (str(d.get('name') or ''),
+            color,
+            _num(d.get('saturation', 1.0), 1.0),
+            _num(d.get('metallic', 0.0), 0.0),
+            _num(d.get('roughness', 0.5), 0.5),
+            bool(d.get('pbr', False)),
+            _slot_key(d.get('albedo')),
+            _slot_key(d.get('normal_map')),
+            _slot_key(d.get('env_map')))
+
+
+def material_has_inline(d):
+    """场景材质条目里是否带内联定义（只有 id/guid/name 的是**引用**）。"""
+    if not isinstance(d, dict):
+        return False
+    return any(k in d and d.get(k) is not None for k in MATERIAL_INLINE_KEYS)
+
+
+def material_value_from_dict(d):
+    """场景内联材质 -> 资产库 value（贴图槽只保留 guid，路径属旧格式）。"""
+    if not isinstance(d, dict):
+        return {}
+    v = {'name': d.get('name'), 'color': d.get('color'),
+         'saturation': d.get('saturation', 1.0),
+         'metallic': d.get('metallic', 0.0),
+         'roughness': d.get('roughness', 0.5),
+         'pbr': bool(d.get('pbr', False))}
+    for slot in ('albedo', 'normal_map'):
+        ref = d.get(slot)
+        g = ref.get('guid') if isinstance(ref, dict) else None
+        if isinstance(g, str) and g:
+            v[slot] = g
+    env = d.get('env_map')
+    if isinstance(env, dict):
+        if isinstance(env.get('guid'), str) and env['guid']:
+            v['env_map'] = env['guid']
+        elif env.get('solid_color'):
+            v['env_map_solid'] = list(env['solid_color'])
+    return v
+
+
+def material_matches(value, inline):
+    """库 value 与场景内联定义是否等价（同一 guid 的冲突判定用）。"""
+    return material_canon(value) == material_canon(inline)
+
+
 # 索引读缓存: (index_path, mtime_ns, size) -> index dict（只读共享；save 时清）
 _CACHE = {}
 _INDEX_LOCK = threading.RLock()      # 同进程多写者串行（跨进程靠写前重读+合并）
@@ -727,6 +810,7 @@ class AssetContext(object):
         except Exception as exc:
             return None, False, '材质资产构造失败 (%r)' % (exc,)
         first_reason = None
+        _kept = {}
         for slot in ('albedo', 'normal_map'):
             g = v.get(slot)
             if not g:
@@ -734,6 +818,10 @@ class AssetContext(object):
             tex, ok, why = self.texture(g)
             if tex is not None:
                 setattr(mat, slot, tex)
+            else:
+                # P1-1 语义延续：库 value 里有的引用，解析失败也要保留，
+                # 下次保存（sync_material）不会把它从库里抹掉。
+                _kept[slot] = {'guid': g}
             if why and first_reason is None:
                 first_reason = why
         g = v.get('env_map')
@@ -741,6 +829,8 @@ class AssetContext(object):
             cube, ok, why = self.cubemap(g)
             if cube is not None:
                 mat.env_map = cube
+            else:
+                _kept['env_map'] = {'guid': g}
             if why and first_reason is None:
                 first_reason = why
         elif v.get('env_map_solid'):
@@ -750,7 +840,49 @@ class AssetContext(object):
                                                  name=v.get('name'), guid=guid + ':env')
             except Exception:
                 pass
+        if _kept:
+            try:
+                mat._asset_ref_slots = _kept
+            except Exception:
+                pass
         return mat, True, first_reason
+
+    # ---- 材质真相源 (Q-B1-3=A) ----
+    def material_value(self, guid):
+        """资产库里该材质的 value（不存在返回 None）。"""
+        e = self.entry(guid)
+        if e is None or e.get('type') != 'material':
+            return None
+        return dict(e.get('value') or {})
+
+    def material_matches(self, guid, inline):
+        """库内 value 与场景内联定义是否等价（冲突规则用）。"""
+        v = self.material_value(guid)
+        return v is not None and material_matches(v, inline)
+
+    def register_material_value(self, guid, value, name=None):
+        """登记材质值（迁移脚本用；已存在不覆盖）-> (guid, migrated, reason)。"""
+        if self.owns(guid, 'material'):
+            return guid, False, None
+        self.index.setdefault('assets', {})[guid] = {
+            'type': 'material', 'src': None,
+            'name': name or value.get('name') or '材质',
+            'value': dict(value)}
+        self._dirty = True
+        return self._finish(guid)
+
+    def sync_material(self, mat):
+        """保存期：把材质（含本次编辑后的值）写回资产库。
+
+        返回 (guid, migrated, reason)：migrated=True 表示「本次才登记进资产库」。
+        库是唯一真相源，所以已存在的条目也会被本次值覆盖更新。
+        """
+        gid = getattr(mat, 'guid', None)
+        if not gid:
+            return None, False, '材质没有 guid'
+        existed = self.owns(gid, 'material')
+        g, _created, why = self.import_material(mat, guid=gid)
+        return g, (bool(g) and not existed), why
 
     # ---- 写（导入）----
     def _unique_dest(self, kind, name, create=True):
@@ -975,9 +1107,17 @@ class AssetContext(object):
                  'roughness': getattr(mat, 'roughness', 0.5),
                  'pbr': bool(getattr(mat, 'pbr', False))}
         reasons = []
+        kept = getattr(mat, '_asset_ref_slots', None)
+        kept = kept if isinstance(kept, dict) else {}
         for slot in ('albedo', 'normal_map'):
             tex = getattr(mat, slot, None)
             if tex is None:
+                # P1-1 语义延续到资产库层：解析失败的槽位保留原 guid 引用，
+                # 不因"这次没解析出来"把引用从库 value 里抹掉。
+                _ref = kept.get(slot)
+                _g = (_ref or {}).get('guid') if isinstance(_ref, dict) else None
+                if isinstance(_g, str) and _g:
+                    value[slot] = _g
                 continue
             tg = getattr(tex, 'guid', None)
             if self.owns(tg, 'texture'):
@@ -996,6 +1136,11 @@ class AssetContext(object):
             else:
                 reasons.append('%s: 贴图无源文件（无法登记）' % slot)
         env = getattr(mat, 'env_map', None)
+        if env is None:
+            _ref = kept.get('env_map')
+            _g = (_ref or {}).get('guid') if isinstance(_ref, dict) else None
+            if isinstance(_g, str) and _g:
+                value['env_map'] = _g
         if env is not None:
             eg = getattr(env, 'guid', None)
             if self.owns(eg, 'cubemap'):
