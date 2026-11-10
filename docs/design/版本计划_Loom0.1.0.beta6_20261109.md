@@ -457,3 +457,19 @@ R04 复核时发现两件事，直接推翻了它自己的一条证据，也暴�
 - 原登记为 beta7 的 **B7-13（VK 迁入 FramePlan）上调为 beta6 必做**：目标是把「重复语义面」从 14 降到 ≤8、VK 由共享描述驱动。
 - 同时完成本轮审计出的清理项（文档同步、死代码、env 治理、测试入口证据、源码子串断言）。
 - 只有上述目标全部达成，beta6 才谈收尾；版本号保持 `0.1.0.beta6` 不动。
+
+### 9.23 骨架补全验收（2026-11-10，最终验收 F-02）
+
+**原定目标：8 达成 / 1 部分 / 1 未达成**
+- 达成：B1 guid+越界拒绝（152 PASS）、打包带资产（3 处 assets_base 全接）、旧路径 fallback、C1 动画内核唯一化（115 PASS）、undo 值隔离、D7 版本闸门（5 入口）、LOOM_NO_PHYSICS 真开关、LOOM_POST 双端
+- 部分：G9 崩溃可见性——`enable_if_requested` 只在 `Loom.py`/`build_entry.py`，**打包游戏入口 0 处**
+- 未达成：G10「诊断开关定稿前清理」——`LOOM_POST_STAGE` 仍在，6 个新 env 在文档 0 登记
+
+**P2（本版应处理）**
+1) **资产索引校验 1.0ms/条**（`is_inside` 的 2×realpath）→ 10000 条冷加载 **8660ms**、`inspect_index` 8588ms；beta5 基线 0ms → 大项目会卡死
+2) 用户层 delta 的 import 覆盖**从未生效**（实测 mipmaps/wrap 无视 delta），`user_index_path` 全仓 0 写者 → 文档说的三层实际两层
+3) `save_index('')`=CWD；编辑器未保存场景也返回 CWD → 探针在仓库根写了 `Assets/assets.json`（已删）
+4) `post_stage` 死条件：`LOOM_POST_STAGE=0` → stage1（**关不掉后处理**）
+5) `_env_float` 接受 nan/inf → 直入 `write_buffer` → **整屏 NaN**
+
+**P3**：`record_asset_error` O(N²)（5000 条 313ms）；`LOOM_FAULTHANDLER` 非法值当路径建文件且游戏档不生效；`_anim_fallback_models` 停播后仍强引用已删模型；`parse_version('0.1.0-beta6')=None` → D7 闸门 **fail-open**；`_skybox_ref` 仅 engine/editor；VK 不认 `LOOM_POST_STAGE`。
