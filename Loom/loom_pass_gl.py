@@ -89,6 +89,14 @@ class GLFrameExecutor:
         errs = plan.validate()
         if errs:
             raise ValueError('FramePlan 非法: %s' % '; '.join(errs))
+        # 2a 补：后处理 bloom 源取决于 plan 里有没有 down pass（档 2 读 0.5、档 3 读 0.25），
+        # 否则 LOOM_POST_STAGE=2 的 bright 输出无人消费 -> 与档 1 逐位相同（死档）。
+        try:
+            from loom_post import HALF_TARGET as _H, QUARTER_TARGET as _Q
+            self.engine._post_bloom_src = (_Q if any(p.id == 'bloom.down' for p in plan.passes)
+                                           else _H)
+        except Exception:
+            pass
         ctx = self.ctx
         func_before = _safe_get(ctx, 'depth_func', '<')   # 迁移前稳态默认 '<'
         first = True

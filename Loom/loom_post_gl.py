@@ -181,7 +181,10 @@ class GLPostChain:
         elif source == 'post.tonemap':
             prog = self._program('tonemap', _TONEMAP)
             self.tex(HDR_TARGET).use(0)
-            self.tex(QUARTER_TARGET).use(1)   # 0.25 目标直接双线性上采样（见 loom_pass 注释）
+            # 2a 补：无 down pass 时（LOOM_POST_STAGE=2）直接读 0.5 目标 —— 否则 bright 的
+            # 输出没有消费者，档 2 会与档 1 逐位相同（死档）。
+            _src = getattr(self.engine, '_post_bloom_src', QUARTER_TARGET)
+            self.tex(_src).use(1)
             prog['u_hdr'].value = 0
             prog['u_bloom'].value = 1
             prog['u_strength'].value = p['strength']

@@ -146,9 +146,10 @@ check("A9 无动态纹理数组索引 (textureSample 下标写法不存在)",
       'textureSample(t_shadow[' not in frag and 'textureSample(t_shadow2[' not in frag)
 check("A10 _pack_scene 写 params.w 槽位 (源码含 _dir_shadow_slots)",
       '_dir_shadow_slots' in inspect.getsource(VR.VkRenderer._pack_scene))
-check("A11 阴影 pass 按槽位各烘一张 (源码含 _dir_shadow_bufs/_shadow_view2)",
-      '_dir_shadow_bufs' in inspect.getsource(VR.VkRenderer.draw_frame)
-      and '_shadow_view2' in inspect.getsource(VR.VkRenderer.draw_frame))
+check("A11 阴影 pass 按槽位各烘一张 (槽位缓冲/视图 + draw_frame 经 plan 派发)",
+      '_dir_shadow_bufs' in inspect.getsource(VR.VkRenderer._exec_shadow_maps)
+      and '_shadow_view2' in inspect.getsource(VR.VkRenderer._exec_shadow_maps)
+      and '_exec_shadow_maps' in inspect.getsource(VR.VkRenderer.draw_frame))
 
 
 # ============ 灯桩 ============
