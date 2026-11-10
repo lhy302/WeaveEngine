@@ -1,4 +1,4 @@
-"""tools/verify_pkg_vs_head.py — 交付包与代码一致性自证（只读）。
+r"""tools/verify_pkg_vs_head.py — 交付包与代码一致性自证（只读）。
 
 用法：
   py -3.13 tools/verify_pkg_vs_head.py <source.zip> <compiled.zip> [--version <ver>] [--json out.json]
@@ -61,6 +61,35 @@ def head_file(path):
                                         'HEAD:%s' % path], stderr=subprocess.DEVNULL)
     except subprocess.CalledProcessError:
         return None
+
+
+def _git(args):
+    try:
+        return subprocess.check_output(
+            ['git', '-C', REPO] + args, encoding='utf-8', errors='replace',
+            stderr=subprocess.DEVNULL).strip()
+    except Exception:
+        return None
+
+
+def engine_equivalent(base, head):
+    """compiled 包判据（V2-02）：git_head 必须是 HEAD 的祖先，且 HEAD 相对它
+    在 Loom/ 零 diff。这样"只改文档/tools"的提交不会误红，引擎改动仍会被抓。"""
+    if not base or not head:
+        return False, '缺 git_head 或 HEAD'
+    if base == head:
+        return True, 'equal'
+    rc = subprocess.call(['git', '-C', REPO, 'merge-base', '--is-ancestor',
+                          base, head], stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL)
+    if rc != 0:
+        return False, 'git_head 不是 HEAD 的祖先'
+    diff = _git(['diff', '--name-only', base, head, '--', 'Loom/']) or ''
+    files = [x for x in diff.splitlines() if x.strip()]
+    if files:
+        return False, ('Loom/ 有 %d 处改动: %s'
+                       % (len(files), ', '.join(files[:5])))
+    return True, '引擎等价（HEAD 仅改非 Loom/ 文件）'
 
 
 def head_sha():
@@ -146,6 +175,7 @@ def check_compiled(zip_path, version):
             'runtime_build_info_mode': (rbi or {}).get('mode'),
             'git_head': (bi or {}).get('git_head'),
             'git_dirty': (bi or {}).get('git_dirty'),
+            'smoke_passed_at': (bi or {}).get('smoke_passed_at'),
         }
     return out
 
@@ -189,15 +219,19 @@ def main():
           % (c['meta'].get('version'), c['meta'].get('nested_version'),
              (c['meta'].get('editor_build_info') or {}).get('mode'),
              (c['meta'].get('editor_build_info') or {}).get('built_at')))
-    print('[compiled] git_head=%s head=%s dirty=%s -> %s'
+    _eq, _why = engine_equivalent(_cgit, _head)
+    res['compiled']['engine_equivalent'] = {'ok': _eq, 'why': _why}
+    print('[compiled] git_head=%s head=%s dirty=%s -> %s（%s）'
           % ((_cgit or 'None')[:12], (_head or 'None')[:12],
-             c['meta'].get('git_dirty'),
-             'OK' if _cgit and _head and _cgit == _head else 'DIFF'))
+             c['meta'].get('git_dirty'), 'OK' if _eq else 'DIFF', _why))
+    print('[compiled] smoke_passed_at=%s built_at=%s'
+          % (c['meta'].get('smoke_passed_at'),
+             (c['meta'].get('editor_build_info') or {}).get('built_at')))
     if out_json:
         with open(out_json, 'w', encoding='utf-8') as f:
             json.dump(res, f, ensure_ascii=False, indent=1)
         print('json:', out_json)
-    _compiled_bad = (not _cgit) or (not _head) or (_cgit != _head)
+    _compiled_bad = (not _eq) or (c['meta'].get('git_dirty') is not False)
     bad = (s['mismatch']
            or not (s['meta'].get('same_as_target') and s['meta'].get('nested_same'))
            or _compiled_bad)

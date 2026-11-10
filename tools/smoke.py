@@ -38,11 +38,38 @@ def _post(port, token, cmd, args=None, timeout=20):
         return json.loads(r.read().decode('utf-8'))
 
 
+def stamp_build_info(targets):
+    """冒烟通过后盖章: build_info.json.smoke_passed_at = now。
+
+    打包脚本要求 smoke_passed_at 存在且晚于 built_at（门序: 编译→冒烟→打包）。
+    """
+    now = time.strftime('%Y-%m-%d %H:%M:%S')
+    for t in targets:
+        p = t
+        if os.path.isdir(p):
+            p = os.path.join(p, 'build_info.json')
+        if not os.path.isfile(p):
+            print('SMOKE WARN  build_info 不存在，跳过盖章: %s' % p)
+            continue
+        try:
+            with open(p, 'r', encoding='utf-8') as f:
+                info = json.load(f)
+            info['smoke_passed_at'] = now
+            with open(p, 'w', encoding='utf-8') as f:
+                json.dump(info, f, ensure_ascii=False, indent=1)
+            print('SMOKE STAMP  %s -> smoke_passed_at=%s' % (p, now))
+        except Exception as e:
+            print('SMOKE WARN  盖章失败 %s: %r' % (p, e))
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument('--dist', help='编译版引擎目录（含 Loom.exe）；不给则跑源码版')
     ap.add_argument('--scene', help='场景路径（默认 examples/PacMan2D.json）')
     ap.add_argument('--seconds', type=float, default=2.5, help='播放时长（默认 2.5s）')
+    ap.add_argument('--stamp', action='append', default=[],
+                    help='冒烟通过后给 build_info.json 盖 smoke_passed_at '
+                         '（可多次；目录或文件）')
     a = ap.parse_args(argv)
 
     t0 = time.time()
@@ -147,6 +174,12 @@ def main(argv=None):
         print('  - ' + f)
     if dt > BUDGET_S and not fails:
         print('  ! 超出预算：冒烟应 < %.0fs，请检查是否混入了非冒烟内容' % BUDGET_S)
+    if not fails:
+        targets = list(a.stamp)
+        if a.dist:
+            targets.append(engine_dir)
+        if targets:
+            stamp_build_info(targets)
     return 1 if fails else 0
 
 

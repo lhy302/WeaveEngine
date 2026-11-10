@@ -483,7 +483,7 @@ embeddable 是隔离模式（`python3xx._pth` 禁 site、且**脚本目录不进
 ### G.1 「HEAD 中途前进 → 停下报告 → 裁决 B」
 
 - 21:23 构建启动时 HEAD=**dea1f4f**、`git status` 干净；21:36 另一 agent 提交 **c56fb1d**；21:41–21:43 完成两包；自证发现 compiled `build_info.git_head=dea1f4f` ≠ HEAD `c56fb1d` → **按协议停下报告，未硬交**。
-- 事实核对：`dea1f4f..c56fb1d` 仅 +354 行（`tools/smoke.py`、`tools/measure_engine.py`、两份文档），**引擎代码零改动**；源码包 93 个引擎 `.py` 与 HEAD **0 不一致 / 0 缺失**；三项 meta（顶层/嵌套运行时/`--version`）均 0.1.0.beta6；`git_dirty=false`。
+- 事实核对：`dea1f4f..c56fb1d` 仅 +354 行（`tools/smoke.py`、`tools/measure_engine.py`、两份文档），**引擎代码零改动**；源码包 93 个引擎 `.py` 与 HEAD **0 不一致 / 0 缺失**；**version 两处可比**（顶层 meta / 嵌套运行时 meta）均 0.1.0.beta6 且 == `--version`；`git_dirty=false`。
 - **裁决 B**：接受当前包，不为"来源提交号"重编 20 分钟。
 - **纪律（写死）**：最终发布版必须在**最新干净 HEAD** 上重编；`build_info.git_head` 必须等于**发布 tag 指向的提交**，`git_dirty` 必须 false。再遇 "HEAD 中途前进" 一律按本节流程停下报告，不得硬交。
 
@@ -491,12 +491,19 @@ embeddable 是隔离模式（`python3xx._pth` 禁 site、且**脚本目录不进
 
 1. **EOL 误报**：仓库 `core.autocrlf=true` → 工作树 CRLF、git blob LF；直接用 zip 原始字节 vs `git show HEAD:` 字节比 sha，会把所有 CRLF 文件误判成"不一致"（实测 24/18 个假阳性）。工具必须两侧 `\r\n`→`\n` 归一后再算内容哈希。
 2. **运行时 dist 混入源码比对**：源码包内 `Loom/player_runtime/game_player.dist/**.py` 是预置运行时产物（core_components 的 boot_check/module_loader/module_registry/official_manifest），不在 git 树里，会被误报为"HEAD 不存在"。比对范围必须限定 `Loom/*.py` 且排除 `Loom/player_runtime/`。
-3. 自证同时要查：三项 meta 一致；compiled 包无 `.py`，只能用 `build_info.git_head == HEAD` 作代码级证据（这正是本批给 build_info 加 `git_head`/`git_dirty` 的原因）。
+3. 自证同时要查：version 只有 **2 处**可比（顶层/嵌套运行时 meta）+ `--version`；**python 有 3 处**（editor build_info.python、runtime build_info.python、meta.python_version）——不要再说"三项 version 一致"（build_info 没有 version 字段）。compiled 包无 `.py`，用 `build_info.git_head` 作代码级证据，但判据是 **祖先 + Loom/ 零 diff**（见 G.4），不是相等。
 
 ### G.3 当前交付物（裁决 B 后）
 
 - `tools/dist/Loom-0.1.0.beta6-compiled.zip` **132.02MB**（build_info: git_head=dea1f4f / git_dirty=false / python 3.13.15 / nuitka 4.3.5）
 - `tools/dist/Loom-0.1.0.beta6-source.zip` **348.54MB**（93 个引擎 `.py` 与 HEAD 0 不一致；内嵌 Python 3.13.15；SCENE_VERSION=11）
-- 自证脚本 `C:\loom_build\toolchain_probe\verify_pkg_vs_head.py`（EOL 归一 + 排除 runtime dist + 校验 `build_info.git_head`）
+- 自证脚本已收编进仓库：`py -3.13 tools/verify_pkg_vs_head.py <source.zip> <compiled.zip> [--version <ver>] [--json out.json]`（EOL 归一 + 排除 runtime dist + git_head 祖先/引擎零 diff 判据）。
+
+### G.4 V2-02 修订（2026-11-10，按审计纠正）
+
+1. **compiled 判据改为"祖先 + 引擎零 diff"**：`git_head` 必须是 HEAD 的祖先，且 `git diff --name-only <git_head> HEAD -- Loom/` 为空才判 OK。理由：审计实测 `dea1f4f..HEAD` 只动 `.gitignore/docs/tools` 6 个文件、`Loom/` 零改动，旧"必须相等"会因每次改文档误红。工具 `tools/verify_pkg_vs_head.py` 已实现并实测：当前包 `git_head=dea1f4f` vs HEAD 更新后判 **OK（引擎等价）**。
+2. **门序硬门 `smoke_passed_at`**：`build_info.json` 新增该字段（build_engine 初值 null；`tools/smoke.py` 通过后盖章，支持 `--stamp <dir|file>`，`--dist` 时自动盖该 dist）。打包脚本要求它**存在且晚于 built_at**，否则 exit 1（实测：未盖章 → 拒绝打包；冒烟通过后三件盖章 → 打包通过）。审计证据：本包 built_at=21:23:42，而 `tools/smoke.py` 首个提交 21:36 → 该包从未执行"编译→冒烟→打包→对拍"。
+3. **口径纠正**：`build_info` 无 `version` 字段 → version 可比 **2 处**（顶层/嵌套运行时 meta）+ `--version`；python 可比 **3 处**（editor/runtime 两份 build_info + meta.python_version）。
+4. **工具收编**：自证脚本已在仓库 `tools/verify_pkg_vs_head.py`（原 `C:\loom_build\toolchain_probe` 版本仅作历史）；用法见上。
 
 

@@ -161,6 +161,21 @@ def build_info_problems(directory, require_mode='release'):
         time.strptime(ba, '%Y-%m-%d %H:%M:%S')
     except Exception:
         problems.append('build_info.built_at 非法: %r' % (ba,))
+    # 门序硬门（V2-02）: 编译 → 冒烟 → 打包。冒烟会盖 smoke_passed_at，
+    # 缺失或早于 built_at 说明"没冒烟就打包"（本包 built_at=21:23 而
+    # tools/smoke.py 21:36 才出现，就是这条门序从未执行过的证据）。
+    sp = str(info.get('smoke_passed_at') or '').strip()
+    if not sp:
+        problems.append('build_info 缺 smoke_passed_at: 先跑 tools/smoke.py '
+                        '（门序: 编译→冒烟→打包）')
+    else:
+        try:
+            if time.strptime(sp, '%Y-%m-%d %H:%M:%S') <= time.strptime(
+                    ba, '%Y-%m-%d %H:%M:%S'):
+                problems.append('smoke_passed_at(%s) 必须晚于 built_at(%s)'
+                                % (sp, ba))
+        except Exception:
+            problems.append('smoke_passed_at 格式非法: %r' % (sp,))
     return problems
 
 

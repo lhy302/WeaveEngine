@@ -315,6 +315,9 @@ def main():
         'built_at': time.strftime('%Y-%m-%d %H:%M:%S'),
         'git_head': _git_head,
         'git_dirty': _git_dirty,
+        # 冒烟门序: 构建后由 tools/smoke.py 盖章，打包脚本要求
+        # smoke_passed_at 存在且晚于 built_at（编译→冒烟→打包→对拍）。
+        'smoke_passed_at': None,
     }
     print('[build_engine] git_head=%s git_dirty=%s'
           % (_git_head or '<不可用>', _git_dirty))
