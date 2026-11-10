@@ -147,7 +147,21 @@ def build_info_problems(directory, require_mode='release'):
     if mode != require_mode:
         return ['产物档位是 %r（要求 %r；dev 带控制台，不可发布）'
                 % (mode, require_mode)]
-    return []
+    # R6-03 (2026-11-10): 字段合理性 —— 防"改 meta + --version"把旧产物重贴成新版本
+    problems = []
+    pyv = str(info.get('python') or '')
+    parts = pyv.split('.')
+    if len(parts) != 3 or not all(x.isdigit() for x in parts):
+        problems.append('build_info.python 非法: %r（应为 x.y.z）' % (pyv,))
+    nk = str(info.get('nuitka') or '').strip()
+    if not nk or not nk[0].isdigit():
+        problems.append('build_info.nuitka 非法: %r' % (nk,))
+    ba = str(info.get('built_at') or '')
+    try:
+        time.strptime(ba, '%Y-%m-%d %H:%M:%S')
+    except Exception:
+        problems.append('build_info.built_at 非法: %r' % (ba,))
+    return problems
 
 
 def runtime_layout_problems(dist):
@@ -404,6 +418,12 @@ def _dir_size(path):
 
 
 def make_zip(version, allow_missing_runtime=False, kind='source'):
+    # R6-03 (2026-11-10): --version 不得覆盖不一致的元数据 —— 源码包版本
+    # 必须与 Loom/解释器.json 一致，否则 exit 1（以前只写警告/直接改写）。
+    _bad = meta_version_problems(ENGINE_DIR, version)
+    if _bad:
+        raise SystemExit('[错误] 源码元数据版本与目标版本不符，拒绝出包: %s'
+                         % ('; '.join(_bad),))
     os.makedirs(DIST_DIR, exist_ok=True)
     tmp_dir = os.path.join(DIST_DIR, '_Loom_%s_tmp' % version)
     if os.path.isdir(tmp_dir):
@@ -426,6 +446,12 @@ def make_zip(version, allow_missing_runtime=False, kind='source'):
     _pr_src = _runtime_dist(_pr_root)
     key['slim'] = False
     if _pr_src is not None:
+        # R6-03: 预置运行时的嵌套 解释器.json 也必须与目标版本一致
+        # （否则会出现"顶层 beta6 + 运行时 beta5"的自检通过坏包）
+        _bad = meta_version_problems(_pr_src, version)
+        if _bad:
+            raise SystemExit('[错误] 预置运行时元数据版本与目标版本不符，拒绝出包: %s'
+                             % ('; '.join(_bad),))
         # 2026-11-09: 运行时布局硬断言（缺 pygame/ 或旧布局 -> 拒绝打包，
         # 否则会产出"能装能跑编辑器、一做游戏就缺 SDL2.dll"的坏包）
         _layout = runtime_layout_problems(_pr_src)
@@ -566,6 +592,17 @@ def _verify_zip(zip_path, version, slim=False):
                 got = _meta.get('distribution')
                 if want != got:
                     _fail('精简标记不一致: 期望 %r 实际 %r' % (want, got))
+                # R6-03: 嵌套运行时元数据版本必须与顶层一致
+                _nkey = 'Loom/player_runtime/game_player.dist/解释器.json'
+                if _nkey in names:
+                    try:
+                        _nmeta = json.loads(zf.read(_nkey).decode('utf-8'))
+                    except Exception as e:
+                        _fail('嵌套运行时 解释器.json 读不回来: %r' % (e,))
+                    else:
+                        if str(_nmeta.get('version')) != version:
+                            _fail('嵌套运行时元数据版本 %r != 目标 %r'
+                                  % (_nmeta.get('version'), version))
             exe_key = 'Loom/player_runtime/game_player.dist/MyGame.exe'
             has_exe = exe_key in names
             if slim and has_exe:

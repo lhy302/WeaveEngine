@@ -446,6 +446,9 @@ LoomHub = 项目管理器 ("解释器名 + Hub", 类似 Unity -> Unity Hub)。
     工具还会把 ckernels / core_components / scripts / GUI / assets / 设置.json 一并
     塞进 dist（--include-data-dir + 构建后补拷 *.dll），保证**裸 dist 自洽**：手敲
     上面命令漏了这些，编译版 `--bench` 会 "loom_kernels.dll 未找到" 直接退出。
+    源码包重建（发布前必做；源码包含内嵌 Python，改动代码后必须重打）：
+      py -3.13 tools/package_engine.py --version <版本> --allow-missing-runtime
+      → tools/dist/Loom-<版本>-source.zip（会校验源码/嵌套运行时的 解释器.json 版本）
     产物名（2026-11-10）：源码包 = tools/dist/Loom-<版本>-source.zip，
     编译包 = tools/dist/Loom-<版本>-compiled.zip（两包不再同名互相覆盖；
     release_github 发布引擎时优先取 compiled，其次 source，最后兼容旧名）。
