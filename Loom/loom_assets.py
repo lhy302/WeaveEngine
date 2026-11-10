@@ -257,8 +257,12 @@ def find_project_root(start_dir, max_up=10):
         return None
     cur = os.path.abspath(start_dir)
     for _ in range(max_up + 1):
-        if os.path.isfile(index_path(cur)):
-            return cur
+        # 2026-11-11: **盘根不算项目根**。实测：某个探针在 D:\ 误建过 Assets/assets.json，
+        # 之后 D:\ 下所有工程都会把它认成项目根（跨工程污染、测试互相踩）。
+        _drive, _rest = os.path.splitdrive(cur)
+        if _rest not in ('\\', '/', ''):
+            if os.path.isfile(index_path(cur)):
+                return cur
         parent = os.path.dirname(cur)
         if parent == cur:
             return None
