@@ -76,7 +76,39 @@ class PresentHealth:
                 'threshold': self.threshold}
 
 
+def _mro_prof(self, name):
+    """Q-D1-3=A: 在 MRO 里找**真正的** profiler 实现（跳过 RenderMixin 自己的空实现）。
+
+    这样无论 ProfilerMixin 在 RenderMixin 之前还是之后混入，行为都正确：
+    只混 RenderMixin 的宿主走空实现（一帧不抛 AttributeError），混了 ProfilerMixin 的
+    宿主仍然走真实现（不会被这里的默认值遮蔽）。
+    """
+    for klass in type(self).__mro__:
+        if klass is RenderMixin:
+            continue
+        fn = klass.__dict__.get(name)
+        if fn is not None:
+            return fn
+    return None
+
+
 class RenderMixin:
+    # ---- Q-D1-3=A: profiler 钩子的默认空实现（RenderMixin 内隐式依赖）----
+    def _prof_t0(self):
+        fn = _mro_prof(self, '_prof_t0')
+        return fn(self) if fn is not None else 0.0
+
+    def _prof_add(self, name, t0):
+        fn = _mro_prof(self, '_prof_add')
+        return fn(self, name, t0) if fn is not None else None
+
+    def _prof_count(self, name, n=1):
+        fn = _mro_prof(self, '_prof_count')
+        return fn(self, name, n) if fn is not None else None
+
+    def _profile(self, name, fn):
+        impl = _mro_prof(self, '_profile')
+        return impl(self, name, fn) if impl is not None else fn()
     def _sky_warn(self, tag, msg):
         """天空盒相关告警每条只打一次（失败必须可见, 但不刷屏）。"""
         ow = getattr(self, '_warn_sky_once', None)
@@ -184,9 +216,16 @@ class RenderMixin:
         except Exception as e:
             self._sky_warn('state', '读 depth_func 失败 (%r) -> 用默认值' % (e,))
             old_depth_func = '<'
+        # V2-01: 剔除面来自 plan 的 RasterState.cull（声明 none 才 disable）；
+        # 旧实现无条件 disable，会把描述覆盖掉 -> 与 VK 不一致。
+        _spec = getattr(self, '_frame_sky_spec', None)
+        _cull = getattr(getattr(_spec, 'raster', None), 'cull', 'none') if _spec is not None else 'none'
         try:
             self.ctx.depth_func = '<='
-            self.ctx.disable(moderngl.CULL_FACE)
+            if _cull == 'none':
+                self.ctx.disable(moderngl.CULL_FACE)
+            else:
+                self.ctx.enable(moderngl.CULL_FACE)
             self._sky_vao.render(moderngl.TRIANGLES, vertices=6)
         except Exception as e:
             self._sky_warn('draw', '绘制失败 (%r), 本帧跳过' % (e,))

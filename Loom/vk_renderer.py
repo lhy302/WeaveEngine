@@ -911,12 +911,15 @@ class VkRenderer:
         if getattr(self, '_pipeline_base', None) is None:
             self._pipeline_base = self._pipeline
             self._main_pipe_fmt = self.format
-        # 2a: depth 声明的 test=False -> 管线**不带**深度附件（否则与无深度 pass 不兼容）
-        _no_depth = (depth is not None and not depth.test)
-        di = None if _no_depth else {
+        # V2-01 语义对齐: test=False **不等于**「没有深度附件」。GL 的 disable(DEPTH_TEST)
+        # 语义是「不测也不写，但深度缓冲仍挂着（保留上一 pass 的内容）」。VK 必须同样保留
+        # 深度附件，只用 compare='always' + write=False 表达，否则天空会读到未写深度。
+        di = {
             'format': 'depth32float',
-            'depth_write_enabled': (True if dkey is None else dkey[0]),
-            'depth_compare': ('less' if dkey is None else dkey[1])}
+            'depth_write_enabled': (bool(depth.write) if depth is not None
+                                    else (True if dkey is None else dkey[0])),
+            'depth_compare': ('always' if (depth is not None and not depth.test)
+                              else ('less' if dkey is None else dkey[1]))}
         pr = self._prim(raster)
         if fmt == self.format and dkey is None and rkey is None:
             self._pipeline = self._pipeline_base
@@ -2277,8 +2280,10 @@ class VkRenderer:
             load = wgpu.LoadOp.clear
             clear_val = (tuple(spec.clear) if spec.clear is not None
                          else CLEAR_COLOR_RGBA)
+        # 后处理 pass 的管线没有深度附件，不能挂（其余 pass 一律挂深度，见 V2-01 语义）
+        _is_post = bool(spec.draws) and spec.draws[0].source.startswith('post.')
         depth_att = None
-        if spec.depth is not None and spec.depth.test:
+        if spec.depth is not None and not _is_post:
             depth_att = {
                 'view': self._depth[1],
                 'depth_clear_value': (1.0 if spec.depth.clear is None

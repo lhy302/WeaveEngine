@@ -55,14 +55,31 @@ def _swap(plan):
     return dataclasses.replace(plan, passes=tuple(ps))
 
 
+def _clear_red_no_sky(plan):
+    p = _map_main(plan, clear=(1.0, 0.0, 0.0, 1.0))
+    return dataclasses.replace(p, passes=tuple(x for x in p.passes if x.id != 'sky'))
+
+
+def _sky_cull_back(plan):
+    return dataclasses.replace(plan, passes=tuple(
+        dataclasses.replace(p, raster=dataclasses.replace(p.raster, cull='back'))
+        if p.id == 'sky' else p for p in plan.passes))
+
+
 MUTS = (
     ('删 main pass', _del_main),
     ('main<->sky 换序', _swap),
+    ('删 sky + main.clear=红', _clear_red_no_sky),
     ('main.draws=skybox', lambda p: _map_main(p, draws=(DrawCmd('skybox'),))),
     ('main.load=load', lambda p: _map_main(p, load='load')),
     ('main.depth.test=False', lambda p: _map_main(
         p, depth=DepthState(test=False, write=False, func='always', clear=None))),
+    ('sky.raster.cull=back', _sky_cull_back),
 )
+
+# 已知语义差异项（VK/GL 幅度比可超出 [0.5, 2.0] 的反例）——当前为空；
+# 若将来出现，登记名字 + 原因，不能默默放宽判据。
+MAGNITUDE_EXCEPTIONS = {}
 
 
 def _vk_render_with_renderer(data):
@@ -118,8 +135,18 @@ def main():
         check('反例两端同向：%s' % name, (mg > 1e-3) == (mv > 1e-3),
               (mg, mv))
     both = [n for n, mg, mv in rows if mg > 1e-3 and mv > 1e-3]
-    check('至少 4 类反例两端都 >1e-3（VK 真读 plan）', len(both) >= 4,
+    check('至少 5 类反例两端都 >1e-3（VK 真读 plan）', len(both) >= 5,
           '%d/%d' % (len(both), len(rows)))
+    # 幅度判据（V2-01）：不是只看「非零」，而是 VK/GL 幅度比要落在 [0.5, 2.0]，
+    # 否则「VK 变了 4 倍」也能混过去。已知例外必须登记在 MAGNITUDE_EXCEPTIONS。
+    for name, mg, mv in rows:
+        if mg <= 1e-3 or mv <= 1e-3:
+            continue
+        ratio = mv / mg
+        if name in MAGNITUDE_EXCEPTIONS:
+            continue
+        check('反例幅度比在 [0.5, 2.0]：%s' % name, 0.5 <= ratio <= 2.0,
+              'VK/GL=%.3f' % ratio)
     check('正常路径未劣化（GL vs VK 基线仍很小）', _mae(g0, v0) <= 2e-4,
           _mae(g0, v0))
 

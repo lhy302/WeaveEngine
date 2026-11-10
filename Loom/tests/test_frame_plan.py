@@ -335,6 +335,48 @@ def t_post():
     check('F9 开关默认开启（未设 LOOM_POST）', post_enabled() is True, '')
 
 
+# ---------------- Q-D1-3=A: profiler 默认空实现 ----------------
+def t_profiler_defaults():
+    print('=== G. Q-D1-3=A: RenderMixin 的 profiler 默认空实现 ===')
+    from loom_render import RenderMixin
+    from loom_profiler import ProfilerMixin
+
+    class OnlyRender(RenderMixin):
+        pass
+
+    h = OnlyRender()
+    check('G1 只混 RenderMixin: _prof_t0() 返回 0.0（不抛 AttributeError）',
+          h._prof_t0() == 0.0, h._prof_t0())
+    check('G2 只混 RenderMixin: _prof_add 不抛且返回 None',
+          h._prof_add('x', 0.0) is None)
+    check('G3 只混 RenderMixin: _profile 直接执行原函数',
+          h._profile('x', lambda: 7) == 7)
+
+    class Spy:
+        def _prof_t0(self):
+            return 42.0
+
+        def _prof_add(self, name, t0):
+            return ('added', name, t0)
+
+    class RenderFirst(RenderMixin, Spy):        # 与 GLEngine 相同的基类次序
+        pass
+
+    r = RenderFirst()
+    check('G4 RenderMixin 在前时委托给真实 profiler（不被空实现遮蔽）',
+          r._prof_t0() == 42.0, r._prof_t0())
+    check('G5 _prof_add 同样委托', r._prof_add('a', 1.0) == ('added', 'a', 1.0),
+          r._prof_add('a', 1.0))
+
+    class ProfFirst(ProfilerMixin, RenderMixin):
+        def __init__(self):
+            self._stage_times = {}
+            self._stage_calls = {}
+
+    check('G6 ProfilerMixin 在前时真实现优先（MRO 不受影响）',
+          ProfFirst._prof_t0 is ProfilerMixin._prof_t0)
+
+
 # ---------------- D. 真实 GL ----------------
 def t_real_gl():
     print('=== D. 真实 GL 4.3 跑一帧 PlayerApp ===')
@@ -370,6 +412,7 @@ def main():
     t_executor()
     t_s3s4()
     t_post()
+    t_profiler_defaults()
     t_real_gl()
     print('')
     if _fails:

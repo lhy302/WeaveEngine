@@ -101,6 +101,10 @@ class GLFrameExecutor:
         func_before = _safe_get(ctx, 'depth_func', '<')   # 迁移前稳态默认 '<'
         first = True
         for spec, decl, srcs in self._rows(plan):
+            # 绘制源实现需要读描述（如天空按 RasterState.cull 决定是否关剔除）
+            self.engine._frame_spec = spec
+            self.engine._frame_sky_spec = spec if spec.id == 'sky' else getattr(
+                self.engine, '_frame_sky_spec', None)
             if before_pass is not None:
                 before_pass(spec)
             fb = self.pool.resolve(decl)
