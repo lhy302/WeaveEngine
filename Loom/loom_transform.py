@@ -27,6 +27,10 @@ import numpy as np
 
 from matlib import (mat4_scale, mat4_rotation, mat4_translation, decompose_euler)
 from fastpath import depths as _fp_depths
+# 2026-11-10 V-03: pipeline_glue.depths 的契约是「失败返回 None」（见其 docstring），
+# 但本文件以前直接 depth.max() -> 一旦 C 路径返回 None 就 AttributeError 崩渲染帧。
+# 这里接上"失败回退"到纯 Python 参考实现（同口径），符合调用方应尽的义务。
+from fastpath import _depths_impl as _fp_depths_py
 from loom_types import Point3D
 from loom_components import TransformComponent
 from interp_state import InterpState
@@ -212,6 +216,8 @@ class TransformMixin:
             if m.parent is not None:
                 parent[i] = id2i.get(id(m.parent), -1)
         depth = _fp_depths(parent)
+        if depth is None:          # C 路径失败 -> 回退纯 Python（同口径），别让渲染帧崩
+            depth = _fp_depths_py(parent)
         self._pd_cache = (stamp, parent, depth)
         return parent, depth
 

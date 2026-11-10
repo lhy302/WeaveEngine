@@ -23,7 +23,7 @@ Loom 开发进度与 Unity 差距对照 (2026-08-11 起稿, 更新至 2026-08-28
       文档 *.txt 留项目根 (位置不变); 编译版本已删 (2026-08-31, 等指令重打)
   - 现状: **创作闭环 [布置→行为→试玩→打包] 四环齐全, M1~M41 全落地,
           + LoomHub 项目管理器 + 插件系统 L1 分级 (2026-08-27)
-          + EAI/HUB-EAI 命令自动化 (102/21 条命令, 测试全绿), 详见第八节**
+          + EAI/HUB-EAI 命令自动化 (103/21 条命令, 测试全绿), 详见第八节**
 
 和 Unity 的关系: 不是"竞争", 是"按 Unity 的模块设计逐项补齐"。
 本引擎能做出"能玩、能发布"的东西(见《使用操作指南.txt》), 但它不是要替代
@@ -282,7 +282,7 @@ Unity —— 它证明"Unity 的架构哲学用几百 KB 的 Python 也能搭起
     测试 test_plugin_loader 39 项 + test_gamepack 8 项。
     方案文档 = 《Loom插件系统分级方案.txt》(来龙去脉见
     《Loom模块化插件化分析.txt》顶部更新段)。
-  [EAI / HUB-EAI] agent_commands.py 102 条命令 (status 含 dirty / screenshot /
+  [EAI / HUB-EAI] agent_commands.py 103 条命令 (status 含 dirty / screenshot /
     object_* / set_transform / 材质 / collider / rigidbody / audio / animator /
     scripts 系 / light_set / camera_* / reparent / prefab_* / assets /
     asset_* / settings_* / play / quit 三态(保存/不保存/取消) / undo / redo /

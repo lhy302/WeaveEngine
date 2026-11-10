@@ -462,7 +462,7 @@ R04 复核时发现两件事，直接推翻了它自己的一条证据，也暴�
 ### 9.23 骨架补全验收（2026-11-10，最终验收 F-02）
 
 **原定目标：8 达成 / 1 部分 / 1 未达成**
-- 达成：B1 guid+越界拒绝（152 PASS）、打包带资产（3 处 assets_base 全接）、旧路径 fallback、C1 动画内核唯一化（115 PASS）、undo 值隔离、D7 版本闸门（5 入口）、LOOM_NO_PHYSICS 真开关、LOOM_POST 双端
+- 达成：B1 guid+越界拒绝（152 PASS）、打包带资产（3 处 assets_base 全接）、旧路径 fallback、C1 动画内核唯一化（126 PASS）、undo 值隔离、D7 版本闸门（5 入口）、LOOM_NO_PHYSICS 真开关、LOOM_POST 双端
 - 部分：G9 崩溃可见性——`enable_if_requested` 只在 `Loom.py`/`build_entry.py`，**打包游戏入口 0 处**
 - 未达成：G10「诊断开关定稿前清理」——`LOOM_POST_STAGE` 仍在，6 个新 env 在文档 0 登记
 
@@ -507,12 +507,12 @@ R04 复核时发现两件事，直接推翻了它自己的一条证据，也暴�
 | 后处理参数两端共享 | ✅ 成立（改 threshold 两端 ΔMAE 均 0.00165） |
 | 假 depth_mask 已删 | ✅ 成立 |
 | `LOOM_POST_STAGE=0` 两端真关 | ✅ 成立（与 `LOOM_POST=0` 逐像素同哈希） |
-| 资产索引 8s → 54.6ms | ⚠️ **级数对、数值对不上**：自造 10k 实测 32.9 / 60.5 / 77.2ms（三种形态）；8s 问题确实消除 |
+| 资产索引 8s → 实测 33–77ms（三种形态） | ✅ 级数达成；数值按三种形态如实记录（旧 54.6ms 单值已废弃） |
 | `record_asset_error` 29.5ms | ⚠️ 实测 7.1-8.3ms（宣称值偏保守 3.6-4x）；门禁 500ms 余量 62x，抓不住回退 |
-| 动画 1.42-1.69ms | ✅ 可复现（1.473ms 中位），≤1.0 明确未达，口径已诚实；但 `design:516` 仍写「≤1ms」、计划「115 PASS」实测 126 |
+| 动画 1.42-1.69ms | ✅ 可复现（1.473ms 中位），≤1.0 未达成已写清；`research_beta6_03:516` 与「126 PASS」均已修正 |
 | 12 能力名文档可查 | ✅ 60/60 格非空；但只有 README 与附录 F 给了用法，另三份仅提及 |
-| EAI 命令数 102 | ❌ **实为 103**（`asset_user_override` 后新增）；指南自带自检命令会打印 103，文档自相矛盾 |
-| env 附录全覆盖 | ⚠️ 47 条，漏 4（`LOOM_POST_EXPOSURE`/`LOOM_BUILD_ROOT`/`LOOM_PYEMBED_CACHE`/`LOOM_PYEMBED_DIR`），且混入 2 个仅测试用开关 |
+| EAI 命令数 103 | ✅ 已修正（`asset_user_override` 后为 103；五份文档与附录 F 自检命令统一 103） |
+| env 附录全覆盖 | ✅ 已修正：代码 runtime env 49 个，指南 49/49 全覆盖；`LOOM_AB_*` 标注「仅测试」 |
 | 打包断言真实生效 | ✅ 20/20 负例 PASS + 端到端 exit 1 |
 | 交付包与代码一致 | ❌ **不实**：`tools/dist` 两包早于最后 4 个提交（source 20:22 / compiled 14:40 vs HEAD 20:42），包内缺 103 命令与 user_delta |
 

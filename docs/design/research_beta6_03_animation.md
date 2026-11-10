@@ -513,7 +513,7 @@ class EventQueue:
 | **S4** | 序列化 v2 + undo 值隔离：`sceneio` 写/读新字段；`undo` 快照对 clips 做**值拷贝**（或改存 clip id 引用表） | `sceneio.py:298-303 / 448-455`、`scene_driver.py:86-93`、`undo.py:121-123 / 214-226`、`SCENE_VERSION 10→11`、`migrate()` | ① 往返无损（含 events/loopMode/speed）；② 旧 v10 文件加载后行为**逐位同旧**（快照对比）；③ 改 undo 快照不再污染模型（§1.5 D2 转 PASS）；④ 未知新字段在**旧引擎**里不是静默丢弃（见 ⑦Q6） | `tests/test_anim_serialize_v2.py`（v10→v11 迁移、未知字段拒绝/警告）、`tests/test_anim_undo_isolation.py` |
 | **S5** | 写者优先级契约：动画只写"kinematic 目标"；动态刚体 + animator 给一次性告警并**跳过**动画写；两条物理路径顺序对齐 | `loom_frame_components.py`、`engine.py:1214-1247`（顺序/门控）、`physics_bridge.py`（只读语义确认） | ① pipe 与串行两条路径**同一输入同一结果**（对拍）；② 动态刚体+animator 有且仅有一条告警；③ 现有物理测试（`test_physics_runtime.py`、`test_physics_bridge.py`）全绿 | `tests/test_anim_physics_order.py`（假 pipe 驱动 `_logic_frame`，断言段次序 = 契约）；`tests/test_anim_write_priority.py` |
 
-**批次 1 出口判据**：`test_animation.py` + 5 个新测试全绿；500 物体动画 ≤1ms；`scene_driver` 无动画复刻；`SCENE_VERSION=11` 且 v10 文件可读。
+**批次 1 出口判据**：`test_animation.py` + 5 个新测试全绿；500 物体动画**实测 1.42–1.69ms，≤1.0ms 未达成**（落地 2.0ms 稳定门禁，见 §S2/loom_components 诚实口径）；`scene_driver` 无动画复刻；`SCENE_VERSION=11` 且 v10 文件可读。
 
 ### 批次 2 · 蒙皮（数据模型 + 编辑器可视化，**渲染不做**）
 

@@ -530,8 +530,29 @@ def cmd_scene_load(win, args):
     if not path:
         return {'error': 'scene_load 需要 path (丢丢弃恢复=传磁盘上已保存的场景路径;'
                         ' 无 path 会弹系统对话框, Agent 环境禁用)'}
+    # 2026-11-10 V-03: 失败必须 ok=False（以前无论成败都回 {'loaded': path}，
+    # 静默假成功：路径不存在/JSON 坏/版本闸门拒绝/对象图成环 都报"已加载"）。
+    if not os.path.isfile(path):
+        return {'error': '场景文件不存在: %s' % path}
+    try:
+        with open(path, 'r', encoding='utf-8') as _f:
+            _data = json.load(_f)
+    except (OSError, ValueError) as e:
+        return {'error': '场景读取失败: %r' % (e,)}
+    if not isinstance(_data, dict):
+        return {'error': '场景格式非法（顶层不是对象）: %s' % path}
+    import sceneio as _sio
+    try:
+        _sio.check_engine_version(_data)
+    except _sio.SceneVersionError as e:
+        return {'error': '场景版本不兼容: %s' % e}
     ed._load_scene(path)   # 低层: 直载不弹框不确认 (丢弃当前改动语义)
-    return {'loaded': path}
+    # 复核：_load_scene 在播放态/对象图校验失败时是静默 return（不换场）
+    _cur = getattr(ed, '_scene_path', None)
+    if not _cur or os.path.normcase(os.path.abspath(_cur)) != os.path.normcase(
+            os.path.abspath(path)):
+        return {'error': '场景加载未完成（播放态或对象图校验拒绝），当前场景保持不变'}
+    return {'loaded': path, 'ok': True}
 
 
 # ====================================================================

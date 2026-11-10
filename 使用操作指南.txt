@@ -472,7 +472,7 @@ LoomHub = 项目管理器 ("解释器名 + Hub", 类似 Unity -> Unity Hub)。
   适合: 给别人看成果、跑演示、性能测试、让 Agent 帮手 (Claude Code 等)。
 
 命令行操作全表 (编辑器内 F12 底部命令行坞 / 远程 Agent):
-  status object_list object_add object_select ... 共 102 条命令,
+  status object_list object_add object_select ... 共 103 条命令,
   每条命令 = 对应一个 GUI 操作, 见《Loom-EAI与HUB-EAI说明书.txt》。
 
 ====================================================================
@@ -665,6 +665,7 @@ render_buffer 命中数。逃生门: LOOM_NO_FRAMEBUF=1 环境变量强制关闭
 
 二、渲染 / 后处理
   LOOM_POST                后处理开关（1/0）                        默认：跟随质量设置
+  LOOM_POST_EXPOSURE       后处理曝光覆盖（0.5-3.0，调试用）     默认：跟随设置
   LOOM_POST_STAGE          只跑后处理到指定阶段后停止 —— **崩溃二分工具**：
                            怀疑 bloom/tonemap 某阶段崩时，逐个阶段试，最后停的那个就是元凶
   LOOM_BLOOM_STRENGTH      Bloom 强度覆盖                         默认：材质/设置值
@@ -692,16 +693,23 @@ render_buffer 命中数。逃生门: LOOM_NO_FRAMEBUF=1 环境变量强制关闭
   LOOM_BUCKET_PACK         bucket 打包开关（与 LOOM_BUCKET_LEGACY 二选一）
   LOOM_BUCKET_LEGACY       回退旧 bucket 布局
   LOOM_NO_DLL              注册表层跳过指定槽位（如 'pipeline'；仅探针用）
-  LOOM_AB_SCENES           A/B 基线场景清单（ab_batch 用）
-  LOOM_AB_ALLOW_NO_VK      A/B 允许无 Vulkan 时降级
+  LOOM_AB_SCENES           **仅测试**：A/B 基线场景清单（ab_batch 用）
+  LOOM_AB_ALLOW_NO_VK      **仅测试**：A/B 允许无 Vulkan 时降级
   LOOM_AGENT_PACE_MS       Agent 每步节奏（ms，默认 120）
   LOOM_PROFILE             运行期性能剖析开关（输出阶段耗时）
   LOOM_PROFILE_POSE        姿态/物理链路的分段计时（与 LOOM_POSE_SOA 配合看）
   LOOM_GC_LEGACY           回退旧 GC 分代策略（对象回收排障用）
+  LOOM_GC_PROBE            打印 GC 分代/对象计数（排障）
+  LOOM_CV_MODE             CV（视觉脚本）执行模式覆盖
+  LOOM_CV_STRICT           CV 严格模式（不合法节点直接报错）
+  LOOM_BENCH_DT            基准测试固定步长（秒，与 --bench 配合）
 
 四、构建 / 发布（tools/ 与 build 脚本）
   LOOM_ENGINE_VERSION      引擎版本（必须 == Loom/解释器.json，否则 release_github 报分叉并退出）
   LOOM_HUB_VERSION         Hub 版本（必须 == LoomHub/版本.json，同上）
+  LOOM_BUILD_ROOT          引擎构建根目录覆盖（build_engine.py） 默认：仓库根
+  LOOM_PYEMBED_DIR         嵌入式 Python 来源目录（package_engine.py） 默认：自动探测
+  LOOM_PYEMBED_CACHE       嵌入式 Python 缓存目录（避免每次重装依赖） 默认：tools/ 下缓存
   LOOM_BUILD_CONSOLE_MODE  编译版保留控制台
   LOOM_BUILD_RUNTIME_DIR   build_game --build-runtime 输出目录覆盖
   LOOM_HUB_NO_UPDATE_CHECK 关闭 Hub 自更新后台检查（测试/CI 用）
@@ -732,7 +740,7 @@ render_buffer 命中数。逃生门: LOOM_NO_FRAMEBUF=1 环境变量强制关闭
 | _pose_rows | 物理姿态 SoA 的行数（每行一个刚体姿态） | Loom/physics_bridge.py（env LOOM_POSE_SOA） | 内部实现；排障用 LOOM_POSE_SOA=0/1 切换布局对比 |
 
 自检命令（任何人可复跑）：
-  python -c "import agent_commands as ac; print(len(ac.command_names()))"   -> 102
+  python -c "import agent_commands as ac; print(len(ac.command_names()))"   -> 103
   python -c "import sceneio; print(sceneio.SCENE_VERSION)"                  -> 11
   python -c "import glob; print(len(glob.glob('tests/test_*.py')))"         -> 133
   grep -n "LOOM_FLICKER_DEBUG" Loom/*.py                                    -> 调试开关就在代码里，生产勿开
