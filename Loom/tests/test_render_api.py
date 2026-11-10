@@ -39,6 +39,11 @@ import tempfile as _tempfile_gate
 # 契约 §8: 跑测试不得污染 %LOCALAPPDATA%, 也不得在仓库里留文件。
 _os_gate.environ.setdefault('LOOM_USER_ROOT',
                                _tempfile_gate.mkdtemp(prefix='loom_test_userroot_'))
+# 2026-11-10 (批次 C1 收尾): 本测试会走 run_player 的"VK 初始化失败 -> 改走 GL"
+# 回退链, 该链在 Windows 上会调 user32.MessageBoxW **阻塞等点击**。无交互桌面/
+# CI/自动化跑批时它会一直挂着 (实测 run_all 卡死)。与 test_backend_fallback_policy
+# 同款: 测试环境关弹窗, 只留日志 (断言只依赖 calls 与返回值, 不依赖弹窗)。
+_os_gate.environ.setdefault('LOOM_NO_DIALOG', '1')
 
 
 class _FailGateStream:

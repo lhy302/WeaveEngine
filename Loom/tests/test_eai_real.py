@@ -346,6 +346,34 @@ def t_components():
     check("animator loop 切换", bool(m.animator.loop) != lp)
     r = run('animator', {'action': 'clip'}, expect_ok=False)
     check("animator clip 缺参数 -> 拒绝并列出可用片段", r['ok'] is False)
+    # beta6 C1: 命令层补 speed / seek / loop_mode (组件 API 已可脚本直调)
+    from loom_components import AnimationClip as _Clip
+    an = m.animator
+    an.clips['t'] = _Clip([{'time': 0.0, 'position': (0.0, 0.0, 0.0)},
+                           {'time': 1.0, 'position': (0.0, 1.0, 0.0)}])
+    an.current = 't'
+    r = res('animator', {'action': 'speed', 'value': 2.0})
+    check("animator speed 写入 (2.0)", abs(an.speed - 2.0) < 1e-9
+          and abs(r['animator']['speed'] - 2.0) < 1e-9, r)
+    r = res('animator', {'action': 'speed'})
+    check("animator speed 读取", abs(r['animator']['speed'] - 2.0) < 1e-9, r)
+    r = run('animator', {'action': 'speed', 'value': 'abc'}, expect_ok=False)
+    check("animator speed 非法值 -> 拒绝", r.get('ok') is False, r)
+    r = res('animator', {'action': 'seek', 't': 0.5})
+    check("animator seek 0.5s", abs(an.time - 0.5) < 1e-9
+          and abs(r['animator']['time'] - 0.5) < 1e-9, r)
+    r = run('animator', {'action': 'seek'}, expect_ok=False)
+    check("animator seek 缺 t -> 拒绝", r.get('ok') is False, r)
+    r = res('animator', {'action': 'loop_mode', 'clip': 't', 'mode': 'once'})
+    check("animator loop_mode 写入", an.clips['t'].loop_mode == 'once', r)
+    r = res('animator', {'action': 'loop_mode', 'clip': 't'})
+    check("animator loop_mode 读取", r['animator']['clip_loop_modes'].get('t') == 'once', r)
+    r = run('animator', {'action': 'loop_mode', 'clip': 'nope', 'mode': 'loop'},
+            expect_ok=False)
+    check("animator loop_mode 未知片段 -> 拒绝", r.get('ok') is False, r)
+    r = run('animator', {'action': 'loop_mode', 'clip': 't', 'mode': 'bogus'},
+            expect_ok=False)
+    check("animator loop_mode 非法 mode -> 拒绝", r.get('ok') is False, r)
     res('animator', {'action': 'remove'})
     check("animator remove 真移除", m.animator is None)
 

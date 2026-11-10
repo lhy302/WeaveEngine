@@ -1217,6 +1217,14 @@ class EditorApp(GLEngine):
         if not isinstance(data, dict):
             self._notify("加载失败: 场景文件格式非法 (顶层不是对象)", (235, 90, 90))
             return
+        # beta6 C1/D7: 版本闸门 —— 场景要求更高引擎版本时在**清空旧场景之前**
+        # 拒绝 (旧引擎加载新字段会静默丢弃, 所以宁可拒绝)。
+        try:
+            sceneio.check_engine_version(data)
+        except sceneio.SceneVersionError as e:
+            print("[编辑器] 场景版本不兼容, 保留当前场景:", e)
+            self._notify("加载失败: %s" % e, (235, 90, 90))
+            return
         _objs = data.get('objects', [])
         if not isinstance(_objs, list):
             _objs = []
@@ -1917,6 +1925,35 @@ class EditorApp(GLEngine):
     def toggle_anim_loop(self, m):
         self.commit_model(m, "动画循环",
                           lambda: setattr(m.animator, 'loop', not m.animator.loop))
+
+    # ---- beta6 C1: 每片段循环模式 / 播放速率 (命令层 + 检查器共用, 可撤销) ----
+    def set_anim_loop_mode(self, m, clip_name, mode):
+        """设置某片段的循环模式 ('once'/'loop'/'pingpong'/'inherit'). 可撤销."""
+        clip = m.animator.clips.get(clip_name) if m.animator is not None else None
+        if clip is None:
+            raise ValueError('片段不存在: %r (可用: %s)'
+                             % (clip_name, list(m.animator.clips or [])
+                                if m.animator is not None else []))
+        mode = str(mode if mode is not None else '').strip().lower()
+        if mode in ('inherit', 'none', 'default', ''):
+            mode = None
+        elif mode not in ('once', 'loop', 'pingpong'):
+            raise ValueError('loop_mode 只能 once|loop|pingpong|inherit, 收到 %r'
+                             % (mode,))
+        self.commit_model(m, "动画循环模式",
+                          lambda: setattr(clip, 'loop_mode', mode))
+        return mode
+
+    def set_anim_speed(self, m, speed):
+        """设置播放速率 (写入场景, 可撤销). 非法值抛 ValueError 且模型不变."""
+        if m.animator is None:
+            raise ValueError('没有动画组件')
+        before = undo_snapshot(m)
+        m.animator.set_speed(speed)      # set_speed 先校验后写: 失败时模型不变
+        after = undo_snapshot(m)
+        if after != before:
+            self.undo.push(StateCommand("动画变速", self, m, before, after))
+        return m.animator.speed
 
     def add_script(self, m, sid, extra_vars=None):
         """挂脚本 + 套默认参数 (可撤销).

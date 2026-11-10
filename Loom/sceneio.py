@@ -58,6 +58,107 @@ from mesh import create_cube, spec_to_mesh
 SCENE_VERSION = 11  # v11 (beta6 B1 资产 guid): 贴图/六面图引用只写 guid (旧路径字段可读+告警)
 PREFAB_VERSION = 1
 
+# ============================================================================
+# beta6 C1/D7: 引擎版本闸门
+# ----------------------------------------------------------------------------
+# 背景: migrate() 只抬 version、不认"更高版本写下的新字段" —— 旧引擎读新场景
+# 会把 animator.speed / clip_meta 等未知键**静默丢弃** (research_beta6_03 §④ R1)。
+# 现在场景写入 min_engine_version(=当前引擎版本), 加载时低版本引擎明确拒绝。
+# 兼容: 旧场景/第三方(Hub)写出的场景没有该字段 -> 不设闸, 行为与以前一致。
+# ============================================================================
+_ENGINE_VERSION_FALLBACK = '0.1.0.beta6'
+
+
+def _read_engine_version():
+    """当前引擎版本. 单一事实源 = 引擎目录 解释器.json; 读不到 -> 常量兜底."""
+    try:
+        p = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                         '解释器.json')
+        with open(p, 'r', encoding='utf-8') as f:
+            v = json.load(f).get('version')
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+    except Exception:
+        pass
+    return _ENGINE_VERSION_FALLBACK
+
+
+ENGINE_VERSION = _read_engine_version()
+
+
+class SceneVersionError(ValueError):
+    """场景要求的引擎版本高于当前引擎 —— 明确拒绝加载 (不静默丢字段)."""
+
+
+def parse_version(text):
+    """版本串 -> 可比较 5 元组; 无法解析 -> None.
+
+    '0.1.0.beta6' -> (0, 1, 0, 0, 6)   第 4 位 0 = 预发布 (beta)
+    '0.1.0'       -> (0, 1, 0, 1, 0)   第 4 位 1 = 正式版 (同号正式版 > beta)
+    '1.2'         -> (1, 2, 0, 1, 0)
+    """
+    if not isinstance(text, str):
+        return None
+    s = text.strip().lower()
+    if not s:
+        return None
+    nums = []
+    beta = None
+    for part in s.split('.'):
+        part = part.strip()
+        if not part:
+            continue
+        if part.isdigit():
+            nums.append(int(part))
+        elif part.startswith('beta'):
+            tail = part[4:]
+            if tail and not tail.isdigit():
+                return None
+            beta = int(tail) if tail else 0
+        else:
+            return None                 # 未知段 (rc1/alpha/日期) -> 不做比较
+    if not nums:
+        return None
+    while len(nums) < 3:
+        nums.append(0)
+    if beta is None:
+        return (nums[0], nums[1], nums[2], 1, 0)
+    return (nums[0], nums[1], nums[2], 0, beta)
+
+
+def version_lt(current, required):
+    """current 是否低于 required. 任一不可解析 -> False (无法判定则不拦)."""
+    a = parse_version(current)
+    b = parse_version(required)
+    if a is None or b is None:
+        return False
+    return a < b
+
+
+def check_engine_version(data, engine_version=None):
+    """加载前版本闸门. 不满足抛 SceneVersionError(带原因), 通过返回 True.
+
+    - 无 min_engine_version (旧场景 / Hub 写出的场景) -> 不设闸 (向后兼容);
+    - 版本串不可解析 -> 打印告警后放行 (不因脏数据把用户挡在场景外);
+    - 当前引擎低于要求 -> 拒绝, 原因里同时给出"要求版本 / 当前版本".
+    """
+    if not isinstance(data, dict):
+        return True
+    need = data.get('min_engine_version')
+    if not isinstance(need, str) or not need.strip():
+        return True
+    need = need.strip()
+    cur = engine_version if engine_version is not None else ENGINE_VERSION
+    if parse_version(need) is None or parse_version(cur) is None:
+        print('[场景] 版本号无法解析 (min_engine_version=%r, 当前=%r): 跳过版本闸门'
+              % (need, cur))
+        return True
+    if version_lt(cur, need):
+        raise SceneVersionError(
+            '场景要求引擎 >= %s, 当前引擎 %s: 拒绝加载 (旧引擎读新场景会静默丢字段, '
+            '请先升级引擎, 或用旧版引擎"导出兼容场景"后重试)' % (need, cur))
+    return True
+
 
 def generate_guid():
     return uuid.uuid4().hex
@@ -1537,7 +1638,11 @@ def scene_to_dict(engine, camera=None, base_dir=None, ctx=None):
             pass
         if camera is not None:
             print('[场景] 天空盒未写入: %s' % (_sb_reason,))
-    return {"version": SCENE_VERSION, "camera": camera,
+    return {"version": SCENE_VERSION,
+            # D7: 写出时声明"最低引擎版本" —— 旧引擎读新场景会明确拒绝,
+            # 而不是把 animator.speed / clip_meta 等未知键静默丢掉.
+            "min_engine_version": ENGINE_VERSION,
+            "camera": camera,
             "gravity": getattr(engine, 'gravity', -9.8),   # 2026-08-30: 场景重力加速度
             "materials": [_emit_material(m, ctx) for m in mats],
             "lights": [_emit_light(l) for l in engine.lights],
@@ -1625,7 +1730,12 @@ def scene_from_dict(engine, data, camera_out=None, base_dir=None, ctx=None):
 
 
 def migrate(data):
-    """版本迁移 (原地修改并返回). 旧格式/缺版本一律能加载."""
+    """版本迁移 (原地修改并返回). 旧格式/缺版本一律能加载.
+
+    beta6 C1/D7: 第一步就过"引擎版本闸门" —— 场景要求更高版本时抛
+    SceneVersionError (明确拒绝), 绝不带着未知字段静默加载。
+    """
+    check_engine_version(data)
     v = data.get('version', 1) if isinstance(data, dict) else 1
     if not isinstance(data, dict):
         data = {'version': SCENE_VERSION, 'objects': []}

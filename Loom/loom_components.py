@@ -353,6 +353,24 @@ class AnimationClip:
     def duration(self):
         return self.frames[-1]['time'] if self.frames else 0.0
 
+    # ---- beta6 C1: 内容相等 / 身份哈希 ----
+    # 为什么需要 __eq__: undo.snapshot() 现在按值拷贝 clips (隔离), commit_model
+    # 用 before/after 快照比较判定"是否真的改了"; 若按对象身份比较, 任何一次
+    # commit 都会因拷贝产生新对象而误判为"改了" -> 撤销栈塞满空操作。
+    # 为什么 hash 保持身份: 求值器按"片段实例"分组 (同内容不同实例各自成组),
+    # 身份哈希即可; 内容相等只用于快照比较 (两者不冲突: 不同 hash 的相等对象
+    # 不会被 dict 合并)。
+    def __eq__(self, other):
+        if not isinstance(other, AnimationClip):
+            return NotImplemented
+        return self.loop_mode == other.loop_mode and self.frames == other.frames
+
+    def __ne__(self, other):
+        r = self.__eq__(other)
+        return NotImplemented if r is NotImplemented else not r
+
+    __hash__ = object.__hash__
+
     def copy(self):
         """深拷贝 (帧字典 + 值序列都复制) —— undo 快照值隔离 / 场景重建用.
 

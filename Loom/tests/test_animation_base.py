@@ -429,6 +429,20 @@ check('④ 撤销清运行态 (time=0/playing=False)',
       m18.animator.time == 0.0 and m18.animator.playing is False)
 check('④ 撤销保留 speed', m18.animator.speed == 1.0)
 
+# 快照按"值"相等: 未改动时两次快照必须相等 (否则 commit_model 会把每次编辑
+# 都当成"改了" -> 撤销栈被空操作塞满)
+e18b = make_engine()
+m18b, _ = add_anim_obj(e18b, full_clip())
+s_a = U.snapshot(m18b)
+s_b = U.snapshot(m18b)
+check('④ 未改动时两次快照相等 (空撤销不产生)', s_a == s_b)
+m18b.animator.set_speed(2.0)
+check('④ 变速后快照不等 (会被记入撤销)', U.snapshot(m18b) != s_a)
+m18b.animator.set_speed(1.0)
+check('④ 变速改回后快照又相等', U.snapshot(m18b) == s_a)
+m18b.animator.clips['c'].loop_mode = 'once'
+check('④ loop_mode 改动使快照不等', U.snapshot(m18b) != s_a)
+
 # ============================================================================
 print('---- ⑤ 写者优先级 D6 + 管线一致性 ----')
 # ============================================================================
@@ -519,6 +533,134 @@ check('⑤ 物理管线 开/关 两种配置 10 帧后位姿一致 (旧实现胜
                              [tuple(o.position) for o in objs_ser]))
 check('⑤ 管线路径动画确实推进 (静态体 y>0)', objs_pipe[0].position.y > 0.0,
       'y=%r' % objs_pipe[0].position.y)
+
+# ---- 逃生门 (render 的 NO_SPLIT 分支) 段次序 + 与分离路径逐位一致 ----
+import loom_render as LR
+
+
+class _EscapeHost:
+    """只承担 _escape_door_step 需要的 5 个口子 (无 GL 上下文)."""
+
+    def __init__(self):
+        self.models = []
+        self.calls = []
+
+    def _run_scripts(self, dt):
+        self.calls.append('scripts')
+
+    def update_animations(self, dt):
+        self.calls.append('animations')
+        LFC.FrameComponentMixin.update_animations(self, dt)
+
+    def update_physics(self, dt, events=False):
+        self.calls.append('physics')
+
+    def update_audio(self, dt):
+        self.calls.append('audio')
+
+    def _profile(self, name, fn):
+        return fn()
+
+
+host = _EscapeHost()
+_src = make_engine()
+add_anim_obj(_src, E.AnimationClip(once.frames, loop_mode='loop'))
+host.models = _src.models
+LR.RenderMixin._escape_door_step(host, 1.0 / 30.0)
+check('⑤ 逃生门段次序 = 脚本→动画→物理→音频 (与分离路径对齐)',
+      host.calls == ['scripts', 'animations', 'physics', 'audio'], str(host.calls))
+
+host2 = _EscapeHost()
+_src2 = make_engine()
+me, _ = add_anim_obj(_src2, E.AnimationClip(once.frames, loop_mode='loop'))
+host2.models = _src2.models
+split_eng = make_logic_engine(False)
+m_split, _ = add_anim_obj(split_eng, E.AnimationClip(once.frames, loop_mode='loop'))
+for _ in range(10):
+    LR.RenderMixin._escape_door_step(host2, 1.0 / 30.0)
+    split_eng._logic_frame(1.0 / 30.0)
+check('⑤ 逃生门 vs 分离路径 10 帧后位姿逐位一致',
+      tuple(me.position) == tuple(m_split.position)
+      and me.rotation == m_split.rotation and me.scale == m_split.scale,
+      'escape=%r split=%r' % (tuple(me.position), tuple(m_split.position)))
+
+# ============================================================================
+print('---- ⑥ 场景版本闸门 (D7: min_engine_version) ----')
+# ============================================================================
+e20 = make_engine()
+add_anim_obj(e20, full_clip())
+e20.cameras = []            # scene_to_dict 需要的场景相机段
+e20.active_camera = None
+e20.ui = None
+d20 = S.scene_to_dict(e20)
+check('⑥ 场景写出 min_engine_version (= 当前引擎版本)',
+      d20.get('min_engine_version') == S.ENGINE_VERSION,
+      '%r vs %r' % (d20.get('min_engine_version'), S.ENGINE_VERSION))
+check('⑥ 未抬 SCENE_VERSION (仍是 11)', S.SCENE_VERSION == 11 and d20['version'] == 11,
+      'version=%r' % (d20.get('version'),))
+
+# 旧场景 (无该字段) -> 照常加载 (向后兼容)
+old_ok = True
+try:
+    S.migrate({'version': 11, 'objects': []})
+    S.scene_from_dict(e20, dict(d20, min_engine_version=None))
+except Exception as exc:                     # noqa: BLE001
+    old_ok = False
+    print('    旧场景加载异常:', exc)
+check('⑥ 旧场景 (无 min_engine_version) 可加载', old_ok)
+
+# 同版本 / 更低要求 -> 加载
+same_ok = True
+try:
+    S.migrate({'version': 11, 'min_engine_version': S.ENGINE_VERSION, 'objects': []})
+    S.check_engine_version({'min_engine_version': '0.0.1'})
+except Exception as exc:                     # noqa: BLE001
+    same_ok = False
+    print('    同版本加载异常:', exc)
+check('⑥ 同版本 / 更低要求 可加载', same_ok)
+
+# 更高要求 -> 明确拒绝, 原因里带"要求版本 + 当前版本"
+rejected = False
+reason = ''
+try:
+    S.migrate({'version': 11, 'min_engine_version': '99.0.0', 'objects': []})
+except S.SceneVersionError as exc:
+    rejected = True
+    reason = str(exc)
+check('⑥ 更高版本要求 -> 抛 SceneVersionError 拒绝', rejected, reason[:80])
+check('⑥ 拒绝原因同时给出要求版本与当前版本',
+      '99.0.0' in reason and S.ENGINE_VERSION in reason, reason[:120])
+
+# 旧引擎读新场景 (模拟: 把"当前引擎版本"降级后检查 beta6 写出的场景)
+rejected_old = False
+try:
+    S.check_engine_version({'min_engine_version': S.ENGINE_VERSION},
+                           engine_version='0.1.0.beta5')
+except S.SceneVersionError:
+    rejected_old = True
+check('⑥ 旧引擎 (beta5) 读 beta6 场景 -> 拒绝', rejected_old)
+check('⑥ 同版本引擎读同一场景 -> 通过',
+      S.check_engine_version({'min_engine_version': S.ENGINE_VERSION},
+                             engine_version=S.ENGINE_VERSION) is True)
+
+# 整个加载链 (scene_from_dict) 也必须被拦住 (播放器/驱动同一入口)
+rejected_chain = False
+try:
+    e21 = make_engine()
+    S.scene_from_dict(e21, {'version': 11, 'min_engine_version': '99.0.0',
+                            'objects': []})
+except S.SceneVersionError:
+    rejected_chain = True
+check('⑥ scene_from_dict 加载链被拒绝 (不静默加载)', rejected_chain)
+
+# 版本比较语义: beta 递增, 同号正式版 > beta
+check('⑥ 版本比较: beta6 < beta7 < beta10 < 0.1.0',
+      S.version_lt('0.1.0.beta6', '0.1.0.beta7')
+      and S.version_lt('0.1.0.beta7', '0.1.0.beta10')
+      and S.version_lt('0.1.0.beta10', '0.1.0'))
+check('⑥ 版本比较: 正式版 0.1.0 不 < beta6',
+      S.version_lt('0.1.0', '0.1.0.beta6') is False)
+check('⑥ 无法解析的版本号不拦 (只告警)', S.version_lt('abc', '99.0.0') is False)
 
 print()
 print('总结果:', 'ALL PASS ✅' if ok else '有 FAIL ❌')

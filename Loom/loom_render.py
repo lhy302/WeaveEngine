@@ -894,6 +894,26 @@ class RenderMixin:
         except Exception as e:
             self._sky_warn('loop', '绘制异常 (%r), 本帧跳过' % (e,))
 
+    def _escape_door_step(self, delta_time):
+        """逃生门 (NO_SPLIT / logic_fps<=0) 的四段逻辑: 脚本 → 动画 → 物理 → 音频.
+
+        beta6 C1: 次序与分离路径 (engine._logic_frame) **对齐** —— 动画先于
+        物理写位姿, 这样"开关逃生门"不改变最终位形与可见动画。旧实现是
+        脚本→物理→音频→动画 (D6「动画只驱动 kinematic」后两者结果已一致,
+        但次序仍分叉, 属于同一份引擎两套时序)。
+
+        单独成方法: 让无 GL 上下文的测试能直接断言段次序 (见
+        tests/test_animation_base.py ⑤ 逃生门一致性)。
+        """
+        self._run_scripts(delta_time)
+        # M35 动画: 先写位姿 (与分离路径同序)
+        self.update_animations(delta_time)
+        # M31: 刚体步进 (碰撞事件延迟到矩阵后与阴影 VP 并行; 直调方仍 events=True)
+        self._profile('physics',
+                      lambda: self.update_physics(delta_time, events=False))
+        # M34: AudioSource 组件播放状态同步
+        self.update_audio(delta_time)
+
     def render(self, delta_time):
         """渲染一帧 (分离批1): 时钟 advance 排 0~N 逻辑步 + 0~M 物理步 ->
         世界矩阵 -> 阴影 pass -> MVP -> GPU 绘制 -> HUD -> 交换缓冲.
@@ -952,15 +972,9 @@ class RenderMixin:
             if it is not None and not getattr(self, '_logic_paused', False):
                 it.alpha = clk.alpha
         else:
-            # 逃生门: 旧绑死模式逐位复现 (脚本→物理→音频→动画, 原 4241-4248)
-            self._run_scripts(delta_time)
-            # M31: 刚体步进 (碰撞事件延迟到矩阵后与阴影 VP 并行; 直调方仍 events=True)
-            self._profile('physics',
-                          lambda: self.update_physics(delta_time, events=False))
-            # M34: AudioSource 组件播放状态同步
-            self.update_audio(delta_time)
-            # M35: 动画推进 (关键帧插值应用变换)
-            self.update_animations(delta_time)
+            # 逃生门: 绑死模式 (beta6 C1: 段次序收口到 _escape_door_step,
+            # 脚本→动画→物理→音频, 与分离路径一致)
+            self._escape_door_step(delta_time)
         # 2026-10-18 阶段1档序11 LateUpdate：两模式汇合后、世界矩阵重算前派发
         # （分离模式逻辑帧已跑完 → 此处即"所有 update 之后"；非分离模式 483-490 刚跑完）
         self._dispatch_late_update(delta_time)

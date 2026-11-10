@@ -1533,7 +1533,13 @@ def cmd_inspect(win, args):
                          else {'loop': obj.animator.loop,
                                'playing': obj.animator.playing,
                                'current': obj.animator.current,
-                               'clips': list(obj.animator.clips or [])}),
+                               # beta6 C1: 读取面补 time/speed/每片段循环模式
+                               'time': obj.animator.time,
+                               'speed': obj.animator.speed,
+                               'clips': list(obj.animator.clips or []),
+                               'clip_loop_modes': {k: c.loop_mode
+                                                   for k, c in
+                                                   obj.animator.clips.items()}}),
             'scripts': [{'id': s.script_id, 'vars': dict(s.script_vars)}
                         for s in getattr(obj, 'scripts', [])],
         })
@@ -1999,7 +2005,8 @@ def cmd_audio(win, args):
                                               'volume': au.volume}}
 
 
-@command('animator', '动画组件: {name?, action=add|remove|loop|play|clip, clip?}')
+@command('animator', '动画组件: {name?, action=add|remove|loop|play|clip|speed|seek|loop_mode, '
+                         'clip?, value?, t?, mode?} (speed/loop_mode 可写可读; seek 只写)')
 def cmd_animator(win, args):
     ed = win.editor
     kind, m = _resolve(ed, args, ('model',))
@@ -2023,14 +2030,47 @@ def cmd_animator(win, args):
             if not name:
                 return {'error': 'clip 缺参数 (可用: %s)' % list(an.clips or [])}
             ed.play_anim(m, name)
+        elif act == 'speed':
+            # 读: 不传 value; 写: value=<数值> (beta6 C1: 可撤销, 写进场景)
+            val = args.get('value', args.get('speed'))
+            if val is not None:
+                try:
+                    ed.set_anim_speed(m, val)
+                except ValueError as e:
+                    return {'error': str(e)}
+        elif act == 'seek':
+            t = args.get('t', args.get('time'))
+            if t is None:
+                return {'error': 'seek 缺参数 t (秒)'}
+            try:
+                an.seek(t)
+            except (TypeError, ValueError) as e:
+                return {'error': 'seek 失败: %s' % (e,)}
+        elif act == 'loop_mode':
+            name = args.get('clip') or an.current
+            if not name:
+                return {'error': '没有当前片段 (给 clip 参数或先 action=clip)'}
+            mode = args.get('mode')
+            if mode is not None:
+                try:
+                    ed.set_anim_loop_mode(m, name, mode)
+                except ValueError as e:
+                    return {'error': str(e)}
         else:
-            return {'error': 'action 只能 add|remove|loop|play|clip'}
+            return {'error': 'action 只能 add|remove|loop|play|clip|speed|seek|loop_mode'}
     an = getattr(m, 'animator', None)
+    if an is None:
+        return {'name': m.name, 'action': act, 'animator': None}
     return {'name': m.name, 'action': act,
-            'animator': None if an is None else {'loop': an.loop,
-                                                 'playing': an.playing,
-                                                 'current': an.current}}
-
+            'animator': {'loop': an.loop,
+                         'playing': an.playing,
+                         'current': an.current,
+                         'time': an.time,
+                         'speed': an.speed,
+                         'loop_mode': an.effective_loop_mode(),
+                         'clips': list(an.clips or []),
+                         'clip_loop_modes': {k: c.loop_mode
+                                             for k, c in an.clips.items()}}}
 
 
 @command('script_remove', '移除脚本: {name?, index} (检查器脚本行 × 按钮)')
