@@ -22,6 +22,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 # (实测两处)。setdefault 不覆盖测试自己已设的值, 所以各测试的精细隔离仍然优先。
 import tempfile as _tf_iso
 os.environ.setdefault('LOOM_USER_ROOT', _tf_iso.mkdtemp(prefix='loom_tests_userroot_'))
+# 2026-11-11: 全量回归里任何子进程都不得弹阻塞对话框（会把弹窗弹到用户桌面并卡住管道）
+os.environ.setdefault('LOOM_NO_DIALOG', '1')
 
 files = [f for f in sorted(glob.glob(os.path.join(HERE, "test_*.py")))
          if os.path.basename(f) != "test_integration.py"]

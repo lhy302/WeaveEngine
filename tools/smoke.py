@@ -98,6 +98,7 @@ def main(argv=None):
             pass
 
     env = dict(os.environ)
+    env['LOOM_NO_DIALOG'] = '1'      # 批量执行不得弹阻塞框
     env.pop('LOOM_POST', None)          # 冒烟只测默认姿态
     proc = subprocess.Popen(cmd, cwd=engine_dir, env=env,
                             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)

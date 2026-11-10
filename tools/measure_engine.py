@@ -30,6 +30,7 @@ TPS_RE = re.compile(r'TPS:\s*([0-9.]+)')
 
 def _bench_once(scene, frames, extra_env):
     env = dict(os.environ)
+    env['LOOM_NO_DIALOG'] = '1'      # 批量执行不得弹阻塞框
     env.pop('LOOM_BENCH_RESULT', None)
     env.update(extra_env or {})
     tmp = os.path.join(tempfile.gettempdir(),
