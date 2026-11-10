@@ -30,9 +30,10 @@ out vec4 frag_color;
 uniform sampler2D u_tex;
 uniform float u_threshold;
 uniform float u_knee;
+uniform float u_exposure;
 void main() {
-    // HDR 目标里存的是 gamma 编码值 -> 先反线性，按亮度做软阈值
-    vec3 c = pow(max(texture(u_tex, v_uv).rgb, vec3(0.0)), vec3(2.2));
+    // HDR 存 gamma 编码值 -> 反线性；再乘曝光（与 tonemap 同一曝光），阈值按曝光后线性亮度
+    vec3 c = pow(max(texture(u_tex, v_uv).rgb, vec3(0.0)), vec3(2.2)) * u_exposure;
     float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
     float w = smoothstep(u_threshold, u_threshold + max(u_knee, 1e-4), l);
     frag_color = vec4(c * w, 1.0);
@@ -175,6 +176,7 @@ class GLPostChain:
             prog['u_tex'].value = 0
             prog['u_threshold'].value = p['threshold']
             prog['u_knee'].value = p['knee']
+            prog['u_exposure'].value = p['exposure']
         elif source == 'post.down':
             prog = self._program('down', _DOWN)
             half = self._tex[HALF_TARGET]

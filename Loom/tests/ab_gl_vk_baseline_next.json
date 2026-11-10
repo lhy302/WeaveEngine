@@ -7,150 +7,156 @@
     "ui_mae_abs": 0.005,
     "ui_mae_drift": 0.002
   },
-  "generated_at": "2026-11-10T08:13:07",
+  "generated_at": "2026-11-10T08:34:02",
   "reference_dir": "ab_scenes_ref_next",
   "resolution": [
     480,
     320
   ],
-  "scene_count": 22,
+  "scene_count": 23,
   "scenes": {
+    "ab_bloom.json": {
+      "mae": 3e-08,
+      "max": 0.003922,
+      "ncc": 1.0,
+      "ref_sha256": "351c84da250df4b7b7c391ea39fbb4a402b04eb19f37208c03edf01f72dddb3d"
+    },
     "ab_c_dir+point.json": {
       "mae": 0.0,
       "max": 0.0,
       "ncc": 1.0,
-      "ref_sha256": "fa0bd7eb0da29b41ce5a29fa7c7454043126b449f37fe408e91ea04b67821bed"
+      "ref_sha256": "40c735a0032a8d83043afb79c59f72c892882fc572b83b973295e434f9838718"
     },
     "ab_c_dir_only.json": {
       "mae": 0.0,
       "max": 0.0,
       "ncc": 1.0,
-      "ref_sha256": "e0853e2c67d483505b133b74cac0d057ad0cab46f715928fbfd9d9de2118dbce"
+      "ref_sha256": "4b812f3bc78d6f4d367c6cf4b7672e38e92e377f1b907aee5d52b3528d54b058"
     },
     "ab_c_dir_shadow.json": {
-      "mae": 4.919e-05,
+      "mae": 5.076e-05,
       "max": 0.043137,
-      "ncc": 0.99989836,
-      "ref_sha256": "22b076780d0de82a607e1d2c91d3588f4e73fbd3c53c74b20365068476dc11b1"
+      "ncc": 0.99990808,
+      "ref_sha256": "a162182902b97213ea48d1e14928742ddbf5f9d7e1163fb130f4008bcba29a02"
     },
     "ab_c_point_only.json": {
-      "mae": 1e-08,
+      "mae": 2e-08,
       "max": 0.003922,
       "ncc": 0.99999999,
-      "ref_sha256": "6f5f93c3f68d88eb96b05d47a231120099b483948adf54184b8022dafb838128"
+      "ref_sha256": "f083beb1c06c13402c9c586705e0baca38580c60e8da182bb6075a62834b00f1"
     },
     "ab_c_spot_only.json": {
       "mae": 1e-08,
       "max": 0.003922,
       "ncc": 0.99999999,
-      "ref_sha256": "c9cdcb0f9f1b93087279e92ee030ea247b754b07045cf4e4e0970591ce6a6865"
+      "ref_sha256": "03cd0b2f9e7a3f09566686b6268bd8f7f4a1969f44ea6c05165c4da53345ca3c"
     },
     "ab_cube.json": {
       "mae": 0.0,
       "max": 0.0,
       "ncc": 1.0,
-      "ref_sha256": "c9bd7cad2fca256a181805eec27b65734be07a51f7e8de69ff9bd6e0fc0fc739"
+      "ref_sha256": "0bd3cc42531b421eeaacb017b14541dde615c15530c1ad42f433f3e11e6c8d6a"
     },
     "ab_env.json": {
-      "mae": 4.9e-07,
+      "mae": 4e-07,
       "max": 0.003922,
-      "ncc": 0.99999916,
-      "ref_sha256": "bb2be5336cbe7e97f114ad8fc2510abae86faffa86423e87920e7999288ab92d"
+      "ncc": 0.99999957,
+      "ref_sha256": "37221ca3416ae1ce3453d5a2c1a58844f9a4fa810f6247bc338960a7976bcfe1"
     },
     "ab_env_off.json": {
       "mae": 0.0,
       "max": 0.0,
       "ncc": 1.0,
-      "ref_sha256": "627319cd39695b2709521d34a4c53e602736a22b125a10cd8bc329d2a14d1df7"
+      "ref_sha256": "497d9b5dc41892f04b2d81b05360b31edb042441aa30e02ab840557591a0c102"
     },
     "ab_nrm.json": {
       "mae": 0.0,
       "max": 0.0,
       "ncc": 1.0,
-      "ref_sha256": "34d6eae1846c78ddc4bf0b7072a708551ea9652dc7c8aec64691b9276e68e091"
+      "ref_sha256": "4906c06f689da182d8dcc82ca361f142970c74744b0b1d48f614f014357a1631"
     },
     "ab_nrm_off.json": {
-      "mae": 0.0,
-      "max": 0.0,
-      "ncc": 1.0,
-      "ref_sha256": "b241064aed49470e8821bbde7b521494a0fd08315bbefdccedfe1d27d2b0da91"
+      "mae": 3e-08,
+      "max": 0.003922,
+      "ncc": 0.99999999,
+      "ref_sha256": "e759dcc5a8f0d1925e4559958af8a8dc22d914a950299fe9b884459046882006"
     },
     "ab_pbr.json": {
       "mae": 1e-08,
       "max": 0.003922,
       "ncc": 1.0,
-      "ref_sha256": "594e4419b7b21da3439cd2f4eaa76f1c041e0100436bcf02437dd203ed761ed9"
+      "ref_sha256": "a050096ef09fff952d67da954d1db1212221f9e9288467463d9b549f21f3f917"
     },
     "ab_plane.json": {
       "mae": 0.0,
       "max": 0.0,
       "ncc": 1.0,
-      "ref_sha256": "70d06345d26378b4374c8b65e9660f7eb8d5d12b0b94243a46482a04e40b31da"
+      "ref_sha256": "8c4744369bdf4d57d8e77a8681e6c881c6d3d18de474faa62791e755c0b61afb"
     },
     "ab_plane_cube.json": {
-      "mae": 1.277e-05,
+      "mae": 1.313e-05,
       "max": 0.043137,
-      "ncc": 0.99997145,
-      "ref_sha256": "9882baaacaa8a50b1fe1db3317990859e4aed9efb0e9b788c7a873e4c43486cf"
+      "ncc": 0.99997425,
+      "ref_sha256": "9b058865904cb35718039302581c37b7c4ade6dc9bbb057d65793ccf5fdbd33c"
     },
     "ab_plane_cube_sun_pt.json": {
-      "mae": 1.11e-05,
+      "mae": 1.127e-05,
       "max": 0.039216,
-      "ncc": 0.99998155,
-      "ref_sha256": "25247c1816c56f07883e0ed6fd8206384f3ef0d2aa77806d20eecae8cdb3fc0f"
+      "ncc": 0.99998361,
+      "ref_sha256": "280fd18432af8fc39569ca0e20fb48528dd8fef3ec904051327974e4e77d37e8"
     },
     "ab_plane_shfalse.json": {
       "mae": 0.0,
       "max": 0.0,
       "ncc": 1.0,
-      "ref_sha256": "70d06345d26378b4374c8b65e9660f7eb8d5d12b0b94243a46482a04e40b31da"
+      "ref_sha256": "8c4744369bdf4d57d8e77a8681e6c881c6d3d18de474faa62791e755c0b61afb"
     },
     "ab_plane_shtrue.json": {
       "mae": 0.0,
       "max": 0.0,
       "ncc": 1.0,
-      "ref_sha256": "70d06345d26378b4374c8b65e9660f7eb8d5d12b0b94243a46482a04e40b31da"
+      "ref_sha256": "8c4744369bdf4d57d8e77a8681e6c881c6d3d18de474faa62791e755c0b61afb"
     },
     "ab_plane_sphere.json": {
-      "mae": 3.642e-05,
+      "mae": 3.762e-05,
       "max": 0.043137,
-      "ncc": 0.99991937,
-      "ref_sha256": "450144dc0fe4447ee6b3fbaf6151ceaa17133f31c7577986f68c151d2683169f"
+      "ncc": 0.99992762,
+      "ref_sha256": "5be3e483ab43cb9cc6a31b7ac12223113719ff68a34a88665a0b1f2eff46ab7f"
     },
     "ab_point_shadow.json": {
-      "mae": 4.736e-05,
+      "mae": 5.066e-05,
       "max": 0.090196,
-      "ncc": 0.99923814,
-      "ref_sha256": "5bcc0b54c57aa0e36e8e7917128c97eff74970ede991ca54fba6e5f87bde9a0a"
+      "ncc": 0.99926015,
+      "ref_sha256": "3dd6fe9e500da4e0b1a2c04bade6d7c45f0b4cfe082a76af271177c08a1b5823"
     },
     "ab_scene.json": {
-      "mae": 4.583e-05,
-      "max": 0.043137,
-      "ncc": 0.99992608,
-      "ref_sha256": "c2c6dc3eaa3e90b7549cdf76f454e1506167be013b7bead6df3bdba7c8eaf676"
+      "mae": 4.648e-05,
+      "max": 0.039216,
+      "ncc": 0.99993452,
+      "ref_sha256": "6c9032e6d43199cc2f87aa9038986893a874c776353a135d4f09cd3efd75e06b"
     },
     "ab_sky.json": {
-      "mae": 1.138e-05,
-      "max": 0.039216,
-      "ncc": 0.9999733,
-      "ref_sha256": "bf8893c32f952331e02328332420f63da94e294bc4911a766bcfa8f1be4f81cc"
+      "mae": 1.154e-05,
+      "max": 0.043137,
+      "ncc": 0.99997523,
+      "ref_sha256": "2b20c91c65debfc836afdfa866a4192d9fb55b2ff02d42529f1de440392c4d4b"
     },
     "ab_tex.json": {
       "mae": 0.0,
       "max": 0.0,
       "ncc": 1.0,
-      "ref_sha256": "51cfbc453151fc325ce0704bf4e90ef1b6d51991f89e6af96bbed8c1f1fbb2a0"
+      "ref_sha256": "8c7d123f296c652fe1554ecc774769234e50d823ffc745c77e6822a3fe55dd13"
     },
     "ab_ui_scene.json": {
-      "mae": 6.083e-05,
-      "max": 0.070588,
-      "ncc": 0.99954351,
-      "ref_sha256": "0b5f22fb9550effde710ef4fa4a7ac61d141f91cf652aeecfcf9e69cdd73f5cf",
+      "mae": 6.558e-05,
+      "max": 0.078431,
+      "ncc": 0.99961498,
+      "ref_sha256": "5d0e7b180cde88b353d3c189b9c3e6a0915d672d32576103ca36bf6ffb2fa7ea",
       "ui": {
-        "mae": 9e-08,
+        "mae": 3e-08,
         "max": 0.003922,
-        "ncc": 0.99999999,
-        "ref_sha256": "479f74c68ca4b49b359f691582c2cb550445b8a9e8999df9e539e52739fc08a0"
+        "ncc": 1.0,
+        "ref_sha256": "ada1479077f1625a938b2f9160ce33c320cb70e9d89071c6c43dba116b411fe9"
       }
     }
   },

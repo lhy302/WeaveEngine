@@ -1,0 +1,139 @@
+{
+ "version": 10,
+ "camera": {
+  "target": [
+   0,
+   1,
+   0
+  ],
+  "distance": 7,
+  "yaw": 0.5,
+  "pitch": -0.2
+ },
+ "gravity": -9.8,
+ "skybox": {
+  "name": "暗场",
+  "guid": "sky_dark_bloom",
+  "solid_color": [
+   4,
+   5,
+   8,
+   255
+  ]
+ },
+ "objects": [
+  {
+   "id": "g",
+   "type": "plane",
+   "params": {
+    "size": 20
+   },
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "rotation": [
+    0,
+    0,
+    0
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "color": "#05060a",
+   "visible": true
+  },
+  {
+   "id": "lamp",
+   "type": "sphere",
+   "params": {
+    "radius": 0.85
+   },
+   "position": [
+    0,
+    1.35,
+    0
+   ],
+   "rotation": [
+    0,
+    0,
+    0
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "color": "#ffffff",
+   "visible": true
+  },
+  {
+   "id": "dim",
+   "type": "cube",
+   "params": {
+    "size": 1
+   },
+   "position": [
+    -1.9,
+    0.5,
+    0.7
+   ],
+   "rotation": [
+    0,
+    0.4,
+    0
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "color": "#1a1e26",
+   "visible": true
+  }
+ ],
+ "lights": [
+  {
+   "id": "key",
+   "kind": "directional",
+   "direction": [
+    -0.35,
+    -0.9,
+    -0.25
+   ],
+   "color": [
+    1,
+    1,
+    1
+   ],
+   "intensity": 2.8,
+   "shadow": false,
+   "mode": "full",
+   "shape": "circle",
+   "size": 5
+  },
+  {
+   "id": "glow",
+   "kind": "point",
+   "position": [
+    0,
+    1.5,
+    0.9
+   ],
+   "color": [
+    1,
+    1,
+    1
+   ],
+   "intensity": 1,
+   "shadow": false,
+   "range": 4
+  }
+ ],
+ "materials": [],
+ "cameras": [],
+ "active_camera": null
+}

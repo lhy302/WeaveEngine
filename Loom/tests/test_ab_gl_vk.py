@@ -55,6 +55,9 @@ BASELINE_PATH = os.path.join(HERE, 'ab_gl_vk_baseline.json')
 REF_DIR_NEXT = os.path.join(HERE, 'ab_scenes_ref_next')
 BASELINE_NEXT = os.path.join(HERE, 'ab_gl_vk_baseline_next.json')
 SCHEMA = 2
+# 只在后处理口径存在的场景：旧基线（LOOM_POST=0）里没有它们，
+# legacy 模式下按**显式白名单**跳过（不是静默放过——其它新场景仍然 FAIL）。
+POST_ONLY = {'ab_bloom.json'}
 
 DEFAULT_GATE = {
     'mae_abs': 0.0002,
@@ -406,7 +409,8 @@ def format_ui_line(mgv, base_ui):
     return s
 
 
-def run_gate(files, baseline_path=None, ref_dir=None, gate=None, allow_no_vk=None):
+def run_gate(files, baseline_path=None, ref_dir=None, gate=None, allow_no_vk=None,
+             legacy=False):
     """对基线跑闸门；返回 rc。基线缺失/损坏/场景无条目一律 FAIL（P1-2）。"""
     gate = gate or _gate()
     if allow_no_vk is None:
@@ -428,6 +432,10 @@ def run_gate(files, baseline_path=None, ref_dir=None, gate=None, allow_no_vk=Non
     vk_broken = False
     for path in files:
         name = os.path.basename(path)
+        if legacy and name in POST_ONLY and name not in base_rows:
+            _skips.append(name)
+            print('SKIP %s 旧基线不含该场景（后处理专用，POST_ONLY 白名单）' % name)
+            continue
         data_s = _load_scene(path)
         if data_s is None:
             check(name + ' 场景可读', False, '读取/解析失败')
@@ -703,7 +711,7 @@ def main(argv):
     if update:
         return run_update(files, BASELINE_PATH, REF_DIR, _gate(),
                           force=('--force' in argv))
-    return run_gate(files, BASELINE_PATH, REF_DIR, _gate())
+    return run_gate(files, BASELINE_PATH, REF_DIR, _gate(), legacy=(not use_next))
 
 
 if __name__ == '__main__':

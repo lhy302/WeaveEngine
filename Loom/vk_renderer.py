@@ -500,7 +500,8 @@ fn to_linear(c: vec3f) -> vec3f {
 }
 
 @fragment fn fs_bright(inp: FragIn) -> @location(0) vec4f {
-    let c = to_linear(textureSample(t0, samp, uv_of(inp.pos.xy)).rgb);
+    // p0.z = exposure（与 tonemap 同一曝光；阈值按曝光后线性亮度）
+    let c = to_linear(textureSample(t0, samp, uv_of(inp.pos.xy)).rgb) * par.p0.z;
     let l = dot(c, vec3f(0.2126, 0.7152, 0.0722));
     let w = smoothstep(par.p0.x, par.p0.x + max(par.p0.y, 1e-4), l);
     return vec4f(c * w, 1.0);
@@ -1014,7 +1015,7 @@ class VkRenderer:
         qw, qh = max(1, w // 4), max(1, h // 4)
         # params: (thr, knee, strength, exposure) + (target_w, target_h, src_texel_x, src_texel_y)
         rows = [
-            ('bright', t['half_view'], (p['threshold'], p['knee'], 0.0, 0.0),
+            ('bright', t['half_view'], (p['threshold'], p['knee'], p['exposure'], 0.0),
              (hw, hh, 0.0, 0.0)),
             ('down', t['quarter_view'], (0.0, 0.0, 0.0, 0.0),
              (qw, qh, 1.0 / hw, 1.0 / hh)),

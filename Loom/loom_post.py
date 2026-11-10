@@ -18,11 +18,16 @@ HALF_TARGET = 'bloom.half'
 QUARTER_TARGET = 'bloom.quarter'
 
 # 默认参数（可用环境变量微调，便于人眼对比与压测）
+# 参数口径（2026-11-10 调参，人类裁决 Q-VIS-1=B）：
+#   · HDR 目标存的是**gamma 编码**值；bright/tonemap 都先 pow(2.2) 反线性。
+#   · bright 的输入 = 线性 * exposure（与 tonemap 同一曝光），阈值按**曝光后线性亮度**比。
+#   · exposure=1.70 由「新图平均亮度 ≈ 旧基线 0.5735」解析标定（预测 0.5714，-0.4%），
+#     实测复核对齐（见交付报告）。可用 LOOM_POST_EXPOSURE 覆盖。
 DEFAULTS = {
-    'threshold': 0.85,   # 线性空间亮度阈值（gamma 编码值先 pow(2.2)）
+    'threshold': 1.15,   # 曝光后线性亮度阈值（≈ gamma 0.90 以上的真正亮部）
     'knee': 0.35,        # 柔和过渡
-    'strength': 0.55,    # bloom 叠加强度
-    'exposure': 1.0,
+    'strength': 0.70,    # bloom 叠加强度
+    'exposure': 1.70,
 }
 
 
