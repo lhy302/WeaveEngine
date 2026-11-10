@@ -418,6 +418,9 @@ class AnimationClip:
                 return v
             if isinstance(v, np.ndarray):
                 return v.copy()
+            if isinstance(v, dict):
+                # P3-2: 畸形 dict 通道值也要隔离（否则改快照会串到模型）
+                return {k: _cv(x, depth + 1) for k, x in v.items()}
             if isinstance(v, list):
                 return [_cv(x, depth + 1) for x in v]
             if isinstance(v, tuple):

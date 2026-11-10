@@ -1108,6 +1108,19 @@ _nested3.frames[0]['position'][0][0] = 77.0
 check('⑧ V-12 改模型嵌套数组不污染快照',
       abs(float(_cp62.frames[0]['position'][0][0]) - 1.0) < 1e-12,
       str(_cp62.frames[0]['position'][0]))
+# ---- P3-2: 畸形 dict 通道值也要值隔离（合法通道应为 3 元序列；这里只防"串"） ----
+_d0 = {'x': [np.array([1.0, 2.0])]}
+_dclip = E.AnimationClip([{'time': 0.0, 'position': _d0}])
+_dcp = _dclip.copy()
+check('⑧ P3-2 dict 通道值深拷（不共享同一 dict/数组）',
+      isinstance(_dcp.frames[0]['position'], dict)
+      and _dcp.frames[0]['position'] is not _d0
+      and _dcp.frames[0]['position']['x'][0] is not _d0['x'][0],
+      repr(_dcp.frames[0]['position']))
+_d0['x'][0][0] = 55.0
+check('⑧ P3-2 改源 dict 值不影响 copy',
+      abs(float(_dcp.frames[0]['position']['x'][0][0]) - 1.0) < 1e-12,
+      str(_dcp.frames[0]['position']))
 
 print()
 print('---- ⑨ R6 F-02/F-03 (版本解析 fail-open + 回退名单弱引用) ----')

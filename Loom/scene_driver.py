@@ -3,8 +3,9 @@
 scene_driver.py — 播放器中间层 (纯逻辑, 后端无关; 2026-08-29 用户指示"中间层")
 
 SceneDriver = 场景数据 + 每帧步进 (脚本/物理/动画/轨道相机), 不碰任何 GPU API:
-  - Vk 播放器 / GL 播放器 (PlayerApp) 共用同一份语义 (engine.update_scripts /
-    update_animations 的复刻, 与 engine.py 保持同步注释, 勿分叉公式);
+  - Vk 播放器 / GL 播放器 (PlayerApp) 共用同一份语义；动画**已委托同一内核**
+    loom_components.evaluate_animations (不再复刻 update_animations 公式，
+    两宿主数值一致性由 test_animation_base 锁死);
   - 由后端层读 driver.models/lights/vp 画帧 (渲染在别处).
   - B1 (2026-08-30): 补上**物理**缺口 —— 每帧步进含桥三段 (pre/step/post,
     culverin 缺失 -> 无物理 (legacy 语义缺失, 打印提示不崩)); 并补齐脚本

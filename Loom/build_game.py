@@ -66,8 +66,26 @@ def _ref_is_managed(ref):
     return not ('path' in ref or 'paths' in ref or 'solid_color' in ref)
 
 
+_MATERIAL_INLINE_KEYS = ('color', 'saturation', 'metallic', 'roughness',
+                        'pbr', 'albedo', 'normal_map', 'env_map')
+
+
+def _material_is_ref(d):
+    """v12: 场景 materials[] 只写引用（id/name）；带内联字段的是旧格式。"""
+    if not isinstance(d, dict):
+        return False
+    if not (isinstance(d.get('id'), str) and d['id']):
+        return False
+    return not any(k in d and d.get(k) is not None for k in _MATERIAL_INLINE_KEYS)
+
+
 def scene_asset_refs(data):
-    """场景里托管的资产引用条数（天空盒/相机天空盒/材质三槽）。"""
+    """场景里「必须靠项目资产库才能解析」的引用条数。
+
+    P3-1（v12 口径）: 材质贴图/环境贴图的 guid 已经进 assets.json，场景里只剩
+    {id,name} 材质引用 —— 旧实现只数内联槽位，导致「只有材质引用」的场景计数=0、
+    缺资产库也照常出包（运行期才丢图）。现在把材质引用也计入（按 guid 去重）。
+    """
     n = 0
     if not isinstance(data, dict):
         return 0
@@ -76,8 +94,15 @@ def scene_asset_refs(data):
     for cam in data.get('cameras') or []:
         if isinstance(cam, dict) and _ref_is_managed(cam.get('skybox')):
             n += 1
+    seen_mat = set()
     for mat in data.get('materials') or []:
         if not isinstance(mat, dict):
+            continue
+        if _material_is_ref(mat):
+            gid = mat.get('id')
+            if gid not in seen_mat:
+                seen_mat.add(gid)
+                n += 1
             continue
         for k in ('albedo', 'normal_map', 'env_map'):
             if _ref_is_managed(mat.get(k)):

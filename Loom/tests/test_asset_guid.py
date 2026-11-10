@@ -771,6 +771,22 @@ def t_p2_5_pack_hard_fail():
     check('无资产库 + 有 guid 引用 -> SystemExit', raised and 'Assets/assets.json' in msg, msg)
     check('无托管引用 -> 不失败',
           build_game.require_assets_or_exit('/tmp/x.json', {'objects': []}, False) == 0)
+    # P3-1: v12 场景 materials[] 只剩 {id,name} 引用 —— 旧实现在这里计数=0
+    mat_ref_scene = {'version': S.SCENE_VERSION,
+                     'materials': [{'id': 'M1', 'name': 'm'}],
+                     'objects': [{'id': 'o1', 'material_id': 'M1'}]}
+    check('v12 只有材质引用 -> 计入托管（旧实现=0）',
+          build_game.scene_asset_refs(mat_ref_scene) == 1,
+          build_game.scene_asset_refs(mat_ref_scene))
+    check('v12 内联材质（旧格式）不计入',
+          build_game.scene_asset_refs(
+              {'materials': [{'id': 'M', 'name': 'm', 'color': '#FF0000'}]}) == 0)
+    raised_m = False
+    try:
+        build_game.require_assets_or_exit('/tmp/x.json', mat_ref_scene, False)
+    except SystemExit:
+        raised_m = True
+    check('只有材质引用且缺资产库 -> 拒绝出包', raised_m)
     # 有资产且索引可用 -> 不失败（D-02: 校验已提到公共路径，必须用真实可用索引）
     btmp = tempfile.mkdtemp(prefix='loom_r5_p25_')
     bproj = os.path.join(btmp, 'proj')
@@ -953,6 +969,15 @@ def t_d02_build_main_e2e():
               (errd, str(errd)[:100] if errd else ''))
         check('E2E main(): 发布夹带 Assets/assets.json',
               os.path.isfile(os.path.join(outd, 'Assets', 'assets.json')))
+        # E) P3-1: 只有材质引用（v12）且无资产库 -> 也必须拦
+        mat_scene = {'version': S.SCENE_VERSION, 'objects': [],
+                     'materials': [{'id': 'M1', 'name': 'm'}]}
+        erre, oute = _build('mat_ref_noidx', mat_scene)
+        check('E2E main(): 只有材质引用 + 无资产库 -> SystemExit',
+              isinstance(erre, SystemExit),
+              (type(erre).__name__, str(erre)[:100]))
+        check('E2E main(): 材质引用缺失时无包产出',
+              not os.path.isfile(os.path.join(oute, '游戏包.lsc')))
     finally:
         build_game.BIN_DIR = old_bin
         sys.argv = old_argv
