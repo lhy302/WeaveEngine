@@ -99,6 +99,10 @@ def main():
         _fail('编辑器 dist 档位不合格: %s\n  dist: %s'
               % ('; '.join(_mode_bad), args.editor_dist))
 
+    _meta_bad = PE.meta_version_problems(args.editor_dist, version)
+    if _meta_bad:
+        _fail('编辑器 dist 版本元数据不合格: %s' % ('; '.join(_meta_bad),))
+
     _bloat = PE.editor_dist_bloat(args.editor_dist)
     if _bloat:
         _fail('编辑器 dist 含可选重包: %s\n'
@@ -115,6 +119,10 @@ def main():
         if _mode_bad:
             _fail('播放器运行时档位不合格: %s\n  dist: %s'
                   % ('; '.join(_mode_bad), runtime))
+        _meta_bad = PE.meta_version_problems(runtime, version)
+        if _meta_bad:
+            _fail('播放器运行时版本元数据不合格: %s'
+                  % ('; '.join(_meta_bad),))
         _bad = PE.runtime_layout_problems(runtime)
         if _bad:
             _fail('播放器运行时布局不符: %s\n  dist: %s'
@@ -186,6 +194,17 @@ def main():
             json.dump(meta, f, ensure_ascii=False, indent=2)
     except OSError as e:
         _fail('写 解释器.json 失败: %r' % (e,))
+    # 2026-11-10: 回读校验（版本闸单一事实源）
+    try:
+        with open(os.path.join(out_loom, '解释器.json'), 'r', encoding='utf-8') as f:
+            _m = json.load(f)
+        if str(_m.get('version')) != version:
+            _fail('包内 解释器.json version=%r != %r'
+                  % (_m.get('version'), version))
+    except SystemExit:
+        raise
+    except Exception as e:
+        _fail('包内 解释器.json 回读失败: %r' % (e,))
 
     PE.write_launcher(tmp)
     PE.write_meta_readme(tmp, version, slim=slim, compiled=True)
@@ -200,6 +219,17 @@ def main():
                     continue
                 full = os.path.join(dp, fn)
                 zf.write(full, os.path.relpath(full, tmp).replace(os.sep, '/'))
+    # zip 自检: Loom/解释器.json 必须在且版本一致（否则版本闸走常量兜底）
+    try:
+        with zipfile.ZipFile(zip_path) as _zf:
+            _m = json.loads(_zf.read('Loom/解释器.json').decode('utf-8'))
+        if str(_m.get('version')) != version:
+            _fail('zip 内 解释器.json version=%r != %r'
+                  % (_m.get('version'), version))
+    except SystemExit:
+        raise
+    except Exception as e:
+        _fail('zip 自检失败（Loom/解释器.json 读不回来）: %r' % (e,))
     shutil.rmtree(tmp, ignore_errors=True)
 
     print('[编译包] 完成: %s (%.2f MB)' % (zip_path, os.path.getsize(zip_path) / 1048576.0))

@@ -115,6 +115,29 @@ def _stash_prev(dist_dir):
     print('[build_engine] 旧产物已挪到 %s' % prev)
 
 
+def _source_engine_version():
+    try:
+        with open(os.path.join(LOOM, '解释器.json'), 'r', encoding='utf-8') as f:
+            return (json.load(f).get('version') or '').strip() or None
+    except Exception:
+        return None
+
+
+def _assert_meta(dist, label):
+    """产物必须带 解释器.json 且 version = 源码版本（sceneio 版本闸的单一事实源）。"""
+    path = os.path.join(dist, '解释器.json')
+    src = _source_engine_version()
+    if not os.path.isfile(path):
+        _fail('%s 缺 解释器.json（会静默走 sceneio 常量兜底）: %s' % (label, path))
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            got = (json.load(f).get('version') or '').strip()
+    except Exception as e:
+        _fail('%s 的解释器.json 读不了: %r' % (label, e))
+    if not src or got != src:
+        _fail('%s 的 解释器.json version=%r != 源码 %r' % (label, got, src))
+
+
 def _write_info(path, info):
     with open(path, 'w', encoding='utf-8') as f:
         json.dump(info, f, ensure_ascii=False, indent=1)
@@ -125,7 +148,7 @@ def _write_info(path, info):
 # 不再依赖 package_engine_compiled 在发布包里补（那会导致"裸 dist 不能跑 bench"）。
 DATA_DIRS = ('ckernels', 'core_components', 'core_plugins', 'plugins',
              'scripts', 'GUI', 'assets')
-DATA_FILES = ('设置.json', '输入配置.default.json')
+DATA_FILES = ('设置.json', '输入配置.default.json', '解释器.json')
 
 
 def _data_includes():
@@ -167,6 +190,7 @@ def build_editor(mode, cfg, info):
            os.path.join(LOOM, 'build_entry.py')]
     secs = _run(cmd, cwd=LOOM)
     _sync_data_dirs(dist)
+    _assert_meta(dist, '编辑器 dist')
     exe = os.path.join(dist, 'Loom.exe')
     qt = os.path.join(dist, 'PySide6', 'qt-plugins', 'platforms', 'qwindows.dll')
     if not os.path.isfile(exe):
@@ -215,6 +239,7 @@ def build_runtime(mode, cfg, info):
     env['LOOM_BUILD_RUNTIME_DIR'] = out
     cmd = [sys.executable, os.path.join(LOOM, 'build_game.py'), '--build-runtime']
     secs = _run(cmd, cwd=LOOM, env=env)
+    _assert_meta(dist, '运行时 dist')
     exe = os.path.join(dist, 'MyGame.exe')
     if not os.path.isfile(exe):
         _fail('运行时产物缺失: %s' % exe)

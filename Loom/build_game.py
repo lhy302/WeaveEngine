@@ -169,7 +169,7 @@ def _resolve_runtime(runtime_arg):
 
 
 def _build_runtime():
-    """Nuitka 打包玩家运行时 (game_player.py -> 玩家运行时/MyGame.exe + 运行库).
+    r"""Nuitka 打包玩家运行时 (game_player.py -> 玩家运行时/MyGame.exe + 运行库).
 
     2026-11-09 两档构建: 环境变量覆盖（由 tools/build_engine.py 设置）——
       LOOM_BUILD_CONSOLE_MODE : force(dev, 带控制台) | disable(release)
@@ -214,10 +214,14 @@ def _build_runtime():
         if os.path.isdir(_src):
             _dst = os.path.join(out_root, 'game_player.dist', _d)
             shutil.copytree(_src, _dst, dirs_exist_ok=True)
+    # 2026-11-10: 引擎版本单一事实源（sceneio 版本闸）随 dist 分发
+    _meta_src = os.path.join(BIN_DIR, '解释器.json')
+    if os.path.isfile(_meta_src):
+        shutil.copy2(_meta_src, os.path.join(out_root, 'game_player.dist', '解释器.json'))
     exe = os.path.join(out_root, 'game_player.dist', 'MyGame.exe')
     if not os.path.isfile(exe):
         raise SystemExit("打包意外, 未找到: %s" % exe)
-    for _need in ('ckernels\\loom_kernels.dll', 'core_components'):
+    for _need in ('ckernels\\loom_kernels.dll', 'core_components', '解释器.json'):
         if not os.path.exists(os.path.join(out_root, 'game_player.dist', _need)):
             raise SystemExit("打包产物不自洽, 缺 %s（ckernels/core_components 未随 dist）"
                              % _need)
