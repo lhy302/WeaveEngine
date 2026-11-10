@@ -8,7 +8,7 @@
 
 | 任务书引用 | 实际情况 |
 |---|---|
-| `docs/design/research_beta6_01_render_abstraction.md` | **不存在**。同名主题的实际文件是 `docs/design/research_beta6_01_render_pass.md`（本报告以其 §2.1–§2.6 / §③S0–S6 / §⑥ / §⑦ 为原始目标） |
+| `docs/design/research_beta6_01_render_pass.md` | **不存在**。同名主题的实际文件是 `docs/design/research_beta6_01_render_pass.md`（本报告以其 §2.1–§2.6 / §③S0–S6 / §⑥ / §⑦ 为原始目标） |
 | 计划 §9.1 | **无此编号**。该文件第 9 章以「9. 人类裁决记录（2026-11-09 第二批）」表开头，下一节即 §9.2；本报告把该表当作 §9.1 口径 |
 
 目标清单（从原文抄，不用实现口径）：
@@ -131,7 +131,7 @@ engine.py / loom_player_window.py / ui\loom_gui.py 各有 1/1/2 个 create_conte
 | I-4 | P2 | `PassSpec.bindings/params/submit` 与 `TargetDecl.format` 在 GL 侧零消费者（声明了不驱动）；`shadow.depth` 两端都不消费（GL `owned_by_provider`→None `loom_pass_gl.py:58-59`，VK 忽略 `spec.target` `vk_renderer.py:2354-2367`） | grep `spec.bindings/spec.params/spec.submit` 各 0 命中 |
 | I-5 | P3 | 设计 S6 验收点"bloom on 无 NaN/Inf"无受跟踪断言 | `Loom/tests` 内 `isnan/isfinite` 无后处理相关命中 |
 | I-6 | P3 | 设计 S5 验收点"HDR 目标创建失败降级直写 LDR 并告警一次"未落：`GLPostChain.ensure` 无 try/except | `loom_post_gl.py:104-133` |
-| I-7 | P3 | 文档数字滞后 + 引用失效：计划 §9.11 写 frame_plan「现 49 项」，实测 **55 PASS**；任务书引用的 `research_beta6_01_render_abstraction.md` 不存在；计划无 §9.1 | `py -3.13 tests/test_frame_plan.py` → PASS=55 FAIL=0；`docs/design` 目录无该文件 |
+| I-7 | P3 | 文档数字滞后 + 引用失效：计划 §9.11 写 frame_plan「现 49 项」，实测 **55 PASS**；任务书引用的 `research_beta6_01_render_pass.md` 不存在；计划无 §9.1 | `py -3.13 tests/test_frame_plan.py` → PASS=55 FAIL=0；`docs/design` 目录无该文件 |
 | I-8 | P3 | 「GL/参考 MAE 恒 0」是自证（参考图由 GL 渲染写入），只在漂移检测上有效 | `test_ab_gl_vk.py:509` |
 | I-9 | P3 | VK 的 HUD/UI 先收集后执行，plan 里 ui 排在 main 之前不会改变输出顺序（顺序只对尾部两项生效） | `vk_renderer.py:2201-2203, 2251-2257` |
 
