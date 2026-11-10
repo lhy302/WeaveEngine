@@ -1199,10 +1199,11 @@ class GLEngine(ShadowMixin, FrameComponentMixin, PhysicsMixin, InputMixin, HudMi
     # ================ 分离批1: 逻辑帧/渲染帧分离 (批5 重对齐) ================
     def _logic_frame(self, fixed_dt):
         """一个逻辑步 = 整个场景的最高同步点 (批5 架构裁决). 帧内段次序
-        (与旧绑死模式 render() 四段同序, R3 数值路径零改动):
-          [脚本] → [物理子步 ×N (N=clock.sub_steps, dt 恒 sub_dt)] →
-          [音频] → [动画] → [逻辑帧 prep: AABB/光源VP/碰撞对] →
-          [事件派发] → [插值翻页].
+        (beta6 C1 重排: 动画提到物理**之前**, 让"物理管线开/关"两种配置的
+        最终位形一致; 旧次序在管线开时是 动画→物理回读, 关时是物理→动画,
+        同一场景换开关结果就变):
+          [脚本] → [动画] → [物理子步 ×N (dt 恒 sub_dt)] → [音频] →
+          [逻辑帧 prep: AABB/光源VP/碰撞对] → [事件派发] → [插值翻页].
         物理**不再是**独立 accumulator 回调 — Unity 模型: 物理在逻辑帧内
         自动子步, fixed_dt 一个时钟 (批5 删除双 accumulator)."""
         # 2026-10-18 阶段1档序10 FixedUpdate：物理子步前派发（用户改速度本步生效）
@@ -1222,7 +1223,12 @@ class GLEngine(ShadowMixin, FrameComponentMixin, PhysicsMixin, InputMixin, HudMi
                    and not getattr(self, '_pipe_disabled', False)
                    and getattr(self, '_phys_bridge', None) is not None)
         if pipe_ok:
-            # 批6 流水线: 连发 N 子步指令 (不等待) → 音频/动画与物理并行
+            # beta6 C1: 动画**先**写位姿 (D6: 只驱动 kinematic/静态体), 再投递
+            # 物理子步 —— 与 no-pipe 串行路径同序, 开关不改结果。
+            _t = self._prof_t0()
+            self.update_animations(fixed_dt)
+            self._prof_add('mt_audio_anim', _t)
+            # 批6 流水线: 连发 N 子步指令 (不等待) → 音频与物理并行
             # → S1 同步点等物理 → prep (物理回读后位形)
             g = getattr(self, 'gravity', self._GRAVITY)
             _t = self._prof_t0()
@@ -1231,8 +1237,7 @@ class GLEngine(ShadowMixin, FrameComponentMixin, PhysicsMixin, InputMixin, HudMi
             self._prof_add('mt_pipe_post', _t)
             _t = self._prof_t0()
             self.update_audio(fixed_dt)
-            self.update_animations(fixed_dt)
-            self._prof_add('mt_audio_anim', _t)
+            self._prof_add('mt_audio', _t)
             try:
                 self._profile('pipe_wait', lambda: pipe.wait_pending())
             except Exception as e:
@@ -1243,15 +1248,18 @@ class GLEngine(ShadowMixin, FrameComponentMixin, PhysicsMixin, InputMixin, HudMi
             self._logic_prep(fixed_dt)
             self._prof_add('mt_logic_prep', _t)
         else:
-            # 无管线: 串行子步 (legacy/降级/NO_PIPE 路径)
+            # 无管线: 串行子步 (legacy/降级/NO_PIPE 路径). 动画仍在物理前,
+            # 与上面 pipe 分支同序 (beta6 C1).
+            _t = self._prof_t0()
+            self.update_animations(fixed_dt)
+            self._prof_add('mt_audio_anim', _t)
             _t = self._prof_t0()
             for _ in range(nsub):
                 self._physics_frame(sdt)
             self._prof_add('mt_physics_serial', _t)
             _t = self._prof_t0()
             self.update_audio(fixed_dt)
-            self.update_animations(fixed_dt)
-            self._prof_add('mt_audio_anim', _t)
+            self._prof_add('mt_audio', _t)
             _t = self._prof_t0()
             self._logic_prep(fixed_dt)
             self._prof_add('mt_logic_prep', _t)
@@ -1525,12 +1533,12 @@ class GLEngine(ShadowMixin, FrameComponentMixin, PhysicsMixin, InputMixin, HudMi
         else:
             # 逃生门 (NO_SPLIT/logic_fps<=0): 旧绑死四行 (诊断报告 §四 必修 —
             # 缺此分支 = NO_SPLIT 编辑器播放态逻辑全丢, 场景静止+假高帧率).
-            # 与 engine.render 逃生门分支逐字一致 (A/B 基线逐位).
+            # beta6 C1: 动画提到物理之前, 与分离路径同序 (开关不改结果).
             self._run_scripts(render_dt)
+            self.update_animations(render_dt)
             self._profile('physics',
                           lambda: self.update_physics(render_dt, events=False))
             self.update_audio(render_dt)
-            self.update_animations(render_dt)
             self._advanced_this_frame = True
 
     def toggle_logic_paused(self):

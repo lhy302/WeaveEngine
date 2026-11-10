@@ -118,9 +118,14 @@ def snapshot(m):
         (m.audio_source.clip, m.audio_source.loop, m.audio_source.volume,
          m.audio_source.category, m.audio_source.min_distance,
          m.audio_source.max_distance, m.audio_source.rolloff),
-        # M35: 动画 (None 或 (clips, current, loop)); 运行时 time/playing 不还原
+        # M35: 动画 (None 或 (clips, current, loop, speed)); 运行时 time/playing 不还原
+        # beta6 C1: clips **按值拷贝** —— 旧实现按引用存字典, 改快照会污染模型,
+        # 关键帧编辑不可撤销 (docs/design/research_beta6_03_animation.md §1.5).
+        # 追加第 4 槽 speed; apply_snapshot 兼容旧 3 元快照.
         'animator': None if m.animator is None else
-        (m.animator.clips, m.animator.current, m.animator.loop),
+        ({name: clip.copy() for name, clip in m.animator.clips.items()},
+         m.animator.current, m.animator.loop,
+         float(getattr(m.animator, 'speed', 1.0))),
     }
 
 
@@ -212,14 +217,23 @@ def apply_snapshot(m, snap):
             m.audio_source.playing = False
             m.audio_source._key = None
     if 'animator' in snap:                 # M35: 还原动画 (None=无动画)
-        if snap['animator'] is None:
+        val = snap['animator']
+        if val is None:
             m.remove_animator()
-        elif m.animator is None:
-            an = m.add_animator(clips=snap['animator'][0],
-                                current=snap['animator'][1],
-                                loop=snap['animator'][2])
         else:
-            m.animator.clips, m.animator.current, m.animator.loop = snap['animator']
+            clips = val[0]
+            # beta6 C1: 还原时再拷一份 —— 快照与模型任何一侧后续编辑都不得
+            # 影响另一侧 (值隔离是双向的: 存快照时拷、写回模型时也拷).
+            clips = {name: clip.copy() for name, clip in clips.items()}
+            speed = float(val[3]) if len(val) > 3 else 1.0
+            if m.animator is None:
+                an = m.add_animator(clips=clips, current=val[1], loop=val[2])
+            else:
+                an = m.animator
+                an.clips = clips
+                an.current = val[1]
+                an.loop = val[2]
+            an.speed = speed
         # 2026-08-30: 运行态清零 (time/playing 不入快照, 还原即"回到未播放")
         if m.animator is not None:
             m.animator.time = 0.0

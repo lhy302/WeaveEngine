@@ -22,7 +22,8 @@ from mesh import spec_to_mesh
 from engine import GameObject, Point3D, LightState, DEFAULT_ACTIONS
 # 2026-11-07 (_fix_summary §5 遗留): LOD 配置代 —— 只在 renderer.lod_* 变化时
 # 重建"配了 LOD 的模型"集合, 无 LOD 场景每帧 O(1) 早退 (不再全量扫描).
-from loom_components import MeshRendererComponent
+from loom_components import (MeshRendererComponent, animator_from_dict,
+                            evaluate_animations)
 # 2026-11-06 相机对齐 (双后端): CameraState 实体 (纯数据类, 无 GL 依赖) ——
 # 场景 cameras/active_camera 在 Vk 侧也要还原, 否则"场景里的 Camera 实体"
 # 在 Vulkan 播放器里完全不存在, 只能看轨道相机。
@@ -83,14 +84,12 @@ def build_models(data, materials=None):
                                min_distance=_f('min_distance', 1.0),
                                max_distance=_f('max_distance', 500.0),
                                rolloff=_f('rolloff', 1.0))
-        # 动画 (M35): 重建 AnimationClip
+        # 动画 (M35): 重建 AnimationClip (beta6 C1: 与 sceneio 共用解析)
         an = obj.get('animator')
         if isinstance(an, dict) and isinstance(an.get('clips'), dict):
-            from engine import AnimationClip
-            _clips = {name: AnimationClip([dict(fr) for fr in frames])
-                      for name, frames in an['clips'].items()}
-            m.add_animator(clips=_clips, current=an.get('current'),
-                           loop=an.get('loop', True))
+            _clips, _cur, _loop, _speed = animator_from_dict(an)
+            m.add_animator(clips=_clips, current=_cur, loop=_loop)
+            m.animator.speed = _speed
         # 碰撞体 (M28 + B1): 文件有 collider 字段则覆盖默认 (缺省=默认, 兼容旧文件)
         col = obj.get('collider')
         if isinstance(col, dict):
@@ -756,16 +755,17 @@ class SceneDriver:
 
     # ---------------- 每帧步进 ----------------
     def _logic_frame(self, fixed_dt):
-        """逻辑步 = 最高同步点 (批5): 脚本 → 物理子步 ×N → 动画
-        (次序同 engine._logic_frame).
+        """逻辑步 = 最高同步点 (批5): 脚本 → 动画 → 物理子步 ×N
+        (次序同 engine._logic_frame; beta6 C1 把动画提到物理之前, 让
+        "物理管线开/关"两种配置的最终位形一致).
         2026-10-18 阶段1档序10 FixedUpdate：_update_scripts 前派发。"""
         self._dispatch_fixed_update(fixed_dt)
         self._update_scripts(fixed_dt)
+        self._update_animations(fixed_dt)
         clk = self._clock
         sdt = clk.sub_dt if clk is not None else fixed_dt
         for _ in range(clk.sub_steps if clk is not None else 1):
             self._step_physics(sdt)
-        self._update_animations(fixed_dt)
         if self._interp is not None:
             self._interp.advance()
 
@@ -879,8 +879,8 @@ class SceneDriver:
             self._end_frame_input()
             return r
         self._update_scripts(render_dt)
+        self._update_animations(render_dt)      # beta6 C1: 动画先于物理 (同序)
         self._step_physics(render_dt)
-        self._update_animations(render_dt)
         # 2026-10-18 阶段1档序11 LateUpdate（绑死模式: update 之后）
         self._dispatch_late_update(render_dt)
         self._end_frame_input()
@@ -1293,27 +1293,12 @@ class SceneDriver:
                     sc._script_broken = True
 
     def _update_animations(self, dt):
-        """复刻 engine.GLEngine.update_animations: 推进动画插值应用变换."""
-        for m in self.models:
-            an = m.animator
-            if an is None or not an.playing or not an.current:
-                continue
-            clip = an.clips.get(an.current)
-            if clip is None or not clip.frames:
-                continue
-            an.time += dt
-            s = clip.sample(an.time)
-            if 'position' in s:
-                m.position = Point3D(*s['position'])
-            if 'rotation' in s:
-                m.rotation = Point3D(*s['rotation'])
-            if 'scale' in s:
-                m.set_scale(s['scale'])
-            if clip.duration > 0 and an.time >= clip.duration:
-                if an.loop:
-                    an.time -= clip.duration
-                else:
-                    an.playing = False
+        """推进动画并应用变换 —— beta6 C1: 与 GLEngine 共用同一份内核.
+
+        旧实现是 engine.update_animations 的逐行复刻(改一处忘一处 -> 双后端
+        行为分叉); 现直接调 loom_components.evaluate_animations。
+        """
+        return evaluate_animations(self.models, dt)
 
     # ================ B1: 脚本 "引擎 API 最小面" (修 Vk 播放器脚本 broken) ================
     # 与 engine.GLEngine 同签名同语义 (几何走 physics_bridge 静态助手, 公式逐位

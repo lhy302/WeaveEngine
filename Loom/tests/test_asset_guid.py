@@ -14,6 +14,17 @@
 跑法: cd Loom && python tests/test_asset_guid.py
 只写临时目录，不写受跟踪文件。
 """
+# 2026-11-10 (批次 C1): 与既有测试同款 stdout UTF-8 兜底 —— run_all 走管道时
+# Windows 控制台默认 GBK, print('⑪ ...') 等符号会 UnicodeEncodeError, 让
+# "全绿"被记成 exit=1 的假失败 (本轮基线实测: test_asset_guid 单独跑绿, 经
+# run_all 管道跑红).
+import sys as _sys_utf8
+try:
+    _sys_utf8.stdout.reconfigure(encoding='utf-8', errors='replace')
+    _sys_utf8.stderr.reconfigure(encoding='utf-8', errors='replace')
+except Exception:
+    pass
+
 import contextlib
 import io
 import json

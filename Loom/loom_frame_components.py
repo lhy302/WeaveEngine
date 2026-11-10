@@ -13,7 +13,7 @@ mixin 只通过 self 按需访问 (语义与拆分前逐位一致)。
 
 import math
 
-from loom_types import Point3D
+from loom_components import evaluate_animations
 
 
 class FrameComponentMixin:
@@ -78,27 +78,14 @@ class FrameComponentMixin:
                     self.audio.update_sound_position(a.clip, cur, owner=id(a))
 
     def update_animations(self, dt):
-        """M35: 每帧推进动画并插值应用变换 (位置/旋转/缩放)."""
-        for m in self.models:
-            an = m.animator
-            if an is None or not an.playing or not an.current:
-                continue
-            clip = an.clips.get(an.current)
-            if clip is None or not clip.frames:
-                continue
-            an.time += dt
-            s = clip.sample(an.time)
-            if 'position' in s:
-                m.position = Point3D(*s['position'])
-            if 'rotation' in s:
-                m.rotation = Point3D(*s['rotation'])
-            if 'scale' in s:
-                m.set_scale(s['scale'])
-            if clip.duration > 0 and an.time >= clip.duration:
-                if an.loop:
-                    an.time -= clip.duration
-                else:
-                    an.playing = False
+        """推进动画并应用变换 (位置/旋转/缩放).
+
+        beta6 C1: 实现已收敛到 loom_components.evaluate_animations ——
+        与 scene_driver.SceneDriver._update_animations **同一份**内核
+        (批量 SoA + once 末帧 + 跨周期规范化 + D6 写者优先级)。
+        旧实现在此逐物体 sample, 500 物体 12.7ms/逻辑帧。
+        """
+        return evaluate_animations(self.models, dt)
 
     def _call_collision_cb(self, m, hook, other):
         """调物体上所有脚本的碰撞回调 (坏脚本标记不崩帧)."""

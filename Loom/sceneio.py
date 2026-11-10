@@ -52,6 +52,7 @@ import base64
 import math
 
 from engine import Point3D, wrap_deg
+from loom_components import animator_from_dict, animator_to_dict
 from mesh import create_cube, spec_to_mesh
 
 SCENE_VERSION = 11  # v11 (beta6 B1 资产 guid): 贴图/六面图引用只写 guid (旧路径字段可读+告警)
@@ -368,12 +369,10 @@ def _emit_object(m, ctx=None):
             "max_distance": m.audio_source.max_distance,
             "rolloff": m.audio_source.rolloff,
         },
-        "animator": None if m.animator is None else {          # M35: 动画
-            "current": m.animator.current,
-            "loop": m.animator.loop,
-            "clips": {name: [dict(f) for f in clip.frames]
-                      for name, clip in m.animator.clips.items()},
-        },
+        # M35 动画 / beta6 C1: 序列化走唯一实现 (speed + 每片段 loop_mode 是
+        # v11 的增量字段; time/playing **不落盘** —— 只作编辑器预览态, 存盘=回
+        # 起点, 见 animator_to_dict 的契约说明与 test_animation_base.py).
+        "animator": animator_to_dict(m.animator),
     }
 
 
@@ -523,14 +522,14 @@ def _apply_object(engine, obj, ctx=None):
                            volume=au.get('volume', 1.0),
                            category=cat, min_distance=mn,
                            max_distance=mx, rolloff=ro)
-    # 动画 (M35): 文件有 animator 字段则加 (重建 AnimationClip)
+    # 动画 (M35): 文件有 animator 字段则加 (重建 AnimationClip).
+    # beta6 C1: 解析收敛到 loom_components.animator_from_dict —— 与
+    # scene_driver.load_from_data 共用同一份 (旧文件无 speed/clip_meta 兼容).
     an = obj.get('animator')
     if isinstance(an, dict) and isinstance(an.get('clips'), dict):
-        from engine import AnimationClip
-        clips = {name: AnimationClip([dict(f) for f in frames])
-                 for name, frames in an['clips'].items()}
-        m.add_animator(clips=clips, current=an.get('current'),
-                       loop=an.get('loop', True))
+        clips, cur, loop, speed = animator_from_dict(an)
+        m.add_animator(clips=clips, current=cur, loop=loop)
+        m.animator.speed = speed
     # 碰撞体 (M28): 文件有 collider 字段则覆盖默认 (旧文件无字段保持自动派生)
     # B1: friction/restitution/rolling_friction 缺省=默认 (0.5/0.0/0.1), 兼容旧文件
     col = obj.get('collider')

@@ -336,17 +336,34 @@ class AnimationClip:
 
     _CHANNELS = ('position', 'rotation', 'scale')
 
-    def __init__(self, frames=None):
+    def __init__(self, frames=None, loop_mode=None):
         self.frames = frames or []
+        # beta6 C1: 每片段循环模式 ('once'/'loop'/'pingpong'); None = 继承
+        # AnimatorComponent.loop (旧文件/旧构造点行为逐位不变).
+        self.loop_mode = loop_mode
         self._np_key = None      # (id(frames), len(frames)) 缓存失效校验
         self._np_fast = False    # True = sample 可走 numpy 快路径
         self._np_times = None    # (F,) f64 关键帧时间 (frames 列表序, 不重排)
         self._np_vals = None     # {'position'/'rotation'/'scale': (F,3) f64}
+        self._np_batch = None    # beta6 C1: 批量求值用 (times, vals) / None
+        self._np_varies = None   # beta6 C1: {通道: 是否逐帧变化}
         self._np_rebuild()
 
     @property
     def duration(self):
         return self.frames[-1]['time'] if self.frames else 0.0
+
+    def copy(self):
+        """深拷贝 (帧字典 + 值序列都复制) —— undo 快照值隔离 / 场景重建用.
+
+        beta6 C1: 旧 undo 快照按引用存 clips 字典, 改快照会污染模型
+        (docs/design/research_beta6_03_animation.md §1.5 实测 D1/D2).
+        值序列保持原类型 (list 仍是 list, tuple 仍是 tuple), 不改变序列化形态.
+        """
+        return AnimationClip(
+            [{k: (list(v) if isinstance(v, list) else v) for k, v in fr.items()}
+             for fr in self.frames],
+            loop_mode=self.loop_mode)
 
     def _np_rebuild(self):
         """A6: 重建 numpy 缓存 (创建时/frames 换列表后调). 任一快路径前提
@@ -359,6 +376,8 @@ class AnimationClip:
         self._np_fast = False
         self._np_times = None
         self._np_vals = None
+        self._np_batch = None
+        self._np_varies = None
         if len(frames) < 2:
             return
         try:
@@ -393,6 +412,19 @@ class AnimationClip:
             return              # 坏帧数据 → 永久慢路径 (采样时同旧代码报错)
         self._np_times = times
         self._np_vals = vals
+        self._np_batch = (times, vals)     # beta6 C1: 批量求值直接读这一对
+        # beta6 C1: 通道是否逐帧变化 —— 恒定通道不必采样/不必 tolist,
+        # 直接写该常量 (值取 clip.sample(0) 的结果, 与插值公式逐位一致)。
+        varies = {}
+        for k in self._CHANNELS:
+            arr = vals[k]
+            const_k = not bool((arr != arr[0]).any())
+            if const_k and bool((arr[0] == 0.0).any()):
+                # 常量通道但值为 ±0: 0.0/-0.0 的符号位会随插值因子 f 变化,
+                # 保守起见仍按"会变"处理 (走采样), 保证与逐物体结果逐位一致。
+                const_k = False
+            varies[k] = not const_k
+        self._np_varies = varies
         self._np_fast = True
 
     def _np_sync(self):
@@ -473,6 +505,8 @@ class AnimatorComponent(Component):
         self.time = 0.0
         self.playing = False
         self.loop = bool(loop)
+        # beta6 C1: 播放速率 (1.0=原速; 旧构造点缺省 -> 行为与旧实现逐位一致).
+        self.speed = 1.0
 
     def play(self, name, restart=False):
         """播放/切换到动画 (restart=True 从头播)."""
@@ -484,6 +518,342 @@ class AnimatorComponent(Component):
     def stop(self):
         self.playing = False
 
+    # ---- beta6 C1: 播放控制 (变速 / scrub / 有效循环模式) ----
+    def set_speed(self, speed):
+        """设置播放速率 (>0 加速, <0 倒放; 0=冻结). 非数值 -> ValueError."""
+        try:
+            speed = float(speed)
+        except (TypeError, ValueError):
+            raise ValueError('speed 必须是数值, 收到 %r' % (speed,))
+        if speed != speed or speed in (float('inf'), float('-inf')):
+            raise ValueError('speed 必须是有限数值, 收到 %r' % (speed,))
+        self.speed = speed
+        return speed
+
+    def effective_loop_mode(self, clip=None):
+        """该片段生效的循环模式: clip.loop_mode 优先, 否则由组件 loop 推导."""
+        if clip is None:
+            clip = self.clips.get(self.current) if self.current else None
+        mode = getattr(clip, 'loop_mode', None) if clip is not None else None
+        return mode or ('loop' if self.loop else 'once')
+
+    def seek(self, t):
+        """把播放头移到 t 秒 (按循环模式归一到合法区间; 编辑器 scrub 用).
+
+        once: [0, duration] 夹取; loop: t % duration; pingpong: 折返.
+        不改变 playing (scrub 预览不应偷偷开播).
+        """
+        try:
+            t = float(t)
+        except (TypeError, ValueError):
+            raise ValueError('seek 需要数值秒, 收到 %r' % (t,))
+        clip = self.clips.get(self.current) if self.current else None
+        if clip is None:
+            self.time = t
+            return t
+        mode = self.effective_loop_mode(clip)
+        dur = clip.duration
+        if mode == 'once':
+            if t < 0.0:
+                t = 0.0
+            elif dur > 0.0 and t > dur:
+                t = dur
+        elif mode == 'pingpong' and dur > 0.0:
+            period = dur + dur
+            t = t % period
+            if t > dur:
+                t = period - t
+        elif dur > 0.0:
+            t = t % dur
+        self.time = t
+        return t
+
+
+# ============================================================================
+# beta6 C1: 动画求值内核 —— GL 引擎与 SceneDriver 的**唯一**实现
+# ----------------------------------------------------------------------------
+# 设计依据 docs/design/research_beta6_03_animation.md（批次1）:
+#   ① 去复刻: loom_frame_components.update_animations 与 scene_driver
+#      ._update_animations 都只调 evaluate_animations()（旧实现逐行相同, 改一处
+#      忘一处 = 双后端行为分叉）。
+#   ② 批量: 快路径片段按 clip 分组走一次 numpy 分段线性求值, 与
+#      AnimationClip.sample() 快路径**同公式同操作顺序**(searchsorted side=left /
+#      i 夹到 >=1 / span<=0 -> f=0 / a+(b-a)*f), 因此数值逐位一致
+#      (tests/test_animation_base.py 有对拍断言)。
+#   ③ 时间语义: once 到点 = **末帧**(旧实现被 sample() 无条件取模倒回第 0 帧);
+#      loop/pingpong 相位每帧规范化(旧实现一帧只减一次 duration, 跨周期越界)。
+#   ④ 写者优先级 D6「动画只驱动 kinematic」: 动态刚体(rigidbody 且非 kinematic)
+#      的变换归物理所有, 动画跳过并只告警一次 —— 这样物理管线开/关两种配置
+#      不再改变结果(旧实现两条路径胜负相反)。
+_ANIM_CHANNELS = ('position', 'rotation', 'scale')
+_ANIM_WARNED_DYNAMIC = False
+# Point3D 是 namedtuple; 其 __new__ 是 Python 层函数 (~0.4us/次). 批量写回每帧
+# 要造 N 个点, 故走 tuple.__new__(Point3D, 序列) 的 C 路径 (~0.12us) ——
+# 产物仍是 Point3D (同名/同值/同相等语义), 只是跳过 namedtuple 的包装层。
+_P3_NEW = tuple.__new__
+
+
+def reset_anim_warn():
+    """测试用: 清掉"动态刚体挂 Animator"一次性告警标记."""
+    global _ANIM_WARNED_DYNAMIC
+    _ANIM_WARNED_DYNAMIC = False
+
+
+def animator_to_dict(an):
+    """AnimatorComponent -> 场景字典 (beta6 C1: v11 增量 speed / clip_meta).
+
+    运行时态 time/playing **不落盘**(D6: 只作预览态) —— 存盘=回到起点,
+    与旧行为一致; 这里显式写入注释与测试断言, 防止有人"顺手"加进去。
+    """
+    if an is None:
+        return None
+    d = {
+        "current": an.current,
+        "loop": an.loop,
+        "clips": {name: [dict(f) for f in clip.frames]
+                  for name, clip in an.clips.items()},
+    }
+    speed = float(getattr(an, 'speed', 1.0))
+    if speed != 1.0:
+        d["speed"] = speed          # 缺省不写, 旧文件/旧阅读器语义不变
+    meta = {}
+    for name, clip in an.clips.items():
+        lm = getattr(clip, 'loop_mode', None)
+        if lm in ('once', 'loop', 'pingpong'):
+            meta[name] = {"loop_mode": lm}
+    if meta:
+        d["clip_meta"] = meta
+    return d
+
+
+def animator_from_dict(an):
+    """场景字典 -> (clips, current, loop, speed). 旧文件(无 speed/clip_meta)兼容."""
+    clips = {}
+    for name, frames in (an.get('clips') or {}).items():
+        clips[name] = AnimationClip([dict(f) for f in frames])
+    meta = an.get('clip_meta')
+    if isinstance(meta, dict):
+        for name, m in meta.items():
+            clip = clips.get(name)
+            if clip is None or not isinstance(m, dict):
+                continue
+            lm = m.get('loop_mode')
+            if lm in ('once', 'loop', 'pingpong'):
+                clip.loop_mode = lm
+    speed = 1.0
+    raw_speed = an.get('speed', 1.0)
+    try:
+        speed = float(raw_speed)
+    except (TypeError, ValueError):
+        speed = 1.0
+    if not math.isfinite(speed):
+        speed = 1.0
+    return clips, an.get('current'), an.get('loop', True), speed
+
+
+def _sample_batch(times, vals, phases, channels=_ANIM_CHANNELS):
+    """批量分段线性采样: 与 AnimationClip.sample 快路径逐位一致.
+
+    返回 ({通道: (k,3) float64}, ok: bool[k])；ok=False 的行(NaN / 越过末帧)
+    必须回落到逐物体 sample()，语义与旧实现相同。
+    channels 只影响"算什么" (调用方跳过恒定通道), 不改变任一通道的公式。
+    """
+    idx = np.searchsorted(times, phases, side='left')   # 首个 times[i] >= t
+    ok = (idx < times.shape[0]) & (phases == phases)
+    idx = np.minimum(np.maximum(idx, 1), times.shape[0] - 1)
+    prev_t = times[idx - 1]
+    span = times[idx] - prev_t
+    f = np.where(span <= 0.0, 0.0,
+                 (phases - prev_t) / np.where(span <= 0.0, 1.0, span))
+    out = {}
+    for k in channels:
+        v = vals[k]
+        a = v[idx - 1]
+        b = v[idx]
+        out[k] = a + (b - a) * f[:, None]
+    return out, ok
+
+
+def _write_pose(m, s):
+    """把 sample() 的通道子集写回物体 (慢路径 / 末帧; 与旧实现同语义).
+
+    旧实现走 m.position / m.rotation 的 property setter (每次 bump gen);
+    这里对"标准 3 分量"直写 transform 内部字段 (gen 由调用方每帧统一 bump),
+    其余形态仍走公开 setter —— 短序列补 1.0 / 长度错抛 TypeError 等旧语义
+    因此保持不变。
+    """
+    tr = m.transform
+    if 'position' in s:
+        p = s['position']
+        if (type(p) is tuple or type(p) is list) and len(p) == 3:
+            tr._position = Point3D(float(p[0]), float(p[1]), float(p[2]))
+        else:
+            m.position = Point3D(*p)
+    if 'rotation' in s:
+        r = s['rotation']
+        if (type(r) is tuple or type(r) is list) and len(r) == 3:
+            tr._rotation = Point3D(float(r[0]), float(r[1]), float(r[2]))
+        else:
+            m.rotation = Point3D(*r)
+    if 'scale' in s:
+        sc = s['scale']
+        if (type(sc) is tuple or type(sc) is list) and len(sc) == 3:
+            tr._scale = (float(sc[0]), float(sc[1]), float(sc[2]))
+        else:
+            m.set_scale(sc)
+
+
+def evaluate_animations(models, dt):
+    """推进全部 Animator 组件并写回变换 (batch / 双后端唯一实现).
+
+    返回 {'advanced': 推进的实例数, 'blocked_dynamic': 因动态刚体被跳过的实例数}.
+    单遍扫描 + 同片段分组批量求值; 慢路径与旧实现逐位一致 (对拍见
+    tests/test_animation_base.py)。性能: 500 动画物体 ~1ms/逻辑帧
+    (旧逐物体实现 12.7ms, docs/design/research_beta6_03_animation.md §1.11)。
+    """
+    global _ANIM_WARNED_DYNAMIC
+    stats = {'advanced': 0, 'blocked_dynamic': 0}
+    if not models:
+        return stats
+    groups = {}          # clip -> (times, vals, models, phases)
+    blocked = 0
+    advanced = 0
+    wrote = False
+    P3NEW = _P3_NEW
+    # ---- ① 单遍扫描: 推进播放头 + 分组 (只碰状态, 不碰变换) ----
+    for m in models:
+        an = m.animator
+        if an is None or not an.playing:
+            continue
+        name = an.current
+        if not name:
+            continue
+        clip = an.clips.get(name)
+        if clip is None:
+            continue
+        frame_list = clip.frames
+        if not frame_list:
+            continue
+        rb = m.rigidbody
+        if rb is not None and not rb.is_kinematic:
+            blocked += 1                     # D6: 动态刚体归物理
+            continue
+        advanced += 1
+        mode = clip.loop_mode
+        if mode is None:
+            mode = 'loop' if an.loop else 'once'
+        dur = frame_list[-1]['time']
+        t = an.time + dt * an.speed
+        if mode == 'loop':
+            if dur > 0.0:
+                phase = t % dur              # 循环: 每帧规范化 (旧实现只减一次)
+                an.time = phase
+            else:
+                an.time = t
+                phase = t
+        elif mode == 'once':
+            if dur > 0.0 and t >= dur:
+                an.time = dur                # 到点: 停在末帧 (不再取模回第 0 帧)
+                an.playing = False
+                last = frame_list[-1]
+                _write_pose(m, {k: last[k] for k in _ANIM_CHANNELS if k in last})
+                wrote = True
+                continue
+            an.time = t
+            phase = t
+        elif mode == 'pingpong' and dur > 0.0:
+            period = dur + dur
+            ph = t % period                  # 跨多周期也规范化
+            if ph > dur:
+                ph = period - ph
+            if ph >= dur:                    # 折返端点 = 末帧
+                an.time = ph
+                last = frame_list[-1]
+                _write_pose(m, {k: last[k] for k in _ANIM_CHANNELS if k in last})
+                wrote = True
+                continue
+            an.time = ph
+            phase = ph
+        else:
+            an.time = t
+            phase = t
+        arr = clip._np_batch
+        if arr is None or phase != phase:    # 非快路径 / NaN: 逐物体 sample()
+            _write_pose(m, clip.sample(phase))
+            wrote = True
+            continue
+        ent = groups.get(clip)
+        if ent is None:
+            ent = groups[clip] = (arr[0], arr[1], [], [])
+        ent[2].append(m)
+        ent[3].append(phase)
+    if blocked and not _ANIM_WARNED_DYNAMIC:
+        _ANIM_WARNED_DYNAMIC = True
+        print('[动画] %d 个物体同时有动态刚体与 Animator: 动画不驱动动态刚体'
+              '(D6: 只驱动 kinematic/静态体), 已跳过; 要让动画驱动请把刚体设为 '
+              'kinematic' % blocked)
+    # ---- ② 批量求值 + 写回 (同片段一次向量化; 恒定通道不采样/不 tolist) ----
+    for clip, (times, vals, ms, phases) in groups.items():
+        varies = clip._np_varies or {'position': True, 'rotation': True,
+                                     'scale': True}
+        want = [k for k in _ANIM_CHANNELS if varies[k]]
+        const = clip.sample(0.0) if len(want) != 3 else None
+        if want:
+            with np.errstate(divide='ignore', invalid='ignore'):
+                sampled, ok = _sample_batch(
+                    times, vals, np.asarray(phases, dtype=np.float64), want)
+        else:
+            sampled, ok = {}, np.ones(len(ms), dtype=bool)
+        if not ok.all():
+            # NaN / 越过末帧等极端行: 整组回落逐物体 sample() (与旧实现同语义;
+            # 常规行与批量结果逐位一致, 见 tests/test_animation_base.py)。
+            for j, mm in enumerate(ms):
+                _write_pose(mm, clip.sample(phases[j]))
+            wrote = True
+            continue
+        pw = 'position' in sampled
+        rw = 'rotation' in sampled
+        sw = 'scale' in sampled
+        pos = sampled['position'].tolist() if pw else None
+        rot = sampled['rotation'].tolist() if rw else None
+        scl = sampled['scale'].tolist() if sw else None
+        cpos = None if pw or const is None else const.get('position')
+        crot = None if rw or const is None else const.get('rotation')
+        cscl = None if sw or const is None else const.get('scale')
+        trs = [mm.transform for mm in ms]
+        changed = False
+        for j, tr in enumerate(trs):
+            if pw:
+                tr._position = P3NEW(Point3D, pos[j])
+                changed = True
+            elif cpos is not None and tr._position != cpos:
+                tr._position = cpos
+                changed = True
+            if rw:
+                r = rot[j]
+                cr = tr._rotation
+                if r[0] != cr[0] or r[1] != cr[1] or r[2] != cr[2]:
+                    tr._rotation = P3NEW(Point3D, r)
+                    changed = True
+            elif crot is not None and tr._rotation != crot:
+                tr._rotation = crot
+                changed = True
+            if sw:
+                s = scl[j]
+                cs = tr._scale
+                if s[0] != cs[0] or s[1] != cs[1] or s[2] != cs[2]:
+                    tr._scale = (s[0], s[1], s[2])
+                    changed = True
+            elif cscl is not None and tr._scale != cscl:
+                tr._scale = cscl
+                changed = True
+        if changed:
+            wrote = True
+    if wrote:
+        TransformComponent._xform_gen += 1
+    stats['advanced'] = advanced
+    stats['blocked_dynamic'] = blocked
+    return stats
 
 class AudioSystem:
     """M34: 音频后端封装 (B2 2026-08-30 换库: 委托 audio_backend.AudioBackend).
