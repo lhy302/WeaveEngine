@@ -283,9 +283,16 @@ def t_camera_priority():
 # ============ ⑦ 编辑器绘制门：相机级天空盒也要画 ============
 def t_draw_gate_effective():
     print('---- 7) 编辑器绘制门认"生效天空盒"（Q3=A 在编辑器也成立） ----')
-    src = open(os.path.join(ROOT, 'editor.py'), encoding='utf-8').read()
-    check('绘制门用 self.effective_skybox()（修前只认 self._skybox）',
-          'if self.effective_skybox() is not None:' in src)
+    # 2026-11-10 2A 后：绘制不再由 editor 里那句 if 决定，而是 FramePlan 是否包含 sky pass。
+    # 这里改成**行为断言**（别再锁源码字符串，否则渲染重构一次就误报一次）。
+    import loom_pass
+    check('frame_plan(include_sky=True) 含 sky pass',
+          any(p.id == 'sky' for p in loom_pass.frame_plan(include_sky=True).passes))
+    check('frame_plan(include_sky=False) 不含 sky pass',
+          all(p.id != 'sky' for p in loom_pass.frame_plan(include_sky=False).passes))
+    src = open(os.path.join(ROOT, 'loom_render.py'), encoding='utf-8').read()
+    check('渲染层按 effective_skybox() 决定 include_sky',
+          ('effective_skybox' in src) and ('include_sky' in src))
     # 场景级 None + 相机级绿: 旧门会跳过, 新门应画
     green, _ = S.parse_color([0, 255, 0])
     ed = _ed()
