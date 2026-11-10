@@ -262,6 +262,36 @@ def _handle_vk_init_failure(exc, explicit, api='vulkan'):
     return reason, ok
 
 
+# 2026-11-10 Q-VER-1=A: 播放器遇到更高版本场景 -> 可见失败 + 优雅退出（不抛 traceback）。
+_SCENE_VER_TITLE = '无法打开场景（引擎版本过低）'
+
+
+def _scene_version_error_cls():
+    """惰性取 sceneio.SceneVersionError（避免顶层 import 顺序耦合）。"""
+    try:
+        import sceneio
+        return sceneio.SceneVersionError
+    except Exception:
+        return None
+
+
+def handle_scene_version_error(exc):
+    """打印原因（要求版本 / 当前版本）+ 弹窗 + SystemExit(1)。
+
+    与 VK 回退同一套可见失败口径：release 版无控制台，必须弹窗；
+    LOOM_NO_DIALOG=1（或非 Windows）时只打印、不阻塞。
+    """
+    msg = ('这个场景要求**更新的引擎版本**，当前播放器无法加载。\n\n'
+           '%s\n\n'
+           '请用更新版本的 Loom 打开该场景；或在旧版 Loom 里「导出兼容场景」后重试。'
+           % (exc,))
+    print('[场景] ' + msg)
+    shown = show_blocking_dialog(_SCENE_VER_TITLE, msg)
+    if not shown:
+        print('[场景] (未弹窗: 无 GUI 或 LOOM_NO_DIALOG=1 —— 原因见上面的 [场景] 行)')
+    raise SystemExit(1)
+
+
 def _reason_with_tag(tag, exc):
     """异常原因统一加前缀；已带同一前缀就不重复（P3③: 不出现 [VK] [VK]）。"""
     s = str(exc) or repr(exc)
@@ -290,6 +320,9 @@ def _run_gl_visible(scene, **kw):
     except BaseException as e:
         if isinstance(e, (KeyboardInterrupt, SystemExit)):
             raise
+        _ve = _scene_version_error_cls()
+        if _ve is not None and isinstance(e, _ve):
+            raise                       # 版本问题交给 run_backend 统一报（不是 GL 故障）
         msg = 'OpenGL 后端无法启动（需要 4.3 core）。\n\n' + _reason_with_tag('[GL]', e)
         print('[backend] ' + msg)
         show_blocking_dialog('无法启动渲染（OpenGL 不可用）', msg)
@@ -312,6 +345,9 @@ def _run_gl_or_double_fault(vk_reason, scene, **kw):
     except BaseException as gl_exc:
         if isinstance(gl_exc, (KeyboardInterrupt, SystemExit)):
             raise
+        _ve = _scene_version_error_cls()
+        if _ve is not None and isinstance(gl_exc, _ve):
+            raise                       # 场景版本问题：不许伪装成「双后端都挂了」
         msg = ('两条后端都不可用（Vulkan 与 OpenGL 均启动失败）:\n\n'
                + vk_reason + '\n\n' + _reason_with_tag('[GL]', gl_exc))
         print('[backend] ' + msg)
@@ -354,7 +390,21 @@ def _maybe_remote_fallback(scene):
 def run_backend(api, scene=None, explicit=False, **kw):
     """按 api 启动播放器 (阻塞). api == 'auto' 时先 Vk 后回退 GL.
     kw 支持 scene_data= (游戏包 dict 模式) / title= / width= / height=.
-    explicit=True = api 来自命令行 --backend (Q6: 显式 vulkan 失败不改写设置)."""
+    explicit=True = api 来自命令行 --backend (Q6: 显式 vulkan 失败不改写设置).
+
+    2026-11-10 Q-VER-1=A: 场景版本过低**不是**后端问题 —— 在这里统一拦截，
+    打印原因（要求版本/当前版本）+ 弹窗 + SystemExit(1)，不冒泡 traceback。
+    """
+    _ver_err = _scene_version_error_cls()
+    if _ver_err is not None:
+        try:
+            return _run_backend_impl(api, scene, explicit=explicit, **kw)
+        except _ver_err as e:
+            handle_scene_version_error(e)
+    return _run_backend_impl(api, scene, explicit=explicit, **kw)
+
+
+def _run_backend_impl(api, scene=None, explicit=False, **kw):
     _ensure_game_config()
     if api == 'auto':
         try:
@@ -362,6 +412,9 @@ def run_backend(api, scene=None, explicit=False, **kw):
         except Exception as e:
             if isinstance(e, VkRunError) or _is_vk_error(e, _VK_SEG_RUN):
                 raise                   # 运行期失败: 不回退, 如实失败
+            _ve = _scene_version_error_cls()
+            if _ve is not None and isinstance(e, _ve):
+                raise                   # 场景版本问题不是「Vulkan 不可用」，别伪装后回退
             if isinstance(e, VkInitError) or _is_vk_error(e, _VK_SEG_INIT):
                 # 2026-11-09 裁决 A: 初始化失败 -> 诊断+落配置, 然后同进程走 GL（弹窗只弹一次）
                 reason, _ok = _handle_vk_init_failure(e, explicit, api)

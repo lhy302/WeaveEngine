@@ -504,7 +504,7 @@ def make_logic_engine(with_pipe):
     e._run_scripts = lambda dt: None
     e.update_audio = lambda dt: None
     e._logic_prep = lambda dt: None
-    e._pipe_post = lambda pipe, sdt, g: None
+    e._pipe_post = lambda pipe, sdt, g, pose=None: None   # D1: _pipe_post 增第 4 参 (pose)
     e._physics_frame = lambda dt: None
     return e
 

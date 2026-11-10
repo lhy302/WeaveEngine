@@ -603,6 +603,15 @@ class SceneDriver:
         # 2026-11-09 (Q1=A / Q3=A / Q5=A): 与 GL/编辑器**逐条一致** —— 复用 sceneio 的解析
         # 入口: 缺 skybox 键 / null -> **默认蓝**; 失败出声并记 valid/error（不静默、不回退成无天空）。
         # 相机级优先见下方 effective_skybox()。base_dir = 场景文件目录（六面图相对路径用）。
+        # 2026-11-10 Q-VER-1=A: 与 GL 播放器同一道版本闸门（GL 走 sceneio.scene_from_dict
+        # -> migrate -> check_engine_version；VK 原来**没有**这道门，会静默加载更高版本场景）。
+        # 抛 sceneio.SceneVersionError 后由 run_player/game_player 统一「弹窗+退出」。
+        try:
+            import sceneio as _sio_ver
+            _sio_ver.check_engine_version(data)
+        except Exception as _ver_e:
+            if _ver_e.__class__.__name__ == 'SceneVersionError':
+                raise
         ctx = None
         try:
             import sceneio as _sio
