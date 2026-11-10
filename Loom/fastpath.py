@@ -55,12 +55,83 @@ _CKERNELS = None      # engine 侧可见别名 (运行时属性访问不折叠; 
 # 模块级 raise (不为官方件兜底; 兜底责任在组件内部, 见 docs/design/逃生门退役设计.md)。
 import ctypes as _ctypes
 _CK['ctypes'] = _ctypes
-_cands = [os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                       'ckernels', 'loom_kernels.dll')]
-if getattr(sys, 'frozen', False) or '__compiled__' in globals():
-    # 冻结环境: DLL 与 exe 同级投放 (assemble 脚本负责拷贝)
-    _cands.insert(0, os.path.join(os.path.dirname(os.path.abspath(sys.executable)),
-                                  'ckernels', 'loom_kernels.dll'))
+
+
+def ckernels_search_dirs():
+    """返回 loom_kernels.dll 的搜索目录 (按优先级, 去重)。
+
+    ★beta6 回归修复 (2026-11-11): Nuitka 4.3.5 的 **onefile** 语义变了 ——
+      sys.executable 指向 onefile 的**临时解包 exe**(%TEMP%\\onefile_xxx), 不再是
+      安装目录。旧实现只用 sys.executable, 于是构建器 build_game.exe --help 直接
+      RuntimeError。现在按"真实安装目录"优先排序:
+        ① LOOM_CKERNELS_DIR 覆盖 (可指向目录或 DLL 本体)
+        ② __compiled__.containing_dir  (Nuitka 编译产物标记里的**原始 exe 目录**)
+        ③ argv[0] 所在目录             (onefile 下通常是真实 exe 路径)
+        ④ sys.executable 所在目录      (非 onefile / 老 Nuitka 语义)
+        ⑤ 本模块所在目录               (源码树 / 裸 dist 内联场景)
+    纯目录计算, 不碰文件系统 (调用方逐个 os.path.isfile 试)。
+    """
+    dirs = []
+
+    def _add(d):
+        if not d:
+            return
+        try:
+            p = os.path.abspath(d)
+        except Exception:
+            return
+        if p not in dirs:
+            dirs.append(p)
+
+    env = os.environ.get('LOOM_CKERNELS_DIR')
+    dll_env = None
+    if env:
+        # 同时接受「目录」与「DLL 本体」两种写法:
+        #   .../ckernels/loom_kernels.dll -> 上跳到安装目录 (.../)
+        #   .../loom_kernels.dll          -> 用其所在目录
+        if os.path.isfile(env):
+            dll_env = os.path.abspath(env)
+            parent = os.path.dirname(dll_env)
+            if os.path.basename(parent).lower() == 'ckernels':
+                _add(os.path.dirname(parent))
+            else:
+                _add(parent)
+        else:
+            _add(env)
+    # ★Nuitka 折叠防御: 走 globals() 运行时取, 不写 __compiled__ 字面量比较
+    _comp = globals().get('__compiled__')
+    if _comp is not None:
+        _add(getattr(_comp, 'containing_dir', None))
+    try:
+        _add(os.path.dirname(os.path.abspath(sys.argv[0])))
+    except Exception:
+        pass
+    try:
+        _add(os.path.dirname(os.path.abspath(sys.executable)))
+    except Exception:
+        pass
+    _add(os.path.dirname(os.path.abspath(__file__)))
+    return dirs, dll_env
+
+
+def ckernels_candidates():
+    """候选 DLL 路径列表 (与 ckernels_search_dirs 同序; env 直指 DLL 时排第一)。"""
+    dirs, dll_env = ckernels_search_dirs()
+    cands = []
+    if dll_env:
+        cands.append(dll_env)
+    for d in dirs:
+        # 兼容两种投放: <dir>/ckernels/loom_kernels.dll 与 <dir>/loom_kernels.dll
+        p = os.path.join(d, 'ckernels', 'loom_kernels.dll')
+        if p not in cands:
+            cands.append(p)
+        p2 = os.path.join(d, 'loom_kernels.dll')
+        if p2 not in cands:
+            cands.append(p2)
+    return cands
+
+
+_cands = ckernels_candidates()
 _dll = None
 for _p in _cands:
     if os.path.isfile(_p):
@@ -83,8 +154,12 @@ for _p in _cands:
         break
 if _dll is None:
     raise RuntimeError(
-        'ckernels 官方组件加载失败: loom_kernels.dll 未找到, 尝试路径 %r'
-        % (_cands,))
+        'ckernels 官方组件加载失败: loom_kernels.dll 未找到。\n'
+        '  搜索目录 (按优先级): %r\n'
+        '  尝试路径          : %r\n'
+        '  线索: onefile/Nuitka 下 sys.executable 可能指向临时解包目录; '
+        '可用 LOOM_CKERNELS_DIR 指定 ckernels 目录或 DLL 本体。'
+        % (ckernels_search_dirs()[0], _cands))
 
 # C 内核并行线程数: 默认物理核数的一半 (AABB 单行工作量小, 满核易 spin 税;
 # 0 = DLL 内部默认)。引擎 _AABB_PAR_MIN_MODELS 闸门仍决定是否走并行版。
