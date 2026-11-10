@@ -82,7 +82,7 @@ py -3.13 Loom.py --agent
 │   ├── ui/                编辑器界面
 │   ├── scripts/           官方 Lua 示例脚本
 │   ├── tests/             单元测试与对拍探针
-│   └── 保存/              示例与压力场景
+│   └── Projects/          示例与压力场景（旧版目录名 保存/，启动时自动迁移）
 ├── LoomHub/               启动器
 ├── docs/                  设计蓝图与开发文档
 └── 代码架构.txt            架构总览（分层 / 数据模型 / 渲染管线）
@@ -117,3 +117,26 @@ py -3.13 Loom.py --agent
 ## 许可
 
 [MIT License](LICENSE)
+
+
+## 能力索引（beta6）
+
+新加入/常被问到的能力，一处可查（完整表格见《使用操作指南.txt》附录 F）：
+
+| 能力/符号 | 实现位置 | 用法/判据 |
+|---|---|---|
+| frame_plan | Loom/loom_pass.py | 每帧 Pass 执行计划；诊断可读 engine.frame_plan |
+| loom_pass | Loom/loom_pass.py, loom_pass_gl.py | Pass 图（后处理链）；新增 Pass 在注册表加 |
+| bloom | Loom/loom_pass.py, loom_post.py | env LOOM_BLOOM_STRENGTH/THRESHOLD/KNEE |
+| tonemap | Loom/loom_pass.py, loom_post.py | env LOOM_POST 总开关；LOOM_POST_STAGE 分阶段排障 |
+| LOOM_POST | Loom/loom_post.py | set LOOM_POST=0 关闭全部后处理 |
+| assets.json | Loom/loom_assets.py | 工程内资产索引；EAI asset_list/asset_get/assets |
+| loom_assets | Loom/loom_assets.py | guid 解析与校验；asset_import/asset_apply/asset_place/asset_save |
+| asset_import | Loom/agent_commands.py | 命令行坞/Agent：asset_import {path,type} |
+| min_engine_version | Loom/sceneio.py（check_engine_version） | 场景 JSON 字段；低于要求抛 SceneVersionError |
+| bucket_pack | Loom/fastpath.py | env LOOM_BUCKET_PACK / LOOM_BUCKET_LEGACY 对比 |
+| AVX2 | Loom/ckernels/loom_kernels.c, fastpath.py | 自动按 CPU 选路；验证 tests/test_aabb_simd.py |
+| _pose_rows | Loom/physics_bridge.py | 姿态 SoA 行数；env LOOM_POSE_SOA 切换 |
+
+> 环境变量全量清单（含 5 个调试开关与 LOOM_POST_STAGE 崩溃二分用法）见《使用操作指南.txt》附录 E；
+> 协议入口与计数一致性见 `docs/design/架构互联协议总表.md` §7。

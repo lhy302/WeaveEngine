@@ -51,7 +51,7 @@ Loom 代码架构文档 (2026-08-11 原名 3D引擎; 2026-08-14 晚: 无限网�
         │     ├── agent_commands.py  EAI 编辑器命令桥 (53 条命令, HTTP/控制台/按钮三通路)
         │     ├── scripts.py         内置脚本注册表 + load_script_dir (游戏脚本目录)
         │     ├── gui.py             即时模式 GUI 控件库 (minimal 视图持有; Qt 视图不用)
-        │     ├── sceneio.py         序列化 (v10/迁移/Prefab/场景加密/gravity 字段)
+        │     ├── sceneio.py         序列化 (v11/迁移/Prefab/场景加密/gravity 字段)
         │     ├── undo.py            撤销管理器 + 命令类
         │     ├── matlib.py          行向量矩阵库
         │     ├── mesh.py            网格生成 (立方体/球/平面/obj 导入)
@@ -148,7 +148,7 @@ Loom 代码架构文档 (2026-08-11 原名 3D引擎; 2026-08-14 晚: 无限网�
     │  audio_backend.py  B2 音频双后端 (game-audio/pygame)    │
     ├────────────────────────────────────────────────────────┤
     │  undo.py       UndoManager + 命令类(撤销)              │
-    │  sceneio.py    scene_to_dict / scene_from_dict (序列化 v10)│
+    │  sceneio.py    scene_to_dict / scene_from_dict (序列化 v11)│
     │  gui.py        即时模式 GUI 控件库 (minimal 视图持有)   │
     │  filedialog.py 保存/打开文件对话框 (ctypes comdlg32)     │
     ├────────────────────────────────────────────────────────┤
@@ -156,7 +156,7 @@ Loom 代码架构文档 (2026-08-11 原名 3D引擎; 2026-08-14 晚: 无限网�
     │  mesh.py       内置网格生成 (立方体/球/平面/obj 导入)      │
     └────────────────────────────────────────────────────────┘
 
-    tests/         49 个测试文件 (当前工作区), run_all.py 一键全跑
+    tests/         133 个测试文件 (当前工作区), run_all.py 一键全跑
 
 关键分层原则:
   * engine 不 import editor / runtime —— 保证打包版能只带 engine。
@@ -216,8 +216,8 @@ hub_view_tk.py (IHubView 第二实现): 极简 tkinter 视图, 同一 HubControl
   跑通全部动作 —— 证明"换 UI 只换实现类、业务零改动".
 
 启动:
-  py -3.12 LoomHub.py            (pygame 视图, 默认)
-  py -3.12 LoomHub.py --ui tk    (tkinter 视图)
+  py -3.13 LoomHub.py            (pygame 视图, 默认)
+  py -3.13 LoomHub.py --ui tk    (tkinter 视图)
 
 LoomHub 空闲 CPU 优化 (2026-08-15, 用户实测单开烧 60% 单核):
   根因: ①_text 每帧对每条文字 font.render 重栅格化 (SDL_ttf, 60FPS×几十条 = 大头);
@@ -306,7 +306,7 @@ LoomHub 空闲 CPU 优化 (2026-08-15, 用户实测单开烧 60% 单核):
         - 挂父激活相机播放期/预览期每帧重应用 = 随父移动 (Unity 父子语义, 脚本后写仍覆盖)
         - 层级摄像机行树形缩进 + 拖到物体行=挂父/拖空白=脱父 (controller reparent_camera/
           detach_camera -> ReparentCameraCommand)
-        - 序列化 v10: cameras 数组加 parent_id, scene_from_dict 在物体建链后连父
+        - 序列化 v10→v11: v10 相机物体化(cameras 加 parent_id)；v11 资产引用改 guid, scene_from_dict 在物体建链后连父
           (_link_camera_parents); 撤销 camera_snapshot 含 parent(guid)
 
 【Point3D】三维向量/点
@@ -701,7 +701,7 @@ B2 = audio_backend.py 双后端适配层: 主 = game-audio 2.1.0 (miniaudio, wav
 ====================================================================
 六、序列化 (sceneio.py)
 ====================================================================
-格式: JSON, SCENE_VERSION = 10。
+格式: JSON, SCENE_VERSION = 11。
   {
     "version": 10,
     "camera": {...},
@@ -725,7 +725,7 @@ B2 = audio_backend.py 双后端适配层: 主 = game-audio 2.1.0 (miniaudio, wav
   }
 
 scene_to_dict / scene_from_dict:  引擎状态 <-> dict (再 json 落盘)。
-migrate(): 老版本(v1..v9)自动升级到 v10 —— 旧场景可加载。
+migrate(): 老版本(v1..v10)自动升级到 v11 —— 旧场景可加载。
   v4->v5 (M23): 旧对象无 material_id, 加载时按颜色/饱和度自建材质。
   v5->v6 (M28): 旧对象无 collider 字段 -> 加载时按网格类型自动派生碰撞体。
   v6->v7 (摄像机): 旧场景补 cameras:[] + active_camera:null。
@@ -807,14 +807,14 @@ run_all.py: 一键跑全部, glob test_*.py, 集成测试最后跑。
   - EditorApp 播放模式: 进 play -> 脚本转物体 -> 停 -> 还原 (7.8)
   - PlayerApp --run: 加载带脚本场景, 帧数推进旋转 (8.5)
 
-49 个测试文件分工 (run_all.py glob test_*.py, 集成测试最后跑; 当前工作区):
+133 个测试文件分工 (run_all.py glob test_*.py, 集成测试最后跑; 当前工作区):
   test_decompose      matlib 矩阵数学 (分解/合成)
   test_hierarchy      父子层次/世界变换
   test_reparent_preserve  保世界挂父 (2026-08-16 语义) 回归
   test_lighting       光照数学 (shade 镜像新着色器)
   test_light_occlusion M29: mat4_ortho/mat4_view_forward 数值, LightState 新字段,
                        light_snapshot+undo, sceneio v8 迁移
-  test_sceneio        序列化 v10 / 脚本字段 / 材质共享 / Prefab / 碰撞体 round-trip
+  test_sceneio        序列化 v11 / 脚本字段 / 材质共享 / Prefab / 碰撞体 round-trip
   test_scene_load     场景加载容错
   test_camera         摄像机实体: 度制状态/roll/环绕/apply/v9迁移/direction/roll矩阵/俯仰限制/undo
   test_fullscreen     F11 假全屏 (NOFRAME 不切分辨率) 无头
@@ -1096,7 +1096,7 @@ core_components\ (DLL 化战役 M1 落地, 2026-09-08 — 核心组件注册表+
   才 unique_default_name 新建, 绝不覆盖陌生文件。
 □ 资源面板与层级面板的点击归属: 两个面板 rect 不重叠, 各自 _register 按下
   已设 click_captured, 互不误触发。
-□ Windows 路径: 测试用完整路径 `py -3.12 "...\tests\test_xxx.py"`,
+□ Windows 路径: 测试用完整路径 `py -3.13 "...\tests\test_xxx.py"`,
   PowerShell cwd 默认在 D:\my-project, 相对路径会解析到错误目录。
 □ .bat 文件必须 CRLF 换行 (LF 会让 cmd 解析错乱)。
 
@@ -1702,3 +1702,27 @@ core_components\ (DLL 化战役 M1 落地, 2026-09-08 — 核心组件注册表+
 ====================================================================
 (完)
 ====================================================================
+
+
+================================================================================
+附录 · F-04 能力索引（beta6 交付，2026-11-10）
+================================================================================
+实测口径：EAI 命令 102 条 / HUB-EAI 21 条 / SCENE_VERSION = 11 / 测试文件 133 个。
+下表为审计中"7/10 能力名 0 命中"的补齐项，每项给实现位置与判据：
+
+| 能力/符号 | 实现位置 | 用法/判据 |
+|---|---|---|
+| frame_plan | Loom/loom_pass.py | 每帧 Pass 执行计划；诊断可读 engine.frame_plan |
+| loom_pass | Loom/loom_pass.py, loom_pass_gl.py | Pass 图（后处理链）；新增 Pass 在注册表加 |
+| bloom | Loom/loom_pass.py, loom_post.py | env LOOM_BLOOM_STRENGTH/THRESHOLD/KNEE |
+| tonemap | Loom/loom_pass.py, loom_post.py | env LOOM_POST 总开关；LOOM_POST_STAGE 分阶段排障 |
+| LOOM_POST | Loom/loom_post.py | set LOOM_POST=0 关闭全部后处理 |
+| assets.json | Loom/loom_assets.py | 工程内资产索引；EAI asset_list/asset_get/assets |
+| loom_assets | Loom/loom_assets.py | guid 解析与校验；asset_import/asset_apply/asset_place/asset_save |
+| asset_import | Loom/agent_commands.py | 命令行坞/Agent：asset_import {path,type} |
+| min_engine_version | Loom/sceneio.py（check_engine_version） | 场景 JSON 字段；低于要求抛 SceneVersionError |
+| bucket_pack | Loom/fastpath.py | env LOOM_BUCKET_PACK / LOOM_BUCKET_LEGACY 对比 |
+| AVX2 | Loom/ckernels/loom_kernels.c, fastpath.py | 自动按 CPU 选路；验证 tests/test_aabb_simd.py |
+| _pose_rows | Loom/physics_bridge.py | 姿态 SoA 行数；env LOOM_POSE_SOA 切换 |
+
+配套环境变量全量清单见《使用操作指南.txt》附录 E。

@@ -23,7 +23,7 @@ Loom 开发进度与 Unity 差距对照 (2026-08-11 起稿, 更新至 2026-08-28
       文档 *.txt 留项目根 (位置不变); 编译版本已删 (2026-08-31, 等指令重打)
   - 现状: **创作闭环 [布置→行为→试玩→打包] 四环齐全, M1~M41 全落地,
           + LoomHub 项目管理器 + 插件系统 L1 分级 (2026-08-27)
-          + EAI/HUB-EAI 命令自动化 (52/16 条命令, 测试全绿), 详见第八节**
+          + EAI/HUB-EAI 命令自动化 (102/21 条命令, 测试全绿), 详见第八节**
 
 和 Unity 的关系: 不是"竞争", 是"按 Unity 的模块设计逐项补齐"。
 本引擎能做出"能玩、能发布"的东西(见《使用操作指南.txt》), 但它不是要替代
@@ -32,7 +32,7 @@ Unity —— 它证明"Unity 的架构哲学用几百 KB 的 Python 也能搭起
 ====================================================================
 一、已实现全景 (模块一览)
 ====================================================================
-  [场景组织]   场景树(Transform 层次, 防环)、单场景 JSON 序列化(v10)、
+  [场景组织]   场景树(Transform 层次, 防环)、单场景 JSON 序列化(v11)、
                Prefab 模板、组件化 GameObject+Component (M25)
   [编辑工具]   层级面板 / 检查器 / 资源浏览器面板 / 播放模式 /
                平移+旋转 gizmo / 轨道相机 / 全量撤销重做(命令模式 100 步) /
@@ -73,7 +73,7 @@ Unity —— 它证明"Unity 的架构哲学用几百 KB 的 Python 也能搭起
 │           │ 父子层级, 各种 gizmo        │ + 平移/旋转 gizmo              │     │
 │ 组件模型  │ GameObject + Component 组合 │ ✓ GameObject + Component (M25),│ ✅  │
 │           │ 组合优于继承               │ 4 种内置组件, 保留平铺旧 API   │     │
-│ 场景文件  │ .unity, 场景管理器, 场景切换│ 🟡 单场景 JSON (v10) + 版本迁移  │ 🟡  │
+│ 场景文件  │ .unity, 场景管理器, 场景切换│ 🟡 单场景 JSON (v11) + 版本迁移  │ 🟡  │
 │ 多场景    │ 加性加载/场景流             │ 🟡 load_scene 运行时切换 (M37)  │ 🟡  │
 │ 选中/编组 │ 单选/多选/编组/Prefab 编辑  │ 🟡 单选 + 检查器, 无多选/编组   │ 🟡  │
 │ 撤销重做  │ 编辑器操作不可任意撤销      │ ✓ 命令模式 100 步, 全量可撤销   │ ✅  │
@@ -282,7 +282,7 @@ Unity —— 它证明"Unity 的架构哲学用几百 KB 的 Python 也能搭起
     测试 test_plugin_loader 39 项 + test_gamepack 8 项。
     方案文档 = 《Loom插件系统分级方案.txt》(来龙去脉见
     《Loom模块化插件化分析.txt》顶部更新段)。
-  [EAI / HUB-EAI] agent_commands.py 52 条命令 (status 含 dirty / screenshot /
+  [EAI / HUB-EAI] agent_commands.py 102 条命令 (status 含 dirty / screenshot /
     object_* / set_transform / 材质 / collider / rigidbody / audio / animator /
     scripts 系 / light_set / camera_* / reparent / prefab_* / assets /
     asset_* / settings_* / play / quit 三态(保存/不保存/取消) / undo / redo /
@@ -468,3 +468,31 @@ Unity —— 它证明"Unity 的架构哲学用几百 KB 的 Python 也能搭起
 - 编译版第 8 次重编 (增量流程仅 Loom; 含相机统一+speed 行+sync_script_keys
   +ckernels DLL 投放), compiled_verify 同口径验收进行中。
 - 文档: 台账大节/代码架构打包节+管线图/测试台账 A54-A56。
+
+
+================================================================================
+附录 · F-04 能力 → Unity 对照（beta6，2026-11-10）
+================================================================================
+| 能力/符号 | 实现位置 | 用法/判据 |
+|---|---|---|
+| frame_plan | Loom/loom_pass.py | 每帧 Pass 执行计划；诊断可读 engine.frame_plan |
+| loom_pass | Loom/loom_pass.py, loom_pass_gl.py | Pass 图（后处理链）；新增 Pass 在注册表加 |
+| bloom | Loom/loom_pass.py, loom_post.py | env LOOM_BLOOM_STRENGTH/THRESHOLD/KNEE |
+| tonemap | Loom/loom_pass.py, loom_post.py | env LOOM_POST 总开关；LOOM_POST_STAGE 分阶段排障 |
+| LOOM_POST | Loom/loom_post.py | set LOOM_POST=0 关闭全部后处理 |
+| assets.json | Loom/loom_assets.py | 工程内资产索引；EAI asset_list/asset_get/assets |
+| loom_assets | Loom/loom_assets.py | guid 解析与校验；asset_import/asset_apply/asset_place/asset_save |
+| asset_import | Loom/agent_commands.py | 命令行坞/Agent：asset_import {path,type} |
+| min_engine_version | Loom/sceneio.py（check_engine_version） | 场景 JSON 字段；低于要求抛 SceneVersionError |
+| bucket_pack | Loom/fastpath.py | env LOOM_BUCKET_PACK / LOOM_BUCKET_LEGACY 对比 |
+| AVX2 | Loom/ckernels/loom_kernels.c, fastpath.py | 自动按 CPU 选路；验证 tests/test_aabb_simd.py |
+| _pose_rows | Loom/physics_bridge.py | 姿态 SoA 行数；env LOOM_POSE_SOA 切换 |
+
+对照要点（与 Unity 的差异，便于评估改造成本）：
+- frame_plan/loom_pass ≈ URP 的 RenderPass 图：Loom 每帧生成执行计划，Pass 注册表在 loom_pass.py。
+- bloom/tonemap ≈ URP Volume 的 Bloom/Tonemapping；Loom 用 env + 材质参数覆盖。
+- assets.json/loom_assets ≈ Unity 的 GUID 资产库（AssetDatabase）；Loom 用 assets.json + guid 索引，
+  导入用 EAI asset_import（无编辑器菜单依赖，Agent 可直接调）。
+- min_engine_version ≈ Unity 的 ProjectVersion.txt 闸门；Loom 写在场景 JSON 里，加载时硬拒绝。
+- bucket_pack/AVX2/_pose_rows ≈ Unity 的 Burst/Jobs 宽相与 SIMD：Loom 走 fastpath + ckernels，
+  有 env 可回退对比（LOOM_BUCKET_LEGACY / LOOM_POSE_SOA）。

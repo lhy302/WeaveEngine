@@ -306,10 +306,6 @@ def _ref_path(name, ui=False, ref_dir=None):
     return os.path.join(ref_dir or REF_DIR, stem + ('__ui' if ui else '') + '.png')
 
 
-def _fmt3(t):
-    return '%.6f/%.6f/%.6f' % (t[0], t[1], t[2])
-
-
 def _check_scene(name, g, v, base, ref_dir, gate):
     """返回 (ok, reasons, line)。三路（GL/参考、VK/参考、GL/VK）+ 漂移 + MAX + UI。"""
     reasons = []

@@ -45,12 +45,6 @@ def gl_info(ctx):
             code)
 
 
-def gl_version_text(ctx):
-    """一行式版本描述（日志 / 报错共用同一格式）。"""
-    ver, renderer, vendor, code = gl_info(ctx)
-    return 'OpenGL %s | 显卡 %s | 厂商 %s | version_code=%d' % (ver, renderer, vendor, code)
-
-
 def supports_gl(ctx, major=GL_MIN_MAJOR, minor=GL_MIN_MINOR):
     """上下文是否达到指定版本（默认地板 4.3）。"""
     _v, _r, _vd, code = gl_info(ctx)

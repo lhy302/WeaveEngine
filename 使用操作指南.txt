@@ -456,7 +456,7 @@ LoomHub = 项目管理器 ("解释器名 + Hub", 类似 Unity -> Unity Hub)。
     详情写 %LOCALAPPDATA%\Loom\bench\bench_error.txt（release 无控制台也能查）。
 
   回滚到 Python 3.12 (2026-11-09 主线迁 3.13 的配套):
-    三件产物用同参数 + py -3.12 重打即可; 3.12 依赖快照见
+    三件产物用同参数 + py -3.13 重打即可; 3.12 依赖快照见
     C:\loom_build\pre_py313_freeze.txt; 迁移前 3.12 产物留在
     C:\loom_build\engine\build_entry.dist.__py312、C:\loom_build\builder\build_game.exe.__py312、
     Loom\player_runtime\game_player.dist.__py312 (含 qwindows.dll 校验)。
@@ -472,7 +472,7 @@ LoomHub = 项目管理器 ("解释器名 + Hub", 类似 Unity -> Unity Hub)。
   适合: 给别人看成果、跑演示、性能测试、让 Agent 帮手 (Claude Code 等)。
 
 命令行操作全表 (编辑器内 F12 底部命令行坞 / 远程 Agent):
-  status object_list object_add object_select ... 共 52 条命令,
+  status object_list object_add object_select ... 共 102 条命令,
   每条命令 = 对应一个 GUI 操作, 见《Loom-EAI与HUB-EAI说明书.txt》。
 
 ====================================================================
@@ -641,3 +641,98 @@ Q: 挂了 重力落地 却没落下去?
 关闭时行为与旧版完全一致, TPS 照常实测。低帧率档位/逻辑帧率不达标时
 复选框灰置并提示要求。命令行观测: engine_metrics 查看 frame_buffer /
 render_buffer 命中数。逃生门: LOOM_NO_FRAMEBUF=1 环境变量强制关闭。
+
+
+================================================================================
+附录 E · 环境变量全量清单（beta6 治理版，2026-11-10）
+================================================================================
+口径：以下全部是代码里**真正读取**的 LOOM_* 运行时开关（os.environ.get/os.getenv 实证）。
+写法：set LOOM_XXX=1（cmd） 或 $env:LOOM_XXX="1"（PowerShell）。
+★ = 调试用，**勿在生产/发布环境开启**（会改行为或大幅降帧）。
+
+一、运行模式 / 路径
+  LOOM_DEV                 开发模式标记（放宽部分自检）             默认：不设
+  LOOM_QUIET               静默启动（LoomHub 拉起的编辑器/播放器用） 默认：不设
+  LOOM_GAME_DIR            打包游戏的"游戏目录"强制覆盖（游戏设置.json 定位） 默认：exe 同级
+  LOOM_GAME_ID             打包游戏标识覆盖（用户配置目录分组）      默认：自动生成
+  LOOM_PROJECT_DIR         编辑器工程目录覆盖                        默认：场景所在目录
+  LOOM_USER_ROOT           用户配置根覆盖（测试/便携调试）           默认 %LOCALAPPDATA%\Loom
+  LOOM_REMOTE_MODE         离屏 GL 回读兜底（1/0）。Hub 设置 remote_mode=on 时才注入
+                           ★ 现场 A/B：直连 55-61 FPS / TPS 23.7；兜底 38-41 FPS / TPS 18.9
+  LOOM_FAULTHANDLER        崩溃时 faulthandler 栈落盘（播放器默认开） 默认：播放器开
+  LOOM_NO_CRASHDUMP        关闭崩溃转储                           默认：不设（=开启）
+  LOOM_AUDIO_BACKEND       音频后端选择（如 dummy 用于无声测试）     默认：自动
+
+二、渲染 / 后处理
+  LOOM_POST                后处理开关（1/0）                        默认：跟随质量设置
+  LOOM_POST_STAGE          只跑后处理到指定阶段后停止 —— **崩溃二分工具**：
+                           怀疑 bloom/tonemap 某阶段崩时，逐个阶段试，最后停的那个就是元凶
+  LOOM_BLOOM_STRENGTH      Bloom 强度覆盖                         默认：材质/设置值
+  LOOM_BLOOM_THRESHOLD     Bloom 阈值覆盖                         默认：材质/设置值
+  LOOM_BLOOM_KNEE          Bloom 软膝覆盖                         默认：材质/设置值
+  LOOM_REMOTE_PROFILE      ★ 离屏回读路径的分阶段计时（性能剖析）
+  LOOM_FLICKER_DEBUG       ★ 每帧 GL readback（查闪烁/撕裂；**每帧同步，帧率腰斩**）
+  LOOM_GL_DEBUG            ★ GL 调试输出（驱动/扩展/状态）
+  LOOM_VK_DEVMOUSE         ★ Vulkan 播放器鼠标调试（打印坐标/命中）
+  LOOM_VK_HUD              ★ Vulkan 播放器 HUD（FPS/统计叠加）
+
+三、物理 / 并行 / 计算
+  LOOM_NO_PHYSICS          关闭物理（调试用）
+  LOOM_NO_PARALLEL         关闭并行（测试确定性；test_eai_real 默认设 1）
+  LOOM_NO_SCHED            关闭主线程核调度
+  LOOM_SCHED_WORKERS       调度线程数覆盖
+  LOOM_SWITCH_INTERVAL     线程迁移重测间隔（秒）
+  LOOM_NO_NUMBA            禁用 numba 加速
+  LOOM_NO_SAVE_MIGRATE     不迁移 保存/ -> Projects/（测试用）
+  LOOM_POSE_SOA            姿态 SoA 布局开关（物理桥 _pose_rows 路径）
+  LOOM_LOGIC_SYNC          逻辑与渲染同步执行（关异步逻辑线程）
+  LOOM_AABB_PAR_MIN_WORK   AABB 并行最小工作量阈值
+  LOOM_AABB_POOL_THRESHOLD AABB 对象池阈值
+  LOOM_AABB_DIRTY_POOL_MIN AABB 脏池下限
+  LOOM_BUCKET_PACK         bucket 打包开关（与 LOOM_BUCKET_LEGACY 二选一）
+  LOOM_BUCKET_LEGACY       回退旧 bucket 布局
+  LOOM_NO_DLL              注册表层跳过指定槽位（如 'pipeline'；仅探针用）
+  LOOM_AB_SCENES           A/B 基线场景清单（ab_batch 用）
+  LOOM_AB_ALLOW_NO_VK      A/B 允许无 Vulkan 时降级
+  LOOM_AGENT_PACE_MS       Agent 每步节奏（ms，默认 120）
+  LOOM_PROFILE             运行期性能剖析开关（输出阶段耗时）
+  LOOM_PROFILE_POSE        姿态/物理链路的分段计时（与 LOOM_POSE_SOA 配合看）
+  LOOM_GC_LEGACY           回退旧 GC 分代策略（对象回收排障用）
+
+四、构建 / 发布（tools/ 与 build 脚本）
+  LOOM_ENGINE_VERSION      引擎版本（必须 == Loom/解释器.json，否则 release_github 报分叉并退出）
+  LOOM_HUB_VERSION         Hub 版本（必须 == LoomHub/版本.json，同上）
+  LOOM_BUILD_CONSOLE_MODE  编译版保留控制台
+  LOOM_BUILD_RUNTIME_DIR   build_game --build-runtime 输出目录覆盖
+  LOOM_HUB_NO_UPDATE_CHECK 关闭 Hub 自更新后台检查（测试/CI 用）
+
+五、契约/内部常量（**不是**运行时开关，勿手动设）
+  LOOM_ABI_* / LOOM_MODULE_* / LOOM_ERR_* / LOOM_PHYSICS_API / LOOM_SCRIPT_API /
+  LOOM_PIPE_API / LOOM_DTYPE_* / LOOM_LIGHT_MODE_* —— 这些出现在 C 头文件与能力探测里，
+  由模块加载器/注册表读取，用户设置无效。
+
+================================================================================
+附录 F · 能力操作索引（F-04 实测 7/10 零命中项，B/C/D 交付）
+================================================================================
+每个名字给出「是什么 / 在哪儿 / 怎么用」，照此可直接操作：
+
+| 能力名 | 是什么 | 在哪儿（实现） | 怎么用 |
+|---|---|---|---|
+| frame_plan | 每帧 Pass 执行计划（把 Pass 图编排成本帧顺序） | Loom/loom_pass.py（loom_pass_gl.py 为 GL 后端） | 编辑器直接生效；脚本可读 engine.frame_plan（诊断用）；相关 EAI：render_api |
+| loom_pass | Pass 图（后处理链）对象/模块 | Loom/loom_pass.py | 同上；新增 Pass 见该文件注册表 |
+| bloom | 泛光后处理 | Loom/loom_pass.py + Loom/loom_post.py | 设置/材质里开关与强度；env LOOM_BLOOM_STRENGTH/THRESHOLD/KNEE |
+| tonemap | 色调映射（后处理末端） | Loom/loom_pass.py + Loom/loom_post.py | env LOOM_POST=1/0 总开关；分阶段排障用 LOOM_POST_STAGE |
+| LOOM_POST | 后处理总开关 env | Loom/loom_post.py | set LOOM_POST=0 关掉全部后处理对比 |
+| assets.json | 项目资产索引文件（资产面板/guid 台账） | Loom/loom_assets.py（索引缓存 _CACHE） | EAI：asset_list / asset_get / assets；文件在 <工程>/assets.json |
+| loom_assets | 资产索引模块（guid 解析、校验、去重） | Loom/loom_assets.py | EAI：asset_import（导入）/asset_apply（应用材质）/asset_place（摆放）/asset_save（存资产） |
+| asset_import | 导入外部资源为项目资产 | Loom/agent_commands.py（@command asset_import） | 命令行坞/Agent：asset_import {path, type}；先 asset_list 看现状 |
+| min_engine_version | 场景要求的最低引擎版本（加载闸门） | Loom/sceneio.py（check_engine_version，beta6 C1/D7） | 场景 JSON 里写 min_engine_version；低于要求抛 SceneVersionError（不再静默加载） |
+| bucket_pack | AABB 宽相 bucket 打包（碰撞加速结构） | Loom/fastpath.py（env LOOM_BUCKET_PACK / LOOM_BUCKET_LEGACY） | 默认开；排障时 set LOOM_BUCKET_LEGACY=1 回退旧布局对比 |
+| AVX2 | 计算内核的 SIMD 路径（C 内核） | Loom/ckernels/loom_kernels.c + Loom/fastpath.py | 自动按 CPU 能力选择；验证见 tests/test_aabb_simd.py |
+| _pose_rows | 物理姿态 SoA 的行数（每行一个刚体姿态） | Loom/physics_bridge.py（env LOOM_POSE_SOA） | 内部实现；排障用 LOOM_POSE_SOA=0/1 切换布局对比 |
+
+自检命令（任何人可复跑）：
+  python -c "import agent_commands as ac; print(len(ac.command_names()))"   -> 102
+  python -c "import sceneio; print(sceneio.SCENE_VERSION)"                  -> 11
+  python -c "import glob; print(len(glob.glob('tests/test_*.py')))"         -> 133
+  grep -n "LOOM_FLICKER_DEBUG" Loom/*.py                                    -> 调试开关就在代码里，生产勿开

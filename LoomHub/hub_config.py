@@ -451,18 +451,6 @@ def remove_interpreter(info):
     return lst
 
 
-# ---------------- 项目名清洗 ----------------
-_FILENAME_ILLEGAL = set('\\/:*?"<>|')   # Windows 文件名非法字符
-
-
-def sanitize_name(name):
-    """把项目名清洗为 Windows 安全的文件名字段: 非法字符 (\\/:*?"<>|) 替换为 _,
-    再去首尾空白. 返回清洗后字符串 (可能为空, 由调用方决定是否拦截).
-    全角符号 (如中文冒号：) 不是 Windows 非法字符, 保持原样."""
-    return ''.join('_' if ch in _FILENAME_ILLEGAL else ch
-                   for ch in str(name)).strip()
-
-
 # ---------------- 项目配置 (projects.json) ----------------
 def load_projects():
     _maybe_migrate_ledger(PROJECTS_FILE, LEGACY_PROJECTS_FILE, 'projects')

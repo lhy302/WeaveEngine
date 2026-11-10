@@ -10,9 +10,11 @@ r"""pipeline_glue.py — 基座 ↔ pipeline.dll 接线层 (M2a-3, 2026-09-08)
   · module_loader/module_registry = M1 契约层 (加载/校验/回退)。
   · pipeline.dll = 计算层 (C, 无 GIL)。
 
-逃生门 (两层, 分层不重叠):
-  · LOOM_NO_PIPELINE=1 → 本模块整体禁用 (engine 回退现行 Python 路径)。
-  · LOOM_NO_DLL='pipeline' → 注册表层跳过该槽位 (get 抛 ModuleNotAvailable)。
+逃生门 (2026-10-16 B2 退役后只剩一层):
+  · LOOM_NO_PIPELINE=1 已**退役**（见 handle() 的 ★B2 说明）—— pipeline 是官方
+    组件，缺失/加载失败一律硬 raise，不再有"整体禁用 + 回退 Python 路径"。
+  · LOOM_NO_DLL='pipeline' → 注册表层跳过该槽位 (get 抛 ModuleNotAvailable)，
+    仅注册表探针使用，生产不设。
 
 线程安全: 句柄在首次使用时惰性组装并缓存; ctypes 调用本身无共享状态。
 """
