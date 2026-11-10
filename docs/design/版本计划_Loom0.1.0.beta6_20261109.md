@@ -474,3 +474,26 @@ R04 复核时发现两件事，直接推翻了它自己的一条证据，也暴�
 5) `_env_float` 接受 nan/inf → 直入 `write_buffer` → **整屏 NaN**
 
 **P3**：`record_asset_error` O(N²)（5000 条 313ms）；`LOOM_FAULTHANDLER` 非法值当路径建文件且游戏档不生效；`_anim_fallback_models` 停播后仍强引用已删模型；`parse_version('0.1.0-beta6')=None` → D7 闸门 **fail-open**；`_skybox_ref` 仅 engine/editor；VK 不认 `LOOM_POST_STAGE`。
+
+### 9.24 倒查推翻「VK 已由 FramePlan 驱动 / 语义面 14→6」（2026-11-10，V-01）
+
+**V-01 用「改 plan、看输出是否跟着变」的反例矩阵验证，结论相反：**
+
+| 反例（ab_sky，MAE vs 同后端基线） | GL | VK |
+|---|---|---|
+| 删 `main` pass | 0.63680 | **0.00000** |
+| `main`↔`sky` 换序 | 0.26022 | **0.00000** |
+| `plan.clear` 改红 | 0.22379 | **0.00000** |
+| `main.draws=skybox` | 0.06324 | **0.00000** |
+| `main load=load` | 0.63026 | **0.00000** |
+| `depth.test=False` | 0.06089 | **0.00000** |
+
+**结论**：VK 只是**按 id 读存在性/取目标名**（11 处引用，**无一处遍历 `plan.passes` 执行**），plan 被改后 VK 输出完全不变。因此：
+- 「VK 由共享描述驱动」**不成立**（仅存在性/后处理参数/目标名部分生效）；
+- 「语义面 14 → 6」**不成立**：14 项未共享一项未消除，所谓 6 是**重新分桶并丢弃 3 项**（U1 目标分配 / U12 mip / U13 后处理管线）后的口径变化；真实共享仅 3 类（后处理参数与开关、后处理段集合与顺序、pass 存在性）。
+
+**成立的部分**：后处理参数确实两端共享（改 threshold 两端 ΔMAE 均 0.00165）；假 `depth_mask` 已删；`LOOM_POST_STAGE=0` 两端都真关（与 `LOOM_POST=0` 逐像素同哈希）。
+
+**新增 P2**：`plan.clear`/`load` 对 VK 无效；`sky.raster.cull` 两端相反（GL 被 `loom_render.py:188-189` 内部重设覆盖）；`TargetDecl.format/scale` 只部分生效；`LOOM_POST_STAGE=1≡2`（bright 输出不被 tonemap 消费，档 2 死档）。
+
+→ 处置：**要求 R01 真正实现「遍历 plan.passes 执行」**，并以「改 plan 必须改变 VK 输出」为验收硬门；在此之前不得再宣称抽象化达成。
