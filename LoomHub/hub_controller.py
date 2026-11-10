@@ -42,7 +42,10 @@ class HubController:
     """LoomHub 全部业务动作 + 状态 (与显示无关). UI 通过本实例读写一切."""
 
     def __init__(self):
-        self.install_root = cfg.DEFAULT_INSTALL_ROOT
+        # 2026-11-10 a/b): 安装根 = 用户层保存值 > 自适应默认
+        # （Program Files 不可写时自动落到 %LOCALAPPDATA%\Programs\Loom）
+        self.install_root = cfg.saved_install_root() or cfg.default_install_root()
+        self.install_root_is_user_level = not cfg.root_writable(cfg.DEFAULT_INSTALL_ROOT)
         # 2026-11-09: 启动即按各目录的 解释器.json 重识别（引擎可能被原地替换成编译版）
         try:
             self.interpreters, _ = cfg.refresh_interpreters()
@@ -114,10 +117,12 @@ class HubController:
 
     # ---------------- 解释器动作 ----------------
     def scan_interpreters(self):
-        """扫描解释器安装根 (C:\\Program Files\\Loom), 全部登记."""
-        found = cfg.scan_install_root()
+        """扫描**所有**安装根（Program Files + 用户目录 + 当前根），合并去重后登记。"""
+        roots = self.scan_roots()
+        found = cfg.scan_install_roots(roots)
         if not found:
-            self.set_msg("C:\\Program Files\\%s 下没有找到已安装解释器" % cfg.APP_NAME, 'dim')
+            self.set_msg("扫描了 %s，没有找到已安装解释器"
+                         % (" / ".join(roots)), 'dim')
             return
         for it in found:
             cfg.add_interpreter(it)
@@ -787,17 +792,58 @@ class HubController:
         self._refresh()
         self.set_msg("已从列表移除项目 (未删除磁盘文件)", 'dim')
 
-    def set_install_root(self, root):
-        """改安装根目录. 返回是否成功 (目录必须存在)."""
+    def set_install_root(self, root, create=False):
+        """改安装根目录并**持久化**（写 Hub 用户层设置）。
+
+        create=True: 目录不存在时自动创建（UI 会先问用户）；
+        写设置失败只提示不阻断（本次内存生效）。
+        """
         root = (root or "").strip()
         if not root:
+            self.set_msg("安装根不能为空", 'err')
             return False
-        if os.path.isdir(root):
-            self.install_root = root
-            self.set_msg("安装根已改为: %s" % root)
+        if not os.path.isdir(root):
+            if not create:
+                self.set_msg("目录不存在: %s（可勾选自动创建）" % root, 'err')
+                return False
+            try:
+                os.makedirs(root, exist_ok=True)
+            except OSError as e:
+                self.set_msg("无法创建安装根 %s: %s" % (root, e), 'err')
+                return False
+            self.set_msg("已创建安装根: %s" % root, 'dim')
+        self.install_root = os.path.abspath(root)
+        try:
+            s = cfg.load_hub_settings()
+            s['install_root'] = self.install_root
+            cfg.save_hub_settings(s)                 # 只写用户层 delta
+        except (OSError, ValueError) as e:
+            self.set_msg("安装根已改（本次生效），但保存设置失败: %r" % (e,), 'err')
             return True
-        self.set_msg("目录不存在: %s" % root, 'err')
-        return False
+        self.set_msg("安装根已改为: %s" % self.install_root)
+        return True
+
+    def install_root_note(self):
+        """给 UI 的一句说明：当前根在用户目录 = 无需管理员。"""
+        if cfg.root_writable(cfg.DEFAULT_INSTALL_ROOT) and \
+                os.path.normcase(os.path.abspath(self.install_root)).startswith(
+                    os.path.normcase(os.path.abspath(cfg.DEFAULT_INSTALL_ROOT))):
+            return "当前安装根：%s（系统目录，可能需要管理员）" % self.install_root
+        return "当前安装根：%s（用户目录，无需管理员）" % self.install_root
+
+    def scan_roots(self):
+        """扫描覆盖的根：Program Files + 用户目录 + 当前安装根（去重）。"""
+        roots, seen = [], set()
+        for r in (cfg.DEFAULT_INSTALL_ROOT, cfg.user_install_root(),
+                  self.install_root):
+            if not r:
+                continue
+            k = os.path.normcase(os.path.abspath(r))
+            if k in seen:
+                continue
+            seen.add(k)
+            roots.append(r)
+        return roots
 
 
 # =====================================================================

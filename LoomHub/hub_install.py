@@ -9,6 +9,7 @@ hub_install.py — LoomHub 解释器安装
 """
 import json
 import os
+import shutil
 import zipfile
 
 from hub_config import (DEFAULT_INSTALL_ROOT, META_NAME, add_interpreter,
@@ -121,6 +122,15 @@ def _install_from_zip_impl(zip_path, version, target_root=None):
         with zipfile.ZipFile(zip_path) as zf:
             _safe_extract(zf, target)
     except (zipfile.BadZipFile, OSError, InstallError) as e:
+        # 2026-11-10 e): 失败必须清掉半成品（否则 <根>/<版本> 会留垃圾目录，
+        # 下次同版本安装还会撞上"目录已存在/半残"的假状态）
+        shutil.rmtree(target, ignore_errors=True)
+        if isinstance(e, PermissionError) or getattr(e, 'winerror', None) == 5:
+            raise InstallError(
+                "权限不足：无法写入 %s。\n"
+                "  · 需要管理员权限（以管理员身份运行 LoomHub），或\n"
+                "  · 点「改安装根」切到用户目录（如 %s），该目录无需管理员。"
+                % (target_root, __import__('hub_config').user_install_root()))
         raise InstallError("解压失败: %s" % e)
 
     # 情形 1: target 直接有解释器
@@ -151,8 +161,9 @@ def _install_from_zip_impl(zip_path, version, target_root=None):
             # 发布包结构：登记 target/Loom，不动其他文件
             add_interpreter(sub_info)
             return sub
-        # 标准包内包裹：提升到 target
-        import shutil
+        # 标准包内包裹：提升到 target（shutil 已在模块顶部导入；
+        # 2026-11-10: 函数内再 import 会把它变成局部变量，使前面的异常清理
+        # 分支在赋值前引用 -> UnboundLocalError）
         for item in os.listdir(sub):
             s = os.path.join(sub, item)
             d = os.path.join(target, item)

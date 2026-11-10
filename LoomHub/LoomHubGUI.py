@@ -57,6 +57,22 @@ def _load_font(size):
     return pygame.font.Font(None, size)
 
 
+def _confirm_yes_no(prompt, title="LoomHub"):
+    """tkinter 是/否确认框（与 _input_string 同款：临时隐藏 pygame 窗口，避免输入法异常）。"""
+    import tkinter as tk
+    from tkinter import messagebox
+    root = tk.Tk()
+    root.withdraw()
+    root.attributes('-topmost', True)
+    try:
+        root.lift()
+        root.focus_force()
+        root.update()
+        return bool(messagebox.askyesno(title, prompt, parent=root))
+    finally:
+        root.destroy()
+
+
 def _input_string(prompt, initial="", title="LoomHub"):
     """tkinter 输入框. 弹出前临时隐藏 pygame 窗口, 输入完恢复.
 
@@ -373,9 +389,19 @@ class LoomHubGUI(IHubView):
         if self._button((x + 18 + bw2, by2, bw2, 24), "移除"):
             self.ctrl.remove_interpreter(self.sel_interp)
         if self._button((x + 24 + 2 * bw2, by2, bw2, 24), "改安装根"):
-            new_root = _input_string("安装根目录 (绝对路径)", initial=self.ctrl.install_root)
+            # 2026-11-10 g): 真目录选择器；选到不存在的目录 -> 询问创建；失败退回手输
+            import filedialog
+            new_root = filedialog.choose_directory(
+                "选择引擎安装根目录", initial_dir=self.ctrl.install_root)
+            if new_root is None:
+                new_root = _input_string("安装根目录 (绝对路径)",
+                                         initial=self.ctrl.install_root)
             if new_root is not None:
-                self.ctrl.set_install_root(new_root)
+                create = False
+                if not os.path.isdir(new_root):
+                    create = _confirm_yes_no("目录不存在：\n%s\n\n是否创建？" % new_root,
+                                             "目录不存在")
+                self.ctrl.set_install_root(new_root, create=create)
         self._text("说明: .zip 解压到安装根/<版本号>; 版本目录下须含 解释器.json",
                    x + 12, by2 + 30, DIM, self.font_s)
 

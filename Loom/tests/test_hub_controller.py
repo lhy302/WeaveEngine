@@ -103,7 +103,9 @@ def t_scan_interpreters():
         added = []
         old_scan, old_add = hc.cfg.scan_install_root, hc.cfg.add_interpreter
         try:
-            hc.cfg.scan_install_root = lambda: [
+            # 2026-11-10: scan_interpreters 现在按多个根调用 scan_install_root(root)，
+            # 桩要接受该参数（多根结果会按 dir 去重）
+            hc.cfg.scan_install_root = lambda root=None: [
                 {"name": "Loom", "version": "1.0.0", "kind": "py",
                  "dir": os.path.join(tmp, "1.0.0")},
                 {"name": "Loom", "version": "2.0.0", "kind": "exe",
@@ -119,7 +121,7 @@ def t_scan_interpreters():
         ctrl2 = _mk_ctrl()
         old_scan2 = hc.cfg.scan_install_root
         try:
-            hc.cfg.scan_install_root = lambda: []
+            hc.cfg.scan_install_root = lambda root=None: []
             ctrl2.scan_interpreters()
             check("无发现 -> dim + 提示", ctrl2.msg_level == 'dim'
                   and "没有找到" in (ctrl2.msg or ""), ctrl2.msg)

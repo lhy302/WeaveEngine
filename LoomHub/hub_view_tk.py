@@ -182,12 +182,25 @@ class TkHubView(IHubView):
 
     # ---------------- 动作转发 (选中 -> controller) ----------------
     def _change_root(self):
-        from tkinter import simpledialog
-        v = simpledialog.askstring("改安装根", "安装根目录 (绝对路径):",
-                                   initialvalue=self.ctrl.install_root,
-                                   parent=self.root)
-        if v is not None:
-            self.ctrl.set_install_root(v)
+        """g) 改安装根：真目录选择器；可选不存在的目录 -> 询问创建；失败退回手输。"""
+        import filedialog
+        from tkinter import messagebox, simpledialog
+        v = filedialog.choose_directory("选择引擎安装根目录",
+                                        initial_dir=self.ctrl.install_root)
+        if v is None:                     # 现代/经典对话框都失败 -> 退回手输
+            v = simpledialog.askstring("改安装根", "安装根目录 (绝对路径):",
+                                       initialvalue=self.ctrl.install_root,
+                                       parent=self.root)
+        if v is None:
+            return
+        create = False
+        if not os.path.isdir(v):
+            if not messagebox.askyesno(
+                    "目录不存在", "目录不存在：\n%s\n\n是否创建？" % v):
+                self.ctrl.set_msg("已取消：目录不存在", 'dim')
+                return
+            create = True
+        self.ctrl.set_install_root(v, create=create)
 
     def _install_zip(self):
         """2026-10-19: 选 zip → 预览元数据 + 安装位置 → 确认安装."""

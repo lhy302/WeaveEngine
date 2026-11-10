@@ -214,6 +214,74 @@ def discover_interpreter(directory):
             "python_version": str(meta.get('python_version') or '').strip()}
 
 
+def user_install_root():
+    r"""非管理员可用的引擎安装根: %LOCALAPPDATA%ProgramsLoom。
+
+    Hub 自身安装器早就支持用户级（PrivilegesRequired=lowest + {autopf}），
+    但引擎安装根一直是写死 Program Files —— 两套口径不一致（2026-11-10 修）。
+    """
+    base = os.environ.get('LOCALAPPDATA') or os.path.expanduser('~')
+    return os.path.join(base, 'Programs', APP_NAME)
+
+
+def root_writable(path):
+    """path（或它最近的已存在祖先）是否可写。只看属性，不真的创建。"""
+    try:
+        p = os.path.abspath(str(path or ''))
+    except (OSError, ValueError):
+        return False
+    if not p:
+        return False
+    while p and not os.path.exists(p):
+        parent = os.path.dirname(p)
+        if parent == p:
+            break
+        p = parent
+    return bool(p) and os.path.isdir(p) and os.access(p, os.W_OK)
+
+
+def default_install_root():
+    r"""默认引擎安装根：Program Files 可写就用它；不可写 -> 用户目录。
+
+    2026-11-10 b): 非管理员机器上 C:\Program Files\Loom 不可写，
+    第一次装引擎必然 WinError 5 —— 启动时自适应到用户目录，不再让用户撞墙。
+    """
+    if root_writable(DEFAULT_INSTALL_ROOT):
+        return DEFAULT_INSTALL_ROOT
+    u = user_install_root()
+    if root_writable(u):
+        return u
+    return DEFAULT_INSTALL_ROOT
+
+
+def saved_install_root():
+    """用户层保存的安装根（空串 = 没设过）。"""
+    try:
+        return str(load_hub_settings().get('install_root') or '').strip()
+    except (OSError, ValueError):
+        return ''
+
+
+def scan_install_roots(roots):
+    """多根扫描 + 按 dir 去重 + 版本升序（f: 同时覆盖 Program Files 与用户目录）。"""
+    out, seen = [], set()
+    for r in roots:
+        if not r:
+            continue
+        try:
+            found = scan_install_root(r)
+        except OSError:
+            continue
+        for info in found:
+            key = os.path.normcase(os.path.abspath(info.get('dir') or ''))
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(info)
+    out.sort(key=lambda x: _version_key(x.get('version', '0')))
+    return out
+
+
 def scan_install_root(root=DEFAULT_INSTALL_ROOT):
     r"""扫描解释器安装根目录 (C:\Program Files\Loom), 按版本号子目录逐个分析.
     返回已安装解释器列表 (按版本号升序)."""
@@ -222,10 +290,18 @@ def scan_install_root(root=DEFAULT_INSTALL_ROOT):
         return result
     for entry in sorted(os.listdir(root)):
         sub = os.path.join(root, entry)
-        if os.path.isdir(sub):
-            info = discover_interpreter(sub)
-            if info:
-                result.append(info)
+        if not os.path.isdir(sub):
+            continue
+        info = discover_interpreter(sub)
+        if info is None:
+            # 2026-11-10 d): 自家发布包布局是 <root>/<ver>/Loom/解释器.json
+            # （顶层还有 Loom.bat / python/），旧实现只看 <sub>/解释器.json ->
+            # 对真实发布包一律返回 []，"扫描"按钮形同虚设。
+            inner = os.path.join(sub, 'Loom')
+            if os.path.isdir(inner):
+                info = discover_interpreter(inner)
+        if info:
+            result.append(info)
     result.sort(key=lambda x: _version_key(x.get('version', '0')))
     return result
 
@@ -839,6 +915,8 @@ DEFAULT_HUB_SETTINGS = {
     # 因此**默认 off**（不再无条件注入 LOOM_REMOTE_MODE=1）；on 留给确实白屏的机器，
     # auto 留给引擎侧自动降级（beta5 的 E2 再做，Hub 侧对 auto 也不注入）。
     "remote_mode": "off",
+    # 2026-11-10: 引擎安装根（空 = 用自适应默认）。写用户层 delta，重启后仍生效。
+    "install_root": "",
     # 2026-11-09 H2: 自更新检查（后台线程 / 24h 最多一次 / 失败静默）
     "check_update_enabled": True,
 }
