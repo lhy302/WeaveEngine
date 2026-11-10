@@ -651,6 +651,14 @@ def t_project_assets():
         check("asset_import 源文件不存在 -> 拒绝", r['ok'] is False)
         r = run('asset_import', {'type': '乱写'}, expect_ok=False)
         check("asset_import 非法 type -> 拒绝", r['ok'] is False)
+        # F-02: 用户层 delta 的唯一写入口（新增命令必须进覆盖率闸门）
+        r = res('asset_user_override', {'guid': guid, 'wrap': 'clamp',
+                                        'max_size': 64})
+        check("asset_user_override 写用户层 delta",
+              r.get('guid') == guid and r.get('effective_import', {})
+              .get('wrap') == 'clamp', r)
+        r = res('asset_user_override', {'guid': guid, 'clear': True})
+        check("asset_user_override clear", r.get('cleared') is True, r)
     finally:
         ED._scene_path = old_sp
 

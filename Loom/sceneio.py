@@ -96,15 +96,23 @@ class SceneVersionError(ValueError):
 def parse_version(text):
     """版本串 -> 可比较 5 元组; 无法解析 -> None.
 
-    '0.1.0.beta6' -> (0, 1, 0, 0, 6)   第 4 位 0 = 预发布 (beta)
-    '0.1.0'       -> (0, 1, 0, 1, 0)   第 4 位 1 = 正式版 (同号正式版 > beta)
-    '1.2'         -> (1, 2, 0, 1, 0)
+    '0.1.0.beta6' / '0.1.0-beta6' -> (0, 1, 0, 0, 6)   第 4 位 0 = 预发布
+    '0.1.0'                       -> (0, 1, 0, 1, 0)   第 4 位 1 = 正式版
+    '1.2'                         -> (1, 2, 0, 1, 0)
+    '1.2.3+build.5'               -> (1, 2, 3, 1, 0)   (丢弃 '+' 之后的构建元数据)
+
+    R6 F-02: 分隔符统一 ('.' / '-' / '_' 等价) —— 旧实现把 '0.1.0-beta6'
+    判成不可解析, 而 check_engine_version 那时是"解析失败即放行" -> 闸门静默
+    fail-open。现在解析失败在**要求侧**是拒绝 (见 check_engine_version)。
     """
     if not isinstance(text, str):
         return None
     s = text.strip().lower()
     if not s:
         return None
+    s = s.split('+', 1)[0]              # 构建元数据不影响比较
+    for ch in ('-', '_'):
+        s = s.replace(ch, '.')
     nums = []
     beta = None
     for part in s.split('.'):
@@ -119,7 +127,7 @@ def parse_version(text):
                 return None
             beta = int(tail) if tail else 0
         else:
-            return None                 # 未知段 (rc1/alpha/日期) -> 不做比较
+            return None                 # 未知段 (rc1/alpha/日期) -> 不可判定
     if not nums:
         return None
     while len(nums) < 3:
@@ -142,7 +150,9 @@ def check_engine_version(data, engine_version=None):
     """加载前版本闸门. 不满足抛 SceneVersionError(带原因), 通过返回 True.
 
     - 无 min_engine_version (旧场景 / Hub 写出的场景) -> 不设闸 (向后兼容);
-    - 版本串不可解析 -> 打印告警后放行 (不因脏数据把用户挡在场景外);
+    - min_engine_version **不可解析** -> 拒绝 (R6 F-02: 旧实现"解析失败即放行"
+      等于闸门静默 fail-open —— 更旧的引擎会带着未知字段静默加载);
+    - 引擎自身版本不可解析 -> 显式告警后放行 (无法比较; 但不静默, 打一行);
     - 当前引擎低于要求 -> 拒绝, 原因里同时给出"要求版本 / 当前版本".
     """
     if not isinstance(data, dict):
@@ -152,11 +162,17 @@ def check_engine_version(data, engine_version=None):
         return True
     need = need.strip()
     cur = engine_version if engine_version is not None else ENGINE_VERSION
-    if parse_version(need) is None or parse_version(cur) is None:
-        print('[场景] 版本号无法解析 (min_engine_version=%r, 当前=%r): 跳过版本闸门'
-              % (need, cur))
+    need_p = parse_version(need)
+    if need_p is None:
+        raise SceneVersionError(
+            '场景 min_engine_version=%r 无法解析: 拒绝加载 (无法判定版本要求时'
+            '不放行, 以免旧引擎静默丢字段; 请修正该字段或删掉它)' % (need,))
+    cur_p = parse_version(cur)
+    if cur_p is None:
+        print('[场景] 当前引擎版本 %r 无法解析: 无法比较 min_engine_version=%r,'
+              ' 本次放行 (请修正 解释器.json 的 version)' % (cur, need))
         return True
-    if version_lt(cur, need):
+    if cur_p < need_p:
         raise SceneVersionError(
             '场景要求引擎 >= %s, 当前引擎 %s: 拒绝加载 (旧引擎读新场景会静默丢字段, '
             '请先升级引擎, 或用旧版引擎"导出兼容场景"后重试)' % (need, cur))
@@ -184,27 +200,71 @@ def asset_context(base_dir=None, create=False):
         return None
 
 
+# F-02: 资产问题上限（超出只计数，不再 append/print）——旧实现 item in errs
+# 是 O(N) 扫描 -> 5000 条 313ms；现在 set 去重 O(1) + 打印上限 200。
+ASSET_ERROR_LIMIT = 200
+
+
+def reset_asset_errors(engine):
+    """清空资产问题（换场景/新建场景统一入口；连同去重键与溢出计数）。"""
+    try:
+        engine._asset_errors = []
+        engine._asset_error_keys = set()
+        engine._asset_error_overflow = 0
+    except Exception:
+        pass
+
+
 def record_asset_error(engine, where, guid, reason):
-    """把资产解析失败/过期挂到引擎（形状对齐 _skybox_valid/_skybox_error）。"""
+    """把资产解析失败/过期挂到引擎（形状对齐 _skybox_valid/_skybox_error）。
+
+    O(1) 追加：去重键放在 set 里（不再线性扫描列表）；超过 ASSET_ERROR_LIMIT
+    只累加 overflow 计数，不 append、不打印（避免脏场景刷屏 + 二次方耗时）。
+    """
     if not reason:
         return
     try:
         errs = getattr(engine, '_asset_errors', None)
         if errs is None:
-            engine._asset_errors = errs = []
+            errs = []
+            engine._asset_errors = errs
+            engine._asset_error_keys = set()
+            engine._asset_error_overflow = 0
+        keys = getattr(engine, '_asset_error_keys', None)
+        if not isinstance(keys, set):
+            keys = set(errs)
+            engine._asset_error_keys = keys
     except Exception:
-        errs = []
+        return
     gid = guid if isinstance(guid, str) else None
     item = (str(where), gid, str(reason))
-    if item in errs:
+    if item in keys:
+        return
+    keys.add(item)
+    if len(errs) >= ASSET_ERROR_LIMIT:
+        try:
+            engine._asset_error_overflow = int(
+                getattr(engine, '_asset_error_overflow', 0) or 0) + 1
+        except Exception:
+            pass
         return
     errs.append(item)
     print('[资产] %s: %s%s' % (where, reason, ('  (guid=%s)' % gid) if gid else ''))
 
 
 def asset_errors(engine):
-    """引擎上累积的资产问题 [(where, guid, reason)]（只读副本）。"""
+    """引擎上累积的资产问题 [(where, guid, reason)]（只读副本，已截断到上限）。"""
     return list(getattr(engine, '_asset_errors', None) or [])
+
+
+def asset_error_count(engine):
+    """资产问题总数（含超出上限被折叠的计数）。"""
+    errs = getattr(engine, '_asset_errors', None) or []
+    try:
+        over = int(getattr(engine, '_asset_error_overflow', 0) or 0)
+    except Exception:
+        over = 0
+    return len(errs) + over
 
 
 def _keep_slot_ref(mat, slot, ref):
@@ -286,13 +346,13 @@ def asset_refs_kept(engine):
 
 def asset_issue_notice(engine, where='打开'):
     """给编辑器/播放器的一句可见提示（没有资产问题返回 None）。"""
-    errs = asset_errors(engine)
+    n_err = asset_error_count(engine)
     kept = asset_refs_kept(engine)
-    if not errs and not kept:
+    if not n_err and not kept:
         return None
     parts = []
-    if errs:
-        parts.append('%d 条资产问题' % (len(errs),))
+    if n_err:
+        parts.append('%d 条资产问题' % (n_err,))
     if kept:
         parts.append('%d 条失效引用已保留（保存不会改写）' % (kept,))
     return '资产：%s —— scene_assets_check 可查看明细' % ('，'.join(parts))
@@ -1842,10 +1902,7 @@ def scene_from_dict(engine, data, camera_out=None, base_dir=None, ctx=None):
     data = migrate(data)
     if ctx is None:
         ctx = asset_context(base_dir)
-    try:
-        engine._asset_errors = []          # 每次加载重置（跨场景不累积）
-    except Exception:
-        pass
+    reset_asset_errors(engine)             # 每次加载重置（跨场景不累积，含去重键）
     # 2026-11-07: 父链成环 -> 拒绝加载 (成环对象无根, DFS 会静默丢整棵).
     # 必须在清空/重建引擎状态之前校验, 保证失败时旧场景不被破坏.
     _objects_in = data.get('objects', [])
@@ -1923,11 +1980,6 @@ def scene_from_dict(engine, data, camera_out=None, base_dir=None, ctx=None):
         print('[场景] 资产问题 %d 条（详见上文；EAI 命令 scene_assets_check 可查）'
               % (len(_errs),))
     return models
-
-
-def scene_asset_summary(engine):
-    """保存/加载后给上层的可见提示文本（无问题返回 None）。见 asset_issue_notice。"""
-    return asset_issue_notice(engine, '保存')
 
 
 def migrate(data):

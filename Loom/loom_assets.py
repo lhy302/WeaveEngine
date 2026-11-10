@@ -96,13 +96,21 @@ def warn_once(key, msg):
     return True
 
 
-def reset_caches():
-    """测试用: 清空索引缓存与告警去重。"""
-    _CACHE.clear()
-    _WARNED.clear()
-
-
 # ---------------------------------------------------------------- 路径与校验
+
+def _valid_root(root):
+    """项目根规范化：空/None -> None（**禁止**把 '' 当 CWD 写 Assets/）。
+
+    F-02: 旧行为 save_index('') = 往当前目录写 Assets/assets.json，
+    编辑器未保存场景时会污染仓库根。所有写入口统一走这里。
+    """
+    if root is None:
+        return None
+    s = str(root).strip()
+    if not s:
+        return None
+    return os.path.abspath(s)
+
 
 def assets_dir(root):
     return os.path.join(os.path.abspath(root), ASSETS_DIR)
@@ -216,6 +224,43 @@ def _warn_text(warns):
             % (len(warns), '; '.join(str(w) for w in warns[:3])))
 
 
+def _index_snapshot(root):
+    """索引读盘 + 校验的**单次快照**（按 mtime/size 缓存，避免重复解析/校验）。
+
+    F-02: 校验改为纯字符串判定后，10k 条一次解析 ≈ 100ms；这里再把
+    load_index / inspect_index / asset_list 的重复读盘合并成一次快照。
+    """
+    p = index_path(root)
+    try:
+        st = os.stat(p)
+    except OSError:
+        return {'state': 'missing', 'data': None, 'warnings': [],
+                'reason': '资产索引不存在: %s' % p, 'path': p, 'stat': None}
+    key = (p, st.st_mtime_ns, st.st_size)
+    hit = _CACHE.get(key)
+    if hit is not None:
+        return hit
+    try:
+        with open(p, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+    except (OSError, ValueError) as e:
+        snap = {'state': 'corrupt', 'data': None, 'warnings': [],
+                'reason': '资产索引损坏 (%r): %s' % (e, p), 'path': p, 'stat': st}
+        _CACHE[key] = snap
+        return snap
+    ok, warns = validate_index(data, root)
+    if not ok:
+        snap = {'state': 'invalid', 'data': None, 'warnings': warns,
+                'reason': '; '.join(warns[:3]), 'path': p, 'stat': st}
+    else:
+        snap = {'state': ('partial' if warns else 'ok'), 'data': data,
+                'warnings': list(warns),
+                'reason': (_warn_text(warns) if warns else None),
+                'path': p, 'stat': st}
+    _CACHE[key] = snap
+    return snap
+
+
 def load_index(root):
     """读项目层索引 -> (index|None, ok, reason).
 
@@ -223,29 +268,15 @@ def load_index(root):
     ok=True + reason 非空 = **部分可用**（个别坏条目已剔除，reason 是告警文本）。
     逐条容错（Q-B1-2=A）：一条坏条目不再让整本索引作废。
     """
-    p = index_path(root)
-    try:
-        st = os.stat(p)
-    except OSError:
-        return None, False, '资产索引不存在: %s' % p
-    key = (p, st.st_mtime_ns, st.st_size)
-    hit = _CACHE.get(key)
-    if hit is not None:
-        data, warns = hit
-        return data, True, _warn_text(warns)
-    try:
-        with open(p, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-    except (OSError, ValueError) as e:
-        return None, False, '资产索引损坏 (%r): %s' % (e, p)
-    ok, warns = validate_index(data, root)
-    if not ok:
-        return None, False, '; '.join(warns[:3])
-    if warns:
-        warn_once(('idx-partial', p, st.st_mtime_ns),
-                  '[资产] ' + _warn_text(warns) + '（其余条目照常可用）')
-    _CACHE[key] = (data, list(warns))
-    return data, True, _warn_text(warns)
+    snap = _index_snapshot(root)
+    if snap['state'] in ('missing', 'corrupt', 'invalid'):
+        return None, False, snap['reason']
+    if snap['warnings']:
+        _st = snap.get('stat')
+        warn_once(('idx-partial', snap['path'],
+                   getattr(_st, 'st_mtime_ns', 0) if _st is not None else 0),
+                  '[资产] ' + _warn_text(snap['warnings']) + '（其余条目照常可用）')
+    return snap['data'], True, snap['reason']
 
 
 def inspect_index(root):
@@ -255,24 +286,39 @@ def inspect_index(root):
            / partial（部分条目被剔除、其余可用）/ ok。
     供 asset_list / scene_assets_check 区分「缺文件」与「文件在但坏了」。
     """
-    p = index_path(root)
-    if not os.path.isfile(p):
-        return {'state': 'missing', 'reason': '资产索引不存在: %s' % p,
-                'warnings': [], 'count': 0, 'path': p}
-    try:
-        with open(p, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-    except (OSError, ValueError) as e:
-        return {'state': 'corrupt', 'reason': '资产索引损坏 (%r)' % (e,),
-                'warnings': [], 'count': 0, 'path': p}
-    ok, warns = validate_index(data, root)
-    if not ok:
-        return {'state': 'invalid', 'reason': '; '.join(warns[:3]),
-                'warnings': warns, 'count': 0, 'path': p}
-    return {'state': ('partial' if warns else 'ok'),
-            'reason': (_warn_text(warns) if warns else None),
-            'warnings': warns, 'count': len(data.get('assets') or {}),
-            'path': p}
+    snap = _index_snapshot(root)
+    data = snap.get('data') or {}
+    return {'state': snap['state'], 'reason': snap['reason'],
+            'warnings': list(snap.get('warnings') or []),
+            'count': len(data.get('assets') or {}),
+            'path': snap['path']}
+
+
+def _norm_src(src):
+    """src -> (规范化相对路径 | None, reason | None)。
+
+    **纯字符串判定，零文件系统调用**（F-02: 旧实现每条 2×realpath = 1.0ms/条，
+    10000 条约 8.6s）。realpath/越界检查推迟到真正解析（resolve）时做。
+    """
+    if not isinstance(src, str) or not src:
+        return None, 'src 必须是非空字符串'
+    if os.path.isabs(src):
+        return None, 'src 不能是绝对路径'
+    norm = src.replace('\\', '/')
+    if len(norm) > 1 and norm[1] == ':':
+        return None, 'src 不能带盘符'
+    if norm.startswith('/'):
+        return None, 'src 不能以 / 开头'
+    parts = norm.split('/')
+    if '..' in parts:
+        return None, 'src 越界/相对路径'
+    parts = [x for x in parts if x not in ('', '.')]
+    norm = '/'.join(parts)
+    if not norm:
+        return None, 'src 非法'
+    if not (norm == ASSETS_DIR or norm.startswith(ASSETS_DIR + '/')):
+        return None, 'src 必须位于 Assets/ 之下'
+    return norm, None
 
 
 def validate_index(index, root=None):
@@ -304,23 +350,10 @@ def validate_index(index, root=None):
             continue
         src = e.get('src')
         if src is not None:
-            if not isinstance(src, str) or os.path.isabs(src):
+            _norm, _why = _norm_src(src)
+            if _why:
                 bad.append(gid)
-                warnings.append('%s: src 必须是项目相对路径 (收到 %r)' % (gid, src))
-                continue
-            parts = src.replace('\\', '/').split('/')
-            if '..' in parts:
-                bad.append(gid)
-                warnings.append('%s: src 越界/相对路径 (收到 %r)' % (gid, src))
-                continue
-            if not (src == ASSETS_DIR or src.startswith(ASSETS_DIR + '/')):
-                bad.append(gid)
-                warnings.append('%s: src 必须位于 Assets/ 之下 (收到 %r)'
-                                % (gid, src))
-                continue
-            if root is not None and not is_inside(root, os.path.join(root, src)):
-                bad.append(gid)
-                warnings.append('%s: src 越界 (%r)' % (gid, src))
+                warnings.append('%s: %s (收到 %r)' % (gid, _why, src))
                 continue
         if 'import' in e and not isinstance(e.get('import'), dict):
             bad.append(gid)
@@ -338,12 +371,17 @@ def _entry_is_valid(gid, entry, root):
 
 
 def save_index(root, index):
-    """原子写项目层索引（tmp + fsync + replace）。返回路径。
+    """原子写项目层索引（tmp + fsync + replace）-> (path|None, reason|None)。
 
-    D-04 / Q-R6A-3=A: 写前**重新加载并合并**（按 guid 并集）——
-    两个写者先后保存时不会互相覆盖丢条目（lost update），我方案里没有删除语义，
-    所以并集是安全的；合并进来的条目要过单条校验，坏条目不会被自愈后的写回"复活"。
+    无项目根（''/None）时**拒绝保存**并返回 reason（不把 CWD 当项目根）。
     """
+    _orig = root
+    # D-04 / Q-R6A-3=A: 写前**重新加载并合并**（按 guid 并集）——
+    # 两个写者先后保存时不会互相覆盖丢条目（lost update）；本方案没有删除语义，
+    # 所以并集是安全的；合并进来的条目要过单条校验，坏条目不会被自愈后的写回"复活"。
+    root = _valid_root(root)
+    if root is None:
+        return None, '没有项目根（root=%r），拒绝写资产索引' % (_orig,)
     os.makedirs(assets_dir(root), exist_ok=True)
     p = index_path(root)
     with _INDEX_LOCK:
@@ -368,7 +406,7 @@ def save_index(root, index):
             os.fsync(f.fileno())
         os.replace(tmp, p)
     _CACHE.clear()
-    return p
+    return p, None
 
 
 def _load_user_delta(root):
@@ -380,6 +418,79 @@ def _load_user_delta(root):
     except (OSError, ValueError):
         pass
     return {}
+
+
+def load_user_delta(root):
+    """读用户层 delta（只读副本；asset_list / asset_get 展示用）。"""
+    root = _valid_root(root)
+    if root is None:
+        return {}
+    return dict(_load_user_delta(root) or {})
+
+
+def _write_user_index(root, assets):
+    p = user_index_path(root)
+    try:
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        tmp = '%s.tmp.%d' % (p, os.getpid())
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump({'schema': SCHEMA, 'assets': assets}, f,
+                      ensure_ascii=False, indent=2, sort_keys=True)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, p)
+        return True, None
+    except OSError as e:
+        return False, '用户层 delta 写入失败 (%r)' % (e,)
+
+
+def write_user_delta(root, guid, src=None, import_settings=None):
+    """写用户层 delta（本机覆盖：src / import）-> (ok, reason)。
+
+    F-02: 用户层此前**没有任何写入方**（全仓 0 writer），这条路径等于死代码；
+    这里补上唯一写入口，并由 EAI 命令 asset_user_override 调用。
+    """
+    root = _valid_root(root)
+    if root is None:
+        return False, '没有项目根，拒绝写用户层 delta'
+    if not isinstance(guid, str) or not guid:
+        return False, 'guid 非法: %r' % (guid,)
+    assets = dict(_load_user_delta(root) or {})
+    ent = assets.get(guid)
+    if not isinstance(ent, dict):
+        ent = {}
+    if src is not None:
+        if not isinstance(src, str) or not src:
+            return False, 'src 必须是非空字符串'
+        _norm, _why = _norm_src(src)
+        if _why:
+            return False, 'src 非法: %s' % (_why,)
+        ent['src'] = src
+    if import_settings is not None:
+        if not isinstance(import_settings, dict):
+            return False, 'import 必须是对象'
+        imp = dict(ent.get('import') or {})
+        for k, v in import_settings.items():
+            if k in IMPORT_KEYS:
+                imp[k] = v
+        ent['import'] = imp
+    if not ent:
+        return False, '没有可写的覆盖项（src / import 至少给一个）'
+    assets[guid] = ent
+    return _write_user_index(root, assets)
+
+
+def clear_user_delta(root, guid=None):
+    """清除用户层 delta（guid 为空 = 清空全部）-> (ok, reason)。"""
+    root = _valid_root(root)
+    if root is None:
+        return False, '没有项目根，拒绝写用户层 delta'
+    assets = dict(_load_user_delta(root) or {})
+    if guid is None:
+        assets = {}
+    else:
+        assets.pop(guid, None)
+    return _write_user_index(root, assets)
 
 
 # ---------------------------------------------------------------- 上下文
@@ -395,6 +506,7 @@ class AssetContext(object):
         self.warnings = list(warnings or [])   # 索引/用户层告警（供 asset_list 上报）
         self.readonly = bool(readonly)         # dry-run: 不落盘、不复制文件
         self._dirty = False
+        self.last_save_error = None            # 最近一次索引写入失败原因（F-02）
         self.errors = []            # [(where, guid, reason)] —— 供 sceneio 汇总
 
     def _warn(self, msg, key=None):
@@ -405,22 +517,31 @@ class AssetContext(object):
     # ---- 构造 ----
     @classmethod
     def for_dir(cls, d, create=False, readonly=False):
-        """目录 -> 上下文；无项目索引且 create=False 时返回 None（旧路径模式）。"""
-        if d is None:
+        """目录 -> 上下文；无项目索引且 create=False 时返回 None（旧路径模式）。
+
+        空串/None 一律 None（F-02: 不把 CWD 当成项目根去建 Assets/）。
+        """
+        root_in = _valid_root(d)
+        if root_in is None:
             return None
-        root = find_project_root(d)
+        root = find_project_root(root_in)
         if root is None:
             if not create:
                 return None
-            root = os.path.abspath(d)
             if not readonly:
-                os.makedirs(assets_dir(root), exist_ok=True)
-                save_index(root, empty_index(root))
-            return cls(root, empty_index(root), readonly=readonly)
+                os.makedirs(assets_dir(root_in), exist_ok=True)
+                _p, _why = save_index(root_in, empty_index(root_in))
+                if _p is None:
+                    warn_once(('idx-save', root_in), '[资产] %s' % (_why,))
+                    return None
+            return cls(root_in, empty_index(root_in), readonly=readonly)
         return cls.open_root(root, create=create, readonly=readonly)
 
     @classmethod
     def open_root(cls, root, create=False, readonly=False):
+        root = _valid_root(root)
+        if root is None:
+            return None
         idx, ok, why = load_index(root)
         warnings = [why] if why else []
         if idx is None:
@@ -437,7 +558,11 @@ class AssetContext(object):
                 warnings.append('原索引备份失败 (%r)' % (e,))
             if not readonly:
                 os.makedirs(assets_dir(root), exist_ok=True)
-                save_index(root, empty_index(root))
+                _p, _swhy = save_index(root, empty_index(root))
+                if _p is None:
+                    warnings.append('索引重建失败: %s' % (_swhy,))
+                    print('[资产] ' + warnings[-1])
+                    return None
             idx = empty_index(root)
         return cls(root, idx, _load_user_delta(root), warnings=warnings,
                    readonly=readonly)
@@ -533,9 +658,18 @@ class AssetContext(object):
         return abs_p, e, True, None
 
     # ---- 构建运行时对象 ----
-    def _import_settings(self, entry, ref=None):
+    def _import_settings(self, entry, ref=None, guid=None):
+        """导入设置优先级: 默认 < 项目条目 < **用户层 delta** < 场景内联覆盖。
+
+        F-02: 旧实现只读 entry/ref，用户层 delta 的 import 从读入到失效都没被用过。
+        """
         s = dict(DEFAULT_IMPORT)
         s.update(entry.get('import') or {})
+        delta = self.user_delta.get(guid) if guid else None
+        if isinstance(delta, dict) and isinstance(delta.get('import'), dict):
+            for k in IMPORT_KEYS:
+                if k in delta['import']:
+                    s[k] = delta['import'][k]
         for k in IMPORT_KEYS:
             if isinstance(ref, dict) and k in ref:
                 s[k] = ref[k]
@@ -547,7 +681,7 @@ class AssetContext(object):
         p, e, ok, why = self.resolve(guid, 'texture')
         if not ok:
             return None, False, why
-        s = self._import_settings(e, ref)
+        s = self._import_settings(e, ref, guid)
         nm = e.get('name')
         if not nm and isinstance(ref, dict):
             nm = ref.get('name')
@@ -678,8 +812,7 @@ class AssetContext(object):
         entry['src'] = os.path.relpath(dest, self.root).replace(os.sep, '/')
         entry['fingerprint'] = fp
         self._dirty = True
-        self.save()
-        return guid, True, '资产正文缺失，已按同 guid 重新落盘'
+        return self._finish(guid, '资产正文缺失，已按同 guid 重新落盘')
 
     def _repair_cubemap(self, guid, entry, abses, face_src, sha, total_bytes):
         """D-05: 六面图正文缺失 -> 按同 guid 重写六面。"""
@@ -709,8 +842,7 @@ class AssetContext(object):
         entry['fingerprint'] = {'sha256': sha, 'size': total_bytes,
                                 'mtime': max(m['mtime'] for m in face_src)}
         self._dirty = True
-        self.save()
-        return guid, True, '六面图正文缺失，已按同 guid 重新落盘'
+        return self._finish(guid, '六面图正文缺失，已按同 guid 重新落盘')
 
     def import_texture(self, src, name=None, import_settings=None, guid=None):
         """导入贴图（复制进项目）-> (guid|None, created, reason)。"""
@@ -759,8 +891,7 @@ class AssetContext(object):
             'name': name or os.path.splitext(os.path.basename(src))[0],
             'import': imp, 'fingerprint': fp}
         self._dirty = True
-        self.save()
-        return gid, True, None
+        return self._finish(gid)
 
     def import_cubemap(self, paths, name=None, guid=None):
         """导入六面图（6 张图 -> Assets/Cubemaps/<name>/px..nz）-> (guid, created, reason)。"""
@@ -833,8 +964,7 @@ class AssetContext(object):
             'fingerprint': {'sha256': sha, 'size': total_bytes,
                             'mtime': max(m['mtime'] for m in face_src)}}
         self._dirty = True
-        self.save()
-        return gid, True, None
+        return self._finish(gid)
 
     def import_material(self, mat, guid=None):
         """材质资产（值 + 贴图 guid 引用）-> (guid, created, reason)。"""
@@ -883,15 +1013,24 @@ class AssetContext(object):
             'type': 'material', 'src': None,
             'name': value.get('name') or '材质', 'value': value}
         self._dirty = True
-        self.save()
-        return gid, True, ('; '.join(reasons) or None)
+        return self._finish(gid, ('; '.join(reasons) or None))
 
     # ---- 持久化 ----
     def save(self):
+        self.last_save_error = None
         if self._dirty and not self.readonly:
-            save_index(self.root, self.index)
+            _p, _why = save_index(self.root, self.index)
+            self.last_save_error = _why
         self._dirty = False
         return index_path(self.root)
+
+    def _finish(self, gid, reason=None):
+        """落盘 + 把"索引写失败"并进 reason（不静默成功）。"""
+        self.save()
+        err = self.last_save_error
+        if err:
+            return gid, True, ('%s；索引写入失败: %s' % (reason, err))
+        return gid, True, reason
 
 
 # ---------------------------------------------------------------- 便捷函数

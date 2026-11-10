@@ -914,7 +914,13 @@ class EditorApp(GLEngine):
             return None
 
     def _asset_context(self, create=False):
-        """当前项目的资产上下文；无项目资产库返回 None（旧路径模式）。"""
+        """当前项目的资产上下文；无项目资产库返回 None（旧路径模式）。
+
+        F-02: create=True 时**必须**有场景文件 —— 未保存场景的 _scene_dir() 是
+        CWD，直接建库会在仓库根/程序目录写出 Assets/assets.json。
+        """
+        if create and not getattr(self, '_scene_path', None):
+            return None
         try:
             import loom_assets
             return loom_assets.AssetContext.for_dir(self._scene_dir(), create=create)
@@ -1318,10 +1324,7 @@ class EditorApp(GLEngine):
         self._skybox_valid = True
         self._skybox_error = None
         self._skybox_ref = None
-        try:
-            self._asset_errors = []
-        except Exception:
-            pass
+        sceneio.reset_asset_errors(self)
         self._sky_eff_last = None           # 强制下一次 refresh 走"变更"分支
         self._refresh_effective_skybox()    # -> reset_sky_state()（幂等）
         self.undo.clear()
@@ -2109,6 +2112,9 @@ class EditorApp(GLEngine):
             self.view.reset_interaction()
         if not self.is_playing:
             # —— 进入播放 ——
+            # R6 F-03: 新会话从空名单开始 (上一场停止若异常未清, 这里兜底)
+            if hasattr(self, '_clear_anim_fallback'):
+                self._clear_anim_fallback()
             self.exit_camera_preview()   # M41: 先退出"用此相机预览", 播放视角走 active_camera
             self.undo.clear()          # 播放期改动不可撤销 (跨边界撤销易错)
             self._play_models = list(self.models)
@@ -2263,6 +2269,10 @@ class EditorApp(GLEngine):
                 if au is not None:
                     au.playing = False
                     au._key = None
+            # R6 F-03: 停止播放清空"动画回退驱动"名单 —— 否则它会对已删除/
+            # 已还原的模型保留强引用 (WeakSet 只解决删除后滞留, 会话结束仍要清)
+            if hasattr(self, '_clear_anim_fallback'):
+                self._clear_anim_fallback()
             self._play_models = self._play_lights = None
             self._play_snap = self._play_light_snap = self._play_parents = None
             # B1: 退出播放销毁物理桥 (**在全部 apply_snapshot 还原完成之后**:

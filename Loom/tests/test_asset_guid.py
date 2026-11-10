@@ -34,6 +34,7 @@ import shutil
 import struct
 import sys
 import tempfile
+import time
 import zlib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -339,8 +340,11 @@ def t_index_guard():
         f.write('{ 坏 json')
     idx2, good2, why2 = loom_assets.load_index(tmp)
     check('损坏索引不抛、给 reason', idx2 is None and not good2 and '损坏' in str(why2), why2)
-    check('find_project_root 不误认引擎 assets/（大小写）',
-          loom_assets.find_project_root(LOOM) is None)
+    # 确定性：只有名为 assets（小写、无 assets.json）的目录 -> 不算项目根
+    fake = tempfile.mkdtemp(prefix='loom_f02_root_')
+    os.makedirs(os.path.join(fake, 'assets', 'Textures'), exist_ok=True)
+    check('find_project_root 不误认名叫 assets 的目录（大小写/缺索引）',
+          loom_assets.find_project_root(fake) is None)
 
 
 # ---------------------------------------------------------------- ⑫ 迁移
@@ -1049,6 +1053,135 @@ def t_d06_reserved_long_names():
     check('六面图 name=LPT1 不抛异常', err2 is None, err2)
 
 
+
+
+# ================================================================ F-02 性能/语义
+# ---------------------------------------------------------------- ① 索引校验惰性化
+def t_f02_index_perf():
+    print('---- F-02 ①: 索引校验惰性化（10k 条 ≤500ms，旧 8190ms） ----')
+    tmp = tempfile.mkdtemp(prefix='loom_f02_perf_')
+    proj = os.path.join(tmp, 'proj')
+    os.makedirs(os.path.join(proj, 'Assets'))
+    assets = {}
+    for i in range(10000):
+        assets['%032x' % i] = {'type': 'texture',
+                               'src': 'Assets/Textures/t%d.png' % i,
+                               'name': 't', 'import': {},
+                               'fingerprint': {'sha256': 'x' * 64, 'size': 1,
+                                               'mtime': 1.0}}
+    with open(os.path.join(proj, 'Assets', 'assets.json'), 'w',
+              encoding='utf-8') as f:
+        json.dump({'schema': 1, 'assets': assets}, f)
+    loom_assets._CACHE.clear()
+    t0 = time.perf_counter()
+    idx, ok, why = loom_assets.load_index(proj)
+    dt = (time.perf_counter() - t0) * 1000.0
+    check('10k 条加载+校验 ≤500ms', ok and idx is not None
+          and len(idx.get('assets') or {}) == 10000 and dt <= 500,
+          '%.1fms' % dt)
+    t0 = time.perf_counter()
+    loom_assets.load_index(proj)          # 二次走快照缓存（mtime/size 未变）
+    dt2 = (time.perf_counter() - t0) * 1000.0
+    check('二次读取命中快照缓存 ≤50ms', dt2 <= 50, '%.1fms' % dt2)
+    # 校验本身不再做 realpath：越界条目仍被剔除（语义不变）
+    bad = {'schema': 1, 'assets': {
+        'a' * 32: {'type': 'texture', 'src': '../escape.png'}}}
+    ok2, warns2 = loom_assets.validate_index(bad, proj)
+    check('字符串判定仍拒绝越界 src', ok2 and not bad['assets'] and warns2, warns2)
+
+
+# ---------------------------------------------------------------- ② delta 生效
+def t_f02_delta_effective():
+    print('---- F-02 ②: 用户层 delta 的 import 覆盖必须生效（含写入方） ----')
+    tmp = tempfile.mkdtemp(prefix='loom_f02_delta_')
+    proj = os.path.join(tmp, 'proj')
+    os.makedirs(proj)
+    ctx = loom_assets.AssetContext.for_dir(proj, create=True)
+    png = _png(os.path.join(tmp, 'src', 'd.png'))
+    g, _c, why = ctx.import_texture(png, name='d',
+                                    import_settings={'wrap': 'repeat'})
+    check('前置: 贴图导入', bool(g), why)
+    ok, why2 = loom_assets.write_user_delta(
+        proj, g, import_settings={'wrap': 'clamp', 'mipmaps': False})
+    check('用户层 delta 写入成功', ok, why2)
+    check('用户在 %LOCALAPPDATA% 的 delta 文件已落盘',
+          os.path.isfile(loom_assets.user_index_path(proj)))
+    ctx2 = loom_assets.AssetContext.open_root(proj)
+    s = ctx2._import_settings(ctx2.entry(g), None, g)
+    check('delta 的 import 生效（wrap=clamp / mipmaps=False）',
+          s.get('wrap') == 'clamp' and s.get('mipmaps') is False, s)
+    tex, ok2, _w2 = ctx2.texture(g)
+    check('Texture 实际拿到 delta 设置',
+          tex is not None and tex.wrap == 'clamp' and tex.mipmaps is False,
+          (getattr(tex, 'wrap', None), getattr(tex, 'mipmaps', None)))
+    check('场景内联覆盖优先级最高（> delta）',
+          ctx2._import_settings(ctx2.entry(g), {'wrap': 'mirror'}, g).get('wrap')
+          == 'mirror')
+    ed = _ed(os.path.join(proj, 'scene.json'))
+    r = _cmd('asset_user_override', ed,
+             {'guid': g, 'wrap': 'clamp', 'mipmaps': 'false', 'max_size': 64})
+    check('asset_user_override 可写（旧: 全仓 0 writer）', r.get('ok') is True,
+          r.get('error'))
+    r2 = _cmd('asset_get', ed, {'guid': g})
+    eff = (r2.get('result') or {}).get('effective_import') or {}
+    check('asset_get.effective_import 反映 delta',
+          eff.get('wrap') == 'clamp' and eff.get('max_size') == 64, eff)
+    r3 = _cmd('asset_user_override', ed, {'guid': g, 'clear': True})
+    check('clear 后 delta 清空', r3.get('ok') is True
+          and not loom_assets.load_user_delta(proj), r3)
+    check('清理后设置回项目默认',
+          loom_assets.AssetContext.open_root(proj)._import_settings(
+              loom_assets.AssetContext.open_root(proj).entry(g), None, g
+          ).get('wrap') == 'repeat')
+
+
+# ---------------------------------------------------------------- ③ 无项目根拒绝
+def t_f02_no_root_save():
+    print('---- F-02 ③: 无项目根时拒绝写索引（不得落 CWD） ----')
+    cwd_assets = os.path.join(os.getcwd(), 'Assets')
+    existed = os.path.isdir(cwd_assets)
+    p, why = loom_assets.save_index('', {'schema': 1, 'assets': {}})
+    check('save_index("") -> 拒绝 + reason 点名项目根',
+          p is None and '项目根' in str(why), (p, why))
+    check('未在 CWD 创建 Assets/', os.path.isdir(cwd_assets) == existed)
+    check('AssetContext.for_dir("", create=True) -> None',
+          loom_assets.AssetContext.for_dir('', create=True) is None)
+    ed = _ed(None)                      # 未保存场景（_scene_dir() == CWD）
+    check('编辑器未保存场景 -> create 上下文为 None',
+          ed._asset_context(create=True) is None)
+    check('编辑器未保存场景 -> 未在 CWD 建 Assets',
+          os.path.isdir(cwd_assets) == existed)
+    check('editor.asset_import 仍明确拒绝（先保存场景）',
+          ed.asset_import(path=None, kind='texture')[0] is None)
+
+
+# ---------------------------------------------------------------- ④ 错误记录 O(1)+上限
+def t_f02_error_cap():
+    print('---- F-02 ④: record_asset_error O(1) + 200 条上限 ----')
+    ed = _ed()
+    t0 = time.perf_counter()
+    for i in range(5000):
+        S.record_asset_error(ed, 'materials.albedo', 'g%d' % i, 'reason %d' % i)
+    dt = (time.perf_counter() - t0) * 1000.0
+    check('5000 条唯一错误 ≤500ms（旧 387ms 且无上限）', dt <= 500, '%.1fms' % dt)
+    check('列表截断到上限 200',
+          len(S.asset_errors(ed)) == S.ASSET_ERROR_LIMIT,
+          len(S.asset_errors(ed)))
+    check('总数含溢出计数 = 5000', S.asset_error_count(ed) == 5000,
+          S.asset_error_count(ed))
+    n = len(S.asset_errors(ed))
+    for i in range(100):
+        S.record_asset_error(ed, 'x', 'dup', 'same')
+    check('重复项不增长（set 去重）', len(S.asset_errors(ed)) == n)
+    _cnt = S.asset_error_count(ed)
+    check('notice 使用总数（不只列表长度）',
+          str(_cnt) in (S.asset_issue_notice(ed) or '') and _cnt >= 5000,
+          (_cnt, S.asset_issue_notice(ed)))
+    S.reset_asset_errors(ed)
+    check('reset 后清空（含溢出计数/去重键）',
+          S.asset_errors(ed) == [] and S.asset_error_count(ed) == 0)
+
+
 def main():
     tmp, proj, g1, gc = t_import()
     proj2, data = t_roundtrip(tmp, proj, g1, gc)
@@ -1071,6 +1204,10 @@ def main():
     t_d04_index_merge()
     t_d05_reimport_repair()
     t_d06_reserved_long_names()
+    t_f02_index_perf()
+    t_f02_delta_effective()
+    t_f02_no_root_save()
+    t_f02_error_cap()
     print('\n总结果: %s' % ('ALL PASS' if ok else 'FAIL'))
     sys.exit(0 if ok else 1)
 

@@ -2476,11 +2476,65 @@ def cmd_asset_get(win, args):
     if entry is None:
         return {'guid': guid, 'valid': False, 'reason': '资产不存在'}
     path, _e, ok, why = ctx.resolve(guid)
+    delta = (ctx.user_delta or {}).get(guid)
+    try:
+        eff = ctx._import_settings(entry, None, guid)
+    except Exception:
+        eff = entry.get('import')
     return {'guid': guid, 'valid': bool(ok), 'reason': why,
             'type': entry.get('type'), 'name': entry.get('name'),
             'src': entry.get('src'),
             'path': os.path.relpath(path, ctx.root) if path else None,
-            'import': entry.get('import'), 'project': ctx.root}
+            'import': entry.get('import'),
+            'user_delta': (delta if isinstance(delta, dict) else None),
+            'effective_import': eff, 'project': ctx.root}
+
+
+@command('asset_user_override',
+         '用户层资产覆盖（本机 delta，不随项目共享）: '
+         '{guid, src?, wrap?/filter_mode?/aniso?/max_size?/mipmaps?/compression?, clear?}')
+def cmd_asset_user_override(win, args):
+    """F-02: 用户层 delta 的唯一写入口（旧实现只有读、没有 writer -> 死代码）。"""
+    import loom_assets
+    ed = win.editor
+    root = ed._project_root()
+    if root is None:
+        return {'error': '当前项目没有资产库（缺 Assets/assets.json）'}
+    guid = args.get('guid')
+    if not guid:
+        return {'error': '需要 guid'}
+    if args.get('clear'):
+        ok, why = loom_assets.clear_user_delta(root, guid)
+        if not ok:
+            return {'error': why}
+        return {'guid': guid, 'cleared': True,
+                'user_index': loom_assets.user_index_path(root)}
+    imp = {}
+    for k in ('wrap', 'filter_mode', 'compression'):
+        if args.get(k) is not None:
+            imp[k] = args[k]
+    if args.get('mipmaps') is not None:
+        imp['mipmaps'] = as_bool(args.get('mipmaps'), True)
+    if args.get('max_size') is not None:
+        imp['max_size'] = int(as_float(args.get('max_size'), 0))
+    if args.get('aniso') is not None:
+        imp['aniso'] = as_float(args.get('aniso'), 1.0)
+    ok, why = loom_assets.write_user_delta(root, guid, src=args.get('src'),
+                                           import_settings=(imp or None))
+    if not ok:
+        return {'error': why}
+    ctx = ed._asset_context()
+    delta = (getattr(ctx, 'user_delta', None) or {}).get(guid)
+    eff = None
+    try:
+        entry = ctx.entry(guid) if ctx else None
+        if entry is not None:
+            eff = ctx._import_settings(entry, None, guid)
+    except Exception:
+        eff = None
+    return {'guid': guid, 'user_index': loom_assets.user_index_path(root),
+            'delta': (delta if isinstance(delta, dict) else None),
+            'effective_import': eff}
 
 
 @command('asset_list', '项目资产清单 (含逐条 valid/reason): {type?}')
