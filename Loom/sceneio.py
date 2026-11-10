@@ -238,6 +238,15 @@ def _clear_slot_ref(mat, slot):
         pass
 
 
+def clear_asset_slot(mat, slot):
+    """用户**显式清空**某个槽位时调用：连"保留的失效引用"一起清掉。
+
+    Q-B1-1=A 的边界：解析失败保留引用；用户主动清空才算移除（否则一次 Ctrl+S
+    之后旧引用又从 _asset_ref_slots 复活）。
+    """
+    _clear_slot_ref(mat, slot)
+
+
 def asset_refs_kept(engine):
     """本次保存会"原样写回"的失效引用条数（材质槽 + 场景/相机天空盒）。"""
     n = 0
@@ -254,7 +263,12 @@ def asset_refs_kept(engine):
             seen.add(id(mat))
             slots = getattr(mat, '_asset_ref_slots', None)
             if isinstance(slots, dict):
-                n += len([s for s in slots.values() if isinstance(s, dict) and s])
+                # 与 _emit_material 完全同口径：只有"槽位为空 + 有保留引用"才会写回
+                for slot, ref in slots.items():
+                    if not isinstance(ref, dict) or not ref:
+                        continue
+                    if getattr(mat, slot, None) is None:
+                        n += 1
     except Exception:
         pass
     try:
@@ -1321,10 +1335,15 @@ def _apply_materials(engine, mat_dicts, ctx=None):
             print('[场景] 材质段不是对象 (%s) -> 跳过该段' % (type(d).__name__,))
             continue
         _warn_dup_guid(engine, 'material', d.get('id'), 'materials[]')
-        mat = engine.add_material(color=d.get('color'),
-                                  saturation=d.get('saturation', 1.0),
-                                  name=d.get('name'),
-                                  guid=d.get('id'))
+        try:
+            mat = engine.add_material(color=d.get('color'),
+                                      saturation=d.get('saturation', 1.0),
+                                      name=d.get('name'),
+                                      guid=d.get('id'))
+        except Exception as _e:
+            record_asset_error(engine, 'materials[]', d.get('id'),
+                               '材质创建失败 (%r)' % (_e,))
+            continue
         if d.get('id'):
             mat.guid = d['id']
         # M36 PBR: 恢复金属度/粗糙度/PBR 开关
@@ -1787,6 +1806,16 @@ def scene_to_dict(engine, camera=None, base_dir=None, ctx=None):
             pass
         if camera is not None:
             print('[场景] 天空盒未写入: %s' % (_sb_reason,))
+    # Q-B1-1=A: 加载时天空盒解析失败过 -> 保存**原样写回旧引用**（不换成默认蓝/新 guid）
+    if _sb_dict is None or getattr(engine, '_skybox_valid', True) is False:
+        _sb_ref = getattr(engine, '_skybox_ref', None)
+        if isinstance(_sb_ref, dict) and _sb_ref:
+            _sb_dict = dict(_sb_ref)
+    # Q-B1-1=A: 保存时若有"保留的失效引用"，出声告知（不静默、不删除）
+    _kept = asset_refs_kept(engine)
+    if _kept and camera is not None:
+        print('[资产] 本次保存保留了 %d 条失效引用（原样写回，未改写；修复资产/缺文件后自动恢复）'
+              % (_kept,))
     return {"version": SCENE_VERSION,
             # D7: 写出时声明"最低引擎版本" —— 旧引擎读新场景会明确拒绝,
             # 而不是把 animator.speed / clip_meta 等未知键静默丢掉.
@@ -1836,11 +1865,29 @@ def scene_from_dict(engine, data, camera_out=None, base_dir=None, ctx=None):
     engine._skybox = _cube
     engine._skybox_valid = bool(_sb_valid)
     engine._skybox_error = _sb_reason
+    # Q-B1-1=A: 天空盒解析失败 -> 保留原引用（保存时写回，不替换成默认蓝）；
+    # P-05: 同时进资产体检（scene_assets_check 不再假绿）。
+    _sb_raw = data.get('skybox')
+    try:
+        engine._skybox_ref = (dict(_sb_raw)
+                              if (not _sb_valid and isinstance(_sb_raw, dict) and _sb_raw)
+                              else None)
+    except Exception:
+        engine._skybox_ref = None
+    if not _sb_valid and isinstance(_sb_raw, dict) and _sb_raw:
+        record_asset_error(engine, 'skybox', _sb_raw.get('guid'), _sb_reason)
     _apply_ui(engine, data.get('ui'))                # 2026-10-18: Canvas UI (清空重建)
     _apply_lights(engine, data.get('lights', []))   # M21: 场景光源 (清空重建)
-    cam_links = _apply_cameras(engine, data.get('cameras', []), base_dir, ctx)  # 场景摄像机 (清空重建)
+    try:
+        cam_links = _apply_cameras(engine, data.get('cameras', []), base_dir, ctx)  # 场景摄像机 (清空重建)
+    except Exception as _e:                          # 资产层异常不得击穿 F7
+        print('[场景] 相机段解析异常 (%r) -> 跳过相机' % (_e,))
+        cam_links = []
     engine.active_camera = data.get('active_camera')  # 玩家视角摄像机
-    _apply_materials(engine, data.get('materials', []), ctx)  # M23: 材质库 (先于物体, 供引用)
+    try:
+        _apply_materials(engine, data.get('materials', []), ctx)  # M23: 材质库 (先于物体, 供引用)
+    except Exception as _e:
+        print('[场景] 材质段解析异常 (%r) -> 跳过材质库' % (_e,))
     # 2026-11-07 D2=A: 文件显式登记的材质 (keep_ids) 与 add_model 自建材质区分
     _lib_keep = {id(x) for x in engine.materials}
     objects = _objects_in
@@ -1876,6 +1923,11 @@ def scene_from_dict(engine, data, camera_out=None, base_dir=None, ctx=None):
         print('[场景] 资产问题 %d 条（详见上文；EAI 命令 scene_assets_check 可查）'
               % (len(_errs),))
     return models
+
+
+def scene_asset_summary(engine):
+    """保存/加载后给上层的可见提示文本（无问题返回 None）。见 asset_issue_notice。"""
+    return asset_issue_notice(engine, '保存')
 
 
 def migrate(data):
@@ -2087,6 +2139,9 @@ def prefab_to_dict(root, ctx=None):
     objs = []
     _emit_subtree(root, objs, ctx=ctx)
     return {"version": PREFAB_VERSION,
+            # R5-02 P-04: prefab 物体同样带 animator.speed / clip_meta,
+            # 旧引擎读新 prefab 会静默丢 (once 变永远循环) —— 与场景同一道闸。
+            "min_engine_version": ENGINE_VERSION,
             "prefab": {"guid": pguid, "name": root.name},
             "objects": objs}
 
@@ -2100,12 +2155,18 @@ def load_prefab(path):
         data = json.load(f)
     if data.get('version', 1) < 1:
         data['version'] = 1
+    # R5-02 P-04: prefab 与场景共用版本闸门 (旧 prefab 无该字段 -> 不拦)。
+    check_engine_version(data)
     return data
 
 
 def instantiate_prefab(engine, data, offset=(0, 0, 0), ctx=None):
     """场景中实例化 prefab: 全部对象重新生成 GUID, 挂 prefab_ref, 根整体平移.
-    返回创建的模型列表 (空 prefab 返回 []). ctx: 资产上下文（贴图/材质按 guid 解析）。"""
+    返回创建的模型列表 (空 prefab 返回 []). ctx: 资产上下文（贴图/材质按 guid 解析）。
+
+    R5-02 P-04: 入口再校验一次版本 —— undo 的 PrefabPlaceCommand 持有已读出的
+    data 并在 redo 时重放, 不能只靠 load_prefab 那一处。"""
+    check_engine_version(data)
     objects = data.get('objects', [])
     if not isinstance(objects, list):
         objects = []

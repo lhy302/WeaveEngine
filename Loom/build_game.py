@@ -56,6 +56,61 @@ def _count_files(d):
     return n
 
 
+def _ref_is_managed(ref):
+    """引用是否为"只能靠项目资产库解析"的纯 guid 引用（无 path/paths/纯色兜底）。"""
+    if not isinstance(ref, dict) or not ref:
+        return False
+    g = ref.get('guid')
+    if not isinstance(g, str) or not g:
+        return False
+    return not ('path' in ref or 'paths' in ref or 'solid_color' in ref)
+
+
+def scene_asset_refs(data):
+    """场景里托管的资产引用条数（天空盒/相机天空盒/材质三槽）。"""
+    n = 0
+    if not isinstance(data, dict):
+        return 0
+    if _ref_is_managed(data.get('skybox')):
+        n += 1
+    for cam in data.get('cameras') or []:
+        if isinstance(cam, dict) and _ref_is_managed(cam.get('skybox')):
+            n += 1
+    for mat in data.get('materials') or []:
+        if not isinstance(mat, dict):
+            continue
+        for k in ('albedo', 'normal_map', 'env_map'):
+            if _ref_is_managed(mat.get(k)):
+                n += 1
+    return n
+
+
+def require_assets_or_exit(scene_json, data, has_assets):
+    """P2-⑤: 场景含托管引用但没带上资产库 -> **拒绝出包**（不再只 print）。
+
+    否则产物里全是"死 guid"，玩家侧贴图/天空盒全丢，而构建是绿的。
+    """
+    n = scene_asset_refs(data)
+    if n <= 0:
+        return n
+    root = loom_assets.find_project_root(os.path.dirname(os.path.abspath(scene_json))) \
+        if loom_assets is not None else None
+    if has_assets:
+        # 资产夹在、但索引坏了 -> 包里仍是死 guid（玩家侧同样丢图），必须拦
+        if loom_assets is not None and root is not None:
+            _idx, _ok, _why = loom_assets.load_index(root)
+            if not _ok:
+                raise SystemExit(
+                    "场景引用了 %d 条项目资产，但资产索引不可用: %s\n"
+                    "请先修复/重建 Assets/assets.json 后重新构建。" % (n, _why))
+        return n
+    raise SystemExit(
+        "场景引用了项目资产库（%d 条 guid 引用），但找不到 Assets/assets.json: %s\n"
+        "请把场景放回项目目录（项目根 = 含 Assets/assets.json 的目录）后重新构建，"
+        "或先在编辑器里 asset_import 重建资产库。"
+        % (n, os.path.dirname(os.path.abspath(scene_json))))
+
+
 def copy_project_assets(scene_path, out_dir):
     """把项目 Assets/ 拷进发布夹（返回 True=有资产可拷）。
 
@@ -356,7 +411,10 @@ def main():
         print("  资产: Assets/ 已随包 (%d 个文件)"
               % _count_files(os.path.join(out, 'Assets')))
     else:
-        print("  资产: 场景无项目资产库 (Assets/assets.json) -> 不携带资产")
+        # P2-⑤: 有托管引用却没有资产库 -> 硬失败（在 pack 之前，避免产出死 guid 包）
+        _nref = require_assets_or_exit(scene_json, data, _has_assets)
+        print("  资产: 场景无项目资产库 (Assets/assets.json) -> 不携带资产"
+              "（场景无 guid 引用: %d 条托管引用）" % (_nref,))
 
     game_pack.pack(out, config, data, scripts,
                    encrypt=not args.no_encrypt_content)

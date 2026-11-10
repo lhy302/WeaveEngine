@@ -26,9 +26,11 @@ except Exception:
     pass
 
 import contextlib
+import glob
 import io
 import json
 import os
+import shutil
 import struct
 import sys
 import tempfile
@@ -310,10 +312,13 @@ def t_index_guard():
         json.dump({'schema': 1, 'assets': {
             'a' * 32: {'type': 'texture', 'src': '../outside.png', 'import': {}}}}, f)
     idx, good, why = loom_assets.load_index(tmp)
-    check('越界 src -> 索引被拒 + reason 点名（越界/相对路径）',
-          idx is None and not good and ('越界' in str(why) or '相对路径' in str(why)), why)
-    check('越界项目 -> AssetContext.for_dir 返回 None（回旧路径模式）',
-          loom_assets.AssetContext.for_dir(tmp) is None)
+    # Q-B1-2=A: 一条坏条目 -> 只剔除该条，索引整体仍可用（不再整本作废）
+    check('越界 src -> 剔除该条 + 告警点名（索引仍可用）',
+          idx is not None and good and not (idx.get('assets') or {})
+          and ('越界' in str(why) or '相对路径' in str(why)), why)
+    ctx_bad = loom_assets.AssetContext.for_dir(tmp)
+    check('坏条目项目 -> 上下文仍可用（空的可用索引，不再退回旧路径模式）',
+          ctx_bad is not None and ctx_bad.entries() == {})
 
     with open(p, 'w', encoding='utf-8') as f:
         f.write('{ 坏 json')
@@ -423,6 +428,370 @@ def t_commands(tmp, proj2):
           (r6.get('result') or {}).get('valid') is False, r6)
 
 
+
+
+# ================================================================ 轮5 审核修复
+# ---------------------------------------------------------------- P1-1
+def t_p1_1_preserve_refs():
+    print('---- 轮5 P1-1: 解析失败后保存**不得**销毁 guid 引用 ----')
+    tmp = tempfile.mkdtemp(prefix='loom_r5_p11_')
+    proj = os.path.join(tmp, 'proj')
+    os.makedirs(proj)
+    ctx = loom_assets.AssetContext.for_dir(proj, create=True)
+    png = _png(os.path.join(tmp, 'src', 'a.png'))
+    guid, _c, why = ctx.import_texture(png, name='a')
+    faces = six(os.path.join(tmp, 'sky'))
+    cg, _c2, why2 = ctx.import_cubemap(faces, name='sky')
+    check('前置: 贴图/六面图导入', bool(guid) and bool(cg), (why, why2))
+    ctx = loom_assets.AssetContext.open_root(proj)
+    tex, ok1, _w1 = ctx.texture(guid)
+    cube, ok2, _w2 = ctx.cubemap(cg)
+    ed = _ed(os.path.join(proj, 'scene.json'))
+    mat = ed.add_material(color=None, name='m')
+    mat.albedo = tex
+    mat.env_map = cube
+    m = ed.add_model(__import__('mesh').create_cube(1.0), E.Point3D(0, 0, 0),
+                     E.Point3D(0, 0, 0))
+    m.renderer.material = mat
+    ed._scene_skybox = cube
+    ed._skybox = cube
+    data = S.scene_to_dict(ed, base_dir=proj)
+    scene_p = os.path.join(proj, 'scene.json')
+    S.save_json_atomic(scene_p, data)
+    mat_id = data['materials'][0]['id']
+
+    # A) 删掉贴图源文件 -> 打开 -> 保存 -> 重开
+    alb_rel = (ctx.entry(guid) or {}).get('src') or ''
+    os.remove(os.path.join(proj, alb_rel.replace('/', os.sep)))
+    ed2 = _ed(scene_p)
+    _, out2 = _cap(lambda: S.scene_from_dict(
+        ed2, json.load(open(scene_p, encoding='utf-8')), base_dir=proj))
+    check('A 缺贴图 -> 打开告警', any('缺失' in r for _w, _g, r in S.asset_errors(ed2)),
+          S.asset_errors(ed2))
+    check('A 打开后贴图确实没解析出来（前置成立）',
+          any(x.guid == mat_id and getattr(x, 'albedo', None) is None
+              for x in ed2.materials))
+    data2 = S.scene_to_dict(ed2, base_dir=proj)
+    md = data2['materials'][0]
+    check('A 保存后 albedo guid 仍在（旧行为: 整键消失）',
+          (md.get('albedo') or {}).get('guid') == guid, md.get('albedo'))
+    check('A 保存后 albedo 仍是 guid 引用（无 path）',
+          'path' not in (md.get('albedo') or {}))
+    check('A 保存后 env_map 仍在', (md.get('env_map') or {}).get('guid') == cg)
+    p2 = os.path.join(proj, 'scene2.json')
+    S.save_json_atomic(p2, data2)
+    ed3 = _ed(p2)
+    _, out3 = _cap(lambda: S.scene_from_dict(
+        ed3, json.load(open(p2, encoding='utf-8')), base_dir=proj))
+    check('A 重开后仍告警（持续可见）', bool(S.asset_errors(ed3)), S.asset_errors(ed3))
+    data3 = S.scene_to_dict(ed3, base_dir=proj)
+    check('A 连续两次保存 guid 不漂移',
+          (data3['materials'][0].get('albedo') or {}).get('guid') == guid)
+
+    # B) 整个项目没有资产索引（天空盒/贴图都是纯 guid）-> 保存必须保留原 guid
+    plain = os.path.join(tmp, 'plain')
+    os.makedirs(plain, exist_ok=True)
+    raw = {'version': S.SCENE_VERSION, 'objects': [],
+           'skybox': {'guid': 'deadsky'},
+           'materials': [{'id': 'M', 'name': 'm', 'color': None, 'saturation': 1.0,
+                          'albedo': {'guid': 'deadtex'}}]}
+    ed4 = _ed()
+    _, out4 = _cap(lambda: S.scene_from_dict(ed4, raw, base_dir=plain))
+    check('B 无索引 -> 打开不崩且有告警', bool(S.asset_errors(ed4)))
+    data4 = S.scene_to_dict(ed4, base_dir=plain)
+    check('B 保存后天空盒仍写原 guid（旧行为: 换成默认蓝 + 新 guid）',
+          (data4.get('skybox') or {}).get('guid') == 'deadsky', data4.get('skybox'))
+    check('B 保存后 albedo 仍写原 guid',
+          (data4['materials'][0].get('albedo') or {}).get('guid') == 'deadtex')
+    ed5 = _ed()
+    _cap(lambda: S.scene_from_dict(ed5, data4, base_dir=plain))
+    check('B 重开后仍告警（不再静默假绿）', bool(S.asset_errors(ed5)))
+
+    # D) 用户**显式清空**才真正移除（Q-B1-1=A 的边界）
+    mat_b = [x for x in ed4.materials if x.guid == 'M'][0]
+    S.clear_asset_slot(mat_b, 'albedo')
+    data5 = S.scene_to_dict(ed4, base_dir=plain)
+    check('D 显式清空后 albedo 键才消失',
+          'albedo' not in (data5['materials'][0] or {}), data5['materials'][0])
+
+    # C) 相机级天空盒失败也保留（相机段不许丢引用）
+    rawc = {'version': S.SCENE_VERSION, 'objects': [], 'skybox': None,
+            'cameras': [{'id': 'cam1', 'name': 'c', 'skybox': {'guid': 'deadcam'},
+                         'position': [0, 0, 0], 'yaw': 0, 'pitch': 0}]}
+    edc = _ed()
+    _cap(lambda: S.scene_from_dict(edc, rawc, base_dir=plain))
+    dcam = S.scene_to_dict(edc, base_dir=plain)
+    cam_sb = ((dcam.get('cameras') or [{}])[0] or {}).get('skybox') or {}
+    check('C 相机天空盒失败 -> 保存写回原 guid', cam_sb.get('guid') == 'deadcam', cam_sb)
+
+
+# ---------------------------------------------------------------- P1-2
+def t_p1_2_index_partial():
+    print('---- 轮5 P1-2: 一条坏条目不再让整本索引作废 ----')
+    tmp = tempfile.mkdtemp(prefix='loom_r5_p12_')
+    proj = os.path.join(tmp, 'proj')
+    os.makedirs(os.path.join(proj, 'Assets', 'Textures'))
+    png = _png(os.path.join(tmp, 'src', 'ok.png'))
+    shutil.copy2(png, os.path.join(proj, 'Assets', 'Textures', 'ok.png'))
+    st = os.stat(png)
+    good = {'type': 'texture', 'src': 'Assets/Textures/ok.png', 'name': 'ok',
+            'import': {}, 'fingerprint': {'sha256': loom_assets.sha256_file(png),
+                                          'size': st.st_size, 'mtime': st.st_mtime}}
+    bad = {'type': 'nonsense', 'src': 'Assets/Textures/x.png'}
+    idxp = os.path.join(proj, 'Assets', 'assets.json')
+    with open(idxp, 'w', encoding='utf-8') as f:
+        json.dump({'schema': 1, 'assets': {'g' * 32: good, 'b' * 32: bad}}, f)
+    idx, ok_, why = loom_assets.load_index(proj)
+    check('坏一条 -> 索引仍可用 + 告警点名坏条目',
+          idx is not None and ok_ and why and '坏条目' in why, why)
+    check('好条目保留 / 坏条目剔除',
+          ('g' * 32 in idx['assets']) and ('b' * 32 not in idx['assets']), list(idx['assets']))
+    ctx = loom_assets.AssetContext.for_dir(proj)
+    check('上下文可用（旧行为: None）', ctx is not None and ctx.entry('g' * 32) is not None)
+    check('上下文把索引告警带出来', bool(getattr(ctx, 'warnings', None)), ctx.warnings)
+    g2, created, why2 = ctx.import_texture(png, name='new')
+    check('部分坏索引下仍可导入（旧行为: 永久"无法创建项目资产库"）',
+          g2 is not None, why2)
+
+    # 命令层三态
+    ed = _ed(os.path.join(proj, 'scene.json'))
+    r = _cmd('asset_list', ed)
+    res = r.get('result') or {}
+    check('asset_list 报 partial + warnings', res.get('state') == 'partial'
+          and res.get('valid') is True and res.get('warnings'), res)
+    with open(idxp, 'w', encoding='utf-8') as f:
+        f.write('{ bad json')
+    check('损坏索引 -> inspect=corrupt', loom_assets.inspect_index(proj)['state'] == 'corrupt')
+    check('损坏索引 -> for_dir(create=False) 不可用（明确）',
+          loom_assets.AssetContext.for_dir(proj) is None)
+    r2 = _cmd('asset_list', ed)
+    res2 = r2.get('result') or {}
+    check('asset_list 区分 corrupt（不再谎报"缺文件"）',
+          res2.get('state') == 'corrupt' and '损坏' in str(res2.get('reason')), res2)
+    ctx2 = loom_assets.AssetContext.for_dir(proj, create=True)
+    check('损坏索引 + create -> 可自愈', ctx2 is not None)
+    check('自愈前已备份（不静默覆盖）', len(glob.glob(idxp + '.bak-*')) == 1,
+          glob.glob(idxp + '.bak-*'))
+    r3 = _cmd('asset_list', ed)
+    check('自愈后 asset_list 可用', (r3.get('result') or {}).get('valid') is True, r3)
+
+
+# ---------------------------------------------------------------- P1-3
+def t_p1_3_delta_guard():
+    print('---- 轮5 P1-3: 用户层 delta 非 dict 不得崩加载 ----')
+    tmp = tempfile.mkdtemp(prefix='loom_r5_p13_')
+    proj = os.path.join(tmp, 'proj')
+    os.makedirs(proj)
+    ctx = loom_assets.AssetContext.for_dir(proj, create=True)
+    png = _png(os.path.join(tmp, 'src', 'd.png'))
+    guid, _c, why = ctx.import_texture(png, name='d')
+    check('前置: 贴图导入', bool(guid), why)
+    dpath = loom_assets.user_index_path(proj)
+    os.makedirs(os.path.dirname(dpath), exist_ok=True)
+    with open(dpath, 'w', encoding='utf-8') as f:
+        json.dump({'schema': 1, 'assets': {guid: 'oops-not-a-dict'}}, f)
+    data = {'version': S.SCENE_VERSION, 'objects': [],
+            'materials': [{'id': 'M', 'name': 'm', 'color': None, 'saturation': 1.0,
+                           'albedo': {'guid': guid}}]}
+    ed = _ed()
+    err = None
+    buf = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buf):
+            S.scene_from_dict(ed, data, base_dir=proj)
+    except Exception as e:      # noqa: BLE001 - 这里就是要证明"不抛"
+        err = e
+    out = buf.getvalue()
+    check('delta 条目非 dict -> 加载不崩', err is None, err)
+    mat = ed.materials[0]
+    check('贴图仍按项目层解析出来（delta 被跳过）', getattr(mat, 'albedo', None) is not None)
+    check('有 delta 告警（出声，不静默）', 'delta' in out, out.strip()[:120])
+    # 编辑器侧: 加载后必须清空过场景却没崩 -> F7 由"不抛"保证
+    check('资产问题未污染（delta 不是场景问题）',
+          not any('delta' in r for _w, _g, r in S.asset_errors(ed)))
+
+
+# ---------------------------------------------------------------- P2-①
+def t_p2_1_name_traversal():
+    print('---- 轮5 P2-①: name 不得写出 Assets/ 之外 ----')
+    tmp = tempfile.mkdtemp(prefix='loom_r5_p21_')
+    proj = os.path.join(tmp, 'proj')
+    os.makedirs(proj)
+    ctx = loom_assets.AssetContext.for_dir(proj, create=True)
+    png = _png(os.path.join(tmp, 'src', 't.png'))
+    g, created, why = ctx.import_texture(png, name='../../escaped')
+    e = ctx.entry(g) or {}
+    check('越界 name -> 仍落在 Assets/Textures 下',
+          str(e.get('src', '')).startswith('Assets/Textures/'), e.get('src'))
+    check('项目根没有逃逸文件', not os.path.isfile(os.path.join(proj, 'escaped.png')))
+    faces = six(os.path.join(tmp, 'sky'))
+    cg, _c, _w = ctx.import_cubemap(faces, name='../../evil dir')
+    ce = ctx.entry(cg) or {}
+    check('六面图目录也在 Assets/Cubemaps 下',
+          str(ce.get('src', '')).startswith('Assets/Cubemaps/'), ce.get('src'))
+    check('六面图名字已净化（无 .. / 空格路径段）',
+          '..' not in str(ce.get('src', '')), ce.get('src'))
+
+
+# ---------------------------------------------------------------- P2-②
+def t_p2_2_skybox_in_check():
+    print('---- 轮5 P2-②: 悬空天空盒 guid 必须进 scene_assets_check ----')
+    tmp = tempfile.mkdtemp(prefix='loom_r5_p22_')
+    proj = os.path.join(tmp, 'proj')
+    os.makedirs(proj)
+    loom_assets.AssetContext.for_dir(proj, create=True)     # 空可用索引
+    data = {'version': S.SCENE_VERSION, 'objects': [],
+            'skybox': {'guid': 'cafebabe'}}
+    ed = _ed(os.path.join(proj, 'scene.json'))
+    _cap(lambda: S.scene_from_dict(ed, data, base_dir=proj))
+    errs = S.asset_errors(ed)
+    check('天空盒失败进 asset_errors', any(w == 'skybox' for w, _g, _r in errs), errs)
+    r = _cmd('scene_assets_check', ed)
+    res = r.get('result') or {}
+    check('scene_assets_check ok=False + count>=1（旧行为: 假绿 ok:true）',
+          res.get('ok') is False and res.get('count', 0) >= 1, res)
+
+
+# ---------------------------------------------------------------- P2-③
+def t_p2_3_cubemap_fingerprint():
+    print('---- 轮5 P2-③: 六面图内容变更必须出声 ----')
+    tmp = tempfile.mkdtemp(prefix='loom_r5_p23_')
+    proj = os.path.join(tmp, 'proj')
+    os.makedirs(proj)
+    ctx = loom_assets.AssetContext.for_dir(proj, create=True)
+    faces = six(os.path.join(tmp, 'sky'))
+    cg, _c, _w = ctx.import_cubemap(faces, name='sky')
+    e = ctx.entry(cg)
+    fp = e.get('fingerprint') or {}
+    check('指纹 size 是字节数（旧行为: 面数 6）', int(fp.get('size', 0)) > 6, fp.get('size'))
+    check('条目带逐面指纹 face_stats', isinstance(e.get('face_stats'), dict)
+          and len(e['face_stats']) == 6)
+    # 替换其中一面（内容/大小都变）
+    face0 = os.path.join(proj, e['src'].replace('/', os.sep), e['files'][0])
+    _png(face0, (9, 9, 9, 255))
+    p, _e, ok, why = ctx.resolve(cg)
+    check('六面图内容变更 -> valid + reason 点名"内容已变更"',
+          ok is True and '内容已变更' in str(why), why)
+
+
+# ---------------------------------------------------------------- P2-④
+def t_p2_4_migrate_gate():
+    print('---- 轮5 P2-④: dry-run 新项目可预演 + 迁移产物带 min_engine_version ----')
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        'migrate_b1_r5', os.path.join(os.path.dirname(LOOM), 'tools',
+                                      'migrate_scene_assets_v11.py'))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    tmp = tempfile.mkdtemp(prefix='loom_r5_p24_')
+    proj = os.path.join(tmp, 'legacy_proj')
+    os.makedirs(proj)
+    alb = _png(os.path.join(proj, 'tex', 'a.png'))
+    faces = six(os.path.join(proj, 'sky'))
+    scene = {'version': 10, 'objects': [], 'materials': [
+        {'id': 'M1', 'name': 'm', 'color': None, 'saturation': 1.0,
+         'albedo': {'path': alb, 'name': 'a'}}],
+        'skybox': {'paths': ['sky/%s.png' % n for n in FACES], 'name': 'sky'}}
+    sp = os.path.join(proj, 'scene.json')
+    S.save_json_atomic(sp, scene)
+    rep = mod.migrate_scene(sp, dry_run=True)
+    check('dry-run 新项目可预演（旧行为: 直接失败 changed=0）',
+          rep['changed'] >= 2 and not rep['failures'], rep)
+    check('dry-run 不写盘（无 Assets 目录）',
+          not os.path.isdir(os.path.join(proj, 'Assets')))
+    rep2 = mod.migrate_scene(sp)
+    check('真跑: 迁移成功', rep2['changed'] >= 2 and not rep2['failures'], rep2)
+    new = json.load(open(sp, encoding='utf-8'))
+    check('迁移产物带 min_engine_version（D7 闸门生效）',
+          new.get('min_engine_version') == S.ENGINE_VERSION, new.get('min_engine_version'))
+    hp = os.path.join(tmp, 'future.json')
+    S.save_json_atomic(hp, {'version': 11, 'min_engine_version': '9.9.9', 'objects': []})
+    rep3 = mod.migrate_scene(hp)
+    check('高版本场景 -> 记 failure 不抛（整批不中断）',
+          bool(rep3['failures']) and '版本' in rep3['failures'][0], rep3['failures'])
+
+
+# ---------------------------------------------------------------- P2-⑤
+def t_p2_5_pack_hard_fail():
+    print('---- 轮5 P2-⑤: 打包缺资产库必须硬失败 ----')
+    data = {'objects': [],
+            'skybox': {'guid': 's'},
+            'materials': [{'albedo': {'guid': 'a'},
+                           'normal_map': {'guid': 'n'},
+                           'env_map': {'guid': 'e'}}]}
+    check('scene_asset_refs 计数（1 skybox + 3 槽）',
+          build_game.scene_asset_refs(data) == 4, build_game.scene_asset_refs(data))
+    raised = False
+    msg = ''
+    try:
+        build_game.require_assets_or_exit('/tmp/x.json', data, False)
+    except SystemExit as e:
+        raised = True
+        msg = str(e)
+    check('无资产库 + 有 guid 引用 -> SystemExit', raised and 'Assets/assets.json' in msg, msg)
+    check('无托管引用 -> 不失败',
+          build_game.require_assets_or_exit('/tmp/x.json', {'objects': []}, False) == 0)
+    check('有资产 -> 不失败',
+          build_game.require_assets_or_exit('/tmp/x.json', data, True) == 4)
+    # 资产夹在但索引坏了 -> 同样必须拦（包内仍是死 guid）
+    btmp = tempfile.mkdtemp(prefix='loom_r5_p25_')
+    bproj = os.path.join(btmp, 'proj')
+    os.makedirs(os.path.join(bproj, 'Assets'), exist_ok=True)
+    with open(os.path.join(bproj, 'Assets', 'assets.json'), 'w', encoding='utf-8') as f:
+        f.write('{ broken')
+    bscene = os.path.join(bproj, 's.json')
+    S.save_json_atomic(bscene, data)
+    raised2 = False
+    try:
+        build_game.require_assets_or_exit(bscene, data, True)
+    except SystemExit:
+        raised2 = True
+    check('资产夹在但索引损坏 -> 仍拒绝出包', raised2)
+    check('legacy path 引用不算托管（不误杀）',
+          build_game.scene_asset_refs({'materials': [{'albedo': {'guid': 'a', 'path': 'x.png'}}]}) == 0)
+
+
+# ---------------------------------------------------------------- P2-⑥
+def t_p2_6_notice_visible():
+    print('---- 轮5 P2-⑥: 资产问题对用户可见（notice + 编辑器 _notify） ----')
+    tmp = tempfile.mkdtemp(prefix='loom_r5_p26_')
+    proj = os.path.join(tmp, 'proj')
+    os.makedirs(proj)
+    loom_assets.AssetContext.for_dir(proj, create=True)
+    data = {'version': S.SCENE_VERSION, 'objects': [],
+            'skybox': {'guid': 'dead'},
+            'materials': [{'id': 'M', 'name': 'm', 'color': None, 'saturation': 1.0,
+                           'albedo': {'guid': 'dead2'}}]}
+    ed = _ed(os.path.join(proj, 'scene.json'))
+    _cap(lambda: S.scene_from_dict(ed, data, base_dir=proj))
+    notice = S.asset_issue_notice(ed)
+    check('notice 文本含"已保留"（告警 + 未改写）', notice and '已保留' in notice, notice)
+    clean = _ed()
+    check('干净场景 -> 无 notice', S.asset_issue_notice(clean) is None)
+    # 编辑器保存路径: 必须调用 _notify（GUI 可见）
+    captured = []
+    ed2 = _ed(os.path.join(proj, 'scene.json'))
+    _cap(lambda: S.scene_from_dict(ed2, data, base_dir=proj))
+    ed2._notify = lambda msg, color=None: captured.append(msg)
+    ed2._camera_dict = lambda: None
+    ed2.mark_saved = lambda: None
+    ed2.last_dir = None
+    ed2.scene_name = 's'
+    import editor as _edmod
+    old_save = _edmod.save_last_dir
+    _edmod.save_last_dir = lambda *a, **k: None
+    try:
+        ed2._save_scene(os.path.join(proj, 'saved.json'))
+    finally:
+        _edmod.save_last_dir = old_save
+    check('编辑器保存 -> _notify 提示（旧行为: 只有 print）',
+          any('资产' in str(m) for m in captured), captured)
+    saved = json.load(open(os.path.join(proj, 'saved.json'), encoding='utf-8'))
+    check('保存文件里引号仍在（保存与提示一致）',
+          (saved.get('skybox') or {}).get('guid') == 'dead',
+          saved.get('skybox'))
+
+
 def main():
     tmp, proj, g1, gc = t_import()
     proj2, data = t_roundtrip(tmp, proj, g1, gc)
@@ -431,6 +800,15 @@ def main():
     t_migrate()
     t_pack(tmp, proj2, data)
     t_commands(tmp, proj2)
+    t_p1_1_preserve_refs()
+    t_p1_2_index_partial()
+    t_p1_3_delta_guard()
+    t_p2_1_name_traversal()
+    t_p2_2_skybox_in_check()
+    t_p2_3_cubemap_fingerprint()
+    t_p2_4_migrate_gate()
+    t_p2_5_pack_hard_fail()
+    t_p2_6_notice_visible()
     print('\n总结果: %s' % ('ALL PASS' if ok else 'FAIL'))
     sys.exit(0 if ok else 1)
 

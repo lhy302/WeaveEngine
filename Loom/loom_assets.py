@@ -188,6 +188,14 @@ def empty_index(project_root=None):
     return {'schema': SCHEMA, 'assets': {}}
 
 
+def _warn_text(warns):
+    """坏条目告警文本（load_index / inspect_index 共用，措辞必须点名"坏条目"）。"""
+    if not warns:
+        return None
+    return ('索引有 %d 条坏条目已剔除: %s'
+            % (len(warns), '; '.join(str(w) for w in warns[:3])))
+
+
 def load_index(root):
     """读项目层索引 -> (index|None, ok, reason).
 
@@ -204,7 +212,7 @@ def load_index(root):
     hit = _CACHE.get(key)
     if hit is not None:
         data, warns = hit
-        return data, True, ('; '.join(warns) if warns else None)
+        return data, True, _warn_text(warns)
     try:
         with open(p, 'r', encoding='utf-8') as f:
             data = json.load(f)
@@ -215,10 +223,9 @@ def load_index(root):
         return None, False, '; '.join(warns[:3])
     if warns:
         warn_once(('idx-partial', p, st.st_mtime_ns),
-                  '[资产] 索引有 %d 条坏条目已剔除（其余照常可用）: %s'
-                  % (len(warns), '; '.join(warns[:3])))
+                  '[资产] ' + _warn_text(warns) + '（其余条目照常可用）')
     _CACHE[key] = (data, list(warns))
-    return data, True, ('; '.join(warns) if warns else None)
+    return data, True, _warn_text(warns)
 
 
 def inspect_index(root):
@@ -243,7 +250,7 @@ def inspect_index(root):
         return {'state': 'invalid', 'reason': '; '.join(warns[:3]),
                 'warnings': warns, 'count': 0, 'path': p}
     return {'state': ('partial' if warns else 'ok'),
-            'reason': ('; '.join(warns[:3]) if warns else None),
+            'reason': (_warn_text(warns) if warns else None),
             'warnings': warns, 'count': len(data.get('assets') or {}),
             'path': p}
 

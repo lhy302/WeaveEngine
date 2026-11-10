@@ -132,6 +132,14 @@ def _run_from_pack():
     # beta6 B1: 发布夹根作为资产 base_dir（Assets/ 与 游戏包.lsc 同夹）
     engine = PlayerApp(None, 1280, 800, scene_data=gm.get('scene'),
                        title=cf.get('title'), assets_base=pack_dir)
+    # P2-⑥: 发布版无控制台 -> 资产问题至少进日志（P2-⑥: 日志是发布版的可见出口）
+    try:
+        import sceneio as _sio
+        _notice = _sio.asset_issue_notice(engine, '启动')
+        if _notice:
+            print('[资产] ' + _notice)
+    except Exception:
+        pass
     print("游戏已启动: %s (%d 个对象, %d 个游戏脚本, %d 个插件)" %
           (cf.get('name', '未命名游戏'), len(engine.models), n, n_plug))
     return engine

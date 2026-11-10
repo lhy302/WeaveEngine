@@ -1174,6 +1174,12 @@ class EditorApp(GLEngine):
         try:
             sceneio.save_json_atomic(path, data)
             print("[编辑器] 场景已保存到", os.path.abspath(path))
+            # P2-⑥ + Q-B1-1=A: 保存后若仍有失效引用，明确告知"已原样保留"
+            _notice = sceneio.asset_issue_notice(self, '保存')
+            if _notice:
+                _notify = getattr(self, '_notify', None)
+                if callable(_notify):
+                    _notify('已保存（' + _notice + '）', (235, 180, 90))
             self.mark_saved()    # 保存成功: 更新"已保存"基线
             return path
         except Exception as e:
@@ -1263,6 +1269,14 @@ class EditorApp(GLEngine):
         self._scene_skybox = getattr(self, '_skybox', self._scene_skybox)
         self._sky_eff_last = None
         self._refresh_effective_skybox()
+        # beta6 轮5 P2-⑥: 资产问题必须对 GUI 用户可见（此前只有 print）。
+        # Q-B1-1=A: 同时说明"引用已保留，保存不会改写"，避免用户以为已丢失。
+        _notice = sceneio.asset_issue_notice(self, '打开')
+        if _notice:
+            _notify = getattr(self, '_notify', None)
+            if callable(_notify):
+                _notify(_notice, (235, 180, 90))
+            print('[编辑器] ' + _notice)
         base = os.path.splitext(os.path.basename(path))[0]
         if base:
             self.scene_name = base
@@ -1415,6 +1429,11 @@ class EditorApp(GLEngine):
             return
         try:
             data = sceneio.load_prefab(path)
+        except sceneio.SceneVersionError as e:
+            # R5-02 P-04: 版本不兼容要说人话 (不能只落 stdout)
+            print("[编辑器] Prefab 版本不兼容:", e)
+            self._notify("放置失败: %s" % e, (235, 90, 90))
+            return
         except Exception as e:
             print("[编辑器] 读取 Prefab 失败:", e)
             return

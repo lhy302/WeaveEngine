@@ -1703,7 +1703,15 @@ def cmd_set_texture(win, args):
     if mat is None:
         return {'error': '物体无材质'}
     if path is None or path == '':
-        ed.commit_model(m, "清除贴图", lambda: setattr(mat, 'albedo', None))
+        def _clear_alb():
+            setattr(mat, 'albedo', None)
+            # Q-B1-1=A: 用户显式清空 = 真正移除（连"保留的失效引用"一起清）
+            try:
+                import sceneio as _sio
+                _sio.clear_asset_slot(mat, 'albedo')
+            except Exception:
+                pass
+        ed.commit_model(m, "清除贴图", _clear_alb)
         return {'name': m.name, 'material': mat.name, 'albedo': None}
     # 相对路径基于引擎目录
     _root = os.path.dirname(os.path.abspath(__file__))
@@ -1844,7 +1852,14 @@ def cmd_set_env(win, args):
     paths = args.get('paths')
     color = args.get('color')
     if not paths and not color:
-        ed.commit_model(m, "清除环境贴图", lambda: setattr(mat, 'env_map', None))
+        def _clear_env():
+            setattr(mat, 'env_map', None)
+            try:
+                import sceneio as _sio
+                _sio.clear_asset_slot(mat, 'env_map')
+            except Exception:
+                pass
+        ed.commit_model(m, "清除环境贴图", _clear_env)
         return {'name': m.name, 'material': mat.name, 'env_map': None}
     _root = os.path.dirname(os.path.abspath(__file__))
     _ctx = None
@@ -2443,7 +2458,8 @@ def cmd_asset_import(win, args):
     ctx = ed._asset_context()
     return {'guid': guid, 'created': bool(created), 'type': kind,
             'name': name, 'project': getattr(ctx, 'root', None),
-            'warning': why}
+            'warning': why,
+            'warnings': list(getattr(ctx, 'warnings', None) or [])}
 
 
 @command('asset_get', '读资产条目 + 解析结果 (valid/reason): {guid}')
@@ -2469,11 +2485,22 @@ def cmd_asset_get(win, args):
 
 @command('asset_list', '项目资产清单 (含逐条 valid/reason): {type?}')
 def cmd_asset_list(win, args):
+    """P1-2: 必须区分「缺文件 / 文件在但部分坏 / 完全不可用」三种状态。"""
+    import loom_assets
     ed = win.editor
+    root = ed._project_root()
+    if root is None:
+        return {'assets': [], 'project': None, 'valid': False, 'state': 'missing',
+                'reason': '当前项目没有资产库（缺 Assets/assets.json）'}
+    st = loom_assets.inspect_index(root)
+    if st['state'] in ('corrupt', 'invalid'):
+        return {'assets': [], 'project': root, 'valid': False,
+                'state': st['state'], 'reason': st['reason'],
+                'warnings': st.get('warnings') or []}
     ctx = ed._asset_context()
     if ctx is None:
-        return {'assets': [], 'project': None, 'valid': False,
-                'reason': '当前项目没有资产库（缺 Assets/assets.json）'}
+        return {'assets': [], 'project': root, 'valid': False,
+                'state': st['state'], 'reason': st['reason']}
     want = args.get('type')
     out = []
     for gid, e in sorted(ctx.entries().items()):
@@ -2482,19 +2509,31 @@ def cmd_asset_list(win, args):
         path, _e, ok, why = ctx.resolve(gid)
         out.append({'guid': gid, 'type': e.get('type'), 'name': e.get('name'),
                     'src': e.get('src'), 'valid': bool(ok), 'reason': why})
-    return {'project': ctx.root, 'count': len(out), 'assets': out}
+    return {'project': ctx.root, 'count': len(out), 'assets': out,
+            'valid': True, 'state': st['state'], 'reason': st.get('reason'),
+            'warnings': st.get('warnings') or []}
 
 
 @command('scene_assets_check',
          '场景资产体检: 本次加载记录的引用问题 (valid/reason)，对齐 skybox_get 口径')
 def cmd_scene_assets_check(win, args):
     import sceneio
+    import loom_assets
     ed = win.editor
-    errs = sceneio.asset_errors(ed)
-    ctx = ed._asset_context()
-    return {'ok': not errs, 'count': len(errs),
+    errs = sceneio.asset_errors(ed)          # 含天空盒/相机天空盒（P-05 修）
+    root = ed._project_root()
+    if root is None:
+        st = {'state': 'missing', 'reason': '当前项目没有资产库（缺 Assets/assets.json）'}
+    else:
+        st = loom_assets.inspect_index(root)
+    bad_index = st.get('state') in ('corrupt', 'invalid')
+    return {'ok': (not errs) and not bad_index,
+            'count': len(errs),
             'errors': [{'where': w, 'guid': g, 'reason': r} for (w, g, r) in errs],
-            'project': getattr(ctx, 'root', None)}
+            'project': root,
+            'index': st.get('state'), 'index_reason': st.get('reason'),
+            'kept': sceneio.asset_refs_kept(ed),
+            'notice': sceneio.asset_issue_notice(ed, '体检')}
 
 
 @command('set_audio_3d', '设置音频 3D 参数: {name?, category?, min_distance?, max_distance?, rolloff?}')

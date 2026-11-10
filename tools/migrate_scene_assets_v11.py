@@ -54,7 +54,10 @@ def migrate_scene(scene_path, dry_run=False, create=True):
         return rep
     rep['version_before'] = data.get('version')
     root = _scene_root(scene_path)
-    ctx = loom_assets.AssetContext.for_dir(root, create=(create and not dry_run))
+    # P2-④: dry-run 用**只读内存索引**预演（新项目也能给出"将改 N 处"），
+    # 不再因为"还没有 Assets/assets.json"直接失败。
+    ctx = loom_assets.AssetContext.for_dir(root, create=(create or dry_run),
+                                           readonly=dry_run)
     if ctx is None:
         rep['failures'].append('无法打开/创建项目资产库（可用 --no-create 只迁已有项目）')
         return rep
@@ -67,7 +70,12 @@ def migrate_scene(scene_path, dry_run=False, create=True):
             return ref, False
         paths = ref.get('paths')
         if not paths:
-            return ref, False           # 纯色 cubemap: 无需迁移
+            # 纯色 cubemap: 无需迁移；但"guid 既不在索引、又无 paths/纯色"= 悬空引用，
+            # 必须报出来（P-10：否则迁移报告全绿而场景其实是坏的）
+            if isinstance(g, str) and g and not ref.get('solid_color'):
+                rep['failures'].append('%s: guid 悬空（索引内无此 cubemap）: %s'
+                                       % (where, g))
+            return ref, False
         if len(paths) != 6:
             rep['failures'].append('%s: 六面图路径不是 6 个 (%d)' % (where, len(paths)))
             return ref, False
@@ -103,6 +111,10 @@ def migrate_scene(scene_path, dry_run=False, create=True):
                 continue
             p = ref.get('path')
             if not p:
+                if isinstance(g, str) and g:
+                    rep['failures'].append(
+                        'materials[%d].%s: guid 悬空（索引内无此 texture）: %s'
+                        % (mi, slot, g))
                 continue
             src = _abs(root, p)
             if not os.path.isfile(src):
@@ -128,12 +140,28 @@ def migrate_scene(scene_path, dry_run=False, create=True):
         if isinstance(params, dict) and params.get('obj'):
             rep['skipped'].append('objects[%d].params.obj（模型引用留到 B2）' % oi)
 
-    data = sceneio.migrate(data)        # 版本升到 11（纯函数）
+    try:
+        data = sceneio.migrate(data)    # 版本升到 11（纯函数）
+    except Exception as e:
+        # P-13: 高版本/坏版本场景只记 failure，不中断整批
+        rep['failures'].append('版本闸门拒绝: %s' % (e,))
+        return rep
+    # P2-④: 与编辑器保存产物等价 —— 写出 min_engine_version（D7 闸门才对迁移场景生效）
+    data['min_engine_version'] = sceneio.ENGINE_VERSION
     rep['version_after'] = data.get('version')
+    rep['min_engine_version'] = data.get('min_engine_version')
     rep['changed'] = n
     if n and not dry_run:
         sceneio.save_json_atomic(scene_path, data)
     return rep
+
+
+def _rel(p):
+    """报告里显示的相对路径（跨盘符 relpath 会抛 ValueError -> 退回绝对路径）。"""
+    try:
+        return os.path.relpath(p, ROOT)
+    except Exception:
+        return os.path.abspath(p)
 
 
 def _default_targets():
@@ -157,11 +185,17 @@ def main(argv=None):
     reports = []
     total = 0
     for t in targets:
-        rep = migrate_scene(t, dry_run=a.dry_run, create=not a.no_create)
+        try:
+            rep = migrate_scene(t, dry_run=a.dry_run, create=not a.no_create)
+        except Exception as e:          # 单个场景/单个文件不得中断整批（P-13）
+            rep = {'scene': os.path.abspath(t), 'changed': 0,
+                   'failures': ['迁移异常: %r' % (e,)], 'skipped': [],
+                   'version_before': None, 'version_after': None,
+                   'dry_run': bool(a.dry_run)}
         reports.append(rep)
         total += rep['changed']
         print('[迁移] %s -> 改动 %d, 失败 %d%s' %
-              (os.path.relpath(t, ROOT), rep['changed'], len(rep['failures']),
+              (_rel(t), rep['changed'], len(rep['failures']),
                ' (dry-run)' if a.dry_run else ''))
         for f in rep['failures'][:5]:
             print('        失败:', f)
