@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from typing import Literal, Sequence
 
 from loom_shaders import CLEAR_COLOR_RGBA
-from loom_post import HDR_TARGET, HALF_TARGET, QUARTER_TARGET
+from loom_post import HALF_TARGET, HDR_TARGET, QUARTER_TARGET, post_stage
 
 # 语义目标名（后端各自解析；GL = engine._screen_fb()）
 SCREEN_TARGET = 'color.ldr'
@@ -169,8 +169,9 @@ def frame_plan(clear_color: Sequence[float] = CLEAR_COLOR_RGBA,
                include_ui: bool = False,
                include_post: bool = False) -> FramePlan:
     """构造一帧的 Pass 列表（编辑器 / 播放器共用）——**按参数缓存**，返回同一 frozen 对象。"""
+    _stage = post_stage() if include_post else 0     # 诊断分级（见 loom_post.post_stage）
     flags = (bool(include_sky), bool(include_world_canvas), bool(include_shadow),
-             bool(include_hud), bool(include_ui), bool(include_post))
+             bool(include_hud), bool(include_ui), bool(include_post), _stage)
     if clear_color is CLEAR_COLOR_RGBA:      # 两条渲染路径都用默认常量 -> 走极速键
         key = (True,) + flags
     else:
@@ -188,7 +189,8 @@ def _build_plan(clear_color: Sequence[float],
                 include_shadow: bool = False,
                 include_hud: bool = False,
                 include_ui: bool = False,
-                include_post: bool = False) -> FramePlan:
+                include_post: bool = False,
+                post_stage_value: int = 3) -> FramePlan:
     """构造一帧的 Pass 列表（编辑器 / 播放器共用）。
 
     顺序与迁移前逐位同序：主 pass（清屏 + 几何） -> 天空 -> World Canvas。
@@ -255,18 +257,20 @@ def _build_plan(clear_color: Sequence[float],
     if include_post:
         # 全屏后处理：显式关深度测试（否则 quad 会写 LDR 深度，下一帧 LESS 失败 -> 黑屏）
         _post_depth = DepthState(test=False, write=False, func='always')
-        passes.append(
-            PassSpec('bloom.bright', shader='post.bright', target=HALF_TARGET,
-                     load='dontcare', depth=_post_depth,
-                     raster=RasterState(cull='none'),
-                     draws=(DrawCmd('post.bright'),))
-        )
-        passes.append(
-            PassSpec('bloom.down', shader='post.down', target=QUARTER_TARGET,
-                     load='dontcare', depth=_post_depth,
-                     raster=RasterState(cull='none'),
-                     draws=(DrawCmd('post.down'),))
-        )
+        if post_stage_value >= 2:
+            passes.append(
+                PassSpec('bloom.bright', shader='post.bright', target=HALF_TARGET,
+                         load='dontcare', depth=_post_depth,
+                         raster=RasterState(cull='none'),
+                         draws=(DrawCmd('post.bright'),))
+            )
+        if post_stage_value >= 3:
+            passes.append(
+                PassSpec('bloom.down', shader='post.down', target=QUARTER_TARGET,
+                         load='dontcare', depth=_post_depth,
+                         raster=RasterState(cull='none'),
+                         draws=(DrawCmd('post.down'),))
+            )
         # 上采样合成放在 tonemap 里做（双线性读 quarter）：避免为此开启加法混合——
         # GL 的 blend_func 在本工程的 standalone/无 world-canvas 场景里读不到也还原不了，
         # 一旦留下「加法」状态，后续 UI 会被画成加法混合（实测整屏变亮）。

@@ -19,6 +19,14 @@ Loom.py — 入口: 命令行参数 + 数学管线基准 + 启动引擎
 import os
 import sys
 
+# 2026-11-10: LOOM_FAULTHANDLER=<1|文件路径> 时开启崩溃栈（编译版 release 无控制台,
+# 必须落到文件才能取证）。默认不启用 = 零开销、零行为变化。
+try:
+    import loom_debug
+    loom_debug.enable_if_requested()
+except Exception:
+    pass
+
 
 def _parse_args(argv):
     """解析命令行参数: --benchmark / --run <场景> / --open <场景> / --editor /
