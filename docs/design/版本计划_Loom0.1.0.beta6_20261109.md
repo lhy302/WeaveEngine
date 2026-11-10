@@ -372,3 +372,12 @@ R04 复核时发现两件事，直接推翻了它自己的一条证据，也暴�
 **验收**：test_asset_guid 46 项 ALL PASS；test_sceneio / test_skybox_scene（beta5 语义未破）/ test_eai_real（102 命令）全绿；全量 **126 文件**绿；老 v8 场景仍可加载（bench FPS 74.0）。
 
 **越界说明**：为双后端一致与包内 base_dir，实际改动含 `scene_driver/run_player/vk_player/game_player`（超出派单清单，主审复核后接受）。
+
+### 9.16 性能预期裁决（2026-11-10）
+
+人类裁决：3.13 带来的性能下降可以接受。后续继续做优化、并等待更高版本 Python 与其依赖生态成熟后再迁移。
+
+含义：
+- 批次 D 的 FPS >= 85 不再是硬门槛：仍按数据做优化（bucket_pack、插桩闭账），但没补回 13% 不构成阻塞；测量照做、数字如实记录。
+- Python 版本路线改为观察式：不追 3.14/3.15，等 PySide6（abi3 vs free-threading）、Nuitka、wgpu/moderngl 生态成熟后再评估。
+- 3.12 回滚点继续保留（pre_py313_freeze.txt + 三件 __py312 备份），但不作为默认路径。
