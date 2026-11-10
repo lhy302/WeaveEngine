@@ -56,7 +56,11 @@ class GLTargetPool:
             return None
         if decl.name == SCREEN_TARGET:
             return self.engine._screen_fb()
-        raise KeyError('GL 后端暂不支持的目标: %s（S0-S3 只做 %s 与 provider 自有目标）'
+        from loom_post import HDR_TARGET, HALF_TARGET, QUARTER_TARGET
+        if decl.name in (HDR_TARGET, HALF_TARGET, QUARTER_TARGET):
+            import loom_post_gl
+            return loom_post_gl.fbo_for(self.engine, decl.name)
+        raise KeyError('GL 后端暂不支持的目标: %s（S0-S3 只做 %s、HDR/bloom 与 provider 自有目标）'
                        % (decl.name, SCREEN_TARGET))
 
 
@@ -92,7 +96,12 @@ class GLFrameExecutor:
             if fb is not None:               # provider 自有目标的 pass 自己绑定（阴影）
                 fb.use()
                 if spec.load == 'clear':
-                    self.engine._clear_main_fbo(*spec.clear)
+                    if decl.name == SCREEN_TARGET:
+                        self.engine._clear_main_fbo(*spec.clear)   # 旧路径逐位不变
+                    else:
+                        d = spec.depth.clear if spec.depth is not None else None
+                        fb.clear(*tuple(spec.clear),
+                                 depth=(1.0 if d is None else float(d)))
             if first and prepare is not None:
                 prepare()
             first = False
@@ -101,7 +110,7 @@ class GLFrameExecutor:
                 fn = self.draws.get(src)
                 if fn is None:
                     raise KeyError('未注册的绘制源: %s' % (src,))
-                fn(self.engine, None)
+                fn(self.engine, src)
             self._restore(spec)
             if after_pass is not None:
                 after_pass(spec)
@@ -146,6 +155,9 @@ class GLFrameExecutor:
         if spec.raster.blend != 'none':
             bl = _BLEND.get(spec.raster.blend)
             if bl is not None:
+                # 保存旧 blend_func：UI 层只在建 program 时设过 blend_func，
+                # 若我们留下「加法」blend_func 不还原，后续 UI 会按加法混合画（实测变亮）。
+                self._blend_saved = _safe_get(ctx, 'blend_func', None)
                 ctx.enable(moderngl.BLEND)
                 ctx.blend_func = bl
 
@@ -161,6 +173,9 @@ class GLFrameExecutor:
             ctx.enable(moderngl.DEPTH_TEST)      # 只有 apply 关过才需要恢复
         if spec.raster.blend != 'none':
             ctx.disable(moderngl.BLEND)
+            saved = getattr(self, '_blend_saved', None)
+            if saved is not None:
+                _safe_set(ctx, 'blend_func', saved)   # 还原给 UI/HUD 用
         if spec.id == 'sky':                     # apply 关过剔除 -> 恢复开启（旧 finally 同款）
             ctx.enable(moderngl.CULL_FACE)
             _safe_set(ctx, 'front_face', 'cw')
@@ -187,6 +202,12 @@ def _draw_hud(engine, cmd):
     engine._draw_hud()
 
 
+def _draw_post(engine, src):
+    # 2B2: 后处理链的四个全屏 pass（目标已由执行器绑定）
+    import loom_post_gl
+    loom_post_gl.draw(engine, src)
+
+
 def _draw_screen_ui(engine, cmd):
     # 与迁移前 `if self.ui is not None: self.ui.draw_all(self)` 同语义
     ui = getattr(engine, 'ui', None)
@@ -201,4 +222,8 @@ _DEFAULT_DRAWS = {
     'shadow_maps': _draw_shadow_maps,
     'hud': _draw_hud,
     'screen_ui': _draw_screen_ui,
+    'post.bright': _draw_post,
+    'post.down': _draw_post,
+    'post.up': _draw_post,
+    'post.tonemap': _draw_post,
 }

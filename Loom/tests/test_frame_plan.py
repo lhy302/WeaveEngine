@@ -285,6 +285,40 @@ def t_s3s4():
           [x.id for x in p2.passes])
 
 
+# ---------------- 2B2: 后处理链结构 ----------------
+def t_post():
+    print('=== F. 2B2 后处理链（tonemap + bloom）===')
+    from loom_post import HDR_TARGET, HALF_TARGET, QUARTER_TARGET, post_enabled
+    p = frame_plan(include_shadow=False, include_world_canvas=True,
+                   include_hud=True, include_ui=True, include_post=True)
+    ids = [x.id for x in p.passes]
+    check('F1 顺序 = 主->天空->WorldUI->bloom(bright/down)->tonemap->HUD->UI',
+          ids == ['main', 'sky', 'world_ui', 'bloom.bright', 'bloom.down',
+                  'tonemap', 'hud', 'ui'], ids)
+    check('F2 结构校验通过', p.validate() == [], p.validate())
+    check('F3 主链目标改为 HDR（color.hdr）',
+          p.pass_by_id('main').target == HDR_TARGET
+          and p.pass_by_id('sky').target == HDR_TARGET, p.pass_by_id('main').target)
+    check('F4 HUD/UI 仍在 LDR 目标（tonemap 之后）',
+          p.pass_by_id('hud').target == 'color.ldr'
+          and p.pass_by_id('ui').target == 'color.ldr',
+          (p.pass_by_id('hud').target, p.pass_by_id('ui').target))
+    check('F5 bloom 目标是 0.5 / 0.25 尺寸声明',
+          p.target_by_name(HALF_TARGET).scale == 0.5
+          and p.target_by_name(QUARTER_TARGET).scale == 0.25, '')
+    check('F6 HDR 目标为 rgba16float',
+          p.target_by_name(HDR_TARGET).format == 'rgba16float', '')
+    check('F7 后处理 pass 显式关深度（防污染 LDR 深度）',
+          all(p.pass_by_id(k).depth is not None
+              and p.pass_by_id(k).depth.test is False
+              for k in ('bloom.bright', 'bloom.down', 'tonemap')), '')
+    p0 = frame_plan(include_post=False)
+    check('F8 LOOM_POST 关闭时回到旧路径（主链直写 LDR）',
+          p0.pass_by_id('main').target == 'color.ldr'
+          and 'tonemap' not in [x.id for x in p0.passes], '')
+    check('F9 开关默认开启（未设 LOOM_POST）', post_enabled() is True, '')
+
+
 # ---------------- D. 真实 GL ----------------
 def t_real_gl():
     print('=== D. 真实 GL 4.3 跑一帧 PlayerApp ===')
@@ -319,6 +353,7 @@ def main():
     t_shared()
     t_executor()
     t_s3s4()
+    t_post()
     t_real_gl()
     print('')
     if _fails:

@@ -471,6 +471,66 @@ struct SkyC {
 
 
 
+_POST_WGSL = """
+// 2026-11-10 阶段 2B2: bloom + tonemap（与 GL loom_post_gl 的 4 段逐公式一致）
+// 目标里存的是 gamma 编码值 -> 统一先 pow(2.2) 反线性，最后 tonemap 再编码。
+struct P { p0: vec4f, p1: vec4f }
+@group(0) @binding(0) var t0: texture_2d<f32>;
+@group(0) @binding(1) var t1: texture_2d<f32>;
+@group(0) @binding(2) var samp: sampler;
+@group(0) @binding(3) var<uniform> par: P;
+
+// WGSL 的属性只能挂在结构体成员上，不能直接写在函数参数上（naga 实测报错）。
+struct FragIn { @builtin(position) pos: vec4f }
+
+@vertex fn vs(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4f {
+    var p = vec2f(-1.0, -1.0);
+    if (vi == 1u) { p = vec2f(3.0, -1.0); }
+    if (vi == 2u) { p = vec2f(-1.0, 3.0); }
+    return vec4f(p, 0.0, 1.0);
+}
+
+fn uv_of(p: vec2f) -> vec2f {
+    // 与天空 shader 同一约定: 像素坐标(y 向下) 除以当前目标尺寸得 uv
+    return p / max(par.p1.xy, vec2f(1.0, 1.0));
+}
+
+fn to_linear(c: vec3f) -> vec3f {
+    return pow(max(c, vec3f(0.0, 0.0, 0.0)), vec3f(2.2, 2.2, 2.2));
+}
+
+@fragment fn fs_bright(inp: FragIn) -> @location(0) vec4f {
+    let c = to_linear(textureSample(t0, samp, uv_of(inp.pos.xy)).rgb);
+    let l = dot(c, vec3f(0.2126, 0.7152, 0.0722));
+    let w = smoothstep(par.p0.x, par.p0.x + max(par.p0.y, 1e-4), l);
+    return vec4f(c * w, 1.0);
+}
+
+@fragment fn fs_down(inp: FragIn) -> @location(0) vec4f {
+    let uv = uv_of(inp.pos.xy);
+    let o = par.p1.zw;
+    let c = textureSample(t0, samp, uv + vec2f(-o.x, -o.y)).rgb
+          + textureSample(t0, samp, uv + vec2f( o.x, -o.y)).rgb
+          + textureSample(t0, samp, uv + vec2f(-o.x,  o.y)).rgb
+          + textureSample(t0, samp, uv + vec2f( o.x,  o.y)).rgb;
+    return vec4f(c * 0.25, 1.0);
+}
+
+@fragment fn fs_up(inp: FragIn) -> @location(0) vec4f {
+    return vec4f(textureSample(t0, samp, uv_of(inp.pos.xy)).rgb, 1.0);
+}
+
+@fragment fn fs_tonemap(inp: FragIn) -> @location(0) vec4f {
+    let uv = uv_of(inp.pos.xy);
+    var c = to_linear(textureSample(t0, samp, uv).rgb);
+    c += textureSample(t1, samp, uv).rgb * par.p0.z;
+    c *= par.p0.w;
+    c = c / (1.0 + c);
+    return vec4f(pow(c, vec3f(1.0 / 2.2, 1.0 / 2.2, 1.0 / 2.2)), 1.0);
+}
+"""
+
+
 def bucket_layout(groups):
     """把实例行按桶重排成连续区间 (裁决 A: 单缓冲 + 按桶重排).
 
@@ -671,6 +731,14 @@ class VkRenderer:
         # (engine._pbr_enabled, 缺省 True)。读写统一落到 _pbr_enabled,
         # 见 pbr_enabled property。
         self._pbr_enabled = (True if pbr_enabled is None else bool(pbr_enabled))
+        # 2026-11-10 阶段 2B2: 后处理（HDR + bloom + tonemap）。LOOM_POST=0 时保持旧路径。
+        from loom_post import post_enabled
+        self._post_on = post_enabled()
+        self._frame_fmt = self.format        # 当前帧主链目标格式（post 开=rgba16float）
+        self._post_t = None                  # HDR / 半 / 四分之一 目标（按尺寸懒建）
+        self._post_pipes = None              # bloom/tonemap 管线（固定 rgba16float 内部）
+        self._post_layout = None
+        self._post_samples = None            # 采样器（linear clamp）
         self._build_pipelines()
         self._depth = None          # (w, h, view)
         self._scene_buf = None      # 场景块 uniform (公共)
@@ -823,6 +891,151 @@ class VkRenderer:
             fragment={'module': shad, 'entry_point': 'fs',
                       'targets': [{'format': 'r32float'}]})
 
+    # ---------------- 2026-11-10 阶段 2B2: 后处理（HDR + bloom + tonemap） ----------------
+    def _ensure_main_pipe(self, fmt):
+        """主链管线按**目标格式**缓存（HDR 化后不能用 self.format 那份）。"""
+        if getattr(self, '_main_pipe_fmt', None) == fmt and self._pipeline is not None:
+            return
+        d = self.device
+        if getattr(self, '_pipeline_base', None) is None:
+            self._pipeline_base = self._pipeline
+            self._main_pipe_fmt = self.format
+        if fmt == self.format:
+            self._pipeline = self._pipeline_base
+        else:
+            shader = d.create_shader_module(code=_MAIN_VERT + _MAIN_FRAG)
+            self._pipeline = d.create_render_pipeline(
+                layout=d.create_pipeline_layout(bind_group_layouts=[self._bgl]),
+                vertex=self._vertex_desc(shader, 'vs', inst=_INST_BYTES, nattr=10),
+                primitive=self._prim(),
+                depth_stencil={'format': 'depth32float',
+                               'depth_write_enabled': True, 'depth_compare': 'less'},
+                fragment={'module': shader, 'entry_point': 'fs',
+                          'targets': [{'format': fmt}]})
+        self._main_pipe_fmt = fmt
+
+    def _ensure_post_targets(self, w, h):
+        """HDR(全) / half(0.5) / quarter(0.25) 三张 rgba16float 目标（尺寸变化重建）。"""
+        if self._post_t is not None and self._post_t['size'] == (w, h):
+            return
+        d = self.device
+        usage = wgpu.TextureUsage.RENDER_ATTACHMENT | wgpu.TextureUsage.TEXTURE_BINDING
+
+        def _mk(tw, th):
+            t = d.create_texture(size=(max(1, tw), max(1, th), 1),
+                                 format='rgba16float', usage=usage)
+            return t, t.create_view()
+
+        hdr, hdr_v = _mk(w, h)
+        half, half_v = _mk(w // 2, h // 2)
+        quar, quar_v = _mk(w // 4, h // 4)
+        self._post_t = {'size': (w, h), 'hdr': hdr, 'hdr_view': hdr_v,
+                        'half': half, 'half_view': half_v,
+                        'quarter': quar, 'quarter_view': quar_v}
+
+    def _ensure_post_pipes(self):
+        if self._post_pipes is not None:
+            return
+        d = self.device
+        sh = d.create_shader_module(code=_POST_WGSL)
+        bgl = d.create_bind_group_layout(entries=[
+            {'binding': 0, 'visibility': wgpu.ShaderStage.FRAGMENT,
+             'texture': {'sample_type': 'float', 'view_dimension': '2d'}},
+            {'binding': 1, 'visibility': wgpu.ShaderStage.FRAGMENT,
+             'texture': {'sample_type': 'float', 'view_dimension': '2d'}},
+            {'binding': 2, 'visibility': wgpu.ShaderStage.FRAGMENT,
+             'sampler': {'type': 'filtering'}},
+            {'binding': 3, 'visibility': wgpu.ShaderStage.FRAGMENT,
+             'buffer': {'type': 'uniform'}},
+        ])
+        lay = d.create_pipeline_layout(bind_group_layouts=[bgl])
+
+        def _pipe(entry, fmt, blend=None):
+            tgt = {'format': fmt}
+            if blend is not None:
+                tgt['blend'] = blend
+            return d.create_render_pipeline(
+                layout=lay,
+                vertex={'module': sh, 'entry_point': 'vs', 'buffers': []},
+                primitive={'topology': 'triangle-list', 'cull_mode': 'none'},
+                fragment={'module': sh, 'entry_point': entry, 'targets': [tgt]})
+
+        add = {'color': {'src_factor': 'one', 'dst_factor': 'one',
+                         'operation': 'add'},
+               'alpha': {'src_factor': 'one', 'dst_factor': 'one',
+                         'operation': 'add'}}
+        self._post_pipes = {
+            'bright': _pipe('fs_bright', 'rgba16float'),
+            'down': _pipe('fs_down', 'rgba16float'),
+            'up': _pipe('fs_up', 'rgba16float', blend=add),
+            'tonemap': _pipe('fs_tonemap', self.format),
+        }
+        self._post_layout = bgl
+        self._post_samples = d.create_sampler(mag_filter='linear', min_filter='linear',
+                                              address_mode_u='clamp-to-edge',
+                                              address_mode_v='clamp-to-edge')
+        # 每个 pass 独立 params 缓冲（同一 encoder 里写同一缓冲会被后写覆盖）
+        self._post_bufs = [d.create_buffer(
+            size=32, usage=wgpu.BufferUsage.UNIFORM | wgpu.BufferUsage.COPY_DST)
+            for _ in range(4)]
+        self._post_groups = None
+
+    def _ensure_post_groups(self):
+        if self._post_groups is not None:
+            return
+        d = self.device
+        t = self._post_t
+
+        def _grp(v0, v1, buf):
+            return d.create_bind_group(layout=self._post_layout, entries=[
+                {'binding': 0, 'resource': v0},
+                {'binding': 1, 'resource': v1},
+                {'binding': 2, 'resource': self._post_samples},
+                {'binding': 3, 'resource': {'buffer': buf, 'offset': 0, 'size': 32}},
+            ])
+
+        self._post_groups = {
+            'bright': _grp(t['hdr_view'], t['hdr_view'], self._post_bufs[0]),
+            'down': _grp(t['half_view'], t['half_view'], self._post_bufs[1]),
+            'up': _grp(t['quarter_view'], t['quarter_view'], self._post_bufs[2]),
+            # 缓冲索引必须与 _record_post 的 rows 顺序一致（bright=0, down=1, tonemap=2）
+            'tonemap': _grp(t['hdr_view'], t['quarter_view'], self._post_bufs[2]),
+        }
+
+    def _record_post(self, enc, view, w, h):
+        """在**同一个 encoder** 里追加 bloom + tonemap（最后一步写交换链 texture）。"""
+        import numpy as _np
+        from loom_post import params as _params
+        p = _params()
+        t = self._post_t
+        self._ensure_post_pipes()
+        self._ensure_post_groups()
+        hw, hh = max(1, w // 2), max(1, h // 2)
+        qw, qh = max(1, w // 4), max(1, h // 4)
+        # params: (thr, knee, strength, exposure) + (target_w, target_h, src_texel_x, src_texel_y)
+        rows = [
+            ('bright', t['half_view'], (p['threshold'], p['knee'], 0.0, 0.0),
+             (hw, hh, 0.0, 0.0)),
+            ('down', t['quarter_view'], (0.0, 0.0, 0.0, 0.0),
+             (qw, qh, 1.0 / hw, 1.0 / hh)),
+            # 没有独立 up pass：tonemap 直接双线性上采样 quarter（与 GL 同口径）
+            ('tonemap', view, (0.0, 0.0, p['strength'], p['exposure']),
+             (w, h, 0.0, 0.0)),
+        ]
+        for i, (name, target, p0, p1) in enumerate(rows):
+            data = _np.array(list(p0) + list(p1), dtype='f4')
+            self.device.queue.write_buffer(self._post_bufs[i], 0, data.tobytes())
+        for i, (name, target, p0, p1) in enumerate(rows):
+            rp = enc.begin_render_pass(color_attachments=[{
+                'view': target,
+                'load_op': wgpu.LoadOp.load if name == 'up' else wgpu.LoadOp.clear,
+                'clear_value': (0.0, 0.0, 0.0, 1.0),
+                'store_op': wgpu.StoreOp.store}])
+            rp.set_pipeline(self._post_pipes[name])
+            rp.set_bind_group(0, self._post_groups[name], [], 0, 1)
+            rp.draw(3, 1, 0, 0)
+            rp.end()
+
     def _prim(self):
         return {'topology': 'triangle-list', 'cull_mode': 'back',
                 'front_face': 'cw'}     # 引擎网格绕序 (ccw 会剔除 plane)
@@ -957,7 +1170,8 @@ class VkRenderer:
     def _ensure_sky(self, cube):
         """懒建天空盒 pipeline/bind group/cube 纹理 (cube 变化才重建)."""
         d = self.device
-        key = (id(cube), getattr(cube, 'guid', None), getattr(cube, 'size', 0))
+        key = (id(cube), getattr(cube, 'guid', None), getattr(cube, 'size', 0),
+               getattr(self, '_frame_fmt', self.format))
         if self._sky_pipe is not None and self._sky_cube_key == key:
             return True
         faces = getattr(cube, '_faces', None)
@@ -981,7 +1195,7 @@ class VkRenderer:
                 depth_stencil={'format': 'depth32float', 'depth_write_enabled': False,
                                'depth_compare': 'always'},
                 fragment={'module': shader, 'entry_point': 'fs',
-                          'targets': [{'format': self.format}]})
+                          'targets': [{'format': getattr(self, '_frame_fmt', self.format)}]})
             self._sky_bgl = bgl
             # SkyC: inv_vp 64B + cam 16B + tint 16B + size 16B = 112B
             self._sky_buf = d.create_buffer(
@@ -1117,9 +1331,11 @@ class VkRenderer:
     # ---------------- 2026-11-06 R1: world Canvas ----------------
     def _ensure_world_ui(self):
         """懒建 world quad 管线 (独立于屏幕 UI 管线)."""
-        if self._world_ui_pipe is None:
+        fmt = getattr(self, '_frame_fmt', self.format)
+        if self._world_ui_pipe is None or getattr(self, '_world_ui_fmt', None) != fmt:
             self._world_ui_pipe = VkWorldUIPipeline(
-                self.device, self.format, 'depth32float')
+                self.device, fmt, 'depth32float')
+            self._world_ui_fmt = fmt
         return self._world_ui_pipe
 
     @staticmethod
@@ -1362,8 +1578,10 @@ class VkRenderer:
 }
 """
 
-    def _ensure_mip_pipeline(self):
-        if getattr(self, '_mip_pipe', None) is not None:
+    def _ensure_mip_pipeline(self, fmt='rgba8unorm'):
+        # 2B2: 目标格式参数化（旧实现写死 rgba8unorm，HDR/半分辨率链会立刻踩到）
+        if getattr(self, '_mip_pipe', None) is not None and \
+                getattr(self, '_mip_fmt', None) == fmt:
             return
         d = self.device
         shader = d.create_shader_module(code=self._MIP_WGSL)
@@ -1378,14 +1596,15 @@ class VkRenderer:
             vertex={'module': shader, 'entry_point': 'vs', 'buffers': []},
             primitive={'topology': 'triangle-list'},
             fragment={'module': shader, 'entry_point': 'fs',
-                      'targets': [{'format': 'rgba8unorm'}]})
+                      'targets': [{'format': fmt}]})
+        self._mip_fmt = fmt
         self._mip_sampler = d.create_sampler(
             mag_filter='linear', min_filter='linear',
             address_mode_u='repeat', address_mode_v='repeat')
 
     def _gen_mips(self, tex, w, h, levels):
         """逐级 downsample 生成 mip (与 GL 的 mipmap=True 对齐)."""
-        self._ensure_mip_pipeline()
+        self._ensure_mip_pipeline(getattr(tex, 'format', 'rgba8unorm'))
         d = self.device
         for lv in range(1, levels):
             src_view = tex.create_view(base_mip_level=lv - 1, mip_level_count=1)
@@ -2008,9 +2227,19 @@ class VkRenderer:
                 self._present_err_logged = True
                 print('[vk] 上屏失败 (本局只报一次, 本帧跳过):', repr(_e))
             return
+        # 2026-11-10 阶段 2B2: 开后处理时主链写 HDR(rgba16float)，最后在**同一 encoder**
+        # 里追加 bloom + tonemap 写回交换链；LOOM_POST=0 时逐位保持旧路径。
+        if self._post_on:
+            self._ensure_post_targets(w, h)
+            color_view = self._post_t['hdr_view']
+            self._frame_fmt = 'rgba16float'
+        else:
+            color_view = view
+            self._frame_fmt = self.format
+        self._ensure_main_pipe(self._frame_fmt)
         enc = d.create_command_encoder()
         rp = enc.begin_render_pass(color_attachments=[{
-            'view': view, 'load_op': wgpu.LoadOp.clear,
+            'view': color_view, 'load_op': wgpu.LoadOp.clear,
             'clear_value': CLEAR_COLOR_RGBA, 'store_op': wgpu.StoreOp.store}],
             depth_stencil_attachment={
                 'view': self._depth[1], 'depth_clear_value': 1.0,
@@ -2060,6 +2289,8 @@ class VkRenderer:
             except Exception as e:
                 print('[vk] world Canvas quad 绘制失败 (跳过):', repr(e))
         rp.end()
+        if self._post_on:
+            self._record_post(enc, view, w, h)   # 同一 encoder, 帧内仍只 submit 一次
         d.queue.submit([enc.finish()])
         # 2026-11-09 C5=B: 主 pass 提交成功 -> 记一次上屏成功（连续失败清零）
         try:

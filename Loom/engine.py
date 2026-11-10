@@ -305,6 +305,8 @@ class GLEngine(ShadowMixin, FrameComponentMixin, PhysicsMixin, InputMixin, HudMi
         # 描述；VK 仍走 vk_renderer 现有实现（阶段 2B 再迁）。
         from loom_pass_gl import GLFrameExecutor
         self._frame_executor = GLFrameExecutor(self)
+        # 2026-11-10 阶段 2B2: 后处理链（HDR + bloom + tonemap）；None = 尚未创建，首次使用懒建
+        self._post_gl = None
 
         # 着色器程序
         self.prog = self.ctx.program(vertex_shader=_VERT_SRC, fragment_shader=_FRAG_SRC)

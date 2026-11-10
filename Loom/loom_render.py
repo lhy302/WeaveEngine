@@ -32,6 +32,7 @@ import numpy as np
 from loom_shaders import CLEAR_COLOR_RGBA   # 2026-11-09 Q2=A: 清屏底色唯一来源
 # 2026-11-10 阶段 2A: 帧描述层（编辑器与播放器共用同一份 FramePlan）
 from loom_pass import frame_plan
+from loom_post import post_enabled   # 2026-11-10 阶段 2B2: LOOM_POST=0 走旧路径
 # 2026-10-18 A2: import pygame 已删（GLFW 窗口剥离；本文件不再引用 pygame 常量）
 import moderngl
 
@@ -1000,7 +1001,8 @@ class RenderMixin:
         # 不挂这个 pass 省一次调度（行为零变化）。
         plan = frame_plan(include_shadow=bool(self.lights), include_sky=True,
                           include_world_canvas=True, include_hud=True,
-                          include_ui=getattr(self, 'ui', None) is not None)
+                          include_ui=getattr(self, 'ui', None) is not None,
+                          include_post=post_enabled())
         self._frame_executor.execute(plan, prepare=self._prepare_main_pass,
                                      before_pass=self._before_pass_prof,
                                      after_pass=self._after_pass_prof)

@@ -1,0 +1,158 @@
+{
+  "gate": {
+    "mae_abs": 0.0002,
+    "mae_drift": 5e-05,
+    "max_abs": 0.2,
+    "ncc_drift": 0.0001,
+    "ui_mae_abs": 0.005,
+    "ui_mae_drift": 0.002
+  },
+  "generated_at": "2026-11-10T08:13:07",
+  "reference_dir": "ab_scenes_ref_next",
+  "resolution": [
+    480,
+    320
+  ],
+  "scene_count": 22,
+  "scenes": {
+    "ab_c_dir+point.json": {
+      "mae": 0.0,
+      "max": 0.0,
+      "ncc": 1.0,
+      "ref_sha256": "fa0bd7eb0da29b41ce5a29fa7c7454043126b449f37fe408e91ea04b67821bed"
+    },
+    "ab_c_dir_only.json": {
+      "mae": 0.0,
+      "max": 0.0,
+      "ncc": 1.0,
+      "ref_sha256": "e0853e2c67d483505b133b74cac0d057ad0cab46f715928fbfd9d9de2118dbce"
+    },
+    "ab_c_dir_shadow.json": {
+      "mae": 4.919e-05,
+      "max": 0.043137,
+      "ncc": 0.99989836,
+      "ref_sha256": "22b076780d0de82a607e1d2c91d3588f4e73fbd3c53c74b20365068476dc11b1"
+    },
+    "ab_c_point_only.json": {
+      "mae": 1e-08,
+      "max": 0.003922,
+      "ncc": 0.99999999,
+      "ref_sha256": "6f5f93c3f68d88eb96b05d47a231120099b483948adf54184b8022dafb838128"
+    },
+    "ab_c_spot_only.json": {
+      "mae": 1e-08,
+      "max": 0.003922,
+      "ncc": 0.99999999,
+      "ref_sha256": "c9cdcb0f9f1b93087279e92ee030ea247b754b07045cf4e4e0970591ce6a6865"
+    },
+    "ab_cube.json": {
+      "mae": 0.0,
+      "max": 0.0,
+      "ncc": 1.0,
+      "ref_sha256": "c9bd7cad2fca256a181805eec27b65734be07a51f7e8de69ff9bd6e0fc0fc739"
+    },
+    "ab_env.json": {
+      "mae": 4.9e-07,
+      "max": 0.003922,
+      "ncc": 0.99999916,
+      "ref_sha256": "bb2be5336cbe7e97f114ad8fc2510abae86faffa86423e87920e7999288ab92d"
+    },
+    "ab_env_off.json": {
+      "mae": 0.0,
+      "max": 0.0,
+      "ncc": 1.0,
+      "ref_sha256": "627319cd39695b2709521d34a4c53e602736a22b125a10cd8bc329d2a14d1df7"
+    },
+    "ab_nrm.json": {
+      "mae": 0.0,
+      "max": 0.0,
+      "ncc": 1.0,
+      "ref_sha256": "34d6eae1846c78ddc4bf0b7072a708551ea9652dc7c8aec64691b9276e68e091"
+    },
+    "ab_nrm_off.json": {
+      "mae": 0.0,
+      "max": 0.0,
+      "ncc": 1.0,
+      "ref_sha256": "b241064aed49470e8821bbde7b521494a0fd08315bbefdccedfe1d27d2b0da91"
+    },
+    "ab_pbr.json": {
+      "mae": 1e-08,
+      "max": 0.003922,
+      "ncc": 1.0,
+      "ref_sha256": "594e4419b7b21da3439cd2f4eaa76f1c041e0100436bcf02437dd203ed761ed9"
+    },
+    "ab_plane.json": {
+      "mae": 0.0,
+      "max": 0.0,
+      "ncc": 1.0,
+      "ref_sha256": "70d06345d26378b4374c8b65e9660f7eb8d5d12b0b94243a46482a04e40b31da"
+    },
+    "ab_plane_cube.json": {
+      "mae": 1.277e-05,
+      "max": 0.043137,
+      "ncc": 0.99997145,
+      "ref_sha256": "9882baaacaa8a50b1fe1db3317990859e4aed9efb0e9b788c7a873e4c43486cf"
+    },
+    "ab_plane_cube_sun_pt.json": {
+      "mae": 1.11e-05,
+      "max": 0.039216,
+      "ncc": 0.99998155,
+      "ref_sha256": "25247c1816c56f07883e0ed6fd8206384f3ef0d2aa77806d20eecae8cdb3fc0f"
+    },
+    "ab_plane_shfalse.json": {
+      "mae": 0.0,
+      "max": 0.0,
+      "ncc": 1.0,
+      "ref_sha256": "70d06345d26378b4374c8b65e9660f7eb8d5d12b0b94243a46482a04e40b31da"
+    },
+    "ab_plane_shtrue.json": {
+      "mae": 0.0,
+      "max": 0.0,
+      "ncc": 1.0,
+      "ref_sha256": "70d06345d26378b4374c8b65e9660f7eb8d5d12b0b94243a46482a04e40b31da"
+    },
+    "ab_plane_sphere.json": {
+      "mae": 3.642e-05,
+      "max": 0.043137,
+      "ncc": 0.99991937,
+      "ref_sha256": "450144dc0fe4447ee6b3fbaf6151ceaa17133f31c7577986f68c151d2683169f"
+    },
+    "ab_point_shadow.json": {
+      "mae": 4.736e-05,
+      "max": 0.090196,
+      "ncc": 0.99923814,
+      "ref_sha256": "5bcc0b54c57aa0e36e8e7917128c97eff74970ede991ca54fba6e5f87bde9a0a"
+    },
+    "ab_scene.json": {
+      "mae": 4.583e-05,
+      "max": 0.043137,
+      "ncc": 0.99992608,
+      "ref_sha256": "c2c6dc3eaa3e90b7549cdf76f454e1506167be013b7bead6df3bdba7c8eaf676"
+    },
+    "ab_sky.json": {
+      "mae": 1.138e-05,
+      "max": 0.039216,
+      "ncc": 0.9999733,
+      "ref_sha256": "bf8893c32f952331e02328332420f63da94e294bc4911a766bcfa8f1be4f81cc"
+    },
+    "ab_tex.json": {
+      "mae": 0.0,
+      "max": 0.0,
+      "ncc": 1.0,
+      "ref_sha256": "51cfbc453151fc325ce0704bf4e90ef1b6d51991f89e6af96bbed8c1f1fbb2a0"
+    },
+    "ab_ui_scene.json": {
+      "mae": 6.083e-05,
+      "max": 0.070588,
+      "ncc": 0.99954351,
+      "ref_sha256": "0b5f22fb9550effde710ef4fa4a7ac61d141f91cf652aeecfcf9e69cdd73f5cf",
+      "ui": {
+        "mae": 9e-08,
+        "max": 0.003922,
+        "ncc": 0.99999999,
+        "ref_sha256": "479f74c68ca4b49b359f691582c2cb550445b8a9e8999df9e539e52739fc08a0"
+      }
+    }
+  },
+  "schema": 2
+}

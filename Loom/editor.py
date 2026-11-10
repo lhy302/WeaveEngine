@@ -22,6 +22,7 @@ import moderngl
 
 # 2026-11-10 阶段 2A: 与播放器共用同一份 FramePlan 描述（S0-S2）
 from loom_pass import frame_plan
+from loom_post import post_enabled   # 2B2: LOOM_POST=0 走旧路径
 
 from engine import (GLEngine, Point3D, LightState, CameraState, wrap_deg,
                     gc_play_enter, gc_play_exit)
@@ -2348,7 +2349,8 @@ class EditorApp(GLEngine):
         # 逐光源/逐面 FBO 仍归 loom_shadow，描述里标 owned_by_provider）。
         self._t_shadow = self._prof_t0()
         plan = frame_plan(include_shadow=bool(self.lights),
-                          include_sky=(self.effective_skybox() is not None))
+                          include_sky=(self.effective_skybox() is not None),
+                          include_post=post_enabled())
         self._frame_executor.execute(plan, prepare=self._prepare_main_pass,
                                      after_pass=self._after_pass_prof)
         # MVP (轨道相机已由 engine.render 逻辑处理, 但此处复算供 gizmo/拾取用)

@@ -17,6 +17,9 @@
 #   py tests/test_ab_gl_vk.py                    # 全场景对基线（失败即 rc=1）
 #   py tests/test_ab_gl_vk.py --update-baseline  # 重建参考图+基线（有 FAIL 不写）
 #   py tests/test_ab_gl_vk.py --update-baseline --force   # 允许场景数变少
+#   py tests/test_ab_gl_vk.py                   # 自动跟随 LOOM_POST（默认=后处理口径的新基线）
+#   py tests/test_ab_gl_vk.py --legacy           # 强制旧参考/旧基线（= LOOM_POST=0 口径）
+#   LOOM_POST=0 py tests/test_ab_gl_vk.py         # 关后处理 -> 旧基线必须全绿（回退证明）
 #   py tests/test_ab_gl_vk.py --self-test        # 自检：反例必须让闸门变红
 #   LOOM_AB_SCENES=a.json,b.json                 # 只跑子集（对基线，不改基线）
 #   LOOM_AB_ALLOW_NO_VK=1                        # 显式允许"本机没有 Vulkan"（否则 FAIL）
@@ -47,6 +50,10 @@ SCENES_DIR = os.path.join(HERE, 'ab_scenes')
 ASSETS_DIR = os.path.join(SCENES_DIR, 'assets')
 REF_DIR = os.path.join(HERE, 'ab_scenes_ref')
 BASELINE_PATH = os.path.join(HERE, 'ab_gl_vk_baseline.json')
+# 2026-11-10 阶段 2B2: 后处理上线后 GL 画面**故意变化** -> 新参考图另存一份，
+# 旧参考/旧基线原样保留（LOOM_POST=0 时仍必须全绿，证明开关真能回退）。
+REF_DIR_NEXT = os.path.join(HERE, 'ab_scenes_ref_next')
+BASELINE_NEXT = os.path.join(HERE, 'ab_gl_vk_baseline_next.json')
 SCHEMA = 2
 
 DEFAULT_GATE = {
@@ -673,7 +680,20 @@ def self_test():
 
 
 def main(argv):
+    global REF_DIR, BASELINE_PATH
     files = _scene_files()
+    # 口径自动跟随开关（人类裁决 2B2）：
+    #   · LOOM_POST=1（默认）-> 新参考图/新基线；
+    #   · LOOM_POST=0        -> 旧参考图/旧基线（回退证明）；
+    #   · --update-baseline 默认重建**旧**那套，加 --next 才重建新那套（旧文件不被覆盖）。
+    from loom_post import post_enabled
+    use_next = ('--next' in argv) or \
+               ('--update-baseline' not in argv and post_enabled())
+    if '--legacy' in argv:
+        use_next = False
+    if use_next:
+        REF_DIR = REF_DIR_NEXT
+        BASELINE_PATH = BASELINE_NEXT
     if '--self-test' in argv:
         return self_test()
     update = '--update-baseline' in argv
