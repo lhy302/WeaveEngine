@@ -60,6 +60,7 @@ def _enforce_fail_exit_code():
 
 import contextlib
 import io
+import json
 import math
 import os
 import struct
@@ -448,6 +449,9 @@ print('---- ⑤ 写者优先级 D6 + 管线一致性 ----')
 # ============================================================================
 C.reset_anim_warn()
 e19 = make_engine()
+# R5-02 P-06: physics_available 由宿主传入; 桩里显式声明"物理桥存在"，
+# 才能测到 D6 (物理可用 -> 动态刚体跳过) 这一支; 无桥的回退支见 ⑦。
+e19._phys_bridge = object()
 m_static, an_static = add_anim_obj(e19, E.AnimationClip(once.frames, loop_mode='loop'))
 m_kin, an_kin = add_anim_obj(e19, E.AnimationClip(once.frames, loop_mode='loop'))
 m_kin.rigidbody = E.RigidbodyComponent()
@@ -661,6 +665,244 @@ check('⑥ 版本比较: beta6 < beta7 < beta10 < 0.1.0',
 check('⑥ 版本比较: 正式版 0.1.0 不 < beta6',
       S.version_lt('0.1.0', '0.1.0.beta6') is False)
 check('⑥ 无法解析的版本号不拦 (只告警)', S.version_lt('abc', '99.0.0') is False)
+
+# ============================================================================
+print('---- ⑦ R5-02 审查回归 (P-01/P-02/P-04/P-05/P-06/P-07) ----')
+# ============================================================================
+import tempfile as _tf7
+
+# ---- P-01 (P0): 常量通道必须写 Point3D, 不能写 plain tuple ----
+# 触发面: 轮子/风扇 (位置恒定 (2,5,3) + 只转 Y) / 平移平台 (旋转恒定)。
+const_pos_clip = E.AnimationClip([
+    {'time': 0.0, 'position': (2.0, 5.0, 3.0), 'rotation': (0.0, 0.0, 0.0),
+     'scale': (1.0, 1.0, 1.0)},
+    {'time': 1.0, 'position': (2.0, 5.0, 3.0), 'rotation': (0.0, 1.5, 0.0),
+     'scale': (1.0, 1.0, 1.0)}])
+e40 = make_engine()
+m40, an40 = add_anim_obj(e40, const_pos_clip)
+for _ in range(10):
+    e40.update_animations(0.1)
+check('⑦ P-01 常量 position 通道写回 Point3D',
+      isinstance(m40.transform._position, E.Point3D),
+      type(m40.transform._position).__name__)
+check('⑦ P-01 m.position.x/.y/.z 可读 (不 AttributeError)',
+      abs(m40.position.x - 2.0) < 1e-12 and abs(m40.position.y - 5.0) < 1e-12
+      and abs(m40.position.z - 3.0) < 1e-12, str(tuple(m40.position)))
+ok40 = True
+try:
+    snap40 = U.snapshot(m40)            # 旧实现在这里 AttributeError
+    d40 = S._emit_object(m40)           # 存盘路径同断
+except Exception as exc:                # noqa: BLE001
+    ok40 = False
+    snap40, d40 = None, None
+    print('    P-01 snapshot/存盘异常:', exc)
+check('⑦ P-01 undo.snapshot + sceneio 存盘不崩', ok40)
+check('⑦ P-01 存盘 position 正确', ok40 and d40['position'] == [2.0, 5.0, 3.0],
+      str(d40.get('position') if ok40 else None))
+
+const_rot_clip = E.AnimationClip([
+    {'time': 0.0, 'position': (0.0, 0.0, 0.0), 'rotation': (0.1, 0.2, 0.3),
+     'scale': (1.0, 1.0, 1.0)},
+    {'time': 1.0, 'position': (0.0, 2.0, 0.0), 'rotation': (0.1, 0.2, 0.3),
+     'scale': (1.0, 1.0, 1.0)}])
+e41 = make_engine()
+m41, an41 = add_anim_obj(e41, const_rot_clip)
+for _ in range(10):
+    e41.update_animations(0.1)
+check('⑦ P-01 常量 rotation 通道写回 Point3D',
+      isinstance(m41.transform._rotation, E.Point3D),
+      type(m41.transform._rotation).__name__)
+check('⑦ P-01 m.rotation.x/.y/.z 可读',
+      abs(m41.rotation.x - 0.1) < 1e-12 and abs(m41.rotation.z - 0.3) < 1e-12,
+      str(tuple(m41.rotation)))
+ok41 = True
+try:
+    snap41 = U.snapshot(m41)
+except Exception as exc:                # noqa: BLE001
+    ok41 = False
+    snap41 = None
+    print('    P-01 常量 rotation snapshot 异常:', exc)
+check('⑦ P-01 常量 rotation 下 undo.snapshot 不崩', ok41)
+
+# ---- P-02 (P1): once + 负相位 -> 夹到 [0,dur] 并停播; 批量==逐物体 ----
+neg_once = E.AnimationClip([
+    {'time': 0.0, 'position': (0.0, 0.0, 0.0), 'rotation': (0.0, 0.0, 0.0),
+     'scale': (1.0, 1.0, 1.0)},
+    {'time': 1.0, 'position': (0.0, 10.0, 0.0), 'rotation': (0.0, 0.0, 0.0),
+     'scale': (1.0, 1.0, 1.0)}], loop_mode='once')
+e42 = make_engine()
+m42, an42 = add_anim_obj(e42, E.AnimationClip(neg_once.frames, loop_mode='once'))
+an42.time = 0.2
+an42.set_speed(-1.0)
+e42.update_animations(0.5)              # t = 0.2 - 0.5 = -0.3 -> 夹到 0
+check('⑦ P-02 once 倒放到 0 停播 (playing=False, time=0)',
+      an42.playing is False and an42.time == 0.0,
+      'time=%r playing=%r' % (an42.time, an42.playing))
+check('⑦ P-02 停在首帧 (与 sample(0) 同位姿)',
+      same_bits(m42.position.y, 0.0), 'y=%r' % m42.position.y)
+# 批量(快路径) vs 逐物体(慢路径, 缺通道) 在负相位下逐位一致
+e43 = make_engine()
+mf43, anf43 = add_anim_obj(e43, E.AnimationClip(neg_once.frames, loop_mode='once'),
+                           name='f')
+ms43, ans43 = add_anim_obj(e43, E.AnimationClip([
+    {'time': 0.0, 'position': (0.0, 0.0, 0.0)},
+    {'time': 1.0, 'position': (0.0, 10.0, 0.0)}], loop_mode='once'), name='s')
+anf43.time = ans43.time = 0.2
+anf43.set_speed(-1.0)
+ans43.set_speed(-1.0)
+for _ in range(10):
+    e43.update_animations(0.1)
+check('⑦ P-02 负速下 批量/逐物体 位姿逐位一致',
+      all(same_bits(a, b) for a, b in zip(mf43.position, ms43.position))
+      and anf43.playing is ans43.playing is False,
+      '%r vs %r' % (tuple(mf43.position), tuple(ms43.position)))
+
+# ---- P-05 (P2): 换 frames 列表后批量必须看到新帧 (与 sample() 同源失效) ----
+stale_clip = E.AnimationClip([
+    {'time': 0.0, 'position': (0.0, 0.0, 0.0), 'rotation': (0.0, 0.0, 0.0),
+     'scale': (1.0, 1.0, 1.0)},
+    {'time': 1.0, 'position': (0.0, 10.0, 0.0), 'rotation': (0.0, 0.0, 0.0),
+     'scale': (1.0, 1.0, 1.0)}], loop_mode='loop')
+e44 = make_engine()
+m44, an44 = add_anim_obj(e44, stale_clip)
+e44.update_animations(0.0)              # 建立批量缓存
+stale_clip.frames = [                   # 脚本整体换帧 (长度同, 列表换了)
+    {'time': 0.0, 'position': (0.0, 0.0, 0.0), 'rotation': (0.0, 0.0, 0.0),
+     'scale': (1.0, 1.0, 1.0)},
+    {'time': 1.0, 'position': (0.0, 100.0, 0.0), 'rotation': (0.0, 0.0, 0.0),
+     'scale': (1.0, 1.0, 1.0)}]
+an44.time = 0.0
+an44.playing = True
+e44.update_animations(0.25)
+ref44 = stale_clip.sample(0.25)['position'][1]
+check('⑦ P-05 换帧后批量结果来自新帧 (y=25, 旧缓存 y=2.5)',
+      same_bits(m44.position.y, 25.0) and same_bits(m44.position.y, ref44),
+      'y=%r ref=%r' % (m44.position.y, ref44))
+
+# ---- P-04 (P2): prefab 也过版本闸 + 旧 prefab 向后兼容 ----
+e45 = make_engine()
+m45, _ = add_anim_obj(e45, full_clip())
+m45.animator.set_speed(2.0)                 # 让 prefab 真的带 speed/clip_meta
+m45.animator.clips['c'].loop_mode = 'once'
+pd45 = S.prefab_to_dict(m45)
+check('⑦ P-04 prefab 写出 min_engine_version',
+      pd45.get('min_engine_version') == S.ENGINE_VERSION,
+      str(pd45.get('min_engine_version')))
+check('⑦ P-04 prefab 体内 animator 带 speed/clip_meta (闸门动机成立)',
+      'speed' in (pd45['objects'][0].get('animator') or {})
+      or 'clip_meta' in (pd45['objects'][0].get('animator') or {}),
+      str(sorted((pd45['objects'][0].get('animator') or {}).keys())))
+_tf7_dir = _tf7.mkdtemp(prefix='loom_pf7_')
+_p_old = os.path.join(_tf7_dir, 'old.prefab')
+with open(_p_old, 'w', encoding='utf-8') as _f:
+    json.dump({'version': 1, 'prefab': {'guid': 'g0', 'name': 'x'},
+               'objects': []}, _f)
+ok45 = True
+try:
+    S.load_prefab(_p_old)
+except Exception as exc:                # noqa: BLE001
+    ok45 = False
+    print('    旧 prefab 加载异常:', exc)
+check('⑦ P-04 旧 prefab (无 min_engine_version) 可加载', ok45)
+_p_new = os.path.join(_tf7_dir, 'new.prefab')
+with open(_p_new, 'w', encoding='utf-8') as _f:
+    json.dump({'version': 1, 'min_engine_version': '99.0.0',
+               'prefab': {'guid': 'g1', 'name': 'x'}, 'objects': []}, _f)
+rej45 = False
+try:
+    S.load_prefab(_p_new)
+except S.SceneVersionError:
+    rej45 = True
+check('⑦ P-04 更高版本 prefab 被 load_prefab 拒绝', rej45)
+rej45b = False
+try:
+    S.instantiate_prefab(make_engine(),
+                         {'min_engine_version': '99.0.0', 'objects': []})
+except S.SceneVersionError:
+    rej45b = True
+check('⑦ P-04 instantiate_prefab 入口同样过闸 (undo 重放)', rej45b)
+
+# ---- P-06 (P2): 物理不可用 -> 回退动画驱动 (不永久冻结) ----
+C.reset_anim_warn()
+e46 = make_engine()
+m46 = e46.add_model(create_cube(1.0), E.Point3D(0, 0, 0), E.Point3D(0, 0, 0))
+an46 = m46.add_animator(clips={'c': E.AnimationClip(once.frames, loop_mode='loop')},
+                        current='c')
+an46.playing = True
+m46.rigidbody = E.RigidbodyComponent()
+m46.rigidbody.is_kinematic = False
+_buf46 = io.StringIO()
+with contextlib.redirect_stdout(_buf46):
+    st46 = C.evaluate_animations(e46.models, 0.25, physics_available=False)
+check('⑦ P-06 物理不可用时动态刚体由动画驱动',
+      abs(m46.position.y - 2.5) < 1e-9, 'y=%r' % m46.position.y)
+check('⑦ P-06 stats.fallback_dynamic 计数', st46.get('fallback_dynamic') == 1,
+      str(st46))
+check('⑦ P-06 一次性提示 (物理不可用)',
+      '物理后端不可用' in _buf46.getvalue(), _buf46.getvalue().strip()[:100])
+# 引擎桩没有物理桥 -> update_animations 自动走回退 (而不是冻结)
+e47 = make_engine()
+m47 = e47.add_model(create_cube(1.0), E.Point3D(0, 0, 0), E.Point3D(0, 0, 0))
+an47 = m47.add_animator(clips={'c': E.AnimationClip(once.frames, loop_mode='loop')},
+                        current='c')
+an47.playing = True
+m47.rigidbody = E.RigidbodyComponent()
+e47.update_animations(0.25)
+check('⑦ P-06 无桥引擎走回退 (位姿不冻结)', m47.position.y > 0.0,
+      'y=%r' % m47.position.y)
+# 对照: 有桥 -> D6, 仍然跳过
+e47._phys_bridge = object()
+m47.position = E.Point3D(0, 0, 0)
+an47.time = 0.0
+an47.playing = True
+e47.update_animations(0.25)
+check('⑦ P-06 有桥时回到 D6 (动态刚体跳过)', m47.position.y == 0.0,
+      'y=%r' % m47.position.y)
+
+# ---- P-07 (P2/P3): ndarray 帧的深拷 + 可比较 ----
+arr_clip = E.AnimationClip([
+    {'time': 0.0, 'position': np.array([1.0, 2.0, 3.0]),
+     'rotation': (0.0, 0.0, 0.0), 'scale': (1.0, 1.0, 1.0)},
+    {'time': 1.0, 'position': np.array([4.0, 5.0, 6.0]),
+     'rotation': (0.0, 0.0, 0.0), 'scale': (1.0, 1.0, 1.0)}])
+e48 = make_engine()
+m48, _ = add_anim_obj(e48, arr_clip)
+snap48 = U.snapshot(m48)
+copy48 = snap48['animator'][0]['c']
+check('⑦ P-07 copy() 不共享 numpy 数组',
+      copy48.frames[0]['position'] is not arr_clip.frames[0]['position'])
+arr_clip.frames[0]['position'][0] = 99.0        # 原地改模型数组
+check('⑦ P-07 改模型数组不污染快照',
+      abs(float(copy48.frames[0]['position'][0]) - 1.0) < 1e-12,
+      str(copy48.frames[0]['position']))
+copy48.frames[1]['position'][1] = 77.0          # 原地改快照数组
+check('⑦ P-07 改快照数组不污染模型',
+      abs(float(arr_clip.frames[1]['position'][1]) - 5.0) < 1e-12,
+      str(arr_clip.frames[1]['position']))
+_a1 = E.AnimationClip([{'time': 0.0, 'position': np.array([1.0, 2.0, 3.0])}])
+_a2 = E.AnimationClip([{'time': 0.0, 'position': np.array([1.0, 2.0, 3.0])}])
+_eq_err = ''
+try:
+    _eq_ok = (_a1 == _a2) is True
+except Exception as exc:                # noqa: BLE001
+    _eq_ok = False
+    _eq_err = repr(exc)
+check('⑦ P-07 含 ndarray 的 __eq__ 可比较 (不抛 ValueError)', _eq_ok, _eq_err)
+_l1 = E.AnimationClip([{'time': 0.0, 'position': [1.0, 2.0, 3.0]}])
+_t1 = E.AnimationClip([{'time': 0.0, 'position': (1.0, 2.0, 3.0)}])
+check('⑦ P-07 list/tuple 同值片段相等 (规范键归一)', (_l1 == _t1) is True)
+# 非数值 speed (绕过 set_speed) 只降级该物体, 不炸整帧
+e49 = make_engine()
+m49, an49 = add_anim_obj(e49, full_clip())
+an49.speed = [1.0]
+ok49 = True
+try:
+    e49.update_animations(0.1)
+except Exception as exc:                # noqa: BLE001
+    ok49 = False
+    print('    非数值 speed 引发整帧异常:', exc)
+check('⑦ P-07 非数值 speed 单物体降级 (不抛整帧, 重置 1.0)',
+      ok49 and an49.speed == 1.0, 'speed=%r' % (an49.speed,))
 
 print()
 print('总结果:', 'ALL PASS ✅' if ok else '有 FAIL ❌')

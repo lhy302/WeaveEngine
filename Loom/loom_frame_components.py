@@ -84,8 +84,18 @@ class FrameComponentMixin:
         与 scene_driver.SceneDriver._update_animations **同一份**内核
         (批量 SoA + once 末帧 + 跨周期规范化 + D6 写者优先级)。
         旧实现在此逐物体 sample, 500 物体 12.7ms/逻辑帧。
+
+        R5-02 P-06: 把"物理后端是否真的在驱动刚体"传下去 —— 桥缺失/被禁时
+        动态刚体改由动画驱动 (否则位姿永久冻结)。判定取保守面: 桥已建 -> 可用;
+        未建但引擎声明会惰性建桥 (_phys_bridge_auto) -> 仍按可用处理 (首帧
+        物理会接管, 避免"第 1 帧动画驱动、第 2 帧物理接管"的位姿跳变)。
         """
-        return evaluate_animations(self.models, dt)
+        pb = getattr(self, '_phys_bridge', None)
+        phys_ok = (pb is not None) or bool(
+            getattr(self, '_phys_bridge_auto', False))
+        if getattr(self, '_phys_bridge_disabled', False):
+            phys_ok = False
+        return evaluate_animations(self.models, dt, physics_available=phys_ok)
 
     def _call_collision_cb(self, m, hook, other):
         """调物体上所有脚本的碰撞回调 (坏脚本标记不崩帧)."""

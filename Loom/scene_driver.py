@@ -633,6 +633,15 @@ class SceneDriver:
             _sio._apply_ui(self, data.get('ui'))
         except Exception as _e:
             print('[driver] UI 恢复失败 (保留现状):', repr(_e))
+        # P-05（双端一致）: 天空盒失败也进本驱动资产问题表（GL 侧已进 engine._asset_errors）
+        try:
+            if (not bool(getattr(self, '_skybox_valid', True))) \
+                    and isinstance(data.get('skybox'), dict):
+                self._asset_errors.append(
+                    ('skybox', (data.get('skybox') or {}).get('guid'),
+                     getattr(self, '_skybox_error', None)))
+        except Exception:
+            pass
         self.materials = build_materials(data, ctx, getattr(self, '_asset_errors', None))
         _mats = {m.guid: m for m in self.materials}
         self._lod_wpos = {}          # 换场景: 旧模型的缓存立刻失效
@@ -676,6 +685,12 @@ class SceneDriver:
                 _c.skybox = _cube
                 _c._skybox_valid = bool(_v)
                 _c._skybox_error = _r
+                if not _v and isinstance(_raw, dict) and _raw:
+                    try:
+                        self._asset_errors.append(
+                            ('cameras[].skybox', _raw.get('guid'), _r))
+                    except Exception:
+                        pass
             if _unmatched:
                 print('[驱动] %d 个相机未按身份匹配到场景段 -> 不配 skybox' % (_unmatched,))
         except Exception as e:
@@ -1306,8 +1321,10 @@ class SceneDriver:
 
         旧实现是 engine.update_animations 的逐行复刻(改一处忘一处 -> 双后端
         行为分叉); 现直接调 loom_components.evaluate_animations。
+        R5-02 P-06: 物理桥模块缺失(culverin 不在) 时回退动画驱动动态刚体。
         """
-        return evaluate_animations(self.models, dt)
+        return evaluate_animations(self.models, dt,
+                                   physics_available=physb is not None)
 
     # ================ B1: 脚本 "引擎 API 最小面" (修 Vk 播放器脚本 broken) ================
     # 与 engine.GLEngine 同签名同语义 (几何走 physics_bridge 静态助手, 公式逐位

@@ -359,11 +359,34 @@ class AnimationClip:
     # commit 都会因拷贝产生新对象而误判为"改了" -> 撤销栈塞满空操作。
     # 为什么 hash 保持身份: 求值器按"片段实例"分组 (同内容不同实例各自成组),
     # 身份哈希即可; 内容相等只用于快照比较 (两者不冲突: 不同 hash 的相等对象
-    # 不会被 dict 合并)。
+    # 不会被 dict 合并)。**已知不对称**: `b in [a]` 可为 True 而 `{a:1}.get(b)`
+    # 为 None —— 本仓只有"列表/== 比较"与"按实例分组"两种用法, 不走混合读者。
+    #
+    # R5-02 P-07: 比较走**规范键**而不是裸 frames —— 帧值可能是 numpy 数组
+    # (脚本/插件塞进来的非规范数据), 直接 `array == array` 会抛
+    # ValueError("truth value ... ambiguous")。规范键把 ndarray 折成
+    # (形状/类型/字节) 三元组, list 与 tuple 归一成 tuple。
+    @staticmethod
+    def _canon_value(v):
+        if isinstance(v, np.ndarray):
+            return ('__ndarray__', v.shape, v.dtype.str, v.tobytes())
+        if isinstance(v, (list, tuple)):
+            return tuple(v)
+        return v
+
+    def _content_key(self):
+        return (self.loop_mode,
+                tuple(tuple((k, self._canon_value(v))
+                            for k, v in sorted(fr.items()))
+                      for fr in self.frames))
+
     def __eq__(self, other):
         if not isinstance(other, AnimationClip):
             return NotImplemented
-        return self.loop_mode == other.loop_mode and self.frames == other.frames
+        try:
+            return self._content_key() == other._content_key()
+        except Exception:                # 畸形帧 (不可排序/不可哈希的值)
+            return self is other
 
     def __ne__(self, other):
         r = self.__eq__(other)
@@ -376,11 +399,18 @@ class AnimationClip:
 
         beta6 C1: 旧 undo 快照按引用存 clips 字典, 改快照会污染模型
         (docs/design/research_beta6_03_animation.md §1.5 实测 D1/D2).
-        值序列保持原类型 (list 仍是 list, tuple 仍是 tuple), 不改变序列化形态.
+        值序列保持原类型 (list/tuple/ndarray), 不改变序列化形态;
+        R5-02 P-07: list 拷一份、ndarray `.copy()` —— 否则模型与快照共享
+        同一个可变数组, 改一侧会串到另一侧 (值隔离被打破)。
         """
+        def _cv(v):
+            if isinstance(v, list):
+                return list(v)
+            if isinstance(v, np.ndarray):
+                return v.copy()
+            return v
         return AnimationClip(
-            [{k: (list(v) if isinstance(v, list) else v) for k, v in fr.items()}
-             for fr in self.frames],
+            [{k: _cv(v) for k, v in fr.items()} for fr in self.frames],
             loop_mode=self.loop_mode)
 
     def _np_rebuild(self):
@@ -605,6 +635,8 @@ class AnimatorComponent(Component):
 #      不再改变结果(旧实现两条路径胜负相反)。
 _ANIM_CHANNELS = ('position', 'rotation', 'scale')
 _ANIM_WARNED_DYNAMIC = False
+_ANIM_WARNED_NO_PHYSICS = False   # R5-02 P-06: 物理不可用 -> 回退动画驱动 (一次性提示)
+_ANIM_WARNED_BAD_SPEED = False    # R5-02 P-07: speed 非数值 -> 单物体降级 (一次性提示)
 # Point3D 是 namedtuple; 其 __new__ 是 Python 层函数 (~0.4us/次). 批量写回每帧
 # 要造 N 个点, 故走 tuple.__new__(Point3D, 序列) 的 C 路径 (~0.12us) ——
 # 产物仍是 Point3D (同名/同值/同相等语义), 只是跳过 namedtuple 的包装层。
@@ -612,9 +644,11 @@ _P3_NEW = tuple.__new__
 
 
 def reset_anim_warn():
-    """测试用: 清掉"动态刚体挂 Animator"一次性告警标记."""
-    global _ANIM_WARNED_DYNAMIC
+    """测试用: 清掉全部一次性告警标记 (动态刚体/无物理/speed 非法)."""
+    global _ANIM_WARNED_DYNAMIC, _ANIM_WARNED_NO_PHYSICS, _ANIM_WARNED_BAD_SPEED
     _ANIM_WARNED_DYNAMIC = False
+    _ANIM_WARNED_NO_PHYSICS = False
+    _ANIM_WARNED_BAD_SPEED = False
 
 
 def animator_to_dict(an):
@@ -721,20 +755,28 @@ def _write_pose(m, s):
             m.set_scale(sc)
 
 
-def evaluate_animations(models, dt):
+def evaluate_animations(models, dt, physics_available=True):
     """推进全部 Animator 组件并写回变换 (batch / 双后端唯一实现).
 
-    返回 {'advanced': 推进的实例数, 'blocked_dynamic': 因动态刚体被跳过的实例数}.
+    返回 {'advanced': 推进的实例数, 'blocked_dynamic': 因动态刚体被跳过的实例数,
+          'fallback_dynamic': 因物理不可用而改由动画驱动的动态刚体数}.
+
+    physics_available: 调用方告知"物理后端是否真的在驱动刚体"。
+      · True  = D6: 动态刚体位姿归物理, 动画整条跳过;
+      · False = 物理后端缺失/被禁 (culverin 缺失、桥僵死): **回退动画驱动**,
+                否则这些物体会永久冻结 (审计 R5-02 P-06 / Q-C1-3=A)。
     单遍扫描 + 同片段分组批量求值; 慢路径与旧实现逐位一致 (对拍见
     tests/test_animation_base.py)。性能: 500 动画物体 ~1ms/逻辑帧
     (旧逐物体实现 12.7ms, docs/design/research_beta6_03_animation.md §1.11)。
     """
-    global _ANIM_WARNED_DYNAMIC
-    stats = {'advanced': 0, 'blocked_dynamic': 0}
+    global _ANIM_WARNED_DYNAMIC, _ANIM_WARNED_NO_PHYSICS, _ANIM_WARNED_BAD_SPEED
+    stats = {'advanced': 0, 'blocked_dynamic': 0, 'fallback_dynamic': 0}
     if not models:
         return stats
     groups = {}          # clip -> (times, vals, models, phases)
+    synced = set()       # R5-02 P-05: 本帧已 _np_sync 的片段 (帧列表可能被脚本换掉)
     blocked = 0
+    fallback = 0
     advanced = 0
     wrote = False
     P3NEW = _P3_NEW
@@ -754,14 +796,26 @@ def evaluate_animations(models, dt):
             continue
         rb = m.rigidbody
         if rb is not None and not rb.is_kinematic:
-            blocked += 1                     # D6: 动态刚体归物理
-            continue
+            if physics_available:
+                blocked += 1                 # D6: 动态刚体归物理
+                continue
+            fallback += 1                    # Q-C1-3=A: 无物理时回退动画驱动
         advanced += 1
         mode = clip.loop_mode
         if mode is None:
             mode = 'loop' if an.loop else 'once'
         dur = frame_list[-1]['time']
-        t = an.time + dt * an.speed
+        # R5-02 P-07 附带: an.speed 是公开属性, 脚本直写非数值 (如 list) 会让
+        # 整条逻辑帧 TypeError —— 单物体降级为 1.0 + 一次性告警, 不放大成全局失败。
+        try:
+            t = an.time + dt * an.speed
+        except TypeError:
+            an.speed = 1.0
+            t = an.time + dt
+            if not _ANIM_WARNED_BAD_SPEED:
+                _ANIM_WARNED_BAD_SPEED = True
+                print('[动画] 物体 %r 的 animator.speed 非数值, 已重置为 1.0'
+                      % (getattr(m, 'name', m),))
         if mode == 'loop':
             if dur > 0.0:
                 phase = t % dur              # 循环: 每帧规范化 (旧实现只减一次)
@@ -777,8 +831,17 @@ def evaluate_animations(models, dt):
                 _write_pose(m, {k: last[k] for k in _ANIM_CHANNELS if k in last})
                 wrote = True
                 continue
-            an.time = t
-            phase = t
+            if dur > 0.0 and t < 0.0:
+                # R5-02 P-02 / Q-C1-2=A: 倒放/负 dt 夹到 [0, dur] (与 seek 一致)。
+                # 旧实现把负相位直接交给批量 -> 外推 (物体飞走), 而慢路径
+                # sample() 取模回绕 -> 同一函数两条路径语义分叉; 这里统一到 0
+                # 并停播 (到 0 后 playing=False)。
+                an.time = 0.0
+                an.playing = False
+                phase = 0.0
+            else:
+                an.time = t
+                phase = t
         elif mode == 'pingpong' and dur > 0.0:
             period = dur + dur
             ph = t % period                  # 跨多周期也规范化
@@ -795,6 +858,10 @@ def evaluate_animations(models, dt):
         else:
             an.time = t
             phase = t
+        cid = id(clip)                       # R5-02 P-05: 与 sample() 同点失效
+        if cid not in synced:                # (脚本可能整体替换 clip.frames)
+            synced.add(cid)
+            clip._np_sync()
         arr = clip._np_batch
         if arr is None or phase != phase:    # 非快路径 / NaN: 逐物体 sample()
             _write_pose(m, clip.sample(phase))
@@ -810,6 +877,12 @@ def evaluate_animations(models, dt):
         print('[动画] %d 个物体同时有动态刚体与 Animator: 动画不驱动动态刚体'
               '(D6: 只驱动 kinematic/静态体), 已跳过; 要让动画驱动请把刚体设为 '
               'kinematic' % blocked)
+    if fallback and not _ANIM_WARNED_NO_PHYSICS:
+        # R5-02 P-06 / Q-C1-3=A: 物理不可用时回退动画驱动 (否则位姿永久冻结,
+        # 与"动画坏了"不可区分)。物理恢复后自动改回 D6 (物理拥有位姿)。
+        _ANIM_WARNED_NO_PHYSICS = True
+        print('[动画] 物理后端不可用: %d 个动态刚体上的动画改由动画驱动; '
+              '物理恢复后自动改回物理驱动' % fallback)
     # ---- ② 批量求值 + 写回 (同片段一次向量化; 恒定通道不采样/不 tolist) ----
     for clip, (times, vals, ms, phases) in groups.items():
         varies = clip._np_varies or {'position': True, 'rotation': True,
@@ -835,9 +908,25 @@ def evaluate_animations(models, dt):
         pos = sampled['position'].tolist() if pw else None
         rot = sampled['rotation'].tolist() if rw else None
         scl = sampled['scale'].tolist() if sw else None
-        cpos = None if pw or const is None else const.get('position')
-        crot = None if rw or const is None else const.get('rotation')
-        cscl = None if sw or const is None else const.get('scale')
+        # R5-02 P-01 (P0): 常量通道也必须写 Point3D —— _position/_rotation 的
+        # 契约是 Point3D, 下游 undo.snapshot / sceneio._emit_object /
+        # instantiate_prefab / 脚本 obj.position.x 全按 .x/.y/.z 读; 写 plain
+        # tuple 会让"轮子/风扇/平移平台"这类正常片段在保存或撤销时 AttributeError。
+        # scale 的契约本来就是 tuple, 但统一 float 化。
+        cpos = crot = cscl = None
+        if const is not None:
+            if not pw:
+                v = const.get('position')
+                if v is not None and len(v) == 3:
+                    cpos = P3NEW(Point3D, v)
+            if not rw:
+                v = const.get('rotation')
+                if v is not None and len(v) == 3:
+                    crot = P3NEW(Point3D, v)
+            if not sw:
+                v = const.get('scale')
+                if v is not None and len(v) == 3:
+                    cscl = (float(v[0]), float(v[1]), float(v[2]))
         trs = [mm.transform for mm in ms]
         changed = False
         for j, tr in enumerate(trs):
@@ -871,6 +960,7 @@ def evaluate_animations(models, dt):
         TransformComponent._xform_gen += 1
     stats['advanced'] = advanced
     stats['blocked_dynamic'] = blocked
+    stats['fallback_dynamic'] = fallback
     return stats
 
 class AudioSystem:
