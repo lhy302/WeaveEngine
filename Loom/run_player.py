@@ -275,11 +275,11 @@ def _scene_version_error_cls():
         return None
 
 
-def handle_scene_version_error(exc):
-    """打印原因（要求版本 / 当前版本）+ 弹窗 + SystemExit(1)。
+def report_scene_version_error(exc):
+    """打印原因（要求版本 / 当前版本）+ 弹窗，**不退出**（给 Qt 槽/需要自行退出的调用方用）。
 
     与 VK 回退同一套可见失败口径：release 版无控制台，必须弹窗；
-    LOOM_NO_DIALOG=1（或非 Windows）时只打印、不阻塞。
+    LOOM_NO_DIALOG=1（或非 Windows）时只打印、不阻塞。返回是否真的弹了窗。
     """
     msg = ('这个场景要求**更新的引擎版本**，当前播放器无法加载。\n\n'
            '%s\n\n'
@@ -289,6 +289,12 @@ def handle_scene_version_error(exc):
     shown = show_blocking_dialog(_SCENE_VER_TITLE, msg)
     if not shown:
         print('[场景] (未弹窗: 无 GUI 或 LOOM_NO_DIALOG=1 —— 原因见上面的 [场景] 行)')
+    return shown
+
+
+def handle_scene_version_error(exc):
+    """打印原因 + 弹窗 + SystemExit(1)（命令行/脚本入口用）。"""
+    report_scene_version_error(exc)
     raise SystemExit(1)
 
 

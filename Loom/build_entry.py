@@ -431,6 +431,17 @@ if __name__ == "__main__":
                 engine = EditorApp(1280, 800, scene_path=open_scene,
                                    view=_make_editor_view(ui))
     except Exception as e:
+        # 2026-11-11 R6-03 缺口1: `--run` / 旧 游戏配置.json 直连 PlayerApp，不走 run_player
+        # —— 高版本场景必须与 MyGame.exe 同一套可见失败（弹窗 + 要求/当前版本 + 非 0），
+        # 不能只打一条通用错误（release console=disable 时等于静默）。
+        try:
+            import sceneio as _sio
+            _is_ver = isinstance(e, _sio.SceneVersionError)
+        except Exception:
+            _is_ver = False
+        if _is_ver:
+            import run_player
+            run_player.handle_scene_version_error(e)
         print(f"[错误] 无法启动渲染引擎: {e}")
         sys.exit(1)
 

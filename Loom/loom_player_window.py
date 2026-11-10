@@ -49,6 +49,46 @@ def _build_qt_to_pg():
     return _QT_TO_PG_MAP
 
 
+def _is_scene_version_error(exc):
+    """sceneio 版本闸异常（惰性判定，避免模块级 import 顺序耦合）。"""
+    try:
+        import sceneio
+        return isinstance(exc, sceneio.SceneVersionError)
+    except Exception:
+        return False
+
+
+def _exit_now(code):
+    """终止进程（单独成函数便于测试替换）。
+
+    os._exit 不跑 atexit/不 flush —— 先显式 flush，否则 release 档的 stdout 重定向里
+    会看不到「要求版本/当前版本」那几行（实测踩过）。
+    """
+    import os
+    import sys
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.flush()
+        except Exception:
+            pass
+    os._exit(code)
+
+
+def _scene_version_fatal(exc, widget=None):
+    """远程回读窗口的版本闸失败：关窗 + 可见原因 + 非 0 退出（不残留空白窗口）。"""
+    try:
+        import run_player
+        run_player.report_scene_version_error(exc)
+    except Exception as e:
+        print('[PlayerWindow] 场景版本失败提示出错 (%r)' % (e,))
+    if widget is not None:
+        try:
+            widget.close()
+        except Exception:
+            pass
+    _exit_now(1)
+
+
 class _PlayerWidget:
     """延迟构造（先建 QApplication，再建 widget）。"""
 
@@ -114,7 +154,11 @@ class _PlayerWidget:
                                               title=title, ctx=self.ctx)
                     self._engine._external_fb = self._fbo
                     print('[PlayerWindow] EditorApp 创建成功（离屏 GL readback 模式）')
-                except Exception:
+                except Exception as e:
+                    # 2026-11-11 R6-03 缺口2: 远程回读模式遇高版本场景 —— 旧实现只 traceback，
+                    # 窗口常驻空白且不退出。现在走统一可见失败（弹窗/打印）后**立即退出**。
+                    if _is_scene_version_error(e):
+                        _scene_version_fatal(e, widget=self)
                     import traceback
                     traceback.print_exc()
 
