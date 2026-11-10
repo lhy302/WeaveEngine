@@ -476,4 +476,27 @@ embeddable 是隔离模式（`python3xx._pth` 禁 site、且**脚本目录不进
 
 **遗留**：① （已修，见上）；② 源码包 `requirements.txt` 未含 `culverin`/`game-audio`（源码版物理/音频降级，编译版不受影响），是否补进 requirements 待裁决。
 
+---
+
+## 附录 G：交付包自证、HEAD 中途前进与对拍工具坑（2026-11-10）
+
+### G.1 「HEAD 中途前进 → 停下报告 → 裁决 B」
+
+- 21:23 构建启动时 HEAD=**dea1f4f**、`git status` 干净；21:36 另一 agent 提交 **c56fb1d**；21:41–21:43 完成两包；自证发现 compiled `build_info.git_head=dea1f4f` ≠ HEAD `c56fb1d` → **按协议停下报告，未硬交**。
+- 事实核对：`dea1f4f..c56fb1d` 仅 +354 行（`tools/smoke.py`、`tools/measure_engine.py`、两份文档），**引擎代码零改动**；源码包 93 个引擎 `.py` 与 HEAD **0 不一致 / 0 缺失**；三项 meta（顶层/嵌套运行时/`--version`）均 0.1.0.beta6；`git_dirty=false`。
+- **裁决 B**：接受当前包，不为"来源提交号"重编 20 分钟。
+- **纪律（写死）**：最终发布版必须在**最新干净 HEAD** 上重编；`build_info.git_head` 必须等于**发布 tag 指向的提交**，`git_dirty` 必须 false。再遇 "HEAD 中途前进" 一律按本节流程停下报告，不得硬交。
+
+### G.2 对拍工具自身误报（踩过两次，必须记住）
+
+1. **EOL 误报**：仓库 `core.autocrlf=true` → 工作树 CRLF、git blob LF；直接用 zip 原始字节 vs `git show HEAD:` 字节比 sha，会把所有 CRLF 文件误判成"不一致"（实测 24/18 个假阳性）。工具必须两侧 `\r\n`→`\n` 归一后再算内容哈希。
+2. **运行时 dist 混入源码比对**：源码包内 `Loom/player_runtime/game_player.dist/**.py` 是预置运行时产物（core_components 的 boot_check/module_loader/module_registry/official_manifest），不在 git 树里，会被误报为"HEAD 不存在"。比对范围必须限定 `Loom/*.py` 且排除 `Loom/player_runtime/`。
+3. 自证同时要查：三项 meta 一致；compiled 包无 `.py`，只能用 `build_info.git_head == HEAD` 作代码级证据（这正是本批给 build_info 加 `git_head`/`git_dirty` 的原因）。
+
+### G.3 当前交付物（裁决 B 后）
+
+- `tools/dist/Loom-0.1.0.beta6-compiled.zip` **132.02MB**（build_info: git_head=dea1f4f / git_dirty=false / python 3.13.15 / nuitka 4.3.5）
+- `tools/dist/Loom-0.1.0.beta6-source.zip` **348.54MB**（93 个引擎 `.py` 与 HEAD 0 不一致；内嵌 Python 3.13.15；SCENE_VERSION=11）
+- 自证脚本 `C:\loom_build\toolchain_probe\verify_pkg_vs_head.py`（EOL 归一 + 排除 runtime dist + 校验 `build_info.git_head`）
+
 
