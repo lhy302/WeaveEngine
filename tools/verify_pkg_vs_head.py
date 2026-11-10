@@ -72,6 +72,15 @@ def _git(args):
         return None
 
 
+def head_engine_py():
+    """HEAD 里的引擎源码集合（与包内同一口径：排除 tests/ 与 player_runtime/）。"""
+    out = _git(['ls-tree', '-r', '--name-only', 'HEAD', '--', 'Loom/']) or ''
+    return {p for p in out.splitlines()
+            if p.endswith('.py')
+            and not p.startswith('Loom/tests/')
+            and not p.startswith('Loom/player_runtime/')}
+
+
 def engine_equivalent(base, head):
     """compiled 包判据（V2-02）：git_head 必须是 HEAD 的祖先，且 HEAD 相对它
     在 Loom/ 零 diff。这样"只改文档/tools"的提交不会误红，引擎改动仍会被抓。"""
@@ -122,13 +131,22 @@ def check_source(zip_path, version):
     out = {'zip': os.path.basename(zip_path), 'kind': 'source', 'py_files': 0,
            'mismatch': [], 'missing_in_head': [], 'meta': {}}
     with zipfile.ZipFile(zip_path) as zf:
-        # 只比引擎源码；Loom/player_runtime/ 是预置运行为产物（含其自身 .py），
-        # 不在源码树里，不能算"与 HEAD 不一致"。
+        # V2-02 双向对拍：包内引擎 .py 集合必须与 HEAD 的引擎 .py 集合完全一致。
+        # 两侧同口径排除 tests/ 与 player_runtime/（后者是预置运行时产物）。
         names = [n for n in zf.namelist()
                  if n.startswith('Loom/') and n.endswith('.py')
+                 and not n.startswith('Loom/tests/')
                  and not n.startswith('Loom/player_runtime/')]
-        out['py_files'] = len(names)
-        for n in names:
+        zip_set = set(names)
+        head_set = head_engine_py()
+        out['py_files'] = len(zip_set)
+        out['head_py_files'] = len(head_set)
+        # 0 文件 = 空包/口径错，直接判死（旧版这里会假绿）
+        out['empty'] = (len(zip_set) == 0)
+        out['missing_in_head'] = sorted(zip_set - head_set)
+        out['missing_in_zip'] = sorted(head_set - zip_set)
+        out['count_equal'] = (len(zip_set) == len(head_set))
+        for n in sorted(zip_set & head_set):
             hb = head_file(n)
             if hb is None:
                 out['missing_in_head'].append(n)
@@ -201,8 +219,15 @@ def main():
            'compiled': check_compiled(args[1], version)}
     print('HEAD commit time:', res['head_commit_time'])
     s = res['source']
-    print('[source] py 文件 %d，与 HEAD 不一致 %d，HEAD 不存在 %d'
-          % (s['py_files'], len(s['mismatch']), len(s['missing_in_head'])))
+    print('[source] 包内引擎 .py=%d / HEAD=%d，内容不一致=%d，'
+          '包多出(HEAD 无)=%d，包缺失=%d%s'
+          % (s['py_files'], s.get('head_py_files', -1), len(s['mismatch']),
+             len(s['missing_in_head']), len(s['missing_in_zip']),
+             '  [空包]' if s.get('empty') else ''))
+    for n in s['missing_in_head'][:5]:
+        print('   + 包内多出: %s' % n)
+    for n in s['missing_in_zip'][:5]:
+        print('   - 包内缺失: %s' % n)
     for k in KEY:
         v = s['key'][k]
         print('  key %-24s zip=%s head=%s %s'
@@ -232,7 +257,12 @@ def main():
             json.dump(res, f, ensure_ascii=False, indent=1)
         print('json:', out_json)
     _compiled_bad = (not _eq) or (c['meta'].get('git_dirty') is not False)
-    bad = (s['mismatch']
+    _source_bad = (s.get('empty')
+                   or not s.get('count_equal')
+                   or bool(s['missing_in_head'])
+                   or bool(s['missing_in_zip'])
+                   or bool(s['mismatch']))
+    bad = (_source_bad
            or not (s['meta'].get('same_as_target') and s['meta'].get('nested_same'))
            or _compiled_bad)
     return 1 if bad else 0

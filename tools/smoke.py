@@ -14,6 +14,7 @@ r"""tools/smoke.py — 冒烟：只回答一个问题「这个程序能不能跑
 """
 import argparse
 import json
+import re
 import os
 import subprocess
 import sys
@@ -62,11 +63,60 @@ def stamp_build_info(targets):
             print('SMOKE WARN  盖章失败 %s: %r' % (p, e))
 
 
+def check_artifact_meta(engine_dir):
+    """[5/5] 编译产物自洽检查（V2-02）：不是复述"能起"，而是查元数据。
+
+    检查: 解释器.json 可读且有 version/python_version；
+          build_info.json 可读且 mode=release / git_head 非空 / built_at 可解析；
+          若安装目录名形如版本号（.../<x.y.z>/Loom），meta.version 必须与目录名一致。
+    返回问题列表（空=通过）。
+    """
+    problems = []
+    meta = bi = None
+    try:
+        with open(os.path.join(engine_dir, '解释器.json'), 'r',
+                  encoding='utf-8') as f:
+            meta = json.load(f)
+    except Exception as e:
+        problems.append('解释器.json 不可读: %r' % (e,))
+    try:
+        with open(os.path.join(engine_dir, 'build_info.json'), 'r',
+                  encoding='utf-8') as f:
+            bi = json.load(f)
+    except Exception as e:
+        problems.append('build_info.json 不可读: %r' % (e,))
+    if meta is not None:
+        v = str(meta.get('version') or '').strip()
+        pyv = str(meta.get('python_version') or '').strip()
+        if not v:
+            problems.append('解释器.json 缺 version')
+        if not pyv:
+            problems.append('解释器.json 缺 python_version')
+        parent = os.path.basename(os.path.dirname(os.path.abspath(engine_dir)))
+        if re.match(r'^\d+\.\d+\.\d+(\.beta\d+)?$', parent or '') and v and v != parent:
+            problems.append('解释器.json version=%r 与安装目录名 %r 不一致'
+                            % (v, parent))
+    if bi is not None:
+        if bi.get('mode') != 'release':
+            problems.append('build_info.mode=%r（应为 release）' % (bi.get('mode'),))
+        if not str(bi.get('git_head') or '').strip():
+            problems.append('build_info 缺 git_head')
+        try:
+            time.strptime(str(bi.get('built_at')), '%Y-%m-%d %H:%M:%S')
+        except Exception:
+            problems.append('build_info.built_at 非法: %r' % (bi.get('built_at'),))
+    return problems
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument('--dist', help='编译版引擎目录（含 Loom.exe）；不给则跑源码版')
     ap.add_argument('--scene', help='场景路径（默认 examples/PacMan2D.json）')
     ap.add_argument('--seconds', type=float, default=2.5, help='播放时长（默认 2.5s）')
+    ap.add_argument('--budget', type=float, default=None,
+                    help='耗时预算秒（默认 %s；超预算默认判失败）' % BUDGET_S)
+    ap.add_argument('--allow-slow', action='store_true',
+                    help='超预算只告警不判失败（默认失败）')
     ap.add_argument('--stamp', action='append', default=[],
                     help='冒烟通过后给 build_info.json 盖 smoke_passed_at '
                          '（可多次；目录或文件）')
@@ -160,21 +210,33 @@ def main(argv=None):
         except Exception:
             proc.kill()
 
-    # 5) 打包产物能起 = 本轮就是 --dist；否则标记 N/A（源码版不适用）
+    # 5) 产物自洽（V2-02）：不再只复述 [1/5]，真查 解释器.json / build_info.json
     if proc.poll() is None:
         fails.append('[5/5] 退出后进程仍在')
     if a.dist:
-        print('SMOKE PASS  [5/5] 编译版产物能起（%s）' % os.path.basename(a.dist))
+        meta_bad = check_artifact_meta(engine_dir)
+        if meta_bad:
+            for p in meta_bad:
+                fails.append('[5/5] ' + p)
+            print('SMOKE FAIL  [5/5] 产物元数据不自洽：%s' % '；'.join(meta_bad))
+        else:
+            print('SMOKE PASS  [5/5] 产物元数据自洽'
+                  '（解释器.json / build_info.json）')
     else:
-        print('SMOKE SKIP  [5/5] 编译版产物检查（源码模式不适用）')
+        print('SMOKE SKIP  [5/5] 源码模式无编译产物可查')
 
     dt = time.time() - t0
+    budget = a.budget if a.budget is not None else BUDGET_S
+    if dt > budget:
+        if a.allow_slow:
+            print('  ! 超出预算（%.1fs > %.0fs）：--allow-slow 放行' % (dt, budget))
+        else:
+            fails.append('[预算] 冒烟耗时 %.1fs 超过 %.0fs（用 --allow-slow 放行）'
+                         % (dt, budget))
     print('SMOKE %s  用时 %.1fs（预算 %.0fs）'
-          % ('FAIL' if fails else 'OK', dt, BUDGET_S))
+          % ('FAIL' if fails else 'OK', dt, budget))
     for f in fails:
         print('  - ' + f)
-    if dt > BUDGET_S and not fails:
-        print('  ! 超出预算：冒烟应 < %.0fs，请检查是否混入了非冒烟内容' % BUDGET_S)
     if not fails:
         targets = list(a.stamp)
         if a.dist:

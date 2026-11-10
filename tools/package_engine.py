@@ -165,6 +165,8 @@ def build_info_problems(directory, require_mode='release'):
     # 缺失或早于 built_at 说明"没冒烟就打包"（本包 built_at=21:23 而
     # tools/smoke.py 21:36 才出现，就是这条门序从未执行过的证据）。
     sp = str(info.get('smoke_passed_at') or '').strip()
+    if not str(info.get('git_head') or '').strip():
+        problems.append('build_info 缺 git_head（无法证明产物来自哪个提交）')
     if not sp:
         problems.append('build_info 缺 smoke_passed_at: 先跑 tools/smoke.py '
                         '（门序: 编译→冒烟→打包）')
@@ -467,6 +469,14 @@ def make_zip(version, allow_missing_runtime=False, kind='source'):
         if _bad:
             raise SystemExit('[错误] 预置运行时元数据版本与目标版本不符，拒绝出包: %s'
                              % ('; '.join(_bad),))
+        # V2-02: 源码包也必须吃 build_info 硬门（release + 已冒烟 + git_head），
+        # 否则 dev 档/未冒烟的运行时能混进源码包而全链不红。
+        _bi_bad = build_info_problems(_pr_src)
+        if _bi_bad:
+            raise SystemExit(
+                '[错误] 预置运行时 build_info 不合格（要求 release + '
+                'smoke_passed_at>built_at + git_head），拒绝出包: %s'
+                % ('; '.join(_bi_bad),))
         # 2026-11-09: 运行时布局硬断言（缺 pygame/ 或旧布局 -> 拒绝打包，
         # 否则会产出"能装能跑编辑器、一做游戏就缺 SDL2.dll"的坏包）
         _layout = runtime_layout_problems(_pr_src)
