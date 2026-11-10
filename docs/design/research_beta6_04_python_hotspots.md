@@ -651,3 +651,68 @@ Python 密集段与"跨线程汇合点"（`pipe_wait` +7.9%/次）同向变差�
 - 像素门 `test_ab_gl_vk.py`：**23 通过 / 0 失败 / 0 跳过**（GL/VK MAE 与迁移前同量级）。
 - `test_render_api.py` / `test_ui.py` / `test_vk_bucket_order.py`：ALL PASS。
 - 全量 `tests/run_all.py`（128 文件）：见本次回报（若本轮未跑完则由下一轮补记）。
+
+---
+
+## 附录 G：批次 D2/D3 落地 + R5-03 审核整改（2026-11-10）
+
+### G.1 D2 · 位姿 SoA（`_dirty_mask_batch` 取数段）
+
+**改动链**：`engine._logic_frame` 在脚本跑完、物理子步投递前抓一次
+`_transform_snapshot(self.models)` → `pipe.post(..., pose=(models,pos,rot))` →
+`PhysicsPipeThread` 作业携带 → `PhysicsWorldBridge.pre_step(dt,g,pose)` →
+`_dirty_mask_batch(entries, pose)` → 新增 `_pose_rows(nodes, pose)`：
+id→行 映射一次性 fancy-gather 出 `(n,6) f64`；**任一节点不在平面里就返回 None 回退属性链**
+（宁可慢不可错，与 P2-⑧ id 复用同纪律）。`LOOM_POSE_SOA=0` 强制旧路径。
+
+**逐位对拍**（`tests/_tmp/d2_pose_soa_check.py`，真实场景 30 帧）：包一层
+`_dirty_mask_batch`，先跑 legacy 记掩码 A 与后态，再恢复 `_last_sync` 跑 SoA 记掩码 B 与后态 ——
+**64 次调用（含子步）掩码与后态 dict 全等，0 不一致**；中途注入「换父 / 删刚体再加回」仍全等（struct=ok）。
+
+**回归断言**（`tests/test_physics_pose_soa.py`，10 条）：正常逐位取数 / pose=None /
+形状·列数·models 长度不符 / **节点不在平面里 → None（防 id 复用错配）** / 换 models 列表后旧节点 → None / 空集不炸。
+
+**性能**（同进程 4 组合交替 ×2 轮 ×90 帧）：
+
+| 指标 | SoA 开 | SoA 关 | Δ |
+|---|---:|---:|---:|
+| `_dirty_mask_batch` /次 | **1.736 ms** | 2.515 ms | **−0.78（−31%）** |
+| `pipe_wait` /帧 | **3.277 ms** | 3.985 ms | **−0.71** |
+| `pipe_wait` /次 | **8.67 ms** | 9.19 ms | −0.52 |
+
+未达 "≤2.0 ms/帧"：剩余是 ①501 次 `getattr(parent)` 父链走查（≈0.32ms）
+②`old` 行仍从 `_last_sync` dict 组装（≈0.65ms）③`id2idx/pidx`（≈0.18ms）。
+这三块是 **D2b**（`_last_sync` → numpy 行表 + 拓扑缓存）的剩余工作面，需连同 pre/post_step
+的 sync 写入一起改，本轮未做（中高风险，留给下一轮）。
+
+### G.2 D3 · AABB AVX2 + CPUID 分派
+
+**改动**：AVX2 版（4 顶点/轮，无 FMA，同顶点运算序一字不改）+ `_cpu_has_avx2()`
+（CPUID leaf1 OSXSAVE/AVX + XGETBV XMM|YMM + leaf7 EBX bit5）+ 显式导出
+`loom_aabbs_minmax_scalar` / `_avx2` / `loom_aabbs_simd_impl`；
+`loom_aabbs_minmax` 与并行 worker 均按运行时探测分派。AVX2 函数 `noinline`、
+编译**不开** `/arch:AVX2`（老机器可加载，永不执行到 AVX2 指令）。
+
+**对拍**（`tests/test_aabb_simd.py`）：V=2035/1617/3015/24/4、尾路径 V=1..7、空批，
+scalar / avx2 / 分派版三路 min/max **逐字节相同**（max|diff|=0）。
+
+**性能**：`mt_aabb_minmax` **2.04 → 1.13 ms/帧（−45%）**，`aabbs` 段 1.05 → 0.73（−30%）；
+微基准 2.29x（V=2035,n=90）。
+> 过程登记：首轮 A/B 显示零收益 —— 定位到只在 DLL 里加了导出、公开入口 `loom_aabbs_minmax`
+> 仍走标量，补上分派才生效。"分派必须接在公开入口" 已写进验收清单。
+
+### G.3 R5-03 审核整改（本轮顺手修）
+
+| 编号 | 整改 |
+|---|---|
+| P-02 契约边界 | `loom_bucket_pack_v1` 去掉 `n_total==0` 提前返回：K>0 且全空桶时逐桶写 `out_main_n=0`；新增断言 `offs[K]==n_total`（区间必须铺满），违反返回 1。测试 ⑦ 用垃圾初值 count 抓"未写"，⑥ 覆盖未铺满 |
+| Q-D1-2 契约登记 | `provides_count 2→3`、`g_module_provides` 与 `loom_module_has` 加 `ckernels.bucket_pack`；registry.json provides 同步；导出改版本化 **`loom_bucket_pack_v1`** 并保留旧名别名；测试 ⑧ 断言 has=1 与 provides 含该项 |
+| P3-05 计数竞态 | `_prof_counts` 懒初始化加模块级锁（首次临界区，稳态零锁），修 3000 次丢 11 次的统计丢失 |
+| P3-06 口径 | `_prof_count` docstring 改为实测口径：**未开时约 1.2µs/次**（非"零开销"），当前 ≤3 次/帧；并注明"要加到高频点必须先做模块级开关缓存" |
+| P3-07 回退声明 | 声明改为实话：**DLL 缺失不可达**（导入期 B1 硬 raise）；可达的只有「DLL 在但无该导出」与「LOOM_BUCKET_PACK=0」 |
+| P3-10 per_call_us | `buckets_pack/buckets_write`、`mt_mp_draws_uniform/tex/render` 直写 `_stage_times` 时同步 +1 `_stage_calls`，`per_call_us` 键齐全（= ms/帧） |
+
+**DLL sha 演进（收尾统一重钉）**：D1 提交 `c5d3e271…` → D3 首版 `118e8333…` →
+AVX2 分派 `730671ac…` → **最终（provides + v1 + 边界修正）`7bf7a7710e6479f034a264317c76ccbe6aecc1ccc7605e706ab65b2d05b8270f`**
+（registry.json 与 official_manifest.py 已同批重生成；`LOOM_DEV=1` 可跳过校验）。
+

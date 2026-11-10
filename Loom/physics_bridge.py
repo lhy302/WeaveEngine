@@ -985,7 +985,38 @@ class PhysicsWorldBridge:
         sync = self._sync_of(m)
         return _t3(m.position) != sync[0] or _t3(m.rotation) != sync[1]
 
-    def _dirty_mask_batch(self, entries):
+    def _pose_rows(self, nodes, pose):
+        """D2 (2026-11-10): 从引擎发布的 (models, pos, rot) SoA 平面取位姿行 (n,6) f64.
+
+        任一节点不在平面里 (祖先不在 models / 平面形状不符) -> None 由调用方回退
+        逐体属性链 —— 宁可慢, 不可错 (与 P2-⑧ id 复用同款纪律: 不猜)。
+        数值逐位同属性链: 平面就是同一批 Point3D 的 float64 分量 (无换算)。"""
+        if pose is None:
+            return None
+        models, pos, rot = pose
+        if pos is None or rot is None:
+            return None
+        if (pos.ndim != 2 or rot.ndim != 2 or pos.shape != rot.shape
+                or pos.shape[0] != len(models) or pos.shape[1] != 3):
+            return None
+        imap = getattr(self, '_pose_idx', None)
+        if imap is None or imap[0] is not models or imap[1] != len(models):
+            imap = self._pose_idx = (models, len(models),
+                                     {id(m): i for i, m in enumerate(models)})
+        table = imap[2]
+        idx = []
+        for m in nodes:
+            i = table.get(id(m))
+            if i is None:
+                return None
+            idx.append(i)
+        idx_arr = np.asarray(idx, dtype=np.intp)
+        out = np.empty((len(nodes), 6), dtype=np.float64)
+        out[:, 0:3] = pos[idx_arr]
+        out[:, 3:6] = rot[idx_arr]
+        return out
+
+    def _dirty_mask_batch(self, entries, pose=None):
         """批5 性能批 (2026-09-05): pre_step 脏检测批量化 — 逐体 _model_dirty
         (501 次 sync 查找+_t3×2 元组比较, ~9.8ms/步) → SoA 平面一次抓 +
         numpy 广播比较。dirty 集合与逐体版**逐位一致** (同一比较语义:
@@ -1026,20 +1057,30 @@ class PhysicsWorldBridge:
                 guard += 1
         nodes = node_models + ancestors
         ids = []
-        rows = []
         syncs = []
         parents = []
-        for m in nodes:
-            sync = self._sync_of(m)
-            ids.append(id(m))
-            p = m.position
-            r = m.rotation
-            rows.append((p.x, p.y, p.z, r.x, r.y, r.z))
-            syncs.append(sync)
-            parents.append(id(getattr(m, 'parent', None)))
-        n = len(ids)
-        ids_t = tuple(ids)
-        cur = np.array(rows, dtype=np.float64).reshape(n, 2, 3)
+        rows_np = self._pose_rows(nodes, pose)   # D2: SoA 取数 (None -> 回退属性链)
+        if rows_np is not None:
+            for m in nodes:
+                ids.append(id(m))
+                syncs.append(self._sync_of(m))
+                parents.append(id(getattr(m, 'parent', None)))
+            n = len(ids)
+            ids_t = tuple(ids)
+            cur = rows_np.reshape(n, 2, 3)
+        else:
+            rows = []
+            for m in nodes:
+                sync = self._sync_of(m)
+                ids.append(id(m))
+                p = m.position
+                r = m.rotation
+                rows.append((p.x, p.y, p.z, r.x, r.y, r.z))
+                syncs.append(sync)
+                parents.append(id(getattr(m, 'parent', None)))
+            n = len(ids)
+            ids_t = tuple(ids)
+            cur = np.array(rows, dtype=np.float64).reshape(n, 2, 3)
         old = np.array([(s[0][0], s[0][1], s[0][2],
                          s[1][0], s[1][1], s[1][2]) for s in syncs],
                        dtype=np.float64).reshape(n, 2, 3)
@@ -1076,7 +1117,7 @@ class PhysicsWorldBridge:
         except RuntimeError:
             return True
 
-    def pre_step(self, dt, gravity=None):
+    def pre_step(self, dt, gravity=None, pose=None):
         """① 脏检测 -> set_position/set_rotation (世界位姿, R4);
         ② 速度策略 R (脚本改过 或 清醒才写); ③ R1 重力累加 (仅清醒且 use_gravity);
         ④ 修复_b①: 自由积分名单 (无碰撞体动态体, 桥外 Python 侧)."""
@@ -1103,7 +1144,7 @@ class PhysicsWorldBridge:
                 p = _t3(m.position)
                 m.position = Point3D(p[0] + v[0] * dt, p[1] + v[1] * dt,
                                      p[2] + v[2] * dt)
-        dirty = self._dirty_mask_batch(self._entries)      # 批5: 批量脏检测 (逐位同旧;
+        dirty = self._dirty_mask_batch(self._entries, pose=pose)   # 批5: 批量脏检测 (逐位同旧;
                                     # ★09-07 祖先传播已移入本方法 + 跨子步缓存, 语义逐位)
         # 祖先链脏传播 — 已移入 _dirty_mask_batch (2026-09-07 重帧治理,
         # 与基础 dirty 同缓存; 本处旧循环删除, 行为逐位一致)

@@ -131,6 +131,40 @@ def main():
     check('⑥ 区间越界 -> rc=1', rc_bad1 == 1, rc_bad1)
     rc_bad2, _, _, _ = run_c(world16, sat, col, [0], None)
     check('⑥ K=0 -> rc=0 (空批合法)', rc_bad2 == 0, rc_bad2)
+    rc_bad3, _, _, _ = run_c(world16, sat, col, [0, 20], None)
+    check('⑥ offs[K] != n_total -> rc=1 (区间未铺满)', rc_bad3 == 1, rc_bad3)
+
+    # ⑦ R5-03 P-02: K>0 且 n_total==0 (全空桶) 必须把 out_main_n 全部写成 0
+    empty16 = np.zeros((0, 16), dtype='f4')
+    empty_sat = np.zeros((0,), dtype='f4')
+    empty_col = np.zeros((0, 4), dtype='f4')
+    cnt7 = np.full((3,), 77, dtype='i4')          # 故意填垃圾: 未写会被抓出来
+    rc7, _, _, c7 = run_c(empty16, empty_sat, empty_col, [0, 0, 0, 0], None,
+                          main=np.zeros((0, 24), dtype='f4'),
+                          sha=np.zeros((0, 16), dtype='f4'), cnt=cnt7)
+    check('⑦ K>0 & n_total==0 -> rc=0 且 out_main_n 全 0',
+          rc7 == 0 and c7.tolist() == [0, 0, 0], (rc7, c7.tolist()))
+
+    # ⑧ R5-03 Q-D1-2: 模块契约登记 (provides / has) + 版本化导出
+    dll = fastpath._CK['dll']
+    ct = fastpath._CK['ctypes']
+    have_v1 = hasattr(dll, 'loom_bucket_pack_v1')
+    have_alias = hasattr(dll, 'loom_bucket_pack')
+    check('⑧ 版本化导出 loom_bucket_pack_v1 存在 (旧名保留别名)',
+          have_v1 and have_alias, (have_v1, have_alias))
+    dll.loom_module_has.restype = ct.c_int32
+    dll.loom_module_has.argtypes = [ct.c_char_p]
+    check("⑧ loom_module_has('ckernels.bucket_pack') == 1",
+          int(dll.loom_module_has(b'ckernels.bucket_pack')) == 1)
+    dll.loom_module_provide.restype = ct.c_char_p
+    dll.loom_module_provide.argtypes = [ct.c_uint32]
+    names = []
+    for i in range(8):
+        nm = dll.loom_module_provide(i)
+        if nm is None:
+            break
+        names.append(nm.decode('utf-8', 'replace'))
+    check('⑧ provides 列表含 ckernels.bucket_pack', 'ckernels.bucket_pack' in names, names)
 
     print()
     print('test_bucket_pack:', 'ALL PASS' if ok else 'HAS FAILURES')

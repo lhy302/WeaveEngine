@@ -1231,9 +1231,19 @@ class GLEngine(ShadowMixin, FrameComponentMixin, PhysicsMixin, InputMixin, HudMi
             # 批6 流水线: 连发 N 子步指令 (不等待) → 音频与物理并行
             # → S1 同步点等物理 → prep (物理回读后位形)
             g = getattr(self, 'gravity', self._GRAVITY)
+            # D2 (2026-11-10): 位姿 SoA 平面 —— 脚本刚跑完 (phy 之前) 抓一次,
+            # 供物理桥脏检测向量化取数 (替代 501 次 m.position/m.rotation 属性链)。
+            # LOOM_POSE_SOA=0 强制旧路径 (A/B / 故障回退)。
+            _pose = None
+            if os.environ.get('LOOM_POSE_SOA') != '0':
+                try:
+                    _stamp, _pos, _rot, _scl = self._transform_snapshot(self.models)
+                    _pose = (self.models, _pos, _rot)
+                except Exception:
+                    _pose = None
             _t = self._prof_t0()
             for _ in range(nsub):
-                self._pipe_post(pipe, sdt, g)
+                self._pipe_post(pipe, sdt, g, _pose)
             self._prof_add('mt_pipe_post', _t)
             _t = self._prof_t0()
             self.update_audio(fixed_dt)
@@ -1284,11 +1294,11 @@ class GLEngine(ShadowMixin, FrameComponentMixin, PhysicsMixin, InputMixin, HudMi
             self._prof_add('mt_interp_advance', _t)
         self._logic_gen += 1             # 批5: prep 缓存失效键 bump
 
-    def _pipe_post(self, pipe, sdt, g):
+    def _pipe_post(self, pipe, sdt, g, pose=None):
         """批6: 段B 指令投递 (异常降级: 本帧起主线程直跑, 游戏不崩)."""
         self._prof_count('hm_pipe_post')       # D1/P0: 跨线程交接计数
         try:
-            pipe.post(self.models, sdt, g, False)
+            pipe.post(self.models, sdt, g, False, pose)
         except Exception as e:
             print("[物理] 管线提交异常 (%r) -> 降级主线程直跑" % (e,))
             self._stop_phys_pipe()

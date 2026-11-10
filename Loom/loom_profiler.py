@@ -9,7 +9,13 @@
   self._draw_calls_total / self._render_buckets
 """
 import os
+import threading
 import time
+
+# D2/D3 收尾 (R5-03 P3-05): _prof_counts 懒初始化在双线程首帧竞争 —— 两个线程各自
+# 建 dict, 后写者覆盖前者, 实测 3000 次丢 11 次计数。这里用一把模块级小锁把
+# "判空 + 建 dict" 做成一次性临界区 (只在首次调用走锁, 稳态零锁开销)。
+_PROF_COUNTS_LOCK = threading.Lock()
 
 
 class ProfilerMixin:
@@ -41,14 +47,23 @@ class ProfilerMixin:
         self._stage_calls[name] = self._stage_calls.get(name, 0) + 1
 
     def _prof_count(self, name, n=1):
-        """D1/P0: 交接/事件计数 (非耗时观测量; 仅 LOOM_PROFILE=1, 未开时零开销).
+        """D1/P0: 交接/事件计数 (非耗时观测量; 仅 LOOM_PROFILE=1).
+
+        口径校正 (R5-03 P3-06): **未开时不是零开销** —— 实测约 1.2 µs/次
+        (os.environ.get + 属性读)。当前调用点每帧 ≤3 次 (hm_pipe_post/wait/
+        hm_logic_wake), 合计 <0.005 ms/帧; 若将来要加到每次 write 这类高频点,
+        必须先改成模块级缓存开关, 否则会吃掉测量收益。
+
         hm_pipe_post / hm_pipe_wait / hm_logic_wake —— 跨线程交接次数的因果证据
         (3.13 GIL 交接变贵, 见 docs/design/research_beta6_04_python_hotspots.md 附录 E)."""
         if os.environ.get('LOOM_PROFILE') != '1':
             return
         c = getattr(self, '_prof_counts', None)
         if c is None:
-            c = self._prof_counts = {}
+            with _PROF_COUNTS_LOCK:          # P3-05: 双线程首帧只建一次
+                c = getattr(self, '_prof_counts', None)
+                if c is None:
+                    c = self._prof_counts = {}
         c[name] = c.get(name, 0) + n
 
     def profile_snapshot(self):

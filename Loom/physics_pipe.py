@@ -60,12 +60,12 @@ class PhysicsPipeThread:
                     job = self._jobs.pop(0) if self._jobs else None
                 if job is None:
                     break
-                models, dt, g, ev = job
+                models, dt, g, ev, pose = job
                 try:
                     br = self._br
                     if self._batch_first:
                         br.ensure_models(models)
-                    br.pre_step(dt, g)
+                    br.pre_step(dt, g, pose=pose)
                     br.step(dt)           # C 层释放 GIL: 主线程跑 D 段真并行
                     br.post_step()
                     # 修复 P1-④ (2026-11-07): 成功路径**不得**清空 _err ——
@@ -83,10 +83,11 @@ class PhysicsPipeThread:
                         self._batch_first = True   # 批末: 下一逻辑帧首子步重新 ensure
                         self._done.set()  # S1: 队列清空 → 唤醒主线程
 
-    def post(self, models, dt, gravity, events):
-        """主线程: 提交一个物理子步 (非阻塞, 可连发 N 子步)."""
+    def post(self, models, dt, gravity, events, pose=None):
+        """主线程: 提交一个物理子步 (非阻塞, 可连发 N 子步).
+        pose = (models, pos_planes, rot_planes) 或 None —— D2 位姿 SoA 入参."""
         with self._lock:
-            self._jobs.append((list(models), dt, gravity, events))
+            self._jobs.append((list(models), dt, gravity, events, pose))
             self._pending += 1
             self._done.clear()
             self._go.set()

@@ -20,7 +20,9 @@
 import hashlib
 import json
 import os
+import re
 import shutil
+import time
 import uuid
 
 ASSETS_DIR = 'Assets'
@@ -46,6 +48,23 @@ _WARNED = set()
 def new_guid():
     """新资产 guid（32 hex，与 sceneio.generate_guid 同格式）。"""
     return uuid.uuid4().hex
+
+
+_ILLEGAL_NAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+
+
+def safe_asset_name(name, default='asset'):
+    """把用户给的 name 净化成安全文件名（P2-①: 不允许写出 Assets/ 之外）。
+
+    只取 basename（去掉任何目录部分）、替换 Windows 非法字符、去掉首尾点/空格、
+    '..' 折叠。返回值不会是 '' / '.' / '..'。
+    """
+    s = str(name or '').replace('\\', '/')
+    s = s.rsplit('/', 1)[-1].strip()
+    s = _ILLEGAL_NAME.sub('_', s)
+    s = s.strip(' .')
+    s = s.replace('..', '_')
+    return s or default
 
 
 def warn_once(key, msg):
@@ -170,7 +189,12 @@ def empty_index(project_root=None):
 
 
 def load_index(root):
-    """读项目层索引 -> (index|None, valid, reason)。损坏不抛。"""
+    """读项目层索引 -> (index|None, ok, reason).
+
+    ok=False: 文件缺失 / JSON 损坏 / 结构非法（此时 index=None，**不可用**）
+    ok=True + reason 非空 = **部分可用**（个别坏条目已剔除，reason 是告警文本）。
+    逐条容错（Q-B1-2=A）：一条坏条目不再让整本索引作废。
+    """
     p = index_path(root)
     try:
         st = os.stat(p)
@@ -179,58 +203,104 @@ def load_index(root):
     key = (p, st.st_mtime_ns, st.st_size)
     hit = _CACHE.get(key)
     if hit is not None:
-        return hit, True, None
+        data, warns = hit
+        return data, True, ('; '.join(warns) if warns else None)
     try:
         with open(p, 'r', encoding='utf-8') as f:
             data = json.load(f)
     except (OSError, ValueError) as e:
         return None, False, '资产索引损坏 (%r): %s' % (e, p)
-    ok, reasons = validate_index(data, root)
+    ok, warns = validate_index(data, root)
     if not ok:
-        return None, False, '; '.join(reasons[:3])
-    _CACHE[key] = data
-    return data, True, None
+        return None, False, '; '.join(warns[:3])
+    if warns:
+        warn_once(('idx-partial', p, st.st_mtime_ns),
+                  '[资产] 索引有 %d 条坏条目已剔除（其余照常可用）: %s'
+                  % (len(warns), '; '.join(warns[:3])))
+    _CACHE[key] = (data, list(warns))
+    return data, True, ('; '.join(warns) if warns else None)
+
+
+def inspect_index(root):
+    """索引体检 -> {state, reason, warnings, count, path}。
+
+    state: missing（文件不存在）/ corrupt（JSON 坏）/ invalid（结构非法、不可用）
+           / partial（部分条目被剔除、其余可用）/ ok。
+    供 asset_list / scene_assets_check 区分「缺文件」与「文件在但坏了」。
+    """
+    p = index_path(root)
+    if not os.path.isfile(p):
+        return {'state': 'missing', 'reason': '资产索引不存在: %s' % p,
+                'warnings': [], 'count': 0, 'path': p}
+    try:
+        with open(p, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+    except (OSError, ValueError) as e:
+        return {'state': 'corrupt', 'reason': '资产索引损坏 (%r)' % (e,),
+                'warnings': [], 'count': 0, 'path': p}
+    ok, warns = validate_index(data, root)
+    if not ok:
+        return {'state': 'invalid', 'reason': '; '.join(warns[:3]),
+                'warnings': warns, 'count': 0, 'path': p}
+    return {'state': ('partial' if warns else 'ok'),
+            'reason': ('; '.join(warns[:3]) if warns else None),
+            'warnings': warns, 'count': len(data.get('assets') or {}),
+            'path': p}
 
 
 def validate_index(index, root=None):
-    """结构校验 -> (ok, reasons)。未知字段忽略；坏条目剔除并记 reason。"""
+    """逐条校验 -> (ok, warnings)。
+
+    ok=False 只表示**整体不可用**（顶层不是对象 / 缺 assets 对象）；
+    个别条目非法 -> 从 assets 里剔除并记 warning，其余照常可用（Q-B1-2=A）。
+    """
     if not isinstance(index, dict):
         return False, ['索引顶层必须是对象']
     assets = index.get('assets')
     if not isinstance(assets, dict):
         return False, ["索引缺 'assets' 对象"]
-    reasons = []
+    warnings = []
     bad = []
     for gid, e in assets.items():
         if not isinstance(gid, str) or not gid:
             bad.append(gid)
-            reasons.append('asset guid 非法: %r' % (gid,))
+            warnings.append('asset guid 非法: %r' % (gid,))
             continue
         if not isinstance(e, dict):
             bad.append(gid)
-            reasons.append('%s: 条目不是对象' % gid)
+            warnings.append('%s: 条目不是对象' % gid)
             continue
         kind = e.get('type')
         if kind not in KINDS:
             bad.append(gid)
-            reasons.append('%s: 未知类型 %r' % (gid, kind))
+            warnings.append('%s: 未知类型 %r' % (gid, kind))
             continue
         src = e.get('src')
         if src is not None:
-            if not isinstance(src, str) or os.path.isabs(src) or '..' in src.replace('\\', '/').split('/'):
+            if not isinstance(src, str) or os.path.isabs(src):
                 bad.append(gid)
-                reasons.append('%s: src 必须是项目相对路径 (收到 %r)' % (gid, src))
+                warnings.append('%s: src 必须是项目相对路径 (收到 %r)' % (gid, src))
+                continue
+            parts = src.replace('\\', '/').split('/')
+            if '..' in parts:
+                bad.append(gid)
+                warnings.append('%s: src 越界/相对路径 (收到 %r)' % (gid, src))
+                continue
+            if not (src == ASSETS_DIR or src.startswith(ASSETS_DIR + '/')):
+                bad.append(gid)
+                warnings.append('%s: src 必须位于 Assets/ 之下 (收到 %r)'
+                                % (gid, src))
                 continue
             if root is not None and not is_inside(root, os.path.join(root, src)):
                 bad.append(gid)
-                reasons.append('%s: src 越界 (%r)' % (gid, src))
+                warnings.append('%s: src 越界 (%r)' % (gid, src))
                 continue
         if 'import' in e and not isinstance(e.get('import'), dict):
             bad.append(gid)
-            reasons.append('%s: import 必须是对象' % gid)
+            warnings.append('%s: import 必须是对象' % gid)
     for gid in bad:
         assets.pop(gid, None)
-    return (not reasons), reasons
+    return True, warnings
 
 
 def save_index(root, index):
@@ -240,7 +310,7 @@ def save_index(root, index):
     index = dict(index or {})
     index['schema'] = SCHEMA
     index.setdefault('assets', {})
-    tmp = p + '.tmp'
+    tmp = '%s.tmp.%d' % (p, os.getpid())
     with open(tmp, 'w', encoding='utf-8') as f:
         json.dump(index, f, ensure_ascii=False, indent=2, sort_keys=True)
         f.flush()
@@ -266,16 +336,24 @@ def _load_user_delta(root):
 class AssetContext(object):
     """一次加载/保存期间的资产解析上下文（项目层 + 用户层 delta 合并视图）。"""
 
-    def __init__(self, root, index, user_delta=None):
+    def __init__(self, root, index, user_delta=None, warnings=None,
+                 readonly=False):
         self.root = os.path.abspath(root)
         self.index = index if index is not None else empty_index(self.root)
         self.user_delta = user_delta or {}
+        self.warnings = list(warnings or [])   # 索引/用户层告警（供 asset_list 上报）
+        self.readonly = bool(readonly)         # dry-run: 不落盘、不复制文件
         self._dirty = False
         self.errors = []            # [(where, guid, reason)] —— 供 sceneio 汇总
 
+    def _warn(self, msg, key=None):
+        if msg and msg not in self.warnings:
+            self.warnings.append(msg)
+            warn_once(key or ('ctx-warn', self.root, msg), '[资产] %s' % (msg,))
+
     # ---- 构造 ----
     @classmethod
-    def for_dir(cls, d, create=False):
+    def for_dir(cls, d, create=False, readonly=False):
         """目录 -> 上下文；无项目索引且 create=False 时返回 None（旧路径模式）。"""
         if d is None:
             return None
@@ -284,21 +362,34 @@ class AssetContext(object):
             if not create:
                 return None
             root = os.path.abspath(d)
-            os.makedirs(assets_dir(root), exist_ok=True)
-            save_index(root, empty_index(root))
-            return cls(root, empty_index(root))
-        return cls.open_root(root)
+            if not readonly:
+                os.makedirs(assets_dir(root), exist_ok=True)
+                save_index(root, empty_index(root))
+            return cls(root, empty_index(root), readonly=readonly)
+        return cls.open_root(root, create=create, readonly=readonly)
 
     @classmethod
-    def open_root(cls, root, create=False):
+    def open_root(cls, root, create=False, readonly=False):
         idx, ok, why = load_index(root)
+        warnings = [why] if why else []
         if idx is None:
             if not create:
                 return None
-            os.makedirs(assets_dir(root), exist_ok=True)
+            # Q-B1-2=A: 索引坏了也允许自愈 —— 但**先备份**，绝不静默覆盖
+            try:
+                if os.path.isfile(index_path(root)) and not readonly:
+                    bak = index_path(root) + '.bak-%s' % time.strftime('%Y%m%d-%H%M%S')
+                    shutil.copy2(index_path(root), bak)
+                    warnings.append('原索引不可用（%s）已备份为 %s' % (why, os.path.basename(bak)))
+                    print('[资产] ' + warnings[-1])
+            except OSError as e:
+                warnings.append('原索引备份失败 (%r)' % (e,))
+            if not readonly:
+                os.makedirs(assets_dir(root), exist_ok=True)
+                save_index(root, empty_index(root))
             idx = empty_index(root)
-            save_index(root, idx)
-        return cls(root, idx, _load_user_delta(root))
+        return cls(root, idx, _load_user_delta(root), warnings=warnings,
+                   readonly=readonly)
 
     # ---- 读 ----
     def entry(self, guid):
@@ -332,8 +423,13 @@ class AssetContext(object):
         if kind is not None and e.get('type') != kind:
             return None, e, False, '资产类型不符 (期望 %s, 实际 %r)' % (kind, e.get('type'))
         # 用户层 delta: 只允许覆盖 src/import（不换 guid 身份）
-        delta = self.user_delta.get(guid) or {}
-        src = delta.get('src') or e.get('src')
+        # Q-B1-3 同口径: 非 dict 的 delta 只跳过 + 告警，**绝不抛**（曾击穿 F7）
+        delta = self.user_delta.get(guid)
+        if delta is not None and not isinstance(delta, dict):
+            self._warn('用户层 delta 条目不是对象 (%s) -> 已忽略，按项目层解析'
+                       % (guid,))
+            delta = None
+        src = (delta or {}).get('src') or e.get('src')
         if not src:
             return None, e, False, '资产没有 src（可能是内置/材质条目）: %s' % (guid,)
         abs_p = os.path.join(self.root, str(src).replace('/', os.sep))
@@ -343,6 +439,31 @@ class AssetContext(object):
             # 目录型资产: 存在性由 cubemap() 逐面校验（缺面 reason 更精确）
             if not os.path.isdir(abs_p):
                 return None, e, False, '资产目录缺失: %s' % (src,)
+            # P2-③: 六面图指纹（逐面 sha256/size/mtime）—— 内容被替换必须出声。
+            # 热路径只 stat；仅在 size/mtime 变化时才逐面算 sha（与 texture 同策略）。
+            fs = e.get('face_stats')
+            if isinstance(fs, dict) and fs:
+                changed = []
+                for fname, meta in fs.items():
+                    if not isinstance(meta, dict):
+                        continue
+                    fp2 = os.path.join(abs_p, str(fname))
+                    try:
+                        st2 = os.stat(fp2)
+                    except OSError:
+                        return None, e, False, '六面图缺面: %s' % (fname,)
+                    if (int(meta.get('size', -1)) == st2.st_size
+                            and abs(float(meta.get('mtime', -1.0)) - st2.st_mtime) < 1e-6):
+                        continue
+                    try:
+                        sha2 = sha256_file(fp2)
+                    except OSError:
+                        sha2 = None
+                    if sha2 and sha2 != meta.get('sha256'):
+                        changed.append(str(fname))
+                if changed:
+                    return abs_p, e, True, ('六面图内容已变更（%s，建议 asset_reimport）: %s'
+                                            % (','.join(sorted(changed)), src))
             return abs_p, e, True, None
         if not os.path.isfile(abs_p):
             return None, e, False, '资产文件缺失: %s' % (src,)
@@ -447,16 +568,20 @@ class AssetContext(object):
         return mat, True, first_reason
 
     # ---- 写（导入）----
-    def _unique_dest(self, kind, name):
+    def _unique_dest(self, kind, name, create=True):
         d = os.path.join(assets_dir(self.root), KIND_DIRS.get(kind, 'Misc'))
-        os.makedirs(d, exist_ok=True)
-        stem, ext = os.path.splitext(name or 'asset')
+        if create:
+            os.makedirs(d, exist_ok=True)
+        stem, ext = os.path.splitext(safe_asset_name(name, 'asset'))
         stem = stem or 'asset'
         cand, n = stem + ext, 1
         while os.path.exists(os.path.join(d, cand)):
             n += 1
             cand = '%s_%d%s' % (stem, n, ext)
-        return os.path.join(d, cand)
+        dest = os.path.join(d, cand)
+        if not is_inside(assets_dir(self.root), dest):
+            raise ValueError('资产目标路径越界（必须是 Assets/ 之下）: %r' % (dest,))
+        return dest
 
     def _find_by_sha(self, kind, sha):
         for gid, e in self.entries(kind).items():
@@ -487,8 +612,9 @@ class AssetContext(object):
             # name 不带扩展名时补源文件扩展名（否则 Assets/Textures/<name> 没有后缀，
             # 解码器只能靠猜 -> 资产文件名不可读且易被误判）
             base_name += os.path.splitext(src)[1] or '.png'
-        dest = self._unique_dest('texture', base_name)
-        shutil.copy2(src, dest)
+        dest = self._unique_dest('texture', base_name, create=not self.readonly)
+        if not self.readonly:
+            shutil.copy2(src, dest)
         gid = guid or new_guid()
         imp = dict(DEFAULT_IMPORT)
         imp.update(import_settings or {})
@@ -521,28 +647,40 @@ class AssetContext(object):
         same = self._find_by_sha('cubemap', sha)
         if same is not None:
             return same, False, None
-        stem = (name
-                or os.path.basename(os.path.dirname(abses[0]))
-                or os.path.splitext(os.path.basename(abses[0]))[0] or 'cubemap')
+        stem = safe_asset_name(
+            name or os.path.basename(os.path.dirname(abses[0]))
+            or os.path.splitext(os.path.basename(abses[0]))[0], 'cubemap')
         base = os.path.join(assets_dir(self.root), KIND_DIRS['cubemap'])
-        os.makedirs(base, exist_ok=True)
+        if not self.readonly:
+            os.makedirs(base, exist_ok=True)
         dest, n = os.path.join(base, stem), 1
         while os.path.isdir(dest):
             n += 1
             dest = os.path.join(base, '%s_%d' % (stem, n))
-        os.makedirs(dest, exist_ok=True)
+        if not is_inside(assets_dir(self.root), dest):
+            return None, False, '六面图目标路径越界: %r' % (dest,)
+        if not self.readonly:
+            os.makedirs(dest, exist_ok=True)
         from loom_cubemap import Cubemap
         files = []
+        face_stats = {}
+        total_bytes = 0
         for i, fname in enumerate(Cubemap.FACES):
             ext = os.path.splitext(abses[i])[1] or '.png'
             out = '%s%s' % (fname, ext)
-            shutil.copy2(abses[i], os.path.join(dest, out))
+            if not self.readonly:
+                shutil.copy2(abses[i], os.path.join(dest, out))
             files.append(out)
+            st = os.stat(abses[i])
+            total_bytes += int(st.st_size)
+            # P2-③: 逐面指纹（内容/时间戳），供 resolve 检测六面图被替换
+            face_stats[out] = {'sha256': sha256_file(abses[i]),
+                               'size': int(st.st_size), 'mtime': float(st.st_mtime)}
         gid = guid or new_guid()
         self.index.setdefault('assets', {})[gid] = {
             'type': 'cubemap', 'src': os.path.relpath(dest, self.root).replace(os.sep, '/'),
-            'name': stem, 'files': files,
-            'fingerprint': {'sha256': sha, 'size': len(abses),
+            'name': stem, 'files': files, 'face_stats': face_stats,
+            'fingerprint': {'sha256': sha, 'size': total_bytes,
                             'mtime': max(os.stat(p).st_mtime for p in abses)}}
         self._dirty = True
         self.save()
@@ -600,18 +738,18 @@ class AssetContext(object):
 
     # ---- 持久化 ----
     def save(self):
-        if self._dirty:
+        if self._dirty and not self.readonly:
             save_index(self.root, self.index)
-            self._dirty = False
+        self._dirty = False
         return index_path(self.root)
 
 
 # ---------------------------------------------------------------- 便捷函数
 
-def context_for_scene(scene_dir, create=False):
+def context_for_scene(scene_dir, create=False, readonly=False):
     """场景目录 -> AssetContext|None（供 sceneio / scene_driver 统一入口）。"""
     try:
-        return AssetContext.for_dir(scene_dir, create=create)
+        return AssetContext.for_dir(scene_dir, create=create, readonly=readonly)
     except Exception as e:
         warn_once(('ctx', str(scene_dir)), '[资产] 项目资产索引不可用 (%r) -> 走旧路径模式' % (e,))
         return None

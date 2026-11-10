@@ -782,6 +782,11 @@ class RenderMixin:
             _st = self._stage_times
             _st['buckets_write'] = _st.get('buckets_write', 0.0) + _w_ms
             _st['buckets_pack'] = _st.get('buckets_pack', 0.0) + max(0.0, _tot_ms - _w_ms)
+            # R5-03 P3-10: 直写 _stage_times 的段也要有调用数, 否则 profile_snapshot
+            # 的 per_call_us 缺键 (这些段每帧 1 次 -> calls/frame 即样本数)。
+            _sc = self._stage_calls
+            for _k in ('buckets_write', 'buckets_pack'):
+                _sc[_k] = _sc.get(_k, 0) + 1
 
     # ============ D1/P1: 桶实例打包 C 内核 (loom_bucket_pack) 接线 ============
     def _bucket_pack_ready(self):
@@ -861,6 +866,9 @@ class RenderMixin:
             a += k
         if _prof_b:
             self._stage_times['buckets_write'] =                 self._stage_times.get('buckets_write', 0.0) +                 (time.perf_counter() - _w0) * 1000.0
+            _sc = self._stage_calls            # R5-03 P3-10: 补调用数 (per_call_us)
+            _sc['buckets_write'] = _sc.get('buckets_write', 0) + 1
+            _sc['buckets_pack'] = _sc.get('buckets_pack', 0) + 1
 
     def _draw_main_buckets(self):
         """A2: 主 pass 实例化批绘制 —— 每桶一次 draw (旧法: 每物体
@@ -949,6 +957,9 @@ class RenderMixin:
             _st['mt_mp_draws_uniform'] = _st.get('mt_mp_draws_uniform', 0.0) + _acc_uni * 1000.0
             _st['mt_mp_draws_tex'] = _st.get('mt_mp_draws_tex', 0.0) + _acc_tex * 1000.0
             _st['mt_mp_draws_render'] = _st.get('mt_mp_draws_render', 0.0) + _acc_rnd * 1000.0
+            _sc = self._stage_calls            # R5-03 P3-10: 补调用数 (per_call_us)
+            for _k in ('mt_mp_draws_uniform', 'mt_mp_draws_tex', 'mt_mp_draws_render'):
+                _sc[_k] = _sc.get(_k, 0) + 1
 
     def _white_gl_tex(self):
         """M36: 1x1 白纹理 GPU 资源 (延迟创建, 需 current context)。"""

@@ -207,6 +207,83 @@ def asset_errors(engine):
     return list(getattr(engine, '_asset_errors', None) or [])
 
 
+def _keep_slot_ref(mat, slot, ref):
+    """Q-B1-1=A: 解析失败时把**原始引用**留在材质对象上，保存时原样写回。
+
+    没有这一步，一次 Ctrl+S 就会把 guid 引用永久销毁（轮5 审计 P-01：
+    贴图文件被删/索引缺失/索引坏 -> 打开告警 -> 保存后 albedo 整键消失、
+    天空盒被替换成"默认蓝天 + 新随机 guid"）。
+    """
+    if not isinstance(ref, dict) or not ref:
+        return
+    try:
+        slots = getattr(mat, '_asset_ref_slots', None)
+        if not isinstance(slots, dict):
+            slots = {}
+            mat._asset_ref_slots = slots
+        slots[slot] = dict(ref)
+    except Exception:
+        pass
+
+
+def _clear_slot_ref(mat, slot):
+    """槽位解析成功 -> 丢掉保留的旧引用（不让旧 ref 覆盖新资产）。"""
+    try:
+        slots = getattr(mat, '_asset_ref_slots', None)
+        if isinstance(slots, dict):
+            slots.pop(slot, None)
+            if not slots:
+                mat._asset_ref_slots = None
+    except Exception:
+        pass
+
+
+def asset_refs_kept(engine):
+    """本次保存会"原样写回"的失效引用条数（材质槽 + 场景/相机天空盒）。"""
+    n = 0
+    seen = set()
+    try:
+        mats = list(getattr(engine, 'materials', None) or [])
+        for mdl in list(getattr(engine, 'models', None) or []):
+            mat = getattr(getattr(mdl, 'renderer', None), 'material', None)
+            if mat is not None:
+                mats.append(mat)
+        for mat in mats:
+            if id(mat) in seen:
+                continue
+            seen.add(id(mat))
+            slots = getattr(mat, '_asset_ref_slots', None)
+            if isinstance(slots, dict):
+                n += len([s for s in slots.values() if isinstance(s, dict) and s])
+    except Exception:
+        pass
+    try:
+        if isinstance(getattr(engine, '_skybox_ref', None), dict) \
+                and getattr(engine, '_skybox_valid', True) is False:
+            n += 1
+        for cam in list(getattr(engine, 'cameras', None) or []):
+            if isinstance(getattr(cam, '_skybox_ref', None), dict) \
+                    and getattr(cam, 'skybox', None) is None:
+                n += 1
+    except Exception:
+        pass
+    return n
+
+
+def asset_issue_notice(engine, where='打开'):
+    """给编辑器/播放器的一句可见提示（没有资产问题返回 None）。"""
+    errs = asset_errors(engine)
+    kept = asset_refs_kept(engine)
+    if not errs and not kept:
+        return None
+    parts = []
+    if errs:
+        parts.append('%d 条资产问题' % (len(errs),))
+    if kept:
+        parts.append('%d 条失效引用已保留（保存不会改写）' % (kept,))
+    return '资产：%s —— scene_assets_check 可查看明细' % ('，'.join(parts))
+
+
 def _texture_ref_dict(tex, ctx=None):
     """Texture -> 场景引用 dict。项目托管资产**只写 guid**（路径永不落盘）。"""
     guid = getattr(tex, 'guid', None)
@@ -1003,8 +1080,29 @@ def _emit_camera(cam, base_dir=None, ctx=None):
         "parent_id": cam.parent.guid if cam.parent is not None else None,
         # 2026-10-19 第1档序13 天空盒 (C3): 相机级 skybox 覆盖（None=用场景默认）
         # A3=B: 相机级同样受"必须在场景目录内"限制；越界 -> 不写出 + 出声
-        "skybox": _emit_skybox_checked(getattr(cam, 'skybox', None), base_dir, ctx)[0],
+        "skybox": _emit_camera_skybox(cam, base_dir, ctx),
     }
+
+
+def _emit_camera_skybox(cam, base_dir=None, ctx=None):
+    """相机级 skybox 落盘：解析失败过则原样写回旧引用（Q-B1-1=A），否则常规发射。"""
+    out = _emit_skybox_checked(getattr(cam, 'skybox', None), base_dir, ctx)[0]
+    if out is None:
+        ref = getattr(cam, '_skybox_ref', None)
+        if isinstance(ref, dict) and ref:
+            return dict(ref)
+    return out
+
+
+def _keep_cam_skybox_ref(cam, raw, valid):
+    """相机级天空盒：解析失败时保留原始引用（保存写回），成功时清掉。"""
+    try:
+        if (not valid) and isinstance(raw, dict) and raw:
+            cam._skybox_ref = dict(raw)
+        else:
+            cam._skybox_ref = None
+    except Exception:
+        pass
 
 
 def _apply_cameras(engine, cam_dicts, base_dir=None, ctx=None):
@@ -1042,6 +1140,7 @@ def _apply_cameras(engine, cam_dicts, base_dir=None, ctx=None):
             cam.skybox = None
             cam._skybox_valid = True
             cam._skybox_error = None
+            cam._skybox_ref = None
         else:
             _cube, _valid, _reason = skybox_from_dict(_raw, base_dir, ctx)
             cam.skybox = _cube
@@ -1050,6 +1149,13 @@ def _apply_cameras(engine, cam_dicts, base_dir=None, ctx=None):
             if not _valid:
                 print('[场景] 相机 %r 的天空盒解析失败: %s'
                       % (getattr(cam, 'name', '?'), _reason))
+                # Q-B1-1=A: 保留原始引用（保存时不改写）；P-05: 进资产体检
+                _keep_cam_skybox_ref(cam, _raw, _valid)
+                record_asset_error(engine, 'cameras[].skybox',
+                                   (_raw or {}).get('guid') if isinstance(_raw, dict) else None,
+                                   _reason)
+            else:
+                _keep_cam_skybox_ref(cam, None, True)
         links.append((cam, d.get('parent_id')))
     return links
 
@@ -1076,17 +1182,22 @@ def _emit_material(mat, ctx=None):
          "metallic": getattr(mat, 'metallic', 0.0),
          "roughness": getattr(mat, 'roughness', 0.5),
          "pbr": getattr(mat, 'pbr', False)}
-    alb = getattr(mat, 'albedo', None)
-    if alb is not None:
-        d["albedo"] = _texture_ref_dict(alb, ctx)
-    nrm = getattr(mat, 'normal_map', None)
-    if nrm is not None:
-        d["normal_map"] = _texture_ref_dict(nrm, ctx)
-    env = getattr(mat, 'env_map', None)
-    if env is not None:
-        ref = _cubemap_ref_dict(env, ctx)
+    kept = getattr(mat, '_asset_ref_slots', None)
+    kept = kept if isinstance(kept, dict) else {}
+
+    def _slot(key, attr):
+        obj = getattr(mat, attr, None)
+        if obj is not None:
+            return (_texture_ref_dict(obj, ctx) if attr != 'env_map'
+                    else _cubemap_ref_dict(obj, ctx))
+        ref = kept.get(key)
+        return dict(ref) if isinstance(ref, dict) and ref else None
+
+    for key, attr in (('albedo', 'albedo'), ('normal_map', 'normal_map'),
+                      ('env_map', 'env_map')):
+        ref = _slot(key, attr)
         if ref is not None:
-            d["env_map"] = ref
+            d[key] = ref
     return d
 
 
@@ -1101,72 +1212,101 @@ def _warn_dup_guid(engine, kind, guid, where):
 
 
 def _apply_material_texture(engine, mat, slot, ref, ctx):
-    """材质贴图槽: guid 优先（项目资产）；旧 path 兼容读 + 告警；失败一律有声。"""
+    """材质贴图槽: guid 优先（项目资产）；旧 path 兼容读 + 告警；失败一律有声。
+
+    Q-B1-1=A: **任何失败都保留原引用**（_keep_slot_ref），保存时原样写回，
+    绝不因为"这次没解析出来"就把 guid 从场景里抹掉。
+    """
     if not isinstance(ref, dict) or not ref:
         return
     guid = ref.get('guid')
-    if ctx is not None and guid and ctx.owns(guid, 'texture'):
-        tex, ok, why = ctx.texture(guid, ref)
-        if tex is not None:
-            setattr(mat, slot, tex)
-        if why:
-            record_asset_error(engine, 'materials.%s' % slot, guid, why)
-        return
-    path = ref.get('path')
-    if path:
+    try:
+        if ctx is not None and guid and ctx.owns(guid, 'texture'):
+            tex, ok, why = ctx.texture(guid, ref)
+            if tex is not None:
+                setattr(mat, slot, tex)
+                _clear_slot_ref(mat, slot)
+            else:
+                _keep_slot_ref(mat, slot, ref)
+            if why:
+                record_asset_error(engine, 'materials.%s' % slot, guid, why)
+            return
+        path = ref.get('path')
+        if path:
+            record_asset_error(engine, 'materials.%s' % slot, guid,
+                               '旧路径引用（beta6 兼容期；建议 asset_import 迁移为 guid）: %s'
+                               % (path,))
+            try:
+                from loom_texture import Texture
+                tex = Texture.from_file(
+                    path, name=ref.get('name'), guid=guid,
+                    mipmaps=ref.get('mipmaps', True),
+                    wrap=ref.get('wrap', 'repeat'),
+                    filter_mode=ref.get('filter_mode', 'trilinear'),
+                    aniso=ref.get('aniso', 1.0),
+                    max_size=ref.get('max_size', 0),
+                    compression=ref.get('compression', 'none'))
+                setattr(mat, slot, tex)
+                _clear_slot_ref(mat, slot)
+            except Exception as e:
+                _keep_slot_ref(mat, slot, ref)
+                record_asset_error(engine, 'materials.%s' % slot, guid,
+                                   '贴图加载失败 (%r): %s' % (e, path))
+            return
+        if guid:
+            _keep_slot_ref(mat, slot, ref)
+            if ctx is not None:
+                record_asset_error(engine, 'materials.%s' % slot, guid,
+                                   '资产 guid 未在项目索引中（可能被删/换了项目）: %s'
+                                   % (guid,))
+            else:
+                record_asset_error(engine, 'materials.%s' % slot, guid,
+                                   '只有 guid 但没有项目资产索引（缺 Assets/assets.json）')
+    except Exception as e:
+        # 资产层任何异常都不许穿透到"已清空场景"之后（F7 / 两端一致）
+        _keep_slot_ref(mat, slot, ref)
         record_asset_error(engine, 'materials.%s' % slot, guid,
-                           '旧路径引用（beta6 兼容期；建议 asset_import 迁移为 guid）: %s'
-                           % (path,))
-        try:
-            from loom_texture import Texture
-            tex = Texture.from_file(
-                path, name=ref.get('name'), guid=guid,
-                mipmaps=ref.get('mipmaps', True),
-                wrap=ref.get('wrap', 'repeat'),
-                filter_mode=ref.get('filter_mode', 'trilinear'),
-                aniso=ref.get('aniso', 1.0),
-                max_size=ref.get('max_size', 0),
-                compression=ref.get('compression', 'none'))
-            setattr(mat, slot, tex)
-        except Exception as e:
-            record_asset_error(engine, 'materials.%s' % slot, guid,
-                               '贴图加载失败 (%r): %s' % (e, path))
-        return
-    if guid:
-        if ctx is not None:
-            record_asset_error(engine, 'materials.%s' % slot, guid,
-                               '资产 guid 未在项目索引中（可能被删/换了项目）: %s' % (guid,))
-        else:
-            record_asset_error(engine, 'materials.%s' % slot, guid,
-                               '只有 guid 但没有项目资产索引（缺 Assets/assets.json）')
+                           '资产解析异常 (%r)' % (e,))
 
 
 def _apply_material_env(engine, mat, ref, ctx):
-    """材质环境贴图: guid 优先；旧 6 面 paths / 纯色兼容读。"""
+    """材质环境贴图: guid 优先；旧 6 面 paths / 纯色兼容读。失败保留原引用。"""
     if not isinstance(ref, dict) or not ref:
         return
     guid = ref.get('guid')
-    if ctx is not None and guid and ctx.owns(guid, 'cubemap'):
-        cube, ok, why = ctx.cubemap(guid, ref)
-        if cube is not None:
-            mat.env_map = cube
-        if why:
-            record_asset_error(engine, 'materials.env_map', guid, why)
-        return
     try:
+        if ctx is not None and guid and ctx.owns(guid, 'cubemap'):
+            cube, ok, why = ctx.cubemap(guid, ref)
+            if cube is not None:
+                mat.env_map = cube
+                _clear_slot_ref(mat, 'env_map')
+            else:
+                _keep_slot_ref(mat, 'env_map', ref)
+            if why:
+                record_asset_error(engine, 'materials.env_map', guid, why)
+            return
         from loom_cubemap import Cubemap
         if ref.get('paths'):
             record_asset_error(engine, 'materials.env_map', guid,
                                '旧路径引用（6 面路径，beta6 兼容期；建议 asset_import）')
-            mat.env_map = Cubemap.from_files(ref['paths'], name=ref.get('name'),
-                                             guid=guid)
+            try:
+                mat.env_map = Cubemap.from_files(ref['paths'], name=ref.get('name'),
+                                                 guid=guid)
+                _clear_slot_ref(mat, 'env_map')
+            except Exception as e:
+                _keep_slot_ref(mat, 'env_map', ref)
+                record_asset_error(engine, 'materials.env_map', guid,
+                                   '环境贴图加载失败 (%r)' % (e,))
         elif ref.get('solid_color'):
             mat.env_map = Cubemap.from_solid(tuple(ref['solid_color']),
                                              name=ref.get('name'), guid=guid)
+            _clear_slot_ref(mat, 'env_map')
         elif guid:
+            _keep_slot_ref(mat, 'env_map', ref)
             record_asset_error(engine, 'materials.env_map', guid,
                                '资产 guid 未在项目索引中（可能被删/换了项目）: %s' % (guid,))
     except Exception as e:
+        _keep_slot_ref(mat, 'env_map', ref)
         record_asset_error(engine, 'materials.env_map', guid,
                            '环境贴图加载失败 (%r)' % (e,))
 
@@ -1214,6 +1354,12 @@ def _is_default_material(mat):
     if (getattr(mat, 'albedo', None) is not None
             or getattr(mat, 'normal_map', None) is not None
             or getattr(mat, 'env_map', None) is not None):
+        return False
+    # Q-B1-1=A: 只有"失效引用"的材质不是默认材质 —— 不能被孤儿规则丢掉
+    # （否则保存后 ref 也没了，等于换个方式丢资产）
+    if isinstance(getattr(mat, '_asset_ref_slots', None), dict) \
+            and any(isinstance(v, dict) and v
+                    for v in mat._asset_ref_slots.values()):
         return False
     if getattr(mat, 'name', None) not in (None, '材质'):
         return False

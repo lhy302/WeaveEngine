@@ -298,6 +298,38 @@ def aabbs_minmax_par(vh, m3, out_mn, out_mx):
 
 
 # ---------------------------------------------------------------------------
+# D3 (2026-11-10): AABB 内核 AVX2 + 运行时 CPUID 分派
+#   公开入口 aabbs_minmax 仍走 C 的**分派版** (loom_aabbs_minmax), 语义不变;
+#   下面两个显式入口只用于对拍/诊断 (标量 vs AVX2 逐位一致断言)。
+# ---------------------------------------------------------------------------
+def aabbs_simd_impl():
+    """当前进程实际选中的 AABB 实现: 0 = 标量, 1 = AVX2 (无导出返回 None)."""
+    dll = _CK['dll']
+    if dll is None or not hasattr(dll, 'loom_aabbs_simd_impl'):
+        return None
+    return int(dll.loom_aabbs_simd_impl())
+
+
+def aabbs_minmax_impl(vh, m3, out_mn, out_mx, impl='auto'):
+    """显式实现选择 (仅对拍): 'auto' 走分派版; 'scalar'/'avx2' 强制单路.
+    avx2 路径由调用方保证 CPU 支持 (测试里先用 aabbs_simd_impl() 判)。"""
+    dll = _CK['dll']
+    ct = _CK['ctypes']
+    if impl == 'auto' or dll is None:
+        return _aabbs_minmax_c(vh, m3, out_mn, out_mx)
+    fn = getattr(dll, 'loom_aabbs_minmax_%s' % impl, None)
+    if fn is None:
+        raise RuntimeError('loom_aabbs_minmax_%s 导出缺失 (旧 DLL?)' % impl)
+    n, V = vh.shape[0], vh.shape[1]
+    pd = ct.POINTER(ct.c_double)
+    rc = int(fn(vh.ctypes.data_as(pd), m3.ctypes.data_as(pd),
+                out_mn.ctypes.data_as(pd), out_mx.ctypes.data_as(pd), n, V))
+    if rc != 0:
+        raise RuntimeError('loom_aabbs_minmax_%s 失败 rc=%d' % (impl, rc))
+    return out_mn, out_mx
+
+
+# ---------------------------------------------------------------------------
 # e) collide_pairs SAP 一体内核 (2026-09-07, 任务 collide_pairs 4.2→≤1.5ms):
 #    engine._collision_pairs_parallel 的 C 路径候选段 (排序/窗口扫描/yz 过滤/
 #    ancestry/精判/归一去重) 全部搬进 loom_kernels.dll 的 loom_collide_pairs
@@ -457,13 +489,20 @@ def collide_extract_local(ci, bmn, bmx, scn, rad, kind):
 #    ★可用性是**可选**的 (与 aabbs/collide 的硬加载不同): 旧 DLL 没有该导出时
 #      available() 返回 False, loom_render 打印一行并回退现有 Python 路径 ——
 #      不静默、不硬 raise (打包不是正确性必需件, 只是性能路径)。
+#    ★回退可达性 (R5-03 P3-07 校正): **DLL 文件缺失**在本仓库是不可达的 ——
+#      fastpath 导入期按 B1 纪律硬 raise (见文件头), 所以"缺 DLL"永远不会走到这里。
+#      实际可达的只有两种: ① DLL 在但**没有该导出**(旧构建/LOOM_DEV=1 下未重钉的本地
+#      DLL) ② 运维用 LOOM_BUCKET_PACK=0 主动关掉。声明按这两条写, 不再夸大。
 #    ★Nuitka 折叠防御: 函数指针存 _BK dict (容器内容不会被常量传播裁掉)。
 _BK = {'pack': None}
 if _CK['dll'] is not None:
     _dll_bk = _CK['dll']
     _ct_bk = _CK['ctypes']
-    if hasattr(_dll_bk, 'loom_bucket_pack'):
-        _fn_bk = _dll_bk.loom_bucket_pack
+    # R5-03 Q-D1-2: 版本化导出优先 (loom_bucket_pack_v1), 旧名 loom_bucket_pack 保留别名
+    _fn_bk = getattr(_dll_bk, 'loom_bucket_pack_v1', None)
+    if _fn_bk is None:
+        _fn_bk = getattr(_dll_bk, 'loom_bucket_pack', None)
+    if _fn_bk is not None:
         _fn_bk.restype = _ct_bk.c_int
         _fn_bk.argtypes = [
             _ct_bk.POINTER(_ct_bk.c_float),    # world16 (n,16) f32
@@ -481,7 +520,10 @@ if _CK['dll'] is not None:
 
 
 def bucket_pack_available():
-    """C 打包内核是否可用 (旧 DLL / 非官方件 → False, 调用方回退 Python)."""
+    """C 打包内核是否可用.
+
+    可达的 False 只有两种 (R5-03 P3-07): ① 当前 DLL 没有该导出 (旧构建) ② 调用方
+    主动 LOOM_BUCKET_PACK=0。DLL 文件缺失在导入期就被 B1 纪律硬 raise, 不会到这里。"""
     return _BK.get('pack') is not None
 
 

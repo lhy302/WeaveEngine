@@ -92,7 +92,7 @@ class _ErrStubBridge:
     def ensure_models(self, models):
         self.ensure_calls += 1
 
-    def pre_step(self, dt, g):
+    def pre_step(self, dt, g, pose=None):   # D2: 桥 API 增加 pose (位姿 SoA 平面)
         self.n += 1
         if self.n == 1:
             raise RuntimeError("boom-substep")
@@ -137,7 +137,7 @@ class _BlockBridge:
     def ensure_models(self, models):
         pass
 
-    def pre_step(self, dt, g):
+    def pre_step(self, dt, g, pose=None):   # D2: 桥 API 增加 pose (位姿 SoA 平面)
         self.entered.set()
         self.gate.wait(10.0)
 

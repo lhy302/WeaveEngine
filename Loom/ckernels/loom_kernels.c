@@ -64,13 +64,24 @@ static void _aabb_one_row(const double *vh_row,   /* (V,4) */
     mx[0] = mx0; mx[1] = mx1; mx[2] = mx2;
 }
 
-/* ---- kernel 1: serial ---- */
+/* D3: Kernel 5 (AVX2 + 分派) 在后面定义 —— 这里前置声明, 供 kernel1/2 分派使用 */
+static int _simd_impl(void);
+static void _aabbs_rows_avx2(const double *vh, const double *m3,
+                             double *mn, double *mx, int64_t n, int64_t V);
+static void _aabb_one_row_avx2(const double *vh_row, const double *m3_row,
+                               double *mn, double *mx, int64_t V);
+
+/* ---- kernel 1: serial (D3: 运行时按 CPUID 分派 AVX2 / 标量) ---- */
 __declspec(dllexport) int loom_aabbs_minmax(const double *vh, const double *m3,
                                             double *out_mn, double *out_mx,
                                             int64_t n, int64_t V)
 {
     if (n < 0 || V < 0) return 1;
     if (n == 0 || V == 0) return 0;
+    if (_simd_impl() == 1) {              /* D3: AVX2 (与标量逐位一致) */
+        _aabbs_rows_avx2(vh, m3, out_mn, out_mx, n, V);
+        return 0;
+    }
     for (int64_t i = 0; i < n; ++i) {
         _aabb_one_row(vh + i * V * 4, m3 + i * 12,
                       out_mn + i * 3, out_mx + i * 3, V);
@@ -91,7 +102,15 @@ static DWORD WINAPI _aabb_worker(LPVOID arg)
     const double *vh = r->vh, *m3 = r->m3;
     double *mn = r->out_mn, *mx = r->out_mx;
     int64_t V = r->V;
-    for (int64_t i = r->row0; i < r->row1; ++i) {
+    int64_t i;
+    if (_simd_impl() == 1) {              /* D3: AVX2 分派 */
+        for (i = r->row0; i < r->row1; ++i) {
+            _aabb_one_row_avx2(vh + i * V * 4, m3 + i * 12,
+                               mn + i * 3, mx + i * 3, V);
+        }
+        return 0;
+    }
+    for (i = r->row0; i < r->row1; ++i) {
         _aabb_one_row(vh + i * V * 4, m3 + i * 12, mn + i * 3, mx + i * 3, V);
     }
     return 0;
@@ -362,16 +381,16 @@ __declspec(dllexport) int64_t loom_collide_pairs(
  *
  * 返回: 0 成功; 1 参数/越界非法 (Python 侧硬 raise: 官方件契约违约, 不静默)。
  * ========================================================================== */
-__declspec(dllexport) int loom_bucket_pack(const float *world16,
-                                           const float *sat,
-                                           const float *col,
-                                           const int64_t *offs,
-                                           int32_t K,
-                                           const uint8_t *keep,
-                                           int64_t n_total,
-                                           float *out_main,
-                                           float *out_sha,
-                                           int32_t *out_main_n)
+__declspec(dllexport) int loom_bucket_pack_v1(const float *world16,
+                                              const float *sat,
+                                              const float *col,
+                                              const int64_t *offs,
+                                              int32_t K,
+                                              const uint8_t *keep,
+                                              int64_t n_total,
+                                              float *out_main,
+                                              float *out_sha,
+                                              int32_t *out_main_n)
 {
     int32_t b;
     if (world16 == NULL || sat == NULL || col == NULL || offs == NULL ||
@@ -379,8 +398,12 @@ __declspec(dllexport) int loom_bucket_pack(const float *world16,
         return 1;
     }
     if (K < 0 || n_total < 0) return 1;
-    if (K == 0 || n_total == 0) return 0;
+    if (K == 0) return 0;                 /* 空批: 无桶可写 */
     if (offs[0] != 0) return 1;
+    /* 契约断言 (R5-03 P-02): 桶区间必须恰好铺满 [0, n_total) —— 否则消费侧
+     * out_main_n 会留下未定义槽位。注意 K>0 且 n_total==0 是**合法**输入
+     * (全空桶), 此时下面循环会逐桶写 out_main_n[b] = 0。 */
+    if (offs[K] != n_total) return 1;
     for (b = 0; b < K; ++b) {
         int64_t a = offs[b];
         int64_t e = offs[b + 1];
@@ -426,6 +449,182 @@ __declspec(dllexport) int loom_bucket_pack(const float *world16,
 }
 
 /* ==========================================================================
+ * Kernel 5: AABB AVX2 + 运行时分派 (2026-11-10, 批次 D3)
+ * ==========================================================================
+ * 目的: 出厂 loom_aabbs_minmax 是标量 (实测 173-180 Mvert/s, 5.8ns/顶点,
+ *       内层 if/else 依赖链使编译器无法向量化)。研究版 AVX2 实测 2.2-2.4x
+ *       且**逐位一致** (只做跨顶点并行: 同一顶点的 x=((a*m00+b*m10)+c*m20)+d*m30
+ *       运算顺序一字不改; min/max 精确且与顺序无关)。
+ *
+ * 分派纪律 (不能牺牲可加载性):
+ *   · 编译**不开** /arch:AVX2 —— AVX2 指令只出现在 noinline 的专用函数里,
+ *     其它代码路径仍是基线 x64 (SSE2); 老机器加载 DLL 不会因非法指令崩溃。
+ *   · 运行时 CPUID (leaf 1 OSXSAVE/AVX + leaf 7 EBX bit5 AVX2 + XGETBV XMM|YMM)
+ *     不满足 → 永不进入 AVX2 函数。
+ *   · 两个实现各自导出 (loom_aabbs_minmax_scalar / _avx2) 供对拍; 公开入口
+ *     loom_aabbs_minmax[_par] 只做分派。
+ * ========================================================================== */
+#include <intrin.h>
+
+static int g_simd_impl = -1;      /* -1=未探测, 0=标量, 1=AVX2 (进程内一次性) */
+
+static int _cpu_has_avx2(void)
+{
+    int regs[4];
+    unsigned long long xcr0;
+    __cpuid(regs, 0);
+    if (regs[0] < 7) return 0;
+    __cpuid(regs, 1);
+    if (!(regs[2] & (1 << 27))) return 0;     /* OSXSAVE */
+    if (!(regs[2] & (1 << 28))) return 0;     /* AVX */
+    xcr0 = _xgetbv(0);
+    if ((xcr0 & 0x6) != 0x6) return 0;        /* XMM+YMM 状态已开 */
+    __cpuidex(regs, 7, 0);
+    if (!(regs[1] & (1 << 5))) return 0;      /* AVX2 */
+    return 1;
+}
+
+static int _simd_impl(void)
+{
+    if (g_simd_impl < 0) {
+        g_simd_impl = _cpu_has_avx2() ? 1 : 0;
+    }
+    return g_simd_impl;
+}
+
+/* AVX2: 每轮 4 个顶点; 与标量 _aabb_one_row 逐位同源 (无 FMA, 左结合加法) */
+__declspec(noinline) static void _aabb_one_row_avx2(const double *vh_row,
+                                                    const double *m3_row,
+                                                    double *mn, double *mx,
+                                                    int64_t V)
+{
+    __m256d m00v = _mm256_set1_pd(m3_row[0]);
+    __m256d m01v = _mm256_set1_pd(m3_row[1]);
+    __m256d m02v = _mm256_set1_pd(m3_row[2]);
+    __m256d m10v = _mm256_set1_pd(m3_row[3]);
+    __m256d m11v = _mm256_set1_pd(m3_row[4]);
+    __m256d m12v = _mm256_set1_pd(m3_row[5]);
+    __m256d m20v = _mm256_set1_pd(m3_row[6]);
+    __m256d m21v = _mm256_set1_pd(m3_row[7]);
+    __m256d m22v = _mm256_set1_pd(m3_row[8]);
+    __m256d m30v = _mm256_set1_pd(m3_row[9]);
+    __m256d m31v = _mm256_set1_pd(m3_row[10]);
+    __m256d m32v = _mm256_set1_pd(m3_row[11]);
+    __m256d vmnx = _mm256_set1_pd(1e308), vmxx = _mm256_set1_pd(-1e308);
+    __m256d vmny = vmnx, vmxy = vmxx, vmnz = vmnx, vmxz = vmxx;
+    int64_t v = 0;
+    for (; v + 4 <= V; v += 4) {
+        const double *p = vh_row + v * 4;
+        __m256d a = _mm256_set_pd(p[12], p[8], p[4], p[0]);
+        __m256d b = _mm256_set_pd(p[13], p[9], p[5], p[1]);
+        __m256d c = _mm256_set_pd(p[14], p[10], p[6], p[2]);
+        __m256d d = _mm256_set_pd(p[15], p[11], p[7], p[3]);
+        __m256d x = _mm256_add_pd(_mm256_add_pd(_mm256_add_pd(
+                      _mm256_mul_pd(a, m00v), _mm256_mul_pd(b, m10v)),
+                      _mm256_mul_pd(c, m20v)), _mm256_mul_pd(d, m30v));
+        __m256d y = _mm256_add_pd(_mm256_add_pd(_mm256_add_pd(
+                      _mm256_mul_pd(a, m01v), _mm256_mul_pd(b, m11v)),
+                      _mm256_mul_pd(c, m21v)), _mm256_mul_pd(d, m31v));
+        __m256d z = _mm256_add_pd(_mm256_add_pd(_mm256_add_pd(
+                      _mm256_mul_pd(a, m02v), _mm256_mul_pd(b, m12v)),
+                      _mm256_mul_pd(c, m22v)), _mm256_mul_pd(d, m32v));
+        vmnx = _mm256_min_pd(vmnx, x);
+        vmxx = _mm256_max_pd(vmxx, x);
+        vmny = _mm256_min_pd(vmny, y);
+        vmxy = _mm256_max_pd(vmxy, y);
+        vmnz = _mm256_min_pd(vmnz, z);
+        vmxz = _mm256_max_pd(vmxz, z);
+    }
+    {
+        double t[4];
+        double mn0, mn1, mn2, mx0, mx1, mx2;
+        int q;
+        _mm256_storeu_pd(t, vmnx); mn0 = t[0];
+        for (q = 1; q < 4; ++q) if (t[q] < mn0) mn0 = t[q];
+        _mm256_storeu_pd(t, vmxx); mx0 = t[0];
+        for (q = 1; q < 4; ++q) if (t[q] > mx0) mx0 = t[q];
+        _mm256_storeu_pd(t, vmny); mn1 = t[0];
+        for (q = 1; q < 4; ++q) if (t[q] < mn1) mn1 = t[q];
+        _mm256_storeu_pd(t, vmxy); mx1 = t[0];
+        for (q = 1; q < 4; ++q) if (t[q] > mx1) mx1 = t[q];
+        _mm256_storeu_pd(t, vmnz); mn2 = t[0];
+        for (q = 1; q < 4; ++q) if (t[q] < mn2) mn2 = t[q];
+        _mm256_storeu_pd(t, vmxz); mx2 = t[0];
+        for (q = 1; q < 4; ++q) if (t[q] > mx2) mx2 = t[q];
+        /* 尾部 (V%4): 与标量同式同序 */
+        for (; v < V; ++v) {
+            const double *p = vh_row + v * 4;
+            double a2 = p[0], b2 = p[1], c2 = p[2], d2 = p[3];
+            double x2 = a2 * m3_row[0] + b2 * m3_row[3] + c2 * m3_row[6] + d2 * m3_row[9];
+            double y2 = a2 * m3_row[1] + b2 * m3_row[4] + c2 * m3_row[7] + d2 * m3_row[10];
+            double z2 = a2 * m3_row[2] + b2 * m3_row[5] + c2 * m3_row[8] + d2 * m3_row[11];
+            if (x2 < mn0) mn0 = x2; if (x2 > mx0) mx0 = x2;
+            if (y2 < mn1) mn1 = y2; if (y2 > mx1) mx1 = y2;
+            if (z2 < mn2) mn2 = z2; if (z2 > mx2) mx2 = z2;
+        }
+        mn[0] = mn0; mn[1] = mn1; mn[2] = mn2;
+        mx[0] = mx0; mx[1] = mx1; mx[2] = mx2;
+    }
+}
+
+static void _aabbs_rows_avx2(const double *vh, const double *m3,
+                             double *mn, double *mx, int64_t n, int64_t V)
+{
+    int64_t i;
+    for (i = 0; i < n; ++i) {
+        _aabb_one_row_avx2(vh + i * V * 4, m3 + i * 12,
+                           mn + i * 3, mx + i * 3, V);
+    }
+}
+
+/* ---- 显式导出: 对拍与诊断 (avx2 版调用方必须已确认 CPU 支持) ---- */
+__declspec(dllexport) int loom_aabbs_minmax_scalar(const double *vh, const double *m3,
+                                                   double *out_mn, double *out_mx,
+                                                   int64_t n, int64_t V)
+{
+    int64_t i;
+    if (n < 0 || V < 0) return 1;
+    if (n == 0 || V == 0) return 0;
+    for (i = 0; i < n; ++i) {
+        _aabb_one_row(vh + i * V * 4, m3 + i * 12,
+                      out_mn + i * 3, out_mx + i * 3, V);
+    }
+    return 0;
+}
+
+__declspec(dllexport) int loom_aabbs_minmax_avx2(const double *vh, const double *m3,
+                                                 double *out_mn, double *out_mx,
+                                                 int64_t n, int64_t V)
+{
+    if (n < 0 || V < 0) return 1;
+    if (n == 0 || V == 0) return 0;
+    _aabbs_rows_avx2(vh, m3, out_mn, out_mx, n, V);
+    return 0;
+}
+
+/* 旧名别名 (R5-03 Q-D1-2): 新代码用 _v1, 老调用方/老探针继续可用 */
+__declspec(dllexport) int loom_bucket_pack(const float *world16,
+                                           const float *sat,
+                                           const float *col,
+                                           const int64_t *offs,
+                                           int32_t K,
+                                           const uint8_t *keep,
+                                           int64_t n_total,
+                                           float *out_main,
+                                           float *out_sha,
+                                           int32_t *out_main_n)
+{
+    return loom_bucket_pack_v1(world16, sat, col, offs, K, keep, n_total,
+                               out_main, out_sha, out_main_n);
+}
+
+/* 当前分派实现: 0 = 标量, 1 = AVX2 (诊断/断言用) */
+__declspec(dllexport) int loom_aabbs_simd_impl(void)
+{
+    return _simd_impl();
+}
+
+/* ==========================================================================
  * M1-4 契约化无侵入追加 (2026-09-08, DLL 化战役 M1)
  * ==========================================================================
  * 本段为向文件末尾"无侵入追加"的 loom_module.h v1.0 契约导出 (最小函数集
@@ -449,12 +648,13 @@ static const LOOM_MODULE_INFO g_module_info = {
     "ckernels",            /* 模块 id: 与 registry.json 条目 module_id 同名 */
     "1.0.0",
     1,                     /* official: 1=官方组件 (随引擎发行, 不走用户信任闸) */
-    2,                     /* provides_count: ckernels.aabbs + ckernels.collide */
+    3,                     /* provides_count: aabbs + collide + bucket_pack (R5-03) */
     0,                     /* depends_count: 数值内核无依赖 */
     0                      /* reserved: 置 0 */
 };
 
-static const char *g_module_provides[] = { "ckernels.aabbs", "ckernels.collide" };
+static const char *g_module_provides[] = { "ckernels.aabbs", "ckernels.collide",
+                                            "ckernels.bucket_pack" };
 
 /* ---- 契约导出 1) 模块信息: 返回静态存储指针 ------------------------------- */
 __declspec(dllexport) const LOOM_MODULE_INFO *loom_module_info(void)
@@ -497,7 +697,8 @@ __declspec(dllexport) uint32_t loom_module_abi(void)
 __declspec(dllexport) int32_t loom_module_has(const char *iface_name)
 {
     if (iface_name == NULL) return 0;
-    if (strcmp(iface_name, "ckernels.aabbs")   == 0) return 1;
-    if (strcmp(iface_name, "ckernels.collide") == 0) return 1;
+    if (strcmp(iface_name, "ckernels.aabbs")       == 0) return 1;
+    if (strcmp(iface_name, "ckernels.collide")     == 0) return 1;
+    if (strcmp(iface_name, "ckernels.bucket_pack") == 0) return 1;
     return 0;
 }
