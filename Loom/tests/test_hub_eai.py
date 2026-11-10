@@ -166,8 +166,9 @@ def t_project_crud():
               and r['result']['name'] == '空工程', r)
         import sceneio
         data = sceneio.load_scene_data(scene)
-        check("空场景可被 sceneio 读 (v10)", data is not None
-              and data.get('version') == 10 and data.get('objects') == [], data)
+        check("空场景可被 sceneio 读 (版本=SCENE_VERSION)", data is not None
+              and data.get('version') == sceneio.SCENE_VERSION
+              and data.get('objects') == [], data)
         r = _r('project_list')
         check("project_list 1 条", r['ok'] and len(r['result']['projects']) == 1
               and r['result']['projects'][0]['scene'] == scene, r)

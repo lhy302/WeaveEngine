@@ -129,13 +129,78 @@ def build_models(data, materials=None):
     return models
 
 
-def build_materials(data):
+def _asset_tex(ref, ctx):
+    """材质贴图引用 -> (Texture|None, reason|None)。guid 优先，旧 path 兼容读。"""
+    if not isinstance(ref, dict) or not ref:
+        return None, None
+    guid = ref.get('guid')
+    if ctx is not None and guid and ctx.owns(guid, 'texture'):
+        try:
+            tex, _ok, why = ctx.texture(guid, ref)
+            return tex, why
+        except Exception as e:
+            return None, '贴图解析失败 (%r)' % (e,)
+    p = ref.get('path')
+    if not p:
+        if guid:
+            return None, '只有 guid 但解析不到资产（缺 assets.json 或条目已删）'
+        return None, None
+    try:
+        from loom_texture import Texture
+        tex = Texture.from_file(
+            p, name=ref.get('name'), guid=guid,
+            mipmaps=ref.get('mipmaps', True),
+            wrap=ref.get('wrap', 'repeat'),
+            filter_mode=ref.get('filter_mode', 'trilinear'),
+            aniso=ref.get('aniso', 1.0),
+            max_size=ref.get('max_size', 0),
+            compression=ref.get('compression', 'none'))
+        return tex, ('旧路径引用（beta6 兼容期）: %s' % (p,)) if ctx is not None else None
+    except Exception as e:
+        return None, '贴图加载失败 (%r): %s' % (e, p)
+
+
+def _asset_env(ref, ctx):
+    """材质环境贴图引用 -> (Cubemap|None, reason|None)。guid 优先，旧 paths/纯色兼容。"""
+    if not isinstance(ref, dict) or not ref:
+        return None, None
+    guid = ref.get('guid')
+    if ctx is not None and guid and ctx.owns(guid, 'cubemap'):
+        try:
+            cube, _ok, why = ctx.cubemap(guid, ref)
+            return cube, why
+        except Exception as e:
+            return None, '环境贴图解析失败 (%r)' % (e,)
+    try:
+        from loom_cubemap import Cubemap
+        if ref.get('paths'):
+            cube = Cubemap.from_files(ref['paths'], name=ref.get('name'), guid=guid)
+            return cube, ('旧路径引用（6 面路径，beta6 兼容期）' if ctx is not None else None)
+        if ref.get('solid_color'):
+            return Cubemap.from_solid(tuple(ref['solid_color']),
+                                      name=ref.get('name'), guid=guid), None
+    except Exception as e:
+        return None, '环境贴图加载失败 (%r)' % (e,)
+    if guid:
+        return None, '只有 guid 但解析不到环境贴图资产'
+    return None, None
+
+
+def build_materials(data, ctx=None, errors=None):
     """场景 dict -> Material 列表 (与 sceneio._apply_materials 同字段语义).
 
     2026-11-06: Vk 后端此前完全没有材质库, PBR/共享材质在播放器里静默丢失。
+    beta6 B1: 贴图/环境贴图按 guid 从项目资产解析；旧 path 字段兼容读并告警
+    （与 GL 走同一套 loom_assets 解析，禁止两后端各写一份）。
     """
     from loom_material import Material
     out = []
+
+    def _rec(where, guid, why):
+        if why:
+            if errors is not None:
+                errors.append((where, guid, why))
+            print('[资产] %s: %s' % (where, why))
     for d in (data.get('materials') or []):
         if not isinstance(d, dict):
             continue
@@ -155,42 +220,17 @@ def build_materials(data):
         # aniso=1 / max_size=0) —— 同一材质 GL 是 64x64/1 级, Vk 是 256x256/9 级
         # (实测 16 倍像素上传), 采样方式也不同。取值列表照抄 sceneio._apply_materials
         # (同一个白名单, 不另立第二份), 避免两后端再分叉。
-        try:
-            from loom_texture import Texture
-            for key in ('albedo', 'normal_map'):
-                ref = d.get(key)
-                if ref and ref.get('path'):
-                    try:
-                        setattr(mat, key, Texture.from_file(
-                            ref['path'], name=ref.get('name'), guid=ref.get('guid'),
-                            mipmaps=ref.get('mipmaps', True),
-                            wrap=ref.get('wrap', 'repeat'),
-                            filter_mode=ref.get('filter_mode', 'trilinear'),
-                            aniso=ref.get('aniso', 1.0),
-                            max_size=ref.get('max_size', 0),
-                            compression=ref.get('compression', 'none')))
-                    except Exception:
-                        pass
-            # 2026-11-06 环境反射: 与 sceneio._apply_materials 同语义 (6 面 paths)
-            # 2026-11-07 F7 联动: 纯色环境 (Cubemap.from_solid) 也要往返 —— sceneio
-            # 的 _emit_material/_apply_materials 已支持 env_map.solid_color, 这里
-            # 只认 paths 会让同一材质在 VK 播放器里丢掉纯色环境反射 (双后端不一致)。
-            eref = d.get('env_map')
-            if eref:
-                try:
-                    from loom_cubemap import Cubemap
-                    if eref.get('paths'):
-                        mat.env_map = Cubemap.from_files(
-                            eref['paths'], name=eref.get('name'),
-                            guid=eref.get('guid'))
-                    elif eref.get('solid_color'):
-                        mat.env_map = Cubemap.from_solid(
-                            tuple(eref['solid_color']), name=eref.get('name'),
-                            guid=eref.get('guid'))
-                except Exception:
-                    pass
-        except Exception:
-            pass
+        # 2026-11-06 贴图 / 2026-11-07 F7 联动: 纯色环境也要往返。
+        # beta6 B1: guid 走 loom_assets；旧 path/paths 兼容读并告警（不再静默跳过）。
+        for key in ('albedo', 'normal_map'):
+            tex, why = _asset_tex(d.get(key), ctx)
+            if tex is not None:
+                setattr(mat, key, tex)
+            _rec('materials.%s' % key, (d.get(key) or {}).get('guid'), why)
+        cube, why = _asset_env(d.get('env_map'), ctx)
+        if cube is not None:
+            mat.env_map = cube
+        _rec('materials.env_map', (d.get('env_map') or {}).get('guid'), why)
         out.append(mat)
     return out
 
@@ -557,17 +597,21 @@ class SceneDriver:
             self.load_from_data(data)
 
     # ---------------- 加载 ----------------
-    def load_from_data(self, data, base_dir=None):
+    def load_from_data(self, data, base_dir=None, ctx=None):
         # 2026-11-06 对齐 GL (双后端一致): 先建材质资产库, 再建物体并挂 material_id,
         # 否则 Vk 播放器里所有 PBR/共享材质都会静默退化成默认材质。
         # 2026-11-06 天空盒 (与 GL 对齐): 场景级 skybox -> Cubemap 实例
         # 2026-11-09 (Q1=A / Q3=A / Q5=A): 与 GL/编辑器**逐条一致** —— 复用 sceneio 的解析
         # 入口: 缺 skybox 键 / null -> **默认蓝**; 失败出声并记 valid/error（不静默、不回退成无天空）。
         # 相机级优先见下方 effective_skybox()。base_dir = 场景文件目录（六面图相对路径用）。
+        ctx = None
         try:
             import sceneio as _sio
+            if ctx is None:
+                ctx = _sio.asset_context(base_dir)
+            self._asset_errors = []
             self.skybox, self._skybox_valid, self._skybox_error = \
-                _sio._scene_skybox_from_data(data, base_dir)
+                _sio._scene_skybox_from_data(data, base_dir, ctx)
         except Exception as e:
             self.skybox, self._skybox_valid = None, False
             self._skybox_error = '天空盒解析入口不可用: %r' % (e,)
@@ -581,7 +625,7 @@ class SceneDriver:
             _sio._apply_ui(self, data.get('ui'))
         except Exception as _e:
             print('[driver] UI 恢复失败 (保留现状):', repr(_e))
-        self.materials = build_materials(data)
+        self.materials = build_materials(data, ctx, getattr(self, '_asset_errors', None))
         _mats = {m.guid: m for m in self.materials}
         self._lod_wpos = {}          # 换场景: 旧模型的缓存立刻失效
         self.models = build_models(data, materials=_mats)
@@ -620,7 +664,7 @@ class SceneDriver:
                     _c._skybox_error = '相机无 id 或未匹配到场景相机段（按身份配对, 不猜）'
                     continue
                 _raw = _cd.get('skybox')
-                _cube, _v, _r = _sio3.skybox_from_dict(_raw, base_dir)
+                _cube, _v, _r = _sio3.skybox_from_dict(_raw, base_dir, ctx)
                 _c.skybox = _cube
                 _c._skybox_valid = bool(_v)
                 _c._skybox_error = _r

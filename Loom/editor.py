@@ -904,6 +904,50 @@ class EditorApp(GLEngine):
         p = getattr(self, '_scene_path', None)
         return os.path.dirname(os.path.abspath(p)) if p else os.getcwd()
 
+    # ---- beta6 B1: 项目资产库（<项目根>/Assets/assets.json） ----
+    def _project_root(self):
+        """场景目录向上找项目根（以 Assets/assets.json 为唯一判据）；没有返回 None。"""
+        try:
+            import loom_assets
+            return loom_assets.find_project_root(self._scene_dir())
+        except Exception:
+            return None
+
+    def _asset_context(self, create=False):
+        """当前项目的资产上下文；无项目资产库返回 None（旧路径模式）。"""
+        try:
+            import loom_assets
+            return loom_assets.AssetContext.for_dir(self._scene_dir(), create=create)
+        except Exception:
+            return None
+
+    def asset_import(self, path=None, kind='texture', name=None, paths=None,
+                     import_settings=None):
+        """导入资产到项目 Assets/ -> (guid|None, created, reason).
+
+        项目根 = 场景目录（要求场景已保存到文件；否则拒绝，避免把 Assets/ 建到
+        引擎目录/CWD 污染仓库）。
+        """
+        import loom_assets
+        if not getattr(self, '_scene_path', None):
+            return None, False, '请先保存场景：项目根 = 场景文件所在目录'
+        ctx = loom_assets.AssetContext.for_dir(self._scene_dir(), create=True)
+        if ctx is None:
+            return None, False, '无法创建项目资产库: %s' % (self._scene_dir(),)
+        kind = (kind or 'texture').lower()
+        if kind == 'texture':
+            return ctx.import_texture(path, name=name,
+                                      import_settings=import_settings)
+        if kind == 'cubemap':
+            return ctx.import_cubemap(paths, name=name)
+        if kind == 'material':
+            m = self._selected()
+            mat = getattr(getattr(m, 'renderer', None), 'material', None) if m else None
+            if mat is None:
+                return None, False, '没有选中的材质'
+            return ctx.import_material(mat)
+        return None, False, '未知资产类型: %r (texture|cubemap|material)' % (kind,)
+
     def _effective_skybox(self):
         """Q3=A: 生效天空盒 —— **委托** GLEngine.effective_skybox()（GL/VK 同一判定）。
 
@@ -1411,6 +1455,19 @@ class EditorApp(GLEngine):
                     items.append({'type': 'prefab', 'key': 'prefab.' + fn,
                                   'name': os.path.splitext(fn)[0], 'path': p,
                                   'builtin': False, 'spec': None})
+        # beta6 B1: 项目资产库（Assets/assets.json）里的贴图/六面图/材质，按 guid 列出
+        try:
+            ctx = self._asset_context()
+            if ctx is not None:
+                for gid, e in sorted(ctx.entries().items()):
+                    t = e.get('type')
+                    if t not in ('texture', 'cubemap', 'material'):
+                        continue
+                    items.append({'type': t, 'key': '%s.%s' % (t, gid),
+                                  'name': e.get('name') or gid, 'path': None,
+                                  'builtin': False, 'spec': None, 'guid': gid})
+        except Exception:
+            pass
         return items
 
     def _asset_data(self, it):

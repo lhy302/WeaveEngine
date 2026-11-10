@@ -113,9 +113,11 @@ def _run_from_pack():
     包查找: exe 目录优先, 其次当前目录 (源码开发时 Ctrl+F5 便捷)."""
     import game_pack
     gm = None
+    pack_dir = None
     for d in (_EXE_DIR, os.getcwd()):
         gm = game_pack.load(d)
         if gm is not None:
+            pack_dir = d
             break
     if gm is None:
         return None
@@ -127,8 +129,9 @@ def _run_from_pack():
     n = register_sources(gm.get('scripts') or [])
     cf = gm.get('config') or {}
     from runtime import PlayerApp
+    # beta6 B1: 发布夹根作为资产 base_dir（Assets/ 与 游戏包.lsc 同夹）
     engine = PlayerApp(None, 1280, 800, scene_data=gm.get('scene'),
-                       title=cf.get('title'))
+                       title=cf.get('title'), assets_base=pack_dir)
     print("游戏已启动: %s (%d 个对象, %d 个游戏脚本, %d 个插件)" %
           (cf.get('name', '未命名游戏'), len(engine.models), n, n_plug))
     return engine
@@ -238,9 +241,11 @@ def _start_pack(backend, explicit=False):
     """游戏包启动: 解包+插件/脚本注册后按渲染 API 进入播放器 (Vk/GL)."""
     import game_pack
     gm = None
+    pack_dir = None
     for d in (_EXE_DIR, os.getcwd()):
         gm = game_pack.load(d)
         if gm is not None:
+            pack_dir = d
             break
     if gm is None:
         return None
@@ -249,7 +254,8 @@ def _start_pack(backend, explicit=False):
     n = register_sources(gm.get('scripts') or [])
     cf = gm.get('config') or {}
     actual = _run_backend_safe(backend, scene_data=gm.get('scene'),
-                               title=cf.get('title'), explicit=explicit)
+                               title=cf.get('title'), explicit=explicit,
+                               assets_base=pack_dir)
     print("游戏已启动: %s (%d 个游戏脚本, %d 个插件, 渲染API=%s)" %
           (cf.get('name', '未命名游戏'), n, n_plug, actual))
     return True

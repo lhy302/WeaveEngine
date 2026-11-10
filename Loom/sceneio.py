@@ -54,12 +54,85 @@ import math
 from engine import Point3D, wrap_deg
 from mesh import create_cube, spec_to_mesh
 
-SCENE_VERSION = 10  # v10 (2026-08-16 相机物体化): 摄像机可挂父 (parent_id)
+SCENE_VERSION = 11  # v11 (beta6 B1 资产 guid): 贴图/六面图引用只写 guid (旧路径字段可读+告警)
 PREFAB_VERSION = 1
 
 
 def generate_guid():
     return uuid.uuid4().hex
+
+
+# ---------------- 资产身份层 (beta6 B1: 项目 Assets/ + guid) ----------------
+_TEXTURE_IMPORT_KEYS = ('mipmaps', 'wrap', 'filter_mode', 'aniso', 'max_size',
+                        'compression')
+
+
+def asset_context(base_dir=None, create=False):
+    """场景目录 -> 资产上下文；无项目 <root>/Assets/assets.json 时返回 None。
+
+    None = **旧路径模式**（无项目资产库）：一切行为与 beta5 完全一致（兼容闸门）。
+    """
+    try:
+        from loom_assets import context_for_scene
+        return context_for_scene(base_dir, create=create)
+    except Exception:
+        return None
+
+
+def record_asset_error(engine, where, guid, reason):
+    """把资产解析失败/过期挂到引擎（形状对齐 _skybox_valid/_skybox_error）。"""
+    if not reason:
+        return
+    try:
+        errs = getattr(engine, '_asset_errors', None)
+        if errs is None:
+            engine._asset_errors = errs = []
+    except Exception:
+        errs = []
+    gid = guid if isinstance(guid, str) else None
+    item = (str(where), gid, str(reason))
+    if item in errs:
+        return
+    errs.append(item)
+    print('[资产] %s: %s%s' % (where, reason, ('  (guid=%s)' % gid) if gid else ''))
+
+
+def asset_errors(engine):
+    """引擎上累积的资产问题 [(where, guid, reason)]（只读副本）。"""
+    return list(getattr(engine, '_asset_errors', None) or [])
+
+
+def _texture_ref_dict(tex, ctx=None):
+    """Texture -> 场景引用 dict。项目托管资产**只写 guid**（路径永不落盘）。"""
+    guid = getattr(tex, 'guid', None)
+    if ctx is not None and ctx.owns(guid, 'texture'):
+        return {'guid': guid, 'name': getattr(tex, 'name', None)}
+    ref = {'guid': guid, 'path': getattr(tex, 'path', None),
+           'name': getattr(tex, 'name', None)}
+    for k in _TEXTURE_IMPORT_KEYS:
+        v = getattr(tex, k, None)
+        if v is not None:
+            ref[k] = v
+    return ref
+
+
+def _cubemap_ref_dict(cube, ctx=None):
+    """Cubemap -> 引用 dict。托管资产只写 guid；否则沿用 beta5 的 paths/纯色。"""
+    if cube is None:
+        return None
+    guid = getattr(cube, 'guid', None)
+    out = {'name': getattr(cube, 'name', None), 'guid': guid}
+    if ctx is not None and ctx.owns(guid, 'cubemap'):
+        return out
+    paths = getattr(cube, 'paths', None)
+    if paths:
+        out['paths'] = list(paths)
+        return out
+    solid = getattr(cube, '_solid_color', None)
+    if solid:
+        out['solid_color'] = [int(c) for c in solid]
+        return out
+    return None
 
 
 class SceneCycleError(ValueError):
@@ -245,7 +318,7 @@ def norm_fov_deg(v, where='camera.fov'):
     return f
 
 
-def _emit_object(m):
+def _emit_object(m, ctx=None):
     """GameObject -> dict (单对象). M25: 脚本组件数组 (可多个). M23: 材质引用."""
     mat = m.renderer.material
     return {
@@ -304,7 +377,7 @@ def _emit_object(m):
     }
 
 
-def _emit_subtree(m, out, seen=None):
+def _emit_subtree(m, out, seen=None, ctx=None):
     """DFS 前序输出子树. seen 共享集合用于检测重复/成环 (防无限递归)."""
     if seen is None:
         seen = set()
@@ -313,7 +386,7 @@ def _emit_subtree(m, out, seen=None):
         raise SceneCycleError(
             "序列化父链成环/对象重复: %r" % (getattr(m, 'name', m),))
     seen.add(key)
-    out.append(_emit_object(m))
+    out.append(_emit_object(m, ctx))
     for c in m.children:
         _emit_subtree(c, out, seen)
 
@@ -334,7 +407,7 @@ def _make_mesh(obj):
         return create_cube(1.0)
 
 
-def _apply_object(engine, obj):
+def _apply_object(engine, obj, ctx=None):
     """按 dict 创建物体 (不做父链). 返回 (model, oid).
     M23: 有 material_id 则引用材质库中的共享材质 (找不到则按颜色/饱和度自建),
     无 material_id (v4 旧文件) 保持 add_model 自建的默认材质."""
@@ -351,6 +424,11 @@ def _apply_object(engine, obj):
     mat_id = obj.get('material_id')
     if mat_id:
         mat = engine._find_material(mat_id)
+        if mat is None and ctx is not None and ctx.owns(mat_id, 'material'):
+            # beta6 B1: 材质资产（assets.json）里的 guid 终于能回查到（修探针 I 段缺陷）
+            mat, _mok, _mwhy = ctx.material(mat_id)
+            if _mwhy:
+                record_asset_error(engine, 'objects.material_id', mat_id, _mwhy)
         if mat is None:                    # 材质不在库 (旧文件/手工编辑) -> 自建并登记
             mat = engine.add_material(color=obj.get('color'),
                                       saturation=obj.get('saturation', 1.0),
@@ -628,11 +706,12 @@ def _inside_scene_dir(abs_path, base_dir):
     return False, '不在场景目录内'
 
 
-def skybox_from_dict(d, base_dir=None):
+def skybox_from_dict(d, base_dir=None, ctx=None):
     """Q5=A/Q6=A: dict -> (cube | None, valid: bool, reason | None).
 
-    失败一律给 reason（不抛、不静默）；paths 的相对项按 base_dir（场景目录）解析；
-    成功时把**原始（可能相对的）paths** 记到 cube._source_paths，供 _emit_skybox 原样回写。
+    v11 新增: {"guid": ...} = 项目资产（走 ctx 解析，越界/缺文件都给 reason）。
+    paths 的相对项按 base_dir（场景目录）解析；成功时把**原始（可能相对的）paths**
+    记到 cube._source_paths，供 _emit_skybox 原样回写。
     """
     if not isinstance(d, dict):
         # P1-2（回归修复）: 场景里的 'skybox' 可能是 str / list / int / bool（手改或旧工具写入）。
@@ -641,7 +720,19 @@ def skybox_from_dict(d, base_dir=None):
         return None, False, "'skybox' 必须是对象 (dict)，实际 %s: %r" % (
             type(d).__name__, d)
     if not d:
-        return None, False, '缺少 paths/solid_color'
+        return None, False, '缺少 guid/paths/solid_color'
+    _guid = d.get('guid')
+    _legacy_payload = ('paths' in d) or ('solid_color' in d)
+    if isinstance(_guid, str) and _guid and not _legacy_payload:
+        # 只有 "纯 guid 引用" 才是项目资产；带 paths/solid_color 的是 beta5 旧字段
+        # （guid 只是历史身份），继续走旧解析 —— 兼容闸门。
+        if ctx is None:
+            return None, False, ('天空盒是资产 guid (%s) 但当前项目没有资产索引'
+                                 '（缺 Assets/assets.json）' % (_guid,))
+        cube, _ok, _why = ctx.cubemap(_guid, d)
+        if cube is None:
+            return None, False, '天空盒资产解析失败: %s' % (_why,)
+        return cube, True, _why
     try:
         from loom_cubemap import Cubemap
     except Exception as e:
@@ -688,15 +779,15 @@ def skybox_from_dict(d, base_dir=None):
     return None, False, '缺少 paths/solid_color'
 
 
-def _apply_skybox(d, base_dir=None):
+def _apply_skybox(d, base_dir=None, ctx=None):
     """dict -> Cubemap 实例（兼容旧签名）。失败: **出声** + 返回 None（Q5=A）。"""
-    cube, valid, reason = skybox_from_dict(d, base_dir)
+    cube, valid, reason = skybox_from_dict(d, base_dir, ctx)
     if not valid and d:
         print('[场景] 天空盒解析失败: %s' % (reason,))
     return cube
 
 
-def _scene_skybox_from_data(data, base_dir=None):
+def _scene_skybox_from_data(data, base_dir=None, ctx=None):
     """场景级天空盒 -> (cube, valid, reason)；Q1=A: 缺键/null -> 默认蓝。
 
     有值但解析失败: 出声 + 回退默认蓝（保证"打开场景一定有天空盒"），valid=False
@@ -707,20 +798,20 @@ def _scene_skybox_from_data(data, base_dir=None):
     # 必须 valid=False 报出来（P1-2），不能悄悄当成"没配"。
     if d is None or (isinstance(d, dict) and not d):
         return default_skybox(), True, None
-    cube, valid, reason = skybox_from_dict(d, base_dir)
+    cube, valid, reason = skybox_from_dict(d, base_dir, ctx)
     if valid:
         return cube, True, None
     print('[场景] 天空盒解析失败 (%s) -> 回退默认蓝天盒' % (reason,))
     return default_skybox(), False, reason
 
 
-def _apply_skybox_or_default(d, base_dir=None):
+def _apply_skybox_or_default(d, base_dir=None, ctx=None):
     """只要 cube 的便捷口（场景级）；缺键/null/解析失败都回落默认蓝。"""
-    cube, _valid, _reason = _scene_skybox_from_data({'skybox': d}, base_dir)
+    cube, _valid, _reason = _scene_skybox_from_data({'skybox': d}, base_dir, ctx)
     return cube
 
 
-def _emit_skybox(cube, base_dir=None):
+def _emit_skybox(cube, base_dir=None, ctx=None):
     """Cubemap -> dict（None 时返回 None）；**不做越界判定**（那是 _emit_skybox_checked 的事）。
 
     Q6=A: paths 写**相对当前场景目录**的形式。给了 base_dir 就**一律重算**
@@ -732,6 +823,8 @@ def _emit_skybox(cube, base_dir=None):
         return None
     out = {"name": getattr(cube, 'name', None),
            "guid": getattr(cube, 'guid', None)}
+    if ctx is not None and ctx.owns(getattr(cube, 'guid', None), 'cubemap'):
+        return out                       # 项目资产: 只写 guid（路径不落盘）
     paths = getattr(cube, 'paths', None)
     if paths:
         if base_dir:
@@ -754,7 +847,7 @@ def _emit_skybox(cube, base_dir=None):
     return None   # 无可用来源（内存态 cubemap 无法序列化）
 
 
-def _emit_skybox_checked(cube, base_dir=None):
+def _emit_skybox_checked(cube, base_dir=None, ctx=None):
     """A3=B（人类裁决 2026-11-09）: 落盘前的路径限制检查 -> (dict | None, reason | None).
 
     规则: 六面图**必须位于场景目录内（允许子目录）**。给了 base_dir 时逐面算相对路径:
@@ -765,8 +858,10 @@ def _emit_skybox_checked(cube, base_dir=None):
     """
     if cube is None:
         return None, None
+    if ctx is not None and ctx.owns(getattr(cube, 'guid', None), 'cubemap'):
+        return _emit_skybox(cube, base_dir, ctx), None
     if not base_dir or not getattr(cube, 'paths', None):
-        return _emit_skybox(cube, base_dir), None
+        return _emit_skybox(cube, base_dir, ctx), None
     root = os.path.abspath(base_dir)
     rel = []
     for i, p in enumerate(cube.paths):
@@ -785,7 +880,7 @@ def _emit_skybox_checked(cube, base_dir=None):
     return out, None
 
 
-def _emit_camera(cam, base_dir=None):
+def _emit_camera(cam, base_dir=None, ctx=None):
     """CameraState -> dict (M41: 朝向度制 + roll + 俯仰角限制; 2026-08-16 相机物体化 parent_id)
 
     base_dir: 场景目录（Q6=A: 相机级 skybox 的六面图路径写成相对该目录的形式）。
@@ -805,11 +900,11 @@ def _emit_camera(cam, base_dir=None):
         "parent_id": cam.parent.guid if cam.parent is not None else None,
         # 2026-10-19 第1档序13 天空盒 (C3): 相机级 skybox 覆盖（None=用场景默认）
         # A3=B: 相机级同样受"必须在场景目录内"限制；越界 -> 不写出 + 出声
-        "skybox": _emit_skybox_checked(getattr(cam, 'skybox', None), base_dir)[0],
+        "skybox": _emit_skybox_checked(getattr(cam, 'skybox', None), base_dir, ctx)[0],
     }
 
 
-def _apply_cameras(engine, cam_dicts, base_dir=None):
+def _apply_cameras(engine, cam_dicts, base_dir=None, ctx=None):
     """摄像机 dict 列表 -> engine.cameras (清空重建; 文件 id 覆盖 guid).
     返回 [(cam, parent_id)] 供 _link_camera_parents 在物体建链后连父 (相机引用物体)."""
     engine.cameras.clear()
@@ -845,7 +940,7 @@ def _apply_cameras(engine, cam_dicts, base_dir=None):
             cam._skybox_valid = True
             cam._skybox_error = None
         else:
-            _cube, _valid, _reason = skybox_from_dict(_raw, base_dir)
+            _cube, _valid, _reason = skybox_from_dict(_raw, base_dir, ctx)
             cam.skybox = _cube
             cam._skybox_valid = bool(_valid)
             cam._skybox_error = _reason
@@ -868,8 +963,11 @@ def _link_camera_parents(engine, links, id_map=None):
 
 # ---------------- 材质资产 (M23) ----------------
 
-def _emit_material(mat):
-    """Material -> dict (M36: 含 albedo 贴图引用 path+guid)"""
+def _emit_material(mat, ctx=None):
+    """Material -> dict (v11: 项目托管贴图/立方图**只写 guid**；未托管沿用旧字段)
+
+    ctx 为 None（无项目资产库）时行为与 beta5 完全一致 —— 这是兼容闸门。
+    """
     d = {"id": mat.guid, "name": mat.name,
          "color": mat.color, "saturation": mat.saturation,
          "metallic": getattr(mat, 'metallic', 0.0),
@@ -877,36 +975,109 @@ def _emit_material(mat):
          "pbr": getattr(mat, 'pbr', False)}
     alb = getattr(mat, 'albedo', None)
     if alb is not None:
-        d["albedo"] = {"guid": alb.guid, "path": alb.path, "name": alb.name,
-                       "wrap": alb.wrap, "filter_mode": alb.filter_mode,
-                       "aniso": alb.aniso, "max_size": alb.max_size,
-                       "mipmaps": alb.mipmaps, "compression": alb.compression}
+        d["albedo"] = _texture_ref_dict(alb, ctx)
     nrm = getattr(mat, 'normal_map', None)
     if nrm is not None:
-        d["normal_map"] = {"guid": nrm.guid, "path": nrm.path, "name": nrm.name,
-                           "wrap": nrm.wrap, "filter_mode": nrm.filter_mode,
-                           "aniso": nrm.aniso, "max_size": nrm.max_size,
-                           "mipmaps": nrm.mipmaps, "compression": nrm.compression}
+        d["normal_map"] = _texture_ref_dict(nrm, ctx)
     env = getattr(mat, 'env_map', None)
     if env is not None:
-        d["env_map"] = {"guid": env.guid, "name": env.name}
-        paths = getattr(env, 'paths', None)
-        if paths:
-            d["env_map"]["paths"] = list(paths)
-        else:
-            # 2026-11-07: 纯色 Cubemap (from_solid) 无 paths, 旧实现保存即丢.
-            solid = getattr(env, '_solid_color', None)
-            if solid:
-                d["env_map"]["solid_color"] = list(solid)
+        ref = _cubemap_ref_dict(env, ctx)
+        if ref is not None:
+            d["env_map"] = ref
     return d
 
 
-def _apply_materials(engine, mat_dicts):
+def _warn_dup_guid(engine, kind, guid, where):
+    """重复 guid 告警（beta6 B1: 现状是静默首条胜出 -> 必须出声）。"""
+    if not guid:
+        return
+    _find = getattr(engine, '_find_material', None)
+    if kind == 'material' and callable(_find) and _find(guid) is not None:
+        print('[资产] 材质 guid 重复 (%s, 位置 %s) -> 同 guid 只保留首个，其余不生效'
+              % (guid, where))
+
+
+def _apply_material_texture(engine, mat, slot, ref, ctx):
+    """材质贴图槽: guid 优先（项目资产）；旧 path 兼容读 + 告警；失败一律有声。"""
+    if not isinstance(ref, dict) or not ref:
+        return
+    guid = ref.get('guid')
+    if ctx is not None and guid and ctx.owns(guid, 'texture'):
+        tex, ok, why = ctx.texture(guid, ref)
+        if tex is not None:
+            setattr(mat, slot, tex)
+        if why:
+            record_asset_error(engine, 'materials.%s' % slot, guid, why)
+        return
+    path = ref.get('path')
+    if path:
+        record_asset_error(engine, 'materials.%s' % slot, guid,
+                           '旧路径引用（beta6 兼容期；建议 asset_import 迁移为 guid）: %s'
+                           % (path,))
+        try:
+            from loom_texture import Texture
+            tex = Texture.from_file(
+                path, name=ref.get('name'), guid=guid,
+                mipmaps=ref.get('mipmaps', True),
+                wrap=ref.get('wrap', 'repeat'),
+                filter_mode=ref.get('filter_mode', 'trilinear'),
+                aniso=ref.get('aniso', 1.0),
+                max_size=ref.get('max_size', 0),
+                compression=ref.get('compression', 'none'))
+            setattr(mat, slot, tex)
+        except Exception as e:
+            record_asset_error(engine, 'materials.%s' % slot, guid,
+                               '贴图加载失败 (%r): %s' % (e, path))
+        return
+    if guid:
+        if ctx is not None:
+            record_asset_error(engine, 'materials.%s' % slot, guid,
+                               '资产 guid 未在项目索引中（可能被删/换了项目）: %s' % (guid,))
+        else:
+            record_asset_error(engine, 'materials.%s' % slot, guid,
+                               '只有 guid 但没有项目资产索引（缺 Assets/assets.json）')
+
+
+def _apply_material_env(engine, mat, ref, ctx):
+    """材质环境贴图: guid 优先；旧 6 面 paths / 纯色兼容读。"""
+    if not isinstance(ref, dict) or not ref:
+        return
+    guid = ref.get('guid')
+    if ctx is not None and guid and ctx.owns(guid, 'cubemap'):
+        cube, ok, why = ctx.cubemap(guid, ref)
+        if cube is not None:
+            mat.env_map = cube
+        if why:
+            record_asset_error(engine, 'materials.env_map', guid, why)
+        return
+    try:
+        from loom_cubemap import Cubemap
+        if ref.get('paths'):
+            record_asset_error(engine, 'materials.env_map', guid,
+                               '旧路径引用（6 面路径，beta6 兼容期；建议 asset_import）')
+            mat.env_map = Cubemap.from_files(ref['paths'], name=ref.get('name'),
+                                             guid=guid)
+        elif ref.get('solid_color'):
+            mat.env_map = Cubemap.from_solid(tuple(ref['solid_color']),
+                                             name=ref.get('name'), guid=guid)
+        elif guid:
+            record_asset_error(engine, 'materials.env_map', guid,
+                               '资产 guid 未在项目索引中（可能被删/换了项目）: %s' % (guid,))
+    except Exception as e:
+        record_asset_error(engine, 'materials.env_map', guid,
+                           '环境贴图加载失败 (%r)' % (e,))
+
+
+def _apply_materials(engine, mat_dicts, ctx=None):
     """材质 dict 列表 -> engine.materials (清空重建; 文件 id 覆盖 guid).
     必须在创建物体之前调用, 这样物体才能通过 material_id 引用库中材质.
-    M36: 有 albedo 引用则从文件重建 Texture (文件缺失/解码失败 -> 跳过贴图, 容错)."""
+    v11: 贴图/环境贴图按 guid 从项目资产解析；旧 path 字段兼容读并告警。"""
     engine.materials.clear()
     for d in mat_dicts:
+        if not isinstance(d, dict):
+            print('[场景] 材质段不是对象 (%s) -> 跳过该段' % (type(d).__name__,))
+            continue
+        _warn_dup_guid(engine, 'material', d.get('id'), 'materials[]')
         mat = engine.add_material(color=d.get('color'),
                                   saturation=d.get('saturation', 1.0),
                                   name=d.get('name'),
@@ -920,38 +1091,9 @@ def _apply_materials(engine, mat_dicts):
             mat.pbr = d.get('pbr', False)
         except Exception:
             pass
-        from loom_texture import Texture
         for slot, key in (('albedo', 'albedo'), ('normal_map', 'normal_map')):
-            ref = d.get(key)
-            if ref and ref.get('path'):
-                try:
-                    tex = Texture.from_file(
-                        ref['path'], name=ref.get('name'), guid=ref.get('guid'),
-                        mipmaps=ref.get('mipmaps', True),
-                        wrap=ref.get('wrap', 'repeat'),
-                        filter_mode=ref.get('filter_mode', 'trilinear'),
-                        aniso=ref.get('aniso', 1.0),
-                        max_size=ref.get('max_size', 0),
-                        compression=ref.get('compression', 'none'))
-                    setattr(mat, slot, tex)
-                except Exception:
-                    pass                # 贴图文件缺失 -> 保持无贴图 (容错)
-        # M36 环境反射: 6 面路径或纯色重建 cubemap
-        eref = d.get('env_map')
-        if eref:
-            try:
-                from loom_cubemap import Cubemap
-                if eref.get('paths'):
-                    mat.env_map = Cubemap.from_files(eref['paths'],
-                                                     name=eref.get('name'),
-                                                     guid=eref.get('guid'))
-                elif eref.get('solid_color'):
-                    # 2026-11-07: 纯色 env (from_solid) 往返还原
-                    mat.env_map = Cubemap.from_solid(
-                        tuple(eref['solid_color']), name=eref.get('name'),
-                        guid=eref.get('guid'))
-            except Exception:
-                pass                    # 文件缺失 -> 保持无 env (容错)
+            _apply_material_texture(engine, mat, slot, d.get(key), ctx)
+        _apply_material_env(engine, mat, d.get('env_map'), ctx)
 
 
 def _is_default_material(mat):
@@ -1342,12 +1484,15 @@ def _link_ui_targets(engine, id_map=None):
             pass
 
 
-def scene_to_dict(engine, camera=None, base_dir=None):
-    """引擎场景 -> v7 dict. camera: {'target','distance','yaw','pitch'} 或 None
+def scene_to_dict(engine, camera=None, base_dir=None, ctx=None):
+    """引擎场景 -> v11 dict. camera: {'target','distance','yaw','pitch'} 或 None
 
     base_dir: 场景文件所在目录（Q6=A: skybox 六面图路径按它写成相对形式）。
+    ctx: 资产上下文（beta6 B1）。None 时按 base_dir 自动探测；探测不到 = 旧路径模式。
     保存前校验父链: 成环/不可达抛 SceneCycleError, 绝不静默丢对象."""
     _validate_model_graph(engine.models)
+    if ctx is None:
+        ctx = asset_context(base_dir)
     objs = []
     seen = set()
     for m in engine.models:                    # 只从根开始, DFS 前序
@@ -1383,7 +1528,8 @@ def scene_to_dict(engine, camera=None, base_dir=None):
     # A3=B: 落盘前检查六面图是否都在场景目录内；越界 -> **不写出** + 记 valid/reason
     # （绝不静默写一个将来加载必然失败的值）。digest（camera=None）不出声避免刷屏。
     _sb_dict, _sb_reason = _emit_skybox_checked(
-        getattr(engine, '_scene_skybox', getattr(engine, '_skybox', None)), base_dir)
+        getattr(engine, '_scene_skybox', getattr(engine, '_skybox', None)),
+        base_dir, ctx)
     if _sb_reason:
         try:
             engine._skybox_valid = False
@@ -1394,9 +1540,9 @@ def scene_to_dict(engine, camera=None, base_dir=None):
             print('[场景] 天空盒未写入: %s' % (_sb_reason,))
     return {"version": SCENE_VERSION, "camera": camera,
             "gravity": getattr(engine, 'gravity', -9.8),   # 2026-08-30: 场景重力加速度
-            "materials": [_emit_material(m) for m in mats],
+            "materials": [_emit_material(m, ctx) for m in mats],
             "lights": [_emit_light(l) for l in engine.lights],
-            "cameras": [_emit_camera(c, base_dir) for c in engine.cameras],
+            "cameras": [_emit_camera(c, base_dir, ctx) for c in engine.cameras],
             "active_camera": engine.active_camera,
             # 2026-10-19 第1档序13 天空盒 (C3): 场景级默认天空盒
             # 场景级天空盒（Q3=A: **不是**"当前生效的那一个"——相机级覆盖只在渲染时生效，
@@ -1406,11 +1552,18 @@ def scene_to_dict(engine, camera=None, base_dir=None):
             "objects": objs}
 
 
-def scene_from_dict(engine, data, camera_out=None, base_dir=None):
+def scene_from_dict(engine, data, camera_out=None, base_dir=None, ctx=None):
     """dict -> 引擎场景 (容错加载). 返回创建的模型列表.
     camera_out: dict 则把相机字段写进去 (编辑器/运行时自行应用).
-    base_dir: 场景文件目录（Q6=A: skybox 相对路径按它解析）。"""
+    base_dir: 场景文件目录（Q6=A: skybox 相对路径按它解析；也用于探测项目资产库）。
+    ctx: 资产上下文（beta6 B1）。None 时按 base_dir 自动探测；探测不到 = 旧路径模式。"""
     data = migrate(data)
+    if ctx is None:
+        ctx = asset_context(base_dir)
+    try:
+        engine._asset_errors = []          # 每次加载重置（跨场景不累积）
+    except Exception:
+        pass
     # 2026-11-07: 父链成环 -> 拒绝加载 (成环对象无根, DFS 会静默丢整棵).
     # 必须在清空/重建引擎状态之前校验, 保证失败时旧场景不被破坏.
     _objects_in = data.get('objects', [])
@@ -1423,7 +1576,7 @@ def scene_from_dict(engine, data, camera_out=None, base_dir=None):
     # 2026-11-09 beta5 Q1=A: 缺键/null -> 默认蓝天盒（吃豆人这类旧场景不再是黑底）；
     # Q5=A: 有值但解析失败 -> 出声 + 回退默认蓝，并把 (valid, reason) 挂在引擎上供
     # skybox_get / 编辑器查询（不得静默）。
-    _cube, _sb_valid, _sb_reason = _scene_skybox_from_data(data, base_dir)
+    _cube, _sb_valid, _sb_reason = _scene_skybox_from_data(data, base_dir, ctx)
     # 场景级（落盘/查询用）与"生效"（渲染端只读 _skybox）在加载后是同一个对象；
     # editor 会在 _load_scene 里按 active camera 再算一次生效值（Q3=A）。
     engine._scene_skybox = _cube
@@ -1432,15 +1585,15 @@ def scene_from_dict(engine, data, camera_out=None, base_dir=None):
     engine._skybox_error = _sb_reason
     _apply_ui(engine, data.get('ui'))                # 2026-10-18: Canvas UI (清空重建)
     _apply_lights(engine, data.get('lights', []))   # M21: 场景光源 (清空重建)
-    cam_links = _apply_cameras(engine, data.get('cameras', []), base_dir)  # 场景摄像机 (清空重建)
+    cam_links = _apply_cameras(engine, data.get('cameras', []), base_dir, ctx)  # 场景摄像机 (清空重建)
     engine.active_camera = data.get('active_camera')  # 玩家视角摄像机
-    _apply_materials(engine, data.get('materials', []))  # M23: 材质库 (先于物体, 供引用)
+    _apply_materials(engine, data.get('materials', []), ctx)  # M23: 材质库 (先于物体, 供引用)
     # 2026-11-07 D2=A: 文件显式登记的材质 (keep_ids) 与 add_model 自建材质区分
     _lib_keep = {id(x) for x in engine.materials}
     objects = _objects_in
     models = []
     for obj in objects:
-        m, _ = _apply_object(engine, obj)
+        m, _ = _apply_object(engine, obj, ctx)
         models.append(m)
     _link_parents(objects, models)          # 物体先建父链
     _link_camera_parents(engine, cam_links)  # 2026-08-16 相机物体化: 相机挂父引用物体, 必须在物体之后
@@ -1465,6 +1618,10 @@ def scene_from_dict(engine, data, camera_out=None, base_dir=None):
                                           '场景 camera.ortho_size'),
             'fov': norm_fov_deg(cam.get('fov'), '场景 camera.fov'),
         })
+    _errs = asset_errors(engine)
+    if _errs:
+        print('[场景] 资产问题 %d 条（详见上文；EAI 命令 scene_assets_check 可查）'
+              % (len(_errs),))
     return models
 
 
@@ -1521,6 +1678,11 @@ def migrate(data):
         # v9 -> v10 (2026-08-16 相机物体化): 旧摄像机无父, 补 parent_id=None
         for cm in data.get('cameras', []):
             cm.setdefault('parent_id', None)
+    if v < 11:
+        # v10 -> v11 (beta6 B1 资产 guid): **不在 migrate 里改写数据**（保持纯函数、可重复）。
+        # 旧 path/paths 字段由加载侧兼容读并告警（一个 beta 周期的 fallback）；
+        # 真正的"路径 -> guid"补全交给一次性脚本 tools/migrate_scene_assets_v11.py。
+        pass
     if v == 1:
         # v1: 扁平对象, 有 id 无 parent/prefab; 无 id 就生成一个
         for obj in data.get('objects', []):
@@ -1612,9 +1774,9 @@ def load_scene_data(path):
 ASSET_VERSION = 1
 
 
-def material_to_dict(mat):
+def material_to_dict(mat, ctx=None):
     """Material -> 材质资产 dict (与 _emit_material 同构 + version)"""
-    return {** _emit_material(mat), "version": ASSET_VERSION}
+    return {** _emit_material(mat, ctx), "version": ASSET_VERSION}
 
 
 def save_material_asset(path, mat):
@@ -1661,18 +1823,18 @@ def load_mesh_asset(path):
 
 # ---------------- Prefab ----------------
 
-def prefab_to_dict(root):
+def prefab_to_dict(root, ctx=None):
     """子树根 -> prefab 资产 dict (局部对象 id, 根 id = prefab guid)"""
     pguid = root.guid or generate_guid()
     objs = []
-    _emit_subtree(root, objs)
+    _emit_subtree(root, objs, ctx=ctx)
     return {"version": PREFAB_VERSION,
             "prefab": {"guid": pguid, "name": root.name},
             "objects": objs}
 
 
-def save_prefab(path, root):
-    save_json_atomic(path, prefab_to_dict(root))
+def save_prefab(path, root, ctx=None):
+    save_json_atomic(path, prefab_to_dict(root, ctx))
 
 
 def load_prefab(path):
@@ -1683,9 +1845,9 @@ def load_prefab(path):
     return data
 
 
-def instantiate_prefab(engine, data, offset=(0, 0, 0)):
+def instantiate_prefab(engine, data, offset=(0, 0, 0), ctx=None):
     """场景中实例化 prefab: 全部对象重新生成 GUID, 挂 prefab_ref, 根整体平移.
-    返回创建的模型列表 (空 prefab 返回 [])."""
+    返回创建的模型列表 (空 prefab 返回 []). ctx: 资产上下文（贴图/材质按 guid 解析）。"""
     objects = data.get('objects', [])
     if not isinstance(objects, list):
         objects = []
@@ -1694,7 +1856,7 @@ def instantiate_prefab(engine, data, offset=(0, 0, 0)):
     models = []
     old_id_map = {}                       # 模板旧 id -> 新模型
     for obj in objects:
-        m, oid = _apply_object(engine, obj)   # 此刻 m.guid = 模板 id
+        m, oid = _apply_object(engine, obj, ctx)   # 此刻 m.guid = 模板 id
         old_id_map[oid] = m
         m.guid = generate_guid()          # 实例与模板解耦
         m.prefab_ref = pguid

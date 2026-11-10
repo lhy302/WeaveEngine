@@ -27,7 +27,7 @@ META_PATH = os.path.join(ENGINE_DIR, '解释器.json')
 
 # player_runtime 由 make_zip 显式预置 (只拷 game_player.dist, 排除 .build 中间产物)
 EXCLUDE_DIRS = {'tests', '保存', 'Projects', '__pycache__', '.pytest_cache',
-                'assets', 'player_runtime', '发布'}
+                'assets', 'Assets', 'player_runtime', '发布'}
 EXCLUDE_EXTS = {'.pyc', '.pyo', '.log', '.tmp'}
 EXCLUDE_FILES = {'解释器.json.bak'}
 

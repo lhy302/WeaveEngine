@@ -10,6 +10,7 @@ Loom.py / build_entry.py 的 --run <scene.json> 都从这里启动。
 """
 import json
 import os
+import sys
 
 # 2026-10-18 A2: import pygame 已删（GLFW 窗口剥离；set_caption 改用 glfw）
 from engine import GLEngine, gc_play_enter, gc_play_exit, engine_gc_frozen
@@ -108,7 +109,7 @@ class PlayerApp(GLEngine):
     """
 
     def __init__(self, scene_path=None, width=1280, height=800,
-                 scene_data=None, title=None, ctx=None):
+                 scene_data=None, title=None, ctx=None, assets_base=None):
         super().__init__(width, height, ctx=ctx)
         for m in list(self.models):
             self.remove_model(m)                 # 清默认场景
@@ -135,6 +136,15 @@ class PlayerApp(GLEngine):
         # （不传的话播放器按 CWD 解析，换目录启动就找不到图 -> 只能回退默认蓝）。
         _base = (os.path.dirname(os.path.abspath(scene_path))
                  if scene_path else None)
+        # beta6 B1: 游戏包模式（scene_data，无场景文件）必须显式给项目/发布夹根，
+        # 否则资产 guid 与天空盒相对路径都会退化成按 CWD 解析（换目录启动即丢资产）。
+        if assets_base:
+            _base = assets_base
+        elif scene_data is not None and _base is None:
+            try:
+                _base = os.path.dirname(os.path.abspath(sys.argv[0]))
+            except Exception:
+                _base = None
         sceneio.scene_from_dict(self, data, camera_out=cam_out, base_dir=_base)
         if cam_out:
             self.camera_target = cam_out['target']

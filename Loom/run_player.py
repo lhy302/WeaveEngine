@@ -273,7 +273,8 @@ def _open_opengl(scene, **kw):
     from runtime import PlayerApp
     if kw.get('scene_data') is not None:
         return PlayerApp(None, kw.get('width', 1280), kw.get('height', 800),
-                         scene_data=kw['scene_data'], title=kw.get('title'))
+                         scene_data=kw['scene_data'], title=kw.get('title'),
+                         assets_base=kw.get('assets_base'))
     return PlayerApp(scene, kw.get('width', 1280), kw.get('height', 800),
                      title=kw.get('title'))
 

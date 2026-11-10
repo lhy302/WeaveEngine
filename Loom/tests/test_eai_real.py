@@ -578,6 +578,55 @@ def t_scene_assets():
     check("asset_save 非法 what -> 拒绝", r['ok'] is False)
 
 
+# ============ 10b. beta6 B1 项目资产库命令 (Assets/assets.json + guid) ============
+def _eai_png(path, rgba=(30, 60, 200, 255)):
+    """最小 8x8 PNG（不依赖显示设备）。"""
+    import struct
+    import zlib
+    w = h = 8
+    raw = b''.join(b'\x00' + bytes(rgba) * w for _ in range(h))
+
+    def chunk(tag, data):
+        return (struct.pack('>I', len(data)) + tag + data
+                + struct.pack('>I', zlib.crc32(tag + data) & 0xffffffff))
+
+    ihdr = struct.pack('>IIBBBBB', w, h, 8, 6, 0, 0, 0)
+    with open(path, 'wb') as f:
+        f.write(b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', ihdr)
+                + chunk(b'IDAT', zlib.compress(raw)) + chunk(b'IEND', b''))
+    return path
+
+
+def t_project_assets():
+    """资产导入 -> 清单/查询 -> 场景体检（全部落临时项目目录）。"""
+    old_sp = getattr(ED, '_scene_path', None)
+    proj = os.path.join(TMP, 'eai_proj')
+    os.makedirs(proj, exist_ok=True)
+    png = _eai_png(os.path.join(TMP, 'eai_asset_src.png'))
+    ED._scene_path = os.path.join(proj, 'eai_scene.json')
+    try:
+        r = res('asset_import', {'type': 'texture', 'path': png, 'name': 'eai'})
+        guid = (r or {}).get('guid')
+        check("asset_import 贴图 -> guid + 项目 Assets/",
+              bool(guid) and os.path.isfile(os.path.join(proj, 'Assets', 'assets.json')),
+              r)
+        r = res('asset_get', {'guid': guid})
+        check("asset_get valid/reason/src",
+              r.get('valid') is True and r.get('src'), r)
+        r = res('asset_list', {'type': 'texture'})
+        check("asset_list 按 type 过滤", r.get('count', 0) >= 1, r)
+        r = res('scene_assets_check')
+        check("scene_assets_check 返回 ok/count/errors",
+              'ok' in r and 'count' in r and isinstance(r.get('errors'), list), r)
+        r = run('asset_import', {'type': 'texture', 'path': os.path.join(TMP, 'nope.png')},
+                expect_ok=False)
+        check("asset_import 源文件不存在 -> 拒绝", r['ok'] is False)
+        r = run('asset_import', {'type': '乱写'}, expect_ok=False)
+        check("asset_import 非法 type -> 拒绝", r['ok'] is False)
+    finally:
+        ED._scene_path = old_sp
+
+
 # ============ 11. 播放 / gizmo / 截图 / 设置 / 插件 / 退出 ============
 def t_misc():
     res('gizmo', {'mode': 'rotate'})
@@ -923,6 +972,7 @@ if __name__ == "__main__":
     t_camera()
     t_reparent()
     t_scene_assets()
+    t_project_assets()
     t_misc()
     t_quit_save()
     t_console_layer()

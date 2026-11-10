@@ -1702,21 +1702,43 @@ def cmd_set_texture(win, args):
     # 相对路径基于引擎目录
     _root = os.path.dirname(os.path.abspath(__file__))
     ap = path if os.path.isabs(path) else os.path.join(_root, path)
+    if not os.path.isfile(ap):
+        return {'error': '贴图文件不存在: %s' % (ap,)}
+    # beta6 B1: 有项目资产库 -> 导入 Assets/ 并登记 guid（场景只存 guid）
+    _ctx = None
     try:
-        from loom_texture import Texture
-        tex = Texture.from_file(
+        _ctx = ed._asset_context()
+    except Exception:
+        _ctx = None
+    if _ctx is not None:
+        _guid, _created, _why = _ctx.import_texture(
             ap, name=os.path.basename(ap),
-            wrap=args.get('wrap', 'repeat'),
-            filter_mode=args.get('filter_mode', 'trilinear'),
-            aniso=as_float(args.get('aniso'), 1.0),
-            max_size=int(as_float(args.get('max_size'), 0)),
-            compression=args.get('compression', 'none'))
-    except Exception as e:
-        return {'error': '贴图加载失败: %r' % (e,)}
+            import_settings={'wrap': args.get('wrap', 'repeat'),
+                             'filter_mode': args.get('filter_mode', 'trilinear'),
+                             'aniso': as_float(args.get('aniso'), 1.0),
+                             'max_size': int(as_float(args.get('max_size'), 0)),
+                             'compression': args.get('compression', 'none')})
+        if _guid is None:
+            return {'error': '贴图导入失败: %s' % (_why,)}
+        tex, _ok, _why2 = _ctx.texture(_guid)
+        if tex is None:
+            return {'error': '贴图解码失败: %s' % (_why2,)}
+    else:
+        try:
+            from loom_texture import Texture
+            tex = Texture.from_file(
+                ap, name=os.path.basename(ap),
+                wrap=args.get('wrap', 'repeat'),
+                filter_mode=args.get('filter_mode', 'trilinear'),
+                aniso=as_float(args.get('aniso'), 1.0),
+                max_size=int(as_float(args.get('max_size'), 0)),
+                compression=args.get('compression', 'none'))
+        except Exception as e:
+            return {'error': '贴图加载失败: %r' % (e,)}
     ed.commit_model(m, "设贴图", lambda: setattr(mat, 'albedo', tex))
     return {'name': m.name, 'material': mat.name,
             'albedo': tex.name, 'size': [tex.width, tex.height],
-            'guid': tex.guid}
+            'guid': tex.guid, 'managed': _ctx is not None}
 
 
 @command('set_pbr', '设材质 PBR: {name?, metallic?, roughness?|smoothness?, on?} (对标 Unity Standard Shader)')
@@ -1819,20 +1841,34 @@ def cmd_set_env(win, args):
         ed.commit_model(m, "清除环境贴图", lambda: setattr(mat, 'env_map', None))
         return {'name': m.name, 'material': mat.name, 'env_map': None}
     _root = os.path.dirname(os.path.abspath(__file__))
+    _ctx = None
+    try:
+        _ctx = ed._asset_context()
+    except Exception:
+        _ctx = None
     try:
         from loom_cubemap import Cubemap
         if paths:
             if isinstance(paths, str):
                 paths = [p for p in paths.split(',') if p.strip()]
             ap = [p if os.path.isabs(p) else os.path.join(_root, p) for p in paths]
-            cube = Cubemap.from_files(ap, name='环境贴图')
+            # beta6 B1: 项目内 -> 六面图登记为 cubemap 资产（场景只存 guid）
+            if _ctx is not None:
+                _g, _created, _why = _ctx.import_cubemap(ap, name='环境贴图')
+                if _g is None:
+                    return {'error': '环境贴图导入失败: %s' % (_why,)}
+                cube, _ok, _why2 = _ctx.cubemap(_g)
+                if cube is None:
+                    return {'error': '环境贴图加载失败: %s' % (_why2,)}
+            else:
+                cube = Cubemap.from_files(ap, name='环境贴图')
         else:
             cube = Cubemap.from_solid(color, size=16, name='环境贴图')
     except Exception as e:
         return {'error': '环境贴图创建失败: %r' % (e,)}
     ed.commit_model(m, "设环境贴图", lambda: setattr(mat, 'env_map', cube))
     return {'name': m.name, 'material': mat.name, 'env_map': cube.name,
-            'size': cube.size, 'guid': cube.guid}
+            'size': cube.size, 'guid': cube.guid, 'managed': _ctx is not None}
 
 
 @command('collider', '碰撞器开关: {name?, on?} (缺 on = 切换)')
@@ -2293,6 +2329,132 @@ def cmd_asset_save(win, args):
     else:
         return {'error': 'what 只能 mesh|material'}
     return {'saved': what, 'path': p}
+
+
+# ---------------- beta6 B1: 项目资产库 (Assets/assets.json + guid) ----------------
+
+def _resolve_asset_input(win, p):
+    """资产导入的输入路径: 绝对 / 引擎目录相对 / 场景目录相对 三种写法统一。"""
+    if not p:
+        return None
+    p = str(p)
+    if os.path.isabs(p):
+        return p
+    _root = os.path.dirname(os.path.abspath(__file__))
+    cand = os.path.join(_root, p)
+    if os.path.exists(cand):
+        return cand
+    try:
+        ed = getattr(win, 'editor', None)
+        if ed is not None:
+            cand2 = os.path.join(ed._scene_dir(), p)
+            if os.path.exists(cand2):
+                return cand2
+    except Exception:
+        pass
+    return cand
+
+
+@command('asset_import',
+         '导入资产到项目 Assets/ (贴图/六面图/材质): '
+         '{type=texture|cubemap|material, path?, paths=[6图]?, name?}')
+def cmd_asset_import(win, args):
+    """beta6 B1: 资产导入（复制进项目 + 登记 guid）。
+
+    失败一律 {'ok': False, 'error': reason}；成功返回 guid（场景引用只写 guid）。
+    """
+    ed = win.editor
+    if getattr(ed, 'is_playing', False):
+        return {'error': '播放中不允许导入资产（请先停止播放）'}
+    kind = str(args.get('type') or args.get('kind') or 'texture').strip().lower()
+    name = args.get('name')
+    if kind == 'cubemap':
+        paths = args.get('paths')
+        if isinstance(paths, str):
+            paths = [x for x in paths.split(',') if x.strip()]
+        if not isinstance(paths, (list, tuple)) or len(paths) != 6:
+            return {'error': 'type=cubemap 需要 paths=6 个路径 (px,nx,py,ny,pz,nz)'}
+        paths = [_resolve_asset_input(win, x) for x in paths]
+        guid, created, why = ed.asset_import(kind='cubemap', paths=paths, name=name)
+    elif kind == 'material':
+        guid, created, why = ed.asset_import(kind='material', name=name)
+    elif kind == 'texture':
+        p = _resolve_asset_input(win, args.get('path'))
+        if not p:
+            return {'error': 'type=texture 需要 path'}
+        if not os.path.isfile(p):
+            return {'error': '文件不存在: %s' % (p,)}
+        imp = {}
+        for k in ('wrap', 'filter_mode', 'compression'):
+            if args.get(k) is not None:
+                imp[k] = args[k]
+        if args.get('max_size') is not None:
+            imp['max_size'] = int(as_float(args.get('max_size'), 0))
+        if args.get('aniso') is not None:
+            imp['aniso'] = as_float(args.get('aniso'), 1.0)
+        if args.get('mipmaps') is not None:
+            imp['mipmaps'] = as_bool(args.get('mipmaps'), True)
+        guid, created, why = ed.asset_import(path=p, kind='texture', name=name,
+                                             import_settings=imp)
+    else:
+        return {'error': 'type 只能 texture|cubemap|material (收到 %r)' % (kind,)}
+    if guid is None:
+        return {'error': why or '资产导入失败'}
+    ctx = ed._asset_context()
+    return {'guid': guid, 'created': bool(created), 'type': kind,
+            'name': name, 'project': getattr(ctx, 'root', None),
+            'warning': why}
+
+
+@command('asset_get', '读资产条目 + 解析结果 (valid/reason): {guid}')
+def cmd_asset_get(win, args):
+    ed = win.editor
+    ctx = ed._asset_context()
+    guid = args.get('guid')
+    if not guid:
+        return {'error': '需要 guid'}
+    if ctx is None:
+        return {'guid': guid, 'valid': False,
+                'reason': '当前项目没有资产库（缺 Assets/assets.json）'}
+    entry = ctx.entry(guid)
+    if entry is None:
+        return {'guid': guid, 'valid': False, 'reason': '资产不存在'}
+    path, _e, ok, why = ctx.resolve(guid)
+    return {'guid': guid, 'valid': bool(ok), 'reason': why,
+            'type': entry.get('type'), 'name': entry.get('name'),
+            'src': entry.get('src'),
+            'path': os.path.relpath(path, ctx.root) if path else None,
+            'import': entry.get('import'), 'project': ctx.root}
+
+
+@command('asset_list', '项目资产清单 (含逐条 valid/reason): {type?}')
+def cmd_asset_list(win, args):
+    ed = win.editor
+    ctx = ed._asset_context()
+    if ctx is None:
+        return {'assets': [], 'project': None, 'valid': False,
+                'reason': '当前项目没有资产库（缺 Assets/assets.json）'}
+    want = args.get('type')
+    out = []
+    for gid, e in sorted(ctx.entries().items()):
+        if want and e.get('type') != want:
+            continue
+        path, _e, ok, why = ctx.resolve(gid)
+        out.append({'guid': gid, 'type': e.get('type'), 'name': e.get('name'),
+                    'src': e.get('src'), 'valid': bool(ok), 'reason': why})
+    return {'project': ctx.root, 'count': len(out), 'assets': out}
+
+
+@command('scene_assets_check',
+         '场景资产体检: 本次加载记录的引用问题 (valid/reason)，对齐 skybox_get 口径')
+def cmd_scene_assets_check(win, args):
+    import sceneio
+    ed = win.editor
+    errs = sceneio.asset_errors(ed)
+    ctx = ed._asset_context()
+    return {'ok': not errs, 'count': len(errs),
+            'errors': [{'where': w, 'guid': g, 'reason': r} for (w, g, r) in errs],
+            'project': getattr(ctx, 'root', None)}
 
 
 @command('set_audio_3d', '设置音频 3D 参数: {name?, category?, min_distance?, max_distance?, rolloff?}')

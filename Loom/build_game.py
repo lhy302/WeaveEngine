@@ -33,6 +33,44 @@ import game_pack
 import plugin_loader
 import sceneio
 
+try:
+    import loom_assets
+except Exception:                     # 极旧引擎目录（无资产层）: 退化为"不拷资产"
+    loom_assets = None
+
+def project_assets_dir(scene_path):
+    """场景 -> 项目 Assets 目录（beta6 B1）。找不到项目索引返回 None。"""
+    if loom_assets is None or not scene_path:
+        return None
+    root = loom_assets.find_project_root(os.path.dirname(os.path.abspath(scene_path)))
+    if not root:
+        return None
+    d = loom_assets.assets_dir(root)
+    return d if os.path.isdir(d) else None
+
+
+def _count_files(d):
+    n = 0
+    for _root, _dirs, files in os.walk(d):
+        n += len(files)
+    return n
+
+
+def copy_project_assets(scene_path, out_dir):
+    """把项目 Assets/ 拷进发布夹（返回 True=有资产可拷）。
+
+    beta6 B1 P0 修复: 旧构建只把**场景 dict** 打进 .lsc，贴图/六面图一个都不带，
+    玩家侧必然"贴图全丢"。Assets/ 与 游戏包.lsc 同夹，运行时以发布夹为 base_dir
+    解析（game_player → PlayerApp(assets_base=发布夹)）。
+    """
+    src = project_assets_dir(scene_path)
+    if not src:
+        return False
+    dst = os.path.join(out_dir, 'Assets')
+    shutil.copytree(src, dst, dirs_exist_ok=True)
+    return True
+
+
 def _bin_dir():
     """引擎"数据根目录"（scripts/ player_runtime/ core_components/ ckernels/ 所在处）。
 
@@ -306,6 +344,15 @@ def main():
                                os.path.basename(src.rstrip('/\\')))
             shutil.copytree(src, dst, dirs_exist_ok=True)
         config['plugins_sha256'] = ''   # open 模式: 无防修改校验
+
+    # beta6 B1: 项目资产随包（Assets/ 与 游戏包.lsc 同夹；缺它 = 贴图/六面图全丢）
+    _has_assets = copy_project_assets(scene_json, out)
+    config['assets'] = bool(_has_assets)
+    if _has_assets:
+        print("  资产: Assets/ 已随包 (%d 个文件)"
+              % _count_files(os.path.join(out, 'Assets')))
+    else:
+        print("  资产: 场景无项目资产库 (Assets/assets.json) -> 不携带资产")
 
     game_pack.pack(out, config, data, scripts,
                    encrypt=not args.no_encrypt_content)

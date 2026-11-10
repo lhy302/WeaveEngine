@@ -307,9 +307,10 @@ def _close_canvas(canvas):
 
 def run_vk(scene=None, frames_n=None, keep=False, mini=False, no_shadow=False,
            stage='p4', width=1280, height=800, title="Loom (Vulkan)",
-           scene_data=None):
+           scene_data=None, assets_base=None):
     """Vk 播放器 (阻塞至窗口关闭/帧数达成). 返回平均 FPS 或 None.
-    scene: 明文场景文件路径 (None 时用 scene_data 字典, 游戏包模式)."""
+    scene: 明文场景文件路径 (None 时用 scene_data 字典, 游戏包模式).
+    assets_base: 项目/发布夹根（游戏包模式下资产解析的 base_dir）。"""
     if scene_data is not None:
         data = scene_data
     elif mini:
@@ -322,6 +323,8 @@ def run_vk(scene=None, frames_n=None, keep=False, mini=False, no_shadow=False,
     # 2026-11-09 (Q6=A): 与 GL 播放器一致 —— 场景目录作为 base_dir，
     # skybox 六面图的相对路径按它解析（否则换目录启动就只剩默认蓝）。
     _base_dir = os.path.dirname(os.path.abspath(scene)) if scene else None
+    if assets_base:
+        _base_dir = assets_base          # beta6 B1: 游戏包/项目模式显式给项目根
     driver.load_from_data(data, base_dir=_base_dir)
     # 2026-11-06 R3: UI 输入桥 (GLFW 回调缓存 -> 每帧 dispatch_mouse + 键盘/文本).
     ui_bridge = UIInputBridge(getattr(driver, 'ui', None))
