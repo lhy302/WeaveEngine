@@ -130,8 +130,52 @@ def vk_diag_text(adapter_info=None, stage='init', extra=None):
     return '\n'.join(lines)
 
 
+def _parse_api_version(v):
+    """'1.1.0' / '1.0' / (1, 0, 0) -> (1, 0, 0)；无法解析返回 None。"""
+    if v is None:
+        return None
+    if isinstance(v, (tuple, list)) and v:
+        nums = [int(x) for x in v]
+        while len(nums) < 3:
+            nums.append(0)
+        return tuple(nums[:3])
+    try:
+        parts = [int(x) for x in str(v).split('.')]
+    except Exception:
+        return None
+    while len(parts) < 3:
+        parts.append(0)
+    return tuple(parts[:3])
+
+
+def adapter_api_version(adapter_info=None):
+    """适配器（adapter）的 Vulkan API 版本；没有该字段返回 None。
+
+    为什么必须单独查：loader（vulkan-1.dll）报 1.1 不代表**这块显卡/驱动**支持 1.1，
+    只查 loader 会把「1.1 loader + 1.0 adapter」放行，到 wgpu 初始化才炸（goal_01）。
+    """
+    info = dict(adapter_info or {})
+    for k in ('api_version', 'apiVersion'):
+        if info.get(k):
+            return _parse_api_version(info.get(k))
+    return None
+
+
+def adapter_backend(adapter_info=None):
+    """适配器后端类型（'vulkan' / 'd3d12' / 'metal' ...）；未知返回 ''。"""
+    info = dict(adapter_info or {})
+    for k in ('backend', 'backend_type'):
+        v = info.get(k)
+        if v:
+            s = str(v).lower()
+            if 'vulkan' in s:
+                return 'vulkan'
+            return s
+    return ''
+
+
 def require_vulkan_api(where='Vulkan 渲染', adapter_info=None):
-    """Vulkan 地板硬门：loader 缺失或 apiVersion < 1.1 -> VkBackendInitError。
+    """Vulkan 地板硬门：loader 缺失 / loader<1.1 / **adapter<1.1** -> VkBackendInitError。
 
     返回 (major, minor, patch) 便于调用方记录；异常消息本身就是给用户看的那段，
     上层（run_player）原样打印 + 弹窗，不再二次包装。
@@ -139,9 +183,24 @@ def require_vulkan_api(where='Vulkan 渲染', adapter_info=None):
     ver = vulkan_api_version()
     if ver is None:
         lines = [
-            '[VK] %s 不可用：未找到 Vulkan 运行时（vulkan-1.dll）—— 显卡驱动未安装 Vulkan 支持，或系统未安装 Vulkan 运行库。',
+            ('[VK] %s 不可用：未找到 Vulkan 运行时（vulkan-1.dll）—— 显卡驱动未安装 '
+             'Vulkan 支持，或系统未安装 Vulkan 运行库。' % (where,)),
             '[VK] 需要 Vulkan %d.%d+（wgpu-native 地板）。' % (VK_MIN_API_MAJOR, VK_MIN_API_MINOR),
             '[VK] 提示: 升级显卡驱动（NVIDIA/AMD/Intel 官方驱动自带 Vulkan 运行库）。',
+            '[VK] 本机诊断:',
+        ]
+        msg = '\n'.join(lines) + '\n' + vk_diag_text(adapter_info)
+        print(msg)
+        raise VkBackendInitError(msg)
+    # B1: adapter 版本也要过闸（loader 通过不等于显卡/驱动支持）
+    aver = adapter_api_version(adapter_info)
+    if aver is not None and (aver[0], aver[1]) < (VK_MIN_API_MAJOR, VK_MIN_API_MINOR):
+        lines = [
+            ('[VK] %s 不可用：显卡驱动的 Vulkan API 为 %d.%d.%d，低于地板 %d.%d'
+             '（wgpu-native 要求；加载器报 %d.%d.%d）。' % (
+                 where, aver[0], aver[1], aver[2],
+                 VK_MIN_API_MAJOR, VK_MIN_API_MINOR, ver[0], ver[1], ver[2])),
+            '[VK] 提示: 升级显卡驱动到 2018 年之后的版本；Intel 核显需要 Skylake（6 代）及以上且驱动支持 Vulkan 1.1。',
             '[VK] 本机诊断:',
         ]
         msg = '\n'.join(lines) + '\n' + vk_diag_text(adapter_info)

@@ -4,7 +4,8 @@
 # 为什么需要它：22 个旧场景里没有高亮物体，`MAE 变化`只能证明"画面变了"，不能证明
 # "bloom 真的在起作用的区域起作用"。这里用 ab_bloom（暗场 + 白球）分别以
 # strength=0 与 strength=0.7 渲染，比较**球周围晕圈**与**远处背景**：
-#   · 晕圈必须显著变亮（相对 +5% 以上，实测 +22%）；
+#   · 晕圈必须显著变亮（相对 +5% 以上；圆心取关 bloom 帧的最亮像素，环半径 10–22px
+#     实测 +22.1%，半径越小增量越大：6–14px +33.4%、8–18px +26.8%、20–40px +10.4%）；
 #   · 远处背景必须几乎不变（|Δ| <= 0.005，实测 0.0000）—— 证明暗部没被糊亮。
 import os
 import sys
@@ -28,9 +29,14 @@ def check(name, cond, detail=''):
         _fails.append(name)
 
 
-def _halo(img):
+def _halo(img, center=None):
+    """晕圈/远处亮度。center 必须来自**关 bloom** 那帧 —— 否则亮心会随 bloom 漂移，
+    同一半径会量出不同结果（实测 +22.1% vs +42.5%），指标失去可复现性。"""
     lum = img.mean(axis=2)
-    cy, cx = np.unravel_index(int(np.argmax(lum)), lum.shape)
+    if center is None:
+        cy, cx = np.unravel_index(int(np.argmax(lum)), lum.shape)
+    else:
+        cy, cx = center
     yy, xx = np.mgrid[0:lum.shape[0], 0:lum.shape[1]]
     r = np.sqrt((yy - cy) ** 2 + (xx - cx) ** 2)
     ring = (r >= 10) & (r <= 22)
@@ -55,7 +61,7 @@ def main():
     os.environ.pop("LOOM_BLOOM_STRENGTH", None)
 
     r0, f0, c0, pos = _halo(g0)
-    r1, f1, c1, _ = _halo(g1)
+    r1, f1, c1, _ = _halo(g1, center=pos)      # 同一圆心，两帧可比
     delta = r1 - r0
     rel = delta / max(1e-6, r0)
     print('球心=%s  中心亮度=%.3f' % (pos, c0))

@@ -120,9 +120,17 @@ class GLPostChain:
             self._fbo[name] = ctx.framebuffer(color_attachments=[tex], **kw)
             self._tex[name] = tex
 
-        _mk_fbo(HDR_TARGET, w, h, True)
-        _mk_fbo(HALF_TARGET, max(1, w // 2), max(1, h // 2), False)
-        _mk_fbo(QUARTER_TARGET, max(1, w // 4), max(1, h // 4), False)
+        # 2026-11-11 goal_01: 尺寸来自**共享描述**的 TargetDecl.scale（执行器写入
+        # engine._post_sizes）；没有声明时才退回 1/0.5/0.25 默认。
+        _sizes = getattr(self.engine, '_post_sizes', None) or {}
+
+        def _sz(name, dflt):
+            v = _sizes.get(name)
+            return (max(1, int(v[0])), max(1, int(v[1]))) if v else dflt
+
+        _mk_fbo(HDR_TARGET, *_sz(HDR_TARGET, (w, h)), True)
+        _mk_fbo(HALF_TARGET, *_sz(HALF_TARGET, (max(1, w // 2), max(1, h // 2))), False)
+        _mk_fbo(QUARTER_TARGET, *_sz(QUARTER_TARGET, (max(1, w // 4), max(1, h // 4))), False)
         if self._vao is None:
             import numpy as np
             quad = np.array([

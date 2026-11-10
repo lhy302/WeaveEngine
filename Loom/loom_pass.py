@@ -55,23 +55,10 @@ class RasterState:
     blend: Literal['none', 'alpha'] = 'none'
 
 
-@dataclass(frozen=True)
-class BindingSpec:
-    """语义槽绑定（不写 unit / @binding 号，由后端分配）。"""
-    slot: str
-    stage: Literal['vertex', 'fragment', 'both'] = 'fragment'
-    kind: Literal['uniform', 'texture2d', 'texturecube', 'sampler'] = 'texture2d'
-    sample_type: Literal['float', 'unfilterable-float', 'depth'] = 'float'
-
-
-@dataclass(frozen=True)
-class ParamField:
-    """参数块字段（GL 具名 uniform / VK std140 偏移，偏移由顺序推导）。"""
-    name: str
-    dtype: Literal['f32', 'i32'] = 'f32'
-    count: int = 1
-    stage: Literal['vertex', 'fragment', 'both'] = 'fragment'
-
+# 2026-11-11 goal_01: 删掉「声明了但 0 消费者」的装饰 —— BindingSpec / ParamField /
+# PassSpec.bindings / PassSpec.params / PassSpec.submit 全仓无读取方（绑定号/参数块布局
+# 仍是两端各自实现），留着只会让人误以为已共享。真正共享的是 target/load/clear/
+# depth/raster/draws 五项。
 
 @dataclass(frozen=True)
 class DrawCmd:
@@ -94,10 +81,7 @@ class PassSpec:
     clear: tuple[float, float, float, float] | None = None
     depth: DepthState | None = None
     raster: RasterState = field(default_factory=RasterState)
-    bindings: tuple[BindingSpec, ...] = ()
-    params: tuple[ParamField, ...] = ()
     draws: tuple[DrawCmd, ...] = ()
-    submit: Literal['frame', 'own'] = 'frame'
 
 
 @dataclass(frozen=True)
@@ -138,24 +122,6 @@ class FramePlan:
 
 
 # ---- 共享的帧描述构造（编辑器与播放器**同一份**）----
-_MAIN_BINDINGS = (
-    BindingSpec('scene', stage='both', kind='uniform'),
-    BindingSpec('inst', stage='vertex', kind='uniform'),
-    BindingSpec('shadow.dir0', kind='texture2d', sample_type='depth'),
-    BindingSpec('shadow.dir1', kind='texture2d', sample_type='depth'),
-    BindingSpec('shadow.point', kind='texturecube', sample_type='depth'),
-    BindingSpec('albedo', kind='texture2d'),
-    BindingSpec('normal_map', kind='texture2d'),
-    BindingSpec('env', kind='texturecube'),
-)
-
-_SKY_BINDINGS = (
-    BindingSpec('sky.uniforms', stage='both', kind='uniform'),
-    BindingSpec('sky.cube', kind='texturecube'),
-    BindingSpec('sky.sampler', kind='sampler'),
-)
-
-
 # 每帧都会调用 frame_plan() —— 实测裸构造 22.4 us/次（1ms 帧 = 2.2%），
 # 而描述只由 (清屏色, 是否天空, 是否 world UI) 决定，故按这三元组缓存。
 _PLAN_CACHE: dict[tuple, FramePlan] = {}
@@ -229,10 +195,6 @@ def _build_plan(clear_color: Sequence[float],
                  clear=tuple(clear_color),
                  depth=DepthState(test=True, write=True, func='less', clear=1.0),
                  raster=RasterState(cull='back', front_face='cw'),
-                 bindings=_MAIN_BINDINGS,
-                 params=(ParamField('u_view_proj', count=16),
-                         ParamField('u_view_pos', count=3),
-                         ParamField('u_light_count', dtype='i32')),
                  draws=(DrawCmd('buckets'),)),
     ]
     if include_sky:
@@ -240,10 +202,6 @@ def _build_plan(clear_color: Sequence[float],
             PassSpec('sky', shader='sky', target=scene_target, load='load',
                      depth=DepthState(test=True, write=False, func='lequal'),
                      raster=RasterState(cull='none'),
-                     bindings=_SKY_BINDINGS,
-                     params=(ParamField('u_inv_view_proj', count=16),
-                             ParamField('u_camera_pos', count=3),
-                             ParamField('u_skybox_tint', count=3)),
                      draws=(DrawCmd('skybox'),))
         )
     if include_world_canvas:

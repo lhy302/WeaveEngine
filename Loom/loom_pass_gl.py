@@ -95,6 +95,13 @@ class GLFrameExecutor:
             from loom_post import HALF_TARGET as _H, QUARTER_TARGET as _Q
             self.engine._post_bloom_src = (_Q if any(p.id == 'bloom.down' for p in plan.passes)
                                            else _H)
+            # TargetDecl.scale -> 实际像素尺寸（GL 也读描述，不再写死 0.5/0.25）
+            _w, _h = self.engine.width, self.engine.height
+            self.engine._post_sizes = {
+                t.name: (max(1, int(round(_w * float(t.scale)))),
+                         max(1, int(round(_h * float(t.scale)))))
+                for t in plan.targets
+            }
         except Exception:
             pass
         ctx = self.ctx

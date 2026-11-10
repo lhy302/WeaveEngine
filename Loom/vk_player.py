@@ -35,7 +35,7 @@ from vk_ui import UIInputBridge      # 2026-11-06 R3: 窗口事件 -> driver.ui
 from run_player import VkInitError, VkRunError
 # 2026-11-09 批次 A/阶段1: VK 地板（1.1）+ 可读诊断（单点实现见 loom_backend_guard）
 from loom_backend_guard import (VkBackendInitError, adapter_info_dict,
-                                require_vulkan_api, vk_diag_text, vulkan_api_text)
+                                require_vulkan_api, vk_diag_text, vulkan_api_text, adapter_backend)
 
 
 # ==================== 2026-11-07: 输入注册/回调链 小工具 ====================
@@ -359,6 +359,14 @@ def run_vk(scene=None, frames_n=None, keep=False, mini=False, no_shadow=False,
         if adapter is None:
             raise RuntimeError('无可用 Vulkan 适配器 (request_adapter_sync 返回 None)')
         _dev_info = adapter_info_dict(adapter)      # P2-1: 0.32/0.33 字段名都吃
+        # B2: 必须是 Vulkan 后端（wgpu 在别的平台可能返回 d3d12/metal，不能当 VK 用）
+        _be = adapter_backend(_dev_info)
+        if _be and _be != 'vulkan':
+            raise VkBackendInitError(
+                '[VK] 选中了非 Vulkan 后端 (%s)：request_adapter 未返回 Vulkan 适配器。\n%s'
+                % (_be, vk_diag_text(_dev_info)))
+        # B1: adapter（显卡/驱动）版本也要过 1.1 地板，loader 通过不代表 adapter 支持
+        require_vulkan_api('Vulkan 渲染', adapter_info=_dev_info)
         device = adapter.request_device_sync()
         ctx = canvas.get_wgpu_context()
         fmt = ctx.get_preferred_format(adapter)

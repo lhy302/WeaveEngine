@@ -392,6 +392,89 @@ def t_vk_canvas_closed(tmp):
               None if cv is None else cv.closed)
 
 
+def t_vk_floor_gate(tmp):
+    """B（goal_01）：VK 地板闸三个缺口 —— adapter 版本 / 后端类型 / None 分支文案。"""
+    print('=== K. VK 地板闸（adapter 版本 / backend_type / 文案） ===')
+    import vk_player
+    import wgpu
+    saved_ver = G.vulkan_api_version
+    # K1: loader 1.1 但 adapter 只有 1.0 -> 必须拒绝
+    G.vulkan_api_version = lambda: (1, 1, 0)
+    err = None
+    try:
+        G.require_vulkan_api('测试', adapter_info={'api_version': '1.0.0',
+                                                   'backend': 'vulkan'})
+    except BaseException as e:
+        err = e
+    check('K1 loader 1.1 + adapter 1.0 -> 拒绝',
+          isinstance(err, G.VkBackendInitError), type(err).__name__)
+    check('K2 拒绝原因里同时给 adapter 与 loader 版本',
+          err is not None and '1.0.0' in str(err) and '1.1.0' in str(err),
+          '' if err is None else str(err)[:80])
+    # K3: adapter 版本够 -> 通过
+    ok = G.require_vulkan_api('测试', adapter_info={'api_version': '1.2.0'}) == (1, 1, 0)
+    check('K3 adapter 1.2 通过地板', ok, ok)
+    # K4: backend_type 过滤（d3d12 不能当 Vulkan 用）
+    check('K4 adapter_backend 识别非 vulkan',
+          G.adapter_backend({'backend': 'd3d12'}) == 'd3d12',
+          G.adapter_backend({'backend': 'd3d12'}))
+
+    class _Canvas:
+        def set_update_mode(self, m):
+            pass
+
+        def get_wgpu_context(self):
+            raise AssertionError('不该走到取 wgpu 上下文')
+
+        def close(self):
+            pass
+
+    class _Adapter:
+        info = {'device': 'fake', 'backend': 'd3d12', 'api_version': '1.2.0'}
+
+        def request_device_sync(self):
+            raise AssertionError('不该走到建设备')
+
+    class _Gpu:
+        def request_adapter_sync(self, **kw):
+            return _Adapter()
+
+    class _Wgpu:
+        gpu = _Gpu()
+
+    scene = os.path.join(tmp, 'mini.json')
+    with open(scene, 'w', encoding='utf-8') as fp:
+        json.dump({'version': 10, 'objects': [], 'lights': [], 'materials': [],
+                   'cameras': [], 'active_camera': None}, fp)
+    saved = (vk_player.GlfwRenderCanvas, vk_player.wgpu)
+    vk_player.GlfwRenderCanvas = lambda **kw: _Canvas()
+    vk_player.wgpu = _Wgpu()
+    err2 = None
+    try:
+        vk_player.run_vk(scene, frames_n=1)
+    except BaseException as e:
+        err2 = e
+    finally:
+        vk_player.GlfwRenderCanvas, vk_player.wgpu = saved
+        G.vulkan_api_version = saved_ver
+    check('K5 选到 d3d12 后端 -> VkBackendInitError',
+          isinstance(err2, G.VkBackendInitError), type(err2).__name__)
+    check('K6 文案含「非 Vulkan」',
+          err2 is not None and '非 Vulkan' in str(err2), '' if err2 is None else str(err2)[:80])
+    # K7: 无 loader 分支的 %s 必须被格式化（不能打印字面 %s）
+    G.vulkan_api_version = lambda: None
+    err3 = None
+    try:
+        G.require_vulkan_api('测试后端')
+    except BaseException as e:
+        err3 = e
+    finally:
+        G.vulkan_api_version = saved_ver
+    check('K7 None 分支文案已格式化（含调用方名、无字面 %s）',
+          err3 is not None and '测试后端' in str(err3) and '%s' not in str(err3),
+          '' if err3 is None else str(err3)[:100])
+
+
 def t_engine_settings_untouched(tmp):
     """Q2: 回退只写游戏设置.json（用户层），引擎层 设置.json 字节不变。"""
     print('=== J. 只写用户层 ===')
@@ -419,6 +502,7 @@ def main():
              t_gl_only_visible_failure,
              t_loop_failure_not_swallowed,
              t_game_player_safe_layer,
+             t_vk_floor_gate,
              t_engine_settings_untouched)
     for fn in cases:
         with tempfile.TemporaryDirectory() as tmp:
