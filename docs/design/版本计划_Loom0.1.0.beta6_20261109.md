@@ -497,3 +497,25 @@ R04 复核时发现两件事，直接推翻了它自己的一条证据，也暴�
 **新增 P2**：`plan.clear`/`load` 对 VK 无效；`sky.raster.cull` 两端相反（GL 被 `loom_render.py:188-189` 内部重设覆盖）；`TargetDecl.format/scale` 只部分生效；`LOOM_POST_STAGE=1≡2`（bright 输出不被 tonemap 消费，档 2 死档）。
 
 → 处置：**要求 R01 真正实现「遍历 plan.passes 执行」**，并以「改 plan 必须改变 VK 输出」为验收硬门；在此之前不得再宣称抽象化达成。
+
+### 9.25 倒查总账（2026-11-10，V-01/02/03 三份）
+
+| 宣称 | 倒查结论 |
+|---|---|
+| VK 由 FramePlan 驱动 | ❌ **不实**：改 plan（删/换序/改 clear/改 draws）VK 输出全不变（MAE 0.00000），VK 只按 id 读存在性 |
+| 语义面 14 → 6 | ❌ **不实**：14 项一项未消除，所谓 6 是重新分桶丢弃 3 项后的口径变化；真实共享仅 3 类 |
+| 后处理参数两端共享 | ✅ 成立（改 threshold 两端 ΔMAE 均 0.00165） |
+| 假 depth_mask 已删 | ✅ 成立 |
+| `LOOM_POST_STAGE=0` 两端真关 | ✅ 成立（与 `LOOM_POST=0` 逐像素同哈希） |
+| 资产索引 8s → 54.6ms | ⚠️ **级数对、数值对不上**：自造 10k 实测 32.9 / 60.5 / 77.2ms（三种形态）；8s 问题确实消除 |
+| `record_asset_error` 29.5ms | ⚠️ 实测 7.1-8.3ms（宣称值偏保守 3.6-4x）；门禁 500ms 余量 62x，抓不住回退 |
+| 动画 1.42-1.69ms | ✅ 可复现（1.473ms 中位），≤1.0 明确未达，口径已诚实；但 `design:516` 仍写「≤1ms」、计划「115 PASS」实测 126 |
+| 12 能力名文档可查 | ✅ 60/60 格非空；但只有 README 与附录 F 给了用法，另三份仅提及 |
+| EAI 命令数 102 | ❌ **实为 103**（`asset_user_override` 后新增）；指南自带自检命令会打印 103，文档自相矛盾 |
+| env 附录全覆盖 | ⚠️ 47 条，漏 4（`LOOM_POST_EXPOSURE`/`LOOM_BUILD_ROOT`/`LOOM_PYEMBED_CACHE`/`LOOM_PYEMBED_DIR`），且混入 2 个仅测试用开关 |
+| 打包断言真实生效 | ✅ 20/20 负例 PASS + 端到端 exit 1 |
+| 交付包与代码一致 | ❌ **不实**：`tools/dist` 两包早于最后 4 个提交（source 20:22 / compiled 14:40 vs HEAD 20:42），包内缺 103 命令与 user_delta |
+
+**新增 P1**：D 批三个性能测试**全是 helper-only、0 处生产入口证据**（`test_bucket_pack`/`test_aabb_simd`/`test_physics_pose_soa`），且设计要求的 `LOOM_NO_SIMD=1` 全仓 0 实现。
+
+→ 处置：R01 真正实现 plan 遍历；R04 补入口级对拍与 `LOOM_NO_SIMD`；05 修文档数字与 env；R06 在所有代码定稿后重打两包。
