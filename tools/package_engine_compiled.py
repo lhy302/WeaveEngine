@@ -80,6 +80,24 @@ def main():
     if not os.path.isfile(args.builder_exe):
         _fail('--builder-exe 不存在: %s' % args.builder_exe)
 
+    def _show_bi(dist, label):
+        """展示 build_info 的来源证据；dirty 工作树要醒目警告（R6-03 扩展）。"""
+        try:
+            with open(os.path.join(dist, 'build_info.json'), 'r',
+                      encoding='utf-8') as _f:
+                _bi = json.load(_f)
+        except Exception:
+            return
+        print('[编译包] %s build_info: git_head=%s git_dirty=%s '
+              'python=%s nuitka=%s built_at=%s'
+              % (label, _bi.get('git_head'), _bi.get('git_dirty'),
+                 _bi.get('python'), _bi.get('nuitka'), _bi.get('built_at')))
+        if _bi.get('git_dirty'):
+            print('[编译包] 警告: %s 来自 dirty 工作树（git_dirty=True），'
+                  '产物与提交不可逐位对拍！' % label)
+
+    _show_bi(os.path.dirname(os.path.abspath(args.builder_exe)), '构建器')
+
     # 2026-11-09 工具链升级: 编辑器 dist 必须带 PySide6 + Qt 平台插件。
     # 漏 --enable-plugin=pyside6 时 dist 体积反而小 ~8MB（体积检查会误判成变好），
     # 所以这里用"路径存在"作硬判据，缺一个就拒绝打包。
@@ -102,6 +120,7 @@ def main():
     _meta_bad = PE.meta_version_problems(args.editor_dist, version)
     if _meta_bad:
         _fail('编辑器 dist 版本元数据不合格: %s' % ('; '.join(_meta_bad),))
+    _show_bi(args.editor_dist, '编辑器 dist')
 
     _bloat = PE.editor_dist_bloat(args.editor_dist)
     if _bloat:
@@ -119,6 +138,7 @@ def main():
         if _mode_bad:
             _fail('播放器运行时档位不合格: %s\n  dist: %s'
                   % ('; '.join(_mode_bad), runtime))
+        _show_bi(runtime, '运行时 dist')
         _meta_bad = PE.meta_version_problems(runtime, version)
         if _meta_bad:
             _fail('播放器运行时版本元数据不合格: %s'

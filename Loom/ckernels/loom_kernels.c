@@ -487,7 +487,15 @@ static int _cpu_has_avx2(void)
 static int _simd_impl(void)
 {
     if (g_simd_impl < 0) {
-        g_simd_impl = _cpu_has_avx2() ? 1 : 0;
+        /* LOOM_NO_SIMD=1 -> 强制标量 (排错/对拍/无 AVX2 机器等价验证).
+         * 只在**首次探测**读一次环境: 运行中修改无效 (进程生命周期内固定),
+         * 保证热路径零 getenv; 需要切换请重开进程。 */
+        const char *no_simd = getenv("LOOM_NO_SIMD");
+        if (no_simd != NULL && no_simd[0] == '1' && no_simd[1] == 0) {
+            g_simd_impl = 0;
+        } else {
+            g_simd_impl = _cpu_has_avx2() ? 1 : 0;
+        }
     }
     return g_simd_impl;
 }

@@ -95,6 +95,27 @@ def _enter_vcvars():
         _fail('vcvars 后 PATH 里仍没有 cl.exe')
 
 
+def _git_info():
+    """来源工作树的提交与脏标记（build_info 硬证据）。
+    2026-11-10: compiled 包不含 .py，靠 git_head 才能证明"包 = 哪次提交"。"""
+    head = None
+    dirty = None
+    try:
+        head = subprocess.check_output(
+            ['git', '-C', ROOT, 'rev-parse', 'HEAD'], encoding='utf-8',
+            errors='replace', stderr=subprocess.DEVNULL).strip() or None
+    except Exception:
+        head = None
+    try:
+        # 注意: 文件名含中文 -> 必须 utf-8 解码（text=True 走 GBK 会抛错）
+        dirty = bool(subprocess.check_output(
+            ['git', '-C', ROOT, 'status', '--porcelain'], encoding='utf-8',
+            errors='replace', stderr=subprocess.DEVNULL).strip())
+    except Exception:
+        dirty = None
+    return head, dirty
+
+
 def _nuitka_version():
     try:
         out = subprocess.check_output([sys.executable, '-m', 'nuitka', '--version'],
@@ -284,6 +305,7 @@ def main():
     if not args.skip_vcvars:
         _enter_vcvars()
 
+    _git_head, _git_dirty = _git_info()
     info = {
         'mode': args.mode,
         'console_mode': cfg['console'],
@@ -291,7 +313,11 @@ def main():
         'python': sys.version.split()[0],
         'nuitka': _nuitka_version(),
         'built_at': time.strftime('%Y-%m-%d %H:%M:%S'),
+        'git_head': _git_head,
+        'git_dirty': _git_dirty,
     }
+    print('[build_engine] git_head=%s git_dirty=%s'
+          % (_git_head or '<不可用>', _git_dirty))
     results = {}
     t_all = time.time()
     if 'editor' in what:
