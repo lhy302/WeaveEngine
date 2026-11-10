@@ -31,6 +31,7 @@ import numpy as np
 
 import fastpath
 from fastpath import ancestry_dfs as _fp_ancestry
+from loom_components import physics_disabled_by_env as _physics_disabled_by_env
 from loom_types import Point3D
 
 
@@ -465,6 +466,12 @@ class PhysicsMixin:
         进入播放 (toggle_play) / 首次 update_physics 直调由 _ensure_phys_bridge
         惰性建桥 (仅完整 __init__ 实例: getattr(_phys_bridge_auto)); 测试桩
         (__new__ 不跑 __init__) 无该属性 -> 永走 legacy (现契约测试零受影响)。"""
+        # R6 V-10: LOOM_NO_PHYSICS=1 —— 本进程彻底不做物理解算 (诊断/回归开关;
+        # 动画在 update_animations 中已回退驱动动态刚体)。
+        if _physics_disabled_by_env():
+            if events:
+                self._update_collision_events(max(delta_time, 1e-4))
+            return
         br = getattr(self, '_phys_bridge', None)
         # 修复 P1-⑥ (2026-11-07): 本场已裁决禁用 -> 永不使用/重建桥 (legacy).
         if getattr(self, '_phys_bridge_disabled', False):
@@ -474,7 +481,8 @@ class PhysicsMixin:
                 self._update_physics_bridge(delta_time, events)
                 return
             self._phys_bridge = None            # 僵死桥 (库异常) -> 释放走 legacy
-            self._update_physics_legacy(delta_time, events)
+            self._update_physics_legacy(delta_time, events,
+                                        skip_models=self._anim_driven_models())
             return
         if getattr(self, '_phys_bridge_auto', False):
             self._ensure_phys_bridge()
@@ -482,9 +490,14 @@ class PhysicsMixin:
             if br is not None and getattr(br, 'enabled', False):
                 self._update_physics_bridge(delta_time, events)
                 return
-        self._update_physics_legacy(delta_time, events)
+        self._update_physics_legacy(delta_time, events,
+                                    skip_models=self._anim_driven_models())
 
-    def _update_physics_legacy(self, delta_time, events=True):
+    def _anim_driven_models(self):
+        """本帧由动画回退驱动的物体 (R6 V-08 物理侧避让名单; 空=没有)."""
+        return getattr(self, '_anim_fallback_models', None)
+
+    def _update_physics_legacy(self, delta_time, events=True, skip_models=None):
         """自研物理 (M31 原实现, B1 起作为**回退分支**): 累加-移动-撞停模型.
         对每个带刚体的动态物体: 重力累加速度 -> 按速度带碰撞移动 (被挡停清速度).
         B1 桥路径下不调用; 无 culverin / 测试桩 / 桥异常回退时走这里 (行为逐位不变).
@@ -497,9 +510,17 @@ class PhysicsMixin:
         等同现算, 见 move_with_collision 注释)."""
         dt = max(delta_time, 1e-4)
         self._physics_bounds = {}          # 本帧物理级缓存 (id(o) -> 碰撞体数据)
+        # R6 V-08: 本帧由动画回退驱动的动态刚体 —— 物理**不写**它们 (掩码)。
+        # 选"掩码"而不是"把动画位姿当载荷喂给物理"的理由: 物理不可用时桥/解算
+        # 本身已不可信, 只做"谁拥有位姿"的划分, 不改积分与碰撞语义, 其它刚体
+        # 的步进逐位不变; 空名单时零开销。
+        skip = {id(x) for x in skip_models} if skip_models else None
         for m in self.models:
             rb = m.rigidbody
             if rb is None or rb.is_kinematic:
+                continue
+            if skip is not None and id(m) in skip:
+                rb.velocity = Point3D(0.0, 0.0, 0.0)   # 防物理恢复时突跳
                 continue
             if rb.use_gravity:
                 # 2026-08-30: 重力可调 (self.gravity, 场景/设置/面板); getattr 防御
@@ -551,7 +572,8 @@ class PhysicsMixin:
             except Exception as ee:
                 print("[物理] 桥销毁被拒绝 (%r): 本场已禁用桥, 线程引用保留待收尾"
                       % (ee,))
-            self._update_physics_legacy(dt, events)
+            self._update_physics_legacy(dt, events,
+                                        skip_models=self._anim_driven_models())
             return
         if events:
             self._update_collision_events(dt)                 # 几何事件 (B1 保留, 见设计 §2.2)

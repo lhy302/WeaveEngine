@@ -11,6 +11,7 @@ engine.py 通过 `from loom_components import *` 重导出所有组件类。
 """
 
 import math
+import os
 
 import numpy as np
 
@@ -367,11 +368,19 @@ class AnimationClip:
     # ValueError("truth value ... ambiguous")。规范键把 ndarray 折成
     # (形状/类型/字节) 三元组, list 与 tuple 归一成 tuple。
     @staticmethod
-    def _canon_value(v):
+    def _canon_value(v, depth=0):
+        """值 -> 可比较规范形 (R6 V-12: 容器**递归**, 内嵌 ndarray 一并折字节).
+
+        顶层 ndarray 早在 R5 P-07 就折成 (shape/dtype/bytes); 但 list/tuple
+        里再套 ndarray 时, `tuple(v)` 内仍是数组 -> `==` 歧义 -> __eq__ 落到
+        `self is other` -> 同内容判不等。这里逐层递归; 深度上限 8 防环。
+        """
+        if depth > 8:
+            return v
         if isinstance(v, np.ndarray):
             return ('__ndarray__', v.shape, v.dtype.str, v.tobytes())
         if isinstance(v, (list, tuple)):
-            return tuple(v)
+            return tuple(AnimationClip._canon_value(x, depth + 1) for x in v)
         return v
 
     def _content_key(self):
@@ -403,11 +412,16 @@ class AnimationClip:
         R5-02 P-07: list 拷一份、ndarray `.copy()` —— 否则模型与快照共享
         同一个可变数组, 改一侧会串到另一侧 (值隔离被打破)。
         """
-        def _cv(v):
-            if isinstance(v, list):
-                return list(v)
+        def _cv(v, depth=0):
+            """值 -> 深拷贝 (R6 V-12: 容器递归; list/tuple/ndarray 都隔离)."""
+            if depth > 8:                # 环状容器: 放弃深拷 (极边界, 不炸)
+                return v
             if isinstance(v, np.ndarray):
                 return v.copy()
+            if isinstance(v, list):
+                return [_cv(x, depth + 1) for x in v]
+            if isinstance(v, tuple):
+                return tuple(_cv(x, depth + 1) for x in v)
             return v
         return AnimationClip(
             [{k: _cv(v) for k, v in fr.items()} for fr in self.frames],
@@ -633,10 +647,24 @@ class AnimatorComponent(Component):
 #   ④ 写者优先级 D6「动画只驱动 kinematic」: 动态刚体(rigidbody 且非 kinematic)
 #      的变换归物理所有, 动画跳过并只告警一次 —— 这样物理管线开/关两种配置
 #      不再改变结果(旧实现两条路径胜负相反)。
+def physics_disabled_by_env():
+    """LOOM_NO_PHYSICS=1 -> 强制"物理不可用" (R6 V-10 兑现: 之前只写在注释里).
+
+    与旧 LOOM_NO_PHYSICS_DLL (DLL 层整体禁门, 已在 B3 删除) 不是一回事:
+    这里只影响**本进程的物理解算**, 让动画回退驱动动态刚体, 用于诊断/回归
+    (无 culverin 的机器行为等价)。接受 1/true/yes/on; 0/false/no/off/空 -> 关。
+    """
+    v = os.environ.get('LOOM_NO_PHYSICS')
+    if not v:
+        return False
+    return v.strip().lower() not in ('0', 'false', 'no', 'off')
+
+
 _ANIM_CHANNELS = ('position', 'rotation', 'scale')
 _ANIM_WARNED_DYNAMIC = False
 _ANIM_WARNED_NO_PHYSICS = False   # R5-02 P-06: 物理不可用 -> 回退动画驱动 (一次性提示)
 _ANIM_WARNED_BAD_SPEED = False    # R5-02 P-07: speed 非数值 -> 单物体降级 (一次性提示)
+_ANIM_INF = float('inf')
 # Point3D 是 namedtuple; 其 __new__ 是 Python 层函数 (~0.4us/次). 批量写回每帧
 # 要造 N 个点, 故走 tuple.__new__(Point3D, 序列) 的 C 路径 (~0.12us) ——
 # 产物仍是 Point3D (同名/同值/同相等语义), 只是跳过 namedtuple 的包装层。
@@ -777,6 +805,7 @@ def evaluate_animations(models, dt, physics_available=True):
     synced = set()       # R5-02 P-05: 本帧已 _np_sync 的片段 (帧列表可能被脚本换掉)
     blocked = 0
     fallback = 0
+    fallback_ms = []     # R6 V-08: 本帧回退动画驱动的物体 (物理侧据此避让)
     advanced = 0
     wrote = False
     P3NEW = _P3_NEW
@@ -800,21 +829,30 @@ def evaluate_animations(models, dt, physics_available=True):
                 blocked += 1                 # D6: 动态刚体归物理
                 continue
             fallback += 1                    # Q-C1-3=A: 无物理时回退动画驱动
+            fallback_ms.append(m)            # R6 V-08: 物理侧要避让这批
         advanced += 1
         mode = clip.loop_mode
         if mode is None:
             mode = 'loop' if an.loop else 'once'
         dur = frame_list[-1]['time']
-        # R5-02 P-07 附带: an.speed 是公开属性, 脚本直写非数值 (如 list) 会让
-        # 整条逻辑帧 TypeError —— 单物体降级为 1.0 + 一次性告警, 不放大成全局失败。
+        # R5-02 P-07 + R6 V-05: an.speed 是公开属性 —— 非数值(list/None) 会抛
+        # TypeError, 非有限(nan/inf) 会让 t/phase 变 nan 后**静默冻结**(nan 传播,
+        # 永不恢复)。两者都按单物体降级 1.0 + 一次性提示, 不放大成整帧失败。
         try:
             t = an.time + dt * an.speed
         except TypeError:
+            t = None
+        if t is None or t != t or t == _ANIM_INF or t == -_ANIM_INF:
             an.speed = 1.0
+            at = an.time
+            if type(at) is not float and type(at) is not int:
+                an.time = 0.0
+            elif at != at or at == _ANIM_INF or at == -_ANIM_INF:
+                an.time = 0.0                    # 污染的时间一并复位 (否则 nan 不愈)
             t = an.time + dt
             if not _ANIM_WARNED_BAD_SPEED:
                 _ANIM_WARNED_BAD_SPEED = True
-                print('[动画] 物体 %r 的 animator.speed 非数值, 已重置为 1.0'
+                print('[动画] 物体 %r 的 animator.speed/时间非法, 已重置 (speed=1.0)'
                       % (getattr(m, 'name', m),))
         if mode == 'loop':
             if dur > 0.0:
@@ -831,11 +869,12 @@ def evaluate_animations(models, dt, physics_available=True):
                 _write_pose(m, {k: last[k] for k in _ANIM_CHANNELS if k in last})
                 wrote = True
                 continue
-            if dur > 0.0 and t < 0.0:
-                # R5-02 P-02 / Q-C1-2=A: 倒放/负 dt 夹到 [0, dur] (与 seek 一致)。
+            if t < 0.0 or dur <= 0.0:
+                # R5-02 P-02 / R6 V-04 (U-03=A): 与 seek 一致 —— once 夹到 [0, dur]。
                 # 旧实现把负相位直接交给批量 -> 外推 (物体飞走), 而慢路径
                 # sample() 取模回绕 -> 同一函数两条路径语义分叉; 这里统一到 0
-                # 并停播 (到 0 后 playing=False)。
+                # 并停播。dur<=0 (单帧/所有关键帧同 time) 同样夹 0 停播 ——
+                # 旧实现此时 an.time 无界负增长且 playing 永真。
                 an.time = 0.0
                 an.playing = False
                 phase = 0.0
@@ -961,6 +1000,7 @@ def evaluate_animations(models, dt, physics_available=True):
     stats['advanced'] = advanced
     stats['blocked_dynamic'] = blocked
     stats['fallback_dynamic'] = fallback
+    stats['fallback_models'] = fallback_ms      # R6 V-08: 空列表=无回退
     return stats
 
 class AudioSystem:

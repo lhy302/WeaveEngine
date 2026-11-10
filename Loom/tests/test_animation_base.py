@@ -905,5 +905,199 @@ check('⑦ P-07 非数值 speed 单物体降级 (不抛整帧, 重置 1.0)',
       ok49 and an49.speed == 1.0, 'speed=%r' % (an49.speed,))
 
 print()
+
+print('---- ⑧ R6 验证回归 (V-04/V-05/V-08/V-09/V-10/V-11/V-12) ----')
+
+# ---- V-04: dur == 0 的 once 与 seek 同构 (夹 0 停播) ----
+single_once = E.AnimationClip([{'time': 0.0, 'position': (0.0, 2.0, 0.0)}],
+                              loop_mode='once')
+e54 = make_engine()
+m54, an54 = add_anim_obj(e54, single_once)
+an54.set_speed(-1.0)
+for _ in range(10):
+    e54.update_animations(0.1)
+check('⑧ V-04 dur==0 once + 负速 -> time=0 且停播',
+      an54.time == 0.0 and an54.playing is False,
+      'time=%r playing=%r' % (an54.time, an54.playing))
+check('⑧ V-04 与 seek(-1) 口径一致', an54.seek(-1.0) == 0.0, str(an54.time))
+
+# ---- V-05: NaN/inf speed 不再静默冻结 ----
+C.reset_anim_warn()
+e55 = make_engine()
+m55, an55 = add_anim_obj(e55, full_clip())
+an55.speed = float('nan')
+_buf55 = io.StringIO()
+with contextlib.redirect_stdout(_buf55):
+    for _ in range(3):
+        e55.update_animations(0.1)
+check('⑧ V-05 NaN speed -> 降级 1.0 且时间复位 (不冻结)',
+      an55.speed == 1.0 and abs(an55.time - 0.3) < 1e-12,
+      'speed=%r time=%r' % (an55.speed, an55.time))
+check('⑧ V-05 一次性提示', '非法' in _buf55.getvalue(),
+      _buf55.getvalue().strip()[:80])
+an55.speed = float('inf')
+e55.update_animations(0.1)
+check('⑧ V-05 inf speed 同样降级', an55.speed == 1.0
+      and abs(an55.time - 0.4) < 1e-12, 'time=%r' % an55.time)
+
+# ---- V-08: 回退动画 + legacy 物理 双写者 (60 帧不漂移, 物理仍驱动其它体) ----
+C.reset_anim_warn()
+_loop2 = [{'time': 0.0, 'position': (0.0, 0.0, 0.0), 'rotation': (0.0, 0.0, 0.0),
+           'scale': (1.0, 1.0, 1.0)},
+          {'time': 1.0, 'position': (0.0, 6.0, 0.0), 'rotation': (0.0, 0.0, 0.0),
+           'scale': (1.0, 1.0, 1.0)}]
+e58 = make_engine()                      # 无 _phys_bridge_auto / 无桥 -> 回退
+m58a = e58.add_model(create_cube(1.0), E.Point3D(0.0, 0.0, 0.0),
+                     E.Point3D(0, 0, 0))
+an58 = m58a.add_animator(clips={'c': E.AnimationClip(_loop2, loop_mode='loop')},
+                         current='c')
+an58.playing = True
+m58a.rigidbody = E.RigidbodyComponent()          # 动态 + 重力
+m58b = e58.add_model(create_cube(1.0), E.Point3D(50.0, 0.0, 0.0),
+                     E.Point3D(0, 0, 0))
+m58b.rigidbody = E.RigidbodyComponent()          # 动态 + 无动画 -> 物理驱动
+DT8 = 0.1
+for _ in range(60):
+    e58.update_animations(DT8)
+    e58.update_physics(DT8, events=False)
+_expect58 = an58.clips['c'].sample(an58.time)['position'][1]
+check('⑧ V-08 回退态 60 帧后位姿=动画位姿 (无逐帧漂移)',
+      same_bits(m58a.position.y, _expect58),
+      'y=%r expect=%r' % (m58a.position.y, _expect58))
+check('⑧ V-08 物理仍驱动其它刚体', m58b.position.y < -1.0,
+      'y=%r' % m58b.position.y)
+check('⑧ V-08 回退体速度被清零 (物理恢复不突跳)',
+      m58a.rigidbody.velocity.y == 0.0, str(m58a.rigidbody.velocity))
+
+# ---- V-09: VK 的 physics_available 不再恒真 ----
+_drv = SD.SceneDriver.__new__(SD.SceneDriver)
+_drv._bridge = None
+_drv._bridge_disabled = False
+_orig_cv = getattr(SD.physb, 'cv_available', None) if SD.physb is not None else None
+_ok59 = True
+try:
+    if SD.physb is None:
+        _ok59 = False
+        check('⑧ V-09 VK 判据 (本机 physics_bridge 模块缺失, 跳过对照)', True)
+    else:
+        SD.physb.cv_available = False
+        check('⑧ V-09 VK: culverin 缺失 -> 物理不可用',
+              _drv._physics_available() is False)
+        SD.physb.cv_available = True
+        check('⑧ V-09 VK: culverin 可用 -> 物理可用',
+              _drv._physics_available() is True)
+        _drv._bridge = object()
+        check('⑧ V-09 VK: 桥已建 -> 物理可用',
+              _drv._physics_available() is True)
+        _drv._bridge_disabled = True
+        check('⑧ V-09 VK: 桥被禁 -> 物理不可用',
+              _drv._physics_available() is False)
+finally:
+    if SD.physb is not None:
+        SD.physb.cv_available = _orig_cv
+    _drv._bridge = None
+    _drv._bridge_disabled = False
+# 行为面: culverin 缺失时 VK 动态体由动画驱动
+if SD.physb is not None:
+    _drv2 = SD.SceneDriver.__new__(SD.SceneDriver)
+    _drv2._bridge = None
+    _drv2._bridge_disabled = False
+    _m59 = E.GameObject(create_cube(1.0), E.Point3D(0, 0, 0), E.Point3D(0, 0, 0))
+    _a59 = _m59.add_animator(clips={'c': E.AnimationClip(_loop2, loop_mode='loop')},
+                             current='c')
+    _a59.playing = True
+    _m59.rigidbody = E.RigidbodyComponent()
+    _drv2.models = [_m59]
+    try:
+        SD.physb.cv_available = False
+        _st59 = SD.SceneDriver._update_animations(_drv2, 0.25)
+    finally:
+        SD.physb.cv_available = _orig_cv
+    check('⑧ V-09 VK culverin 缺失 -> 回退动画驱动',
+          _st59.get('fallback_dynamic') == 1 and _m59.position.y > 0.0,
+          'stats=%r y=%r' % (_st59, _m59.position.y))
+
+# ---- V-10: LOOM_NO_PHYSICS=1 真开关 ----
+C.reset_anim_warn()
+os.environ['LOOM_NO_PHYSICS'] = '1'
+try:
+    e60 = make_engine()
+    e60._phys_bridge_auto = True                 # 真引擎声明会建桥
+    m60a = e60.add_model(create_cube(1.0), E.Point3D(0, 0, 0), E.Point3D(0, 0, 0))
+    a60 = m60a.add_animator(clips={'c': E.AnimationClip(_loop2, loop_mode='loop')},
+                            current='c')
+    a60.playing = True
+    m60a.rigidbody = E.RigidbodyComponent()
+    m60b = e60.add_model(create_cube(1.0), E.Point3D(50, 0, 0), E.Point3D(0, 0, 0))
+    m60b.rigidbody = E.RigidbodyComponent()      # 动态无动画 -> 应完全不动
+    e60.update_animations(0.25)
+    e60.update_physics(0.25, events=False)
+    check('⑧ V-10 LOOM_NO_PHYSICS=1: 动画回退驱动动态刚体',
+          m60a.position.y > 0.0, 'y=%r' % m60a.position.y)
+    check('⑧ V-10 LOOM_NO_PHYSICS=1: 物理整体不跑 (其它体不动)',
+          m60b.position.y == 0.0, 'y=%r' % m60b.position.y)
+finally:
+    os.environ.pop('LOOM_NO_PHYSICS', None)
+check('⑧ V-10 取消 env 后恢复正常', C.physics_disabled_by_env() is False)
+
+# ---- V-11: 生产判据 (_phys_bridge_auto / _phys_bridge_disabled) ----
+C.reset_anim_warn()
+e61 = make_engine()
+e61._phys_bridge_auto = True                    # 生产实例形态
+m61 = e61.add_model(create_cube(1.0), E.Point3D(0, 0, 0), E.Point3D(0, 0, 0))
+a61 = m61.add_animator(clips={'c': E.AnimationClip(_loop2, loop_mode='loop')},
+                       current='c')
+a61.playing = True
+m61.rigidbody = E.RigidbodyComponent()
+st61 = e61.update_animations(0.25)
+check('⑧ V-11 生产判据 (auto=True, 桥未建) -> 首帧按物理可用跳过',
+      st61.get('blocked_dynamic') == 1 and m61.position.y == 0.0, str(st61))
+e61._phys_bridge_disabled = True                # 桥被禁 -> 真回退
+st61b = e61.update_animations(0.25)
+check('⑧ V-11 生产判据 (桥被禁) -> 回退动画驱动',
+      st61b.get('fallback_dynamic') == 1 and m61.position.y > 0.0,
+      'stats=%r y=%r' % (st61b, m61.position.y))
+
+# ---- V-12: 嵌套容器内的 ndarray (copy 深拷 + __eq__ 可比较) ----
+_v0 = [np.array([1.0, 2.0]), np.array([3.0])]
+_nested = E.AnimationClip([{'time': 0.0, 'extra': _v0}])
+_cp12 = _nested.copy()
+check('⑧ V-12 list 内嵌 ndarray 深拷',
+      _cp12.frames[0]['extra'][0] is not _v0[0])
+_v0[0][0] = 99.0
+check('⑧ V-12 改源列表内数组不影响 copy',
+      abs(float(_cp12.frames[0]['extra'][0][0]) - 1.0) < 1e-12,
+      str(_cp12.frames[0]['extra'][0]))
+_n1 = E.AnimationClip([{'time': 0.0, 'extra': [np.array([1.0, 2.0])]}])
+_n2 = E.AnimationClip([{'time': 0.0, 'extra': [np.array([1.0, 2.0])]}])
+_eq12 = ''
+try:
+    _eq12_ok = (_n1 == _n2) is True
+except Exception as exc:                        # noqa: BLE001
+    _eq12_ok = False
+    _eq12 = repr(exc)
+check('⑧ V-12 list 内嵌 ndarray 内容相等 (不抛)', _eq12_ok, _eq12)
+_t1 = E.AnimationClip([{'time': 0.0, 'extra': (np.array([1.0]),)}])
+_t2 = E.AnimationClip([{'time': 0.0, 'extra': (np.array([1.0]),)}])
+check('⑧ V-12 tuple 内嵌 ndarray 内容相等', (_t1 == _t2) is True)
+_tcp = _t1.copy()
+check('⑧ V-12 tuple 内嵌 ndarray 深拷',
+      _tcp.frames[0]['extra'][0] is not _t1.frames[0]['extra'][0])
+# undo 快照对嵌套数组的隔离
+_nested3 = E.AnimationClip([
+    {'time': 0.0, 'position': [np.array([1.0, 2.0, 3.0])],
+     'rotation': (0.0, 0.0, 0.0), 'scale': (1.0, 1.0, 1.0)}])
+e62 = make_engine()
+m62, _ = add_anim_obj(e62, _nested3)
+_snap62 = U.snapshot(m62)
+_cp62 = _snap62['animator'][0]['c']
+check('⑧ V-12 undo 快照深拷嵌套数组',
+      _cp62.frames[0]['position'][0] is not _nested3.frames[0]['position'][0])
+_nested3.frames[0]['position'][0][0] = 77.0
+check('⑧ V-12 改模型嵌套数组不污染快照',
+      abs(float(_cp62.frames[0]['position'][0][0]) - 1.0) < 1e-12,
+      str(_cp62.frames[0]['position'][0]))
+
+print()
 print('总结果:', 'ALL PASS ✅' if ok else '有 FAIL ❌')
 sys.exit(0 if ok else 1)

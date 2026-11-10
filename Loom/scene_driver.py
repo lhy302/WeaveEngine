@@ -23,7 +23,7 @@ from engine import GameObject, Point3D, LightState, DEFAULT_ACTIONS
 # 2026-11-07 (_fix_summary §5 遗留): LOD 配置代 —— 只在 renderer.lod_* 变化时
 # 重建"配了 LOD 的模型"集合, 无 LOD 场景每帧 O(1) 早退 (不再全量扫描).
 from loom_components import (MeshRendererComponent, animator_from_dict,
-                            evaluate_animations)
+                            evaluate_animations, physics_disabled_by_env)
 # 2026-11-06 相机对齐 (双后端): CameraState 实体 (纯数据类, 无 GL 依赖) ——
 # 场景 cameras/active_camera 在 Vk 侧也要还原, 否则"场景里的 Camera 实体"
 # 在 Vulkan 播放器里完全不存在, 只能看轨道相机。
@@ -1076,6 +1076,8 @@ class SceneDriver:
     def _step_physics(self, dt):
         """物理桥三段 (脚本后/动画前, 同 engine 帧序): ensure_models 差量 ->
         pre_step (脏同步+策略R+手动重力 R1) -> step (释放 GIL) -> post_step 回读."""
+        if physics_disabled_by_env():        # R6 V-10: LOOM_NO_PHYSICS=1 真开关
+            return
         br = self._bridge
         if br is None:
             br = self._bridge = self._ensure_phys_bridge()
@@ -1316,15 +1318,35 @@ class SceneDriver:
                           % (m.name, sc.script_id, e))
                     sc._script_broken = True
 
+    def _physics_available(self):
+        """物理**真的在驱动刚体**吗 (R6 V-09: 与 _ensure_phys_bridge 同构).
+
+        旧判据 ¤physb is not None¤ 恒真 —— ¤physics_bridge¤ 在 culverin 缺失时
+        仍能 import (内部兜底 cv_available=False), 于是 VK 上动画按"物理可用"
+        跳过、而 _step_physics 因桥 None 直接 return -> 没有任何写者 ->
+        动态刚体永久冻结 (P-06 在 VK 未兑现)。
+        """
+        if physics_disabled_by_env():
+            return False
+        if getattr(self, '_bridge_disabled', False):
+            return False
+        if getattr(self, '_bridge', None) is not None:
+            return True                      # 桥已建 -> 物理真的在跑
+        if physb is None:
+            return False
+        return bool(getattr(physb, 'cv_available', False))
+
     def _update_animations(self, dt):
         """推进动画并应用变换 —— beta6 C1: 与 GLEngine 共用同一份内核.
 
         旧实现是 engine.update_animations 的逐行复刻(改一处忘一处 -> 双后端
         行为分叉); 现直接调 loom_components.evaluate_animations。
-        R5-02 P-06: 物理桥模块缺失(culverin 不在) 时回退动画驱动动态刚体。
+        R5-02 P-06 / R6 V-09: 物理不可用 (culverin 缺失 / 桥禁) 时回退动画驱动。
         """
-        return evaluate_animations(self.models, dt,
-                                   physics_available=physb is not None)
+        stats = evaluate_animations(self.models, dt,
+                                    physics_available=self._physics_available())
+        self._anim_fallback_models = stats.get('fallback_models') or ()
+        return stats
 
     # ================ B1: 脚本 "引擎 API 最小面" (修 Vk 播放器脚本 broken) ================
     # 与 engine.GLEngine 同签名同语义 (几何走 physics_bridge 静态助手, 公式逐位

@@ -13,7 +13,7 @@ mixin 只通过 self 按需访问 (语义与拆分前逐位一致)。
 
 import math
 
-from loom_components import evaluate_animations
+from loom_components import evaluate_animations, physics_disabled_by_env
 
 
 class FrameComponentMixin:
@@ -95,7 +95,13 @@ class FrameComponentMixin:
             getattr(self, '_phys_bridge_auto', False))
         if getattr(self, '_phys_bridge_disabled', False):
             phys_ok = False
-        return evaluate_animations(self.models, dt, physics_available=phys_ok)
+        if physics_disabled_by_env():        # R6 V-10: LOOM_NO_PHYSICS=1 真开关
+            phys_ok = False
+        stats = evaluate_animations(self.models, dt, physics_available=phys_ok)
+        # R6 V-08: 回退驱动的这批物体要在**同一帧**的物理步里被排除,
+        # 否则动画位姿 + legacy 物理位姿叠加 (偏移每帧线性增长)。
+        self._anim_fallback_models = stats.get('fallback_models') or ()
+        return stats
 
     def _call_collision_cb(self, m, hook, other):
         """调物体上所有脚本的碰撞回调 (坏脚本标记不崩帧)."""
