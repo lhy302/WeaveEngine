@@ -24,6 +24,7 @@ layout(location = 2) in vec3 v_world_pos;
 // M36 环境反射 (对标 Unity Reflection Probe / Cubemap): 有 env 时替代环境光项
 uniform samplerCube u_env;
 // M36 贴图: 颜色贴图 (albedo) 采样。无贴图材质绑 1x1 白纹理 (乘白=原色, 视觉不变)。
+layout(location = 4) in vec4 v_matv;   // T3c-2c: (sat, metallic, roughness, pbr)
 layout(location = 5) in vec2 v_uv;
 uniform sampler2D u_albedo;
 // M36 法线贴图: 切线空间法线 (导数法 TBN, 无需预计算切线)。

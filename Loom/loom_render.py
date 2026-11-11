@@ -741,6 +741,8 @@ class RenderMixin:
             if ent is None:                    # 防御: 桶资源未建 (attach 路径遗漏)
                 ent = self._build_bucket_geo(key, self.models[idxs[0]])
             k = len(idxs)
+            # T3c-2c: 桶键 index 5 = (metallic, roughness, pbr)；同桶材质一致
+            _pbr = key[5] if len(key) > 5 else (0.0, 0.5, 0)
             self._grow_bucket_inst(key, k)
             inst = self._bucket_inst[key]
             st = inst.get('stage')
@@ -793,6 +795,9 @@ class RenderMixin:
                     sel = np.where(keep)[0]
                     st[:n_main, 0:16] = g[:k][sel].reshape(n_main, 16)
                     st[:n_main, 16] = sat_k[sel]
+                    st[:n_main, 17] = float(_pbr[0])   # T3c-2c: matv.y=metallic
+                    st[:n_main, 18] = float(_pbr[1])   # matv.z=roughness
+                    st[:n_main, 19] = float(_pbr[2])   # matv.w=pbr
                     st[:n_main, 20:24] = col_k[sel]
                     if _prof_b:
                         _w0 = time.perf_counter()
@@ -803,6 +808,9 @@ class RenderMixin:
             else:
                 st[:k, 0:16] = g[:k].reshape(k, 16)
                 st[:k, 16] = sat_k
+                st[:k, 17] = float(_pbr[0])       # T3c-2c: matv.y=metallic
+                st[:k, 18] = float(_pbr[1])       # matv.z=roughness
+                st[:k, 19] = float(_pbr[2])       # matv.w=pbr
                 st[:k, 20:24] = col_k
                 mbn[key] = k
                 if _prof_b:
