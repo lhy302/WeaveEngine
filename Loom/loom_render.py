@@ -950,40 +950,39 @@ class RenderMixin:
             if _p:
                 _c1 = time.perf_counter(); _acc_tex += _c1 - _c0; _c0 = _c1
             ntex = nrm.get(key)
-            try:
-                self.prog['u_has_normal_map'].value = 1.0 if ntex is not None else 0.0
-            except Exception:
-                pass
             if _p:
                 _c1 = time.perf_counter(); _acc_uni += _c1 - _c0; _c0 = _c1
             if ntex is not None:
                 ntex.use(1)
             if _p:
                 _c1 = time.perf_counter(); _acc_tex += _c1 - _c0; _c0 = _c1
-            # M36 PBR: 每桶设材质级 PBR uniform (从桶键取, 同桶一致)
-            try:
-                _pbr = key[5] if len(key) > 5 else (0.0, 0.5, 0)
-                self.prog['u_metallic'].value = float(_pbr[0])
-                self.prog['u_roughness'].value = float(_pbr[1])
-                self.prog['u_material_pbr'].value = float(_pbr[2])
-            except Exception:
-                pass
+            # M36 PBR: 每桶材质参数（T3c-2a: 与 GL/VK 共用的 32B 桶级 UBO）
+            _pbr = key[5] if len(key) > 5 else (0.0, 0.5, 0)
             # M36 环境反射: 每桶绑 env cubemap (单元 2)
             etex = env.get(key)
-            try:
-                self.prog['u_has_env'].value = 1.0 if etex is not None else 0.0
-            except Exception:
-                pass
             if _p:
                 _c1 = time.perf_counter(); _acc_uni += _c1 - _c0; _c0 = _c1
+            _envlod = 0.0
             if etex is not None:
                 etex.use(2)
                 try:
                     import math as _m
-                    self.prog['u_env_max_lod'].value = float(
-                        max(0, int(_m.log2(etex.size[0]))))
+                    _envlod = float(max(0, int(_m.log2(etex.size[0]))))
                 except Exception:
                     pass
+            # T3c-2a: 一次 pack + write + bind（字段顺序 = loom_shader_bindings.BUCKET_FIELDS）
+            try:
+                import struct as _st
+                if getattr(self, '_bucket_ubo', None) is None:
+                    self._bucket_ubo = self.ctx.buffer(reserve=32)
+                    self.prog['Bucket'].binding = 1
+                self._bucket_ubo.write(_st.pack(
+                    '8f', float(_pbr[0]), float(_pbr[1]), float(_pbr[2]),
+                    1.0 if ntex is not None else 0.0,
+                    1.0 if etex is not None else 0.0, _envlod, 0.0, 0.0))
+                self._bucket_ubo.bind_to_uniform_block(1)
+            except Exception:
+                pass
             if _p:
                 _c1 = time.perf_counter(); _acc_tex += _c1 - _c0; _c0 = _c1
             ent['vao'].render(moderngl.TRIANGLES, instances=cnt)

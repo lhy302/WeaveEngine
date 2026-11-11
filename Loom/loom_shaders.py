@@ -17,21 +17,16 @@ const int MAX_LIGHTS = 8;
 layout(location = 0) in vec4 v_color;
 layout(location = 1) in vec3 v_normal;
 layout(location = 2) in vec3 v_world_pos;
+//@@BUCKET_UBO@@
 // M36 PBR (2026-10-14): (metallic, roughness, pbr_flag)。全局 u.misc.x 与逐实例
 // v_pbr.z 双门控 —— 默认(0)走原 Blinn-Phong 逐位不变 (向后兼容)。
-uniform float u_metallic;          // 材质金属度 (每桶 uniform, 对标 Unity Metallic)
-uniform float u_roughness;         // 材质粗糙度 (对标 Unity Smoothness 的反相)
-uniform float u_material_pbr;      // 材质 PBR 开关 (>0.5=该材质用 PBR)
 // M36 环境反射 (对标 Unity Reflection Probe / Cubemap): 有 env 时替代环境光项
 uniform samplerCube u_env;
-uniform float u_has_env;           // 0=无 env (走原 ambient), 1=有
-uniform float u_env_max_lod;       // cubemap mip 级数 (粗糙度选级用)
 // M36 贴图: 颜色贴图 (albedo) 采样。无贴图材质绑 1x1 白纹理 (乘白=原色, 视觉不变)。
 layout(location = 5) in vec2 v_uv;
 uniform sampler2D u_albedo;
 // M36 法线贴图: 切线空间法线 (导数法 TBN, 无需预计算切线)。
 uniform sampler2D u_normal_map;
-uniform float u_has_normal_map;    // 0=无 (跳过整段), 1=有
 // 多光源 (最多 8 个): 平行光 / 点光源, 场景光源由用户手动添加 (无默认光源)
 // 2026-10-19 第1档序9 聚光灯: 内外锥角余弦 (避免每片元 cos 计算; Python 侧上传算好)
 layout(location = 3) in float v_sat;
@@ -124,8 +119,8 @@ float point_shadow(int slot, vec3 rd) {
 void main() {
     vec3 n = normalize(v_normal);
     // M36 法线贴图: 导数法 TBN (从世界位置与 UV 的屏幕空间导数解切线/副切线,
-    // 免预计算切线)。无贴图 (u_has_normal_map=0) 整段跳过, 零开销。
-    if (u_has_normal_map > 0.5) {
+    // 免预计算切线)。无贴图 (bkt.has_normal_map=0) 整段跳过, 零开销。
+    if (bkt.has_normal_map > 0.5) {
         vec3 dp1 = dFdx(v_world_pos);
         vec3 dp2 = dFdy(v_world_pos);
         vec2 duv1 = dFdx(v_uv);
@@ -143,9 +138,9 @@ void main() {
     vec3 v = normalize(u.cam.xyz - v_world_pos);
     // M36 PBR: 底色提前算 (Blinn-Phong 与 PBR 共用)
     vec3 base = v_color.rgb * texture(u_albedo, v_uv).rgb;
-    bool use_pbr = (u.misc.x > 0.5) && (u_material_pbr > 0.5);
-    float metal = clamp(u_metallic, 0.0, 1.0);
-    float rough = clamp(u_roughness, 0.04, 1.0);
+    bool use_pbr = (u.misc.x > 0.5) && (bkt.pbr > 0.5);
+    float metal = clamp(bkt.metallic, 0.0, 1.0);
+    float rough = clamp(bkt.roughness, 0.04, 1.0);
     vec3 pbr_acc = vec3(0.0);
     // 半球环境光: 朝上面更亮/朝下面更暗 (按法线朝向分离相邻面)
     // 系数已压低: 顶面 0.30 / 侧面 0.16 / 底面 0.02 —— 避免旧版(顶面 0.50)把纯色面洗白
@@ -236,12 +231,12 @@ void main() {
     // M36 PBR 二选一: 全局+材质双门控; 未启时走原 Blinn-Phong (逐位不变)
     vec3 col;
     if (use_pbr) {
-        if (u_has_env > 0.5) {
+        if (bkt.has_env > 0.5) {
             // M36 环境反射: 漫反射=法线方向采样 × base×(1-metal);
             // 镜面=反射向量采样 (粗糙度选 mip 级) × 菲涅尔 F0 (粗糙度调高光衰减)
             vec3 F0 = mix(vec3(0.04), base, metal);
             vec3 R = reflect(-v, n);
-            vec3 spec_env = textureLod(u_env, R, rough * u_env_max_lod).rgb * F0;
+            vec3 spec_env = textureLod(u_env, R, rough * bkt.env_max_lod).rgb * F0;
             vec3 diff_env = texture(u_env, n).rgb * base * (1.0 - metal);
             col = pbr_acc + diff_env + spec_env + vec3(rim);
         } else {
@@ -403,7 +398,10 @@ void main() {
 from loom_scene_ubo import glsl_block as _glsl_scene_block
 from loom_shader_bindings import expand as _expand_bindings
 _SCENE_UBO_GLSL = _expand_bindings(_glsl_scene_block())
+from loom_shader_bindings import bucket_block_glsl as _bucket_block
+_BUCKET_UBO_GLSL = _expand_bindings(_bucket_block())
 _FRAG_SRC = _FRAG_SRC.replace('//@@SCENE_UBO@@', _SCENE_UBO_GLSL)
+_FRAG_SRC = _FRAG_SRC.replace('//@@BUCKET_UBO@@', _BUCKET_UBO_GLSL)
 # _VERT_SRC 由 _shared_vert_src() 在文件末尾加载（单源 main.vert）
 
 

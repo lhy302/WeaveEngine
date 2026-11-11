@@ -120,7 +120,13 @@ _MAIN_FRAG = """
 // 2026-11-06 法线贴图 (与 GL u_normal_map 同式); 无贴图时绑 1x1 平直法线(0.5,0.5,1)
 @group(0) @binding(7) var t_normal: texture_2d<f32>;
 // 2026-11-06: 每桶参数 x = 是否有法线贴图 (GL u_has_normal_map 同语义)
-@group(0) @binding(8) var<uniform> bkt: vec4f;
+// T3c-2a: 桶级参数与 GL 同一张表（loom_shader_bindings.BUCKET_FIELDS，32B）
+struct Bucket {
+    metallic: f32, roughness: f32, pbr: f32,
+    has_normal_map: f32, has_env: f32, env_max_lod: f32,
+    pad0: f32, pad1: f32,
+}
+@group(0) @binding(8) var<uniform> bkt: Bucket;
 // 2026-11-06 PBR 环境反射 (与 GL u_env 同式); y=has_env z=env_max_lod
 @group(0) @binding(9) var t_env: texture_cube<f32>;
 // 2026-11-07 第 2 张平行光阴影贴图 (binding 10/11): 第 2 盏投影平行光专用.
@@ -295,7 +301,7 @@ fn light_pair(L: LightX, n: vec3f, v: vec3f, wpos: vec3f,
 
 @fragment fn fs(in: VSOut) -> @location(0) vec4f {
     var n = normalize(in.n);
-    if (bkt.x > 0.5) {
+    if (bkt.has_normal_map > 0.5) {
         // 与 GL 一致的导数 TBN: dp/duv 解切线/副切线, Gram-Schmidt 正交化
         let dp1 = dpdx(in.wpos);
         let dp2 = dpdy(in.wpos);
@@ -334,11 +340,11 @@ fn light_pair(L: LightX, n: vec3f, v: vec3f, wpos: vec3f,
     let rim = 0.12 * pow(1.0 - max(dot(n, v), 0.0), 3.0);
     var col: vec3f;
     if (use_pbr) {
-        if (bkt.y > 0.5) {
+        if (bkt.has_env > 0.5) {
             let F0e = mix(vec3f(0.04), base, vec3f(metal));
             let R = reflect(-v, n);
             let spec_env = textureSampleLevel(t_env, s_albedo, R,
-                                              rough * bkt.z).rgb * F0e;
+                                              rough * bkt.env_max_lod).rgb * F0e;
             let diff_env = textureSampleLevel(t_env, s_albedo, n, 0.0).rgb
                            * base * (1.0 - metal);
             col = pbr_acc + diff_env + spec_env + vec3f(rim);
@@ -1702,12 +1708,12 @@ class VkRenderer:
         bbuf = self._bkt_bufs.get(key)
         if bbuf is None:
             import numpy as _np
-            bbuf = d.create_buffer(size=16,
+            bbuf = d.create_buffer(size=32,
                                   usage=wgpu.BufferUsage.UNIFORM | wgpu.BufferUsage.COPY_DST)
-            _v = _np.zeros(4, dtype=_np.float32)
-            _v[0] = 1.0 if has_nrm else 0.0
-            _v[1] = 1.0 if has_env else 0.0
-            _v[2] = float(env_maxlod)
+            _v = _np.zeros(8, dtype=_np.float32)
+            _v[3] = 1.0 if has_nrm else 0.0     # has_normal_map
+            _v[4] = 1.0 if has_env else 0.0     # has_env
+            _v[5] = float(env_maxlod)           # env_max_lod
             d.queue.write_buffer(bbuf, 0, _v.tobytes())
             self._bkt_bufs[key] = bbuf
         g = d.create_bind_group(layout=self._bgl, entries=[
@@ -1719,7 +1725,7 @@ class VkRenderer:
             {'binding': 5, 'resource': view},
             {'binding': 6, 'resource': sampler},
             {'binding': 7, 'resource': nview},
-            {'binding': 8, 'resource': {'buffer': bbuf, 'offset': 0, 'size': 16}},
+            {'binding': 8, 'resource': {'buffer': bbuf, 'offset': 0, 'size': 32}},
             {'binding': 9, 'resource': env_view},
             {'binding': 10, 'resource': self._shadow_view2},
             {'binding': 11, 'resource': self._shadow_sampler}])

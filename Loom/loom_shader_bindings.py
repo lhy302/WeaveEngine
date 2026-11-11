@@ -6,6 +6,7 @@ GL 与 VK 共用这一张表：着色器里只写 `layout(binding = B_HDR)`，�
 """
 import re
 
+B_BUCKET = 1     # 桶级 UBO（GL 绑定点；VK 在 binding 8，字段布局一致）
 B_SCENE = 0      # 主 pass 场景 UBO（VK SceneC 就在 binding 0；GL 用 bind_to_uniform_block(0)）
 B_HDR = 0        # 主输入纹理（tonemap: color.hdr；bright: color.hdr；down: bloom.half）
 B_BLOOM = 1      # 第二输入纹理（tonemap: bloom 目标；其余 pass 复用同槽位）
@@ -14,6 +15,7 @@ B_PARAMS = 3     # std140 参数块（p0/p1）
 
 _TABLE = {
     'B_SCENE': B_SCENE,
+    'B_BUCKET': B_BUCKET,
     'B_HDR': B_HDR,
     'B_BLOOM': B_BLOOM,
     'B_SAMPLER': B_SAMPLER,
@@ -25,7 +27,7 @@ def expand(src):
     """把 B_xxx 展开成数字（按标识符边界，避免误伤其它名字）。"""
     def _sub(m):
         return str(_TABLE[m.group(0)])
-    return re.sub(r"\bB_(SCENE|HDR|BLOOM|SAMPLER|PARAMS)\b", _sub, src)
+    return re.sub(r"\bB_(SCENE|BUCKET|HDR|BLOOM|SAMPLER|PARAMS)\b", _sub, src)
 
 # ---------------- T3c-3: 实例属性布局（GL/VK 共用同一张表）----------------
 INSTANCE_STRIDE = 96           # T3c-3: 24 f32 / 实例（法线矩阵移到 GPU）
@@ -41,4 +43,35 @@ VERTEX_LAYOUT = (
     (2, 'in_color', 24, 16), (13, 'in_uv', 40, 8),
 )
 VERTEX_STRIDE = 48
+
+
+# ---------------- T3c-2a: 桶级参数（GL/VK 同一张表）----------------
+BUCKET_FIELDS = (
+    ('metallic', 0), ('roughness', 4), ('pbr', 8),
+    ('has_normal_map', 12), ('has_env', 16), ('env_max_lod', 20),
+    ('pad0', 24), ('pad1', 28),
+)
+BUCKET_FLOATS = 8
+BUCKET_BYTES = 32
+
+
+def bucket_block_glsl():
+    """由表生成 GL 的桶级 UBO 声明（字段名/顺序与 VK Bucket 一致）。"""
+    return (
+        "layout(std140, binding = B_BUCKET) uniform Bucket {\n"
+        "    float metallic;\n"
+        "    float roughness;\n"
+        "    float pbr;\n"
+        "    float has_normal_map;\n"
+        "    float has_env;\n"
+        "    float env_max_lod;\n"
+        "    float pad0;\n"
+        "    float pad1;\n"
+        "} bkt;\n")
+
+
+def assert_bucket_layout():
+    assert len(BUCKET_FIELDS) * 4 == BUCKET_BYTES
+    assert [off for _n, off in BUCKET_FIELDS] == [i * 4 for i in range(BUCKET_FLOATS)]
+    return BUCKET_BYTES
 

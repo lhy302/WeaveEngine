@@ -393,6 +393,19 @@ def t_scene_ubo():
           all('layout(location = %d) in vec4 %s' % (loc, name) in SH._VERT_SRC
               for loc, name, _off in SB.INSTANCE_LAYOUT),
           '')
+    check('H17 桶级 UBO 表：8 字段 / 32B',
+          SB.assert_bucket_layout() == 32 and SB.BUCKET_FLOATS == 8,
+          (SB.BUCKET_BYTES, len(SB.BUCKET_FIELDS)))
+    check('H18 GL 桶级 block == 生成器输出',
+          _exp(SB.bucket_block_glsl()) in SH._FRAG_SRC, '')
+    _vb = VR2._MAIN_VERT + VR2._MAIN_FRAG
+    check('H19 VK Bucket 结构体字段顺序 == 表',
+          all(k in _vb for k in ('metallic', 'roughness', 'pbr',
+                                 'has_normal_map', 'has_env', 'env_max_lod')),
+          '')
+    import inspect as _insp
+    check('H20 VK 桶级 buffer 32B == 表',
+          'size=32' in _insp.getsource(VR2.VkRenderer._tex_group), '')
     check('H16 顶点布局表 0/1/2/13 与 VK 一致',
           [x[0] for x in SB.VERTEX_LAYOUT] == [0, 1, 2, 13], SB.VERTEX_LAYOUT)
     check('H10 GL shader 结构体字段顺序 == 表',
