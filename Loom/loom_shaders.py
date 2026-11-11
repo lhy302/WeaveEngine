@@ -11,17 +11,21 @@ engine.py 通过 `from loom_shaders import *` 重新导出这些名字，
 # 之前的纯兰伯特(0.2+0.8*diff)无观察方向项, 立方体相邻面亮度可能完全相等(如 -Y/+Z 都停在环境光),
 # 导致分不出边缘. 现在: 高光/边缘光看观察角度, 半球环境光按法线朝向分离相邻面.
 _VERT_SRC = """#version 430
-in vec3 in_pos;
-in vec3 in_normal;
-in vec4 in_color;
+layout(location = 0) in vec3 in_pos;
+layout(location = 1) in vec3 in_normal;
+layout(location = 2) in vec4 in_color;
 // A2 (2026-08-29) GL 实例化批绘制: 世界矩阵/饱和度/颜色走 per-instance 属性
 // (/i divisor), 桶内全部实例一次 draw —— 逐物体 u_model/uniform 上传循环取消.
 // ★构造约定: a_w# = 引擎 numpy M 的行 (行主序), GLSL mat4(a_w0..a_w3) 以"列"收
 // 参, 故 mat4 值 = M^T —— 与旧 u_model (M.tobytes() 直传) 数学逐位一致.
-in vec4 a_w0; in vec4 a_w1; in vec4 a_w2; in vec4 a_w3;
-in vec4 a_sat;   // x = 物体饱和度 (0=灰阶, 1=原始, >1=增艳)
-in vec4 a_col;   // rgb + w>0.5 = 材质单色覆盖网格面色 (同组件 color 语义)
-in vec2 in_uv;   // M36 贴图: 逐顶点 UV
+// T3c-3: 实例属性 location 表与 VK 共用（见 loom_shader_bindings.INSTANCE_LAYOUT）
+layout(location = 3) in vec4 a_w0;
+layout(location = 4) in vec4 a_w1;
+layout(location = 5) in vec4 a_w2;
+layout(location = 6) in vec4 a_w3;
+layout(location = 7) in vec4 a_sat;   // x = 物体饱和度（T3c-3 表：nm 4 行在 64..127B，GL 不读）
+layout(location = 8) in vec4 a_col;   // rgb + w>0.5 = 材质单色覆盖
+layout(location = 13) in vec2 in_uv;   // M36 贴图: 逐顶点 UV
 //@@SCENE_UBO@@
 out vec4 v_color;
 out vec3 v_normal;

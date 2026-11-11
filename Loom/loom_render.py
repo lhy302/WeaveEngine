@@ -803,7 +803,7 @@ class RenderMixin:
             else:
                 st[:k, 0:16] = g[:k].reshape(k, 16)
                 st[:k, 16] = sat_k
-                st[:k, 20:24] = col_k                # color=None 的实例留 0 (旧语义)
+                st[:k, 20:24] = col_k
                 mbn[key] = k
                 if _prof_b:
                     _w0 = time.perf_counter()
@@ -1036,16 +1036,9 @@ class RenderMixin:
             P = mat4_perspective(np, self._fov, self.width / self.height,
                                  self.near, self.far)
         self._vp = V @ P                                      # 供 draw_lines / 射线拾取
-        # 组6件3: u_view_proj / u_view_pos 差分上传 (相机静止帧跳过 GL 调用)
-        vp4 = self._vp.astype('f4').tobytes()
-        if self._u_last.get('u_view_proj') != vp4:
-            self._uniform('u_view_proj').write(vp4)
-            self._u_last['u_view_proj'] = vp4
+        # T3c-1: u_view_proj / u_view_pos / 灯光数组 / 全局标量 全部进 Scene UBO，
+        # 由 _upload_lights() 一次 pack + write + bind 完成（单点表）。
         self._upload_lights()
-        campos = (self.camera.x, self.camera.y, self.camera.z)
-        if self._u_last.get('u_view_pos') != campos:
-            self._uniform('u_view_pos').value = campos
-            self._u_last['u_view_pos'] = campos
 
     # ---- 2026-11-10 阶段 2B1: 剖面分段（阶段名与迁移前一致，口径也一致）----
     def _before_pass_prof(self, spec):

@@ -24,3 +24,20 @@ def expand(src):
     def _sub(m):
         return str(_TABLE[m.group(0)])
     return re.sub(r"\bB_(HDR|BLOOM|SAMPLER|PARAMS)\b", _sub, src)
+
+# ---------------- T3c-3: 实例属性布局（GL/VK 共用同一张表）----------------
+INSTANCE_STRIDE = 160          # 40 f32 / 实例
+INSTANCE_LAYOUT = (
+    (3,  'a_w0', 0),    (4, 'a_w1', 16),   (5, 'a_w2', 32),   (6, 'a_w3', 48),
+    (7,  'a_nm0', 64),  (8, 'a_nm1', 80),  (9, 'a_nm2', 96),  (10, 'a_nm3', 112),
+    (11, 'a_sat', 128),
+    (12, 'a_col', 144),
+)
+
+# 顶点属性（非实例）：pos/normal/color/uv —— VK 与 GL 用同一 location 表
+VERTEX_LAYOUT = (
+    (0, 'in_pos', 0, 12), (1, 'in_normal', 12, 12),
+    (2, 'in_color', 24, 16), (13, 'in_uv', 40, 8),
+)
+VERTEX_STRIDE = 48
+
