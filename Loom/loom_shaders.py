@@ -39,7 +39,7 @@ layout(location = 3) in float v_sat;
 // 全部阴影贴图平铺进 sampler 数组 (平行光 1 张 2D / 点光 6 面 2D),
 // 每光源记录起始槽位 u_shadow_slot; 平行光额外带 view-proj 与 beam 截面参数.
 const int MAX_SHADOW_SLOTS = 16;
-uniform sampler2DShadow u_shadow_maps[MAX_SHADOW_SLOTS];  // 阴影采样器: GPU 深度比较
+uniform sampler2D u_shadow_maps[MAX_SHADOW_SLOTS];  // T3c-4=①: 原始深度 + 手工比较（与 VK 一致）
 out vec4 frag_color;
 
 // ---- M36 PBR (Cook-Torrance): GGX 分布 + Smith 几何 + Schlick 菲涅尔 ----
@@ -81,12 +81,14 @@ vec3 pbr_light(vec3 N, vec3 V, vec3 L, vec3 radiance, vec3 albedo,
 // (忽略 compare_func, 实测 ref<=存值=照亮; 与 moderngl 上报的 '<=' 相反).
 // 阴影贴图存真实深度(近=小), 故传 ref = depth-bias (负 bias 把判定阈值推向光源,
 // 防自阴影 acne): stored>=depth-bias <=> 遮挡面在片元之后 -> 片元不被挡=照亮.
-float pcf_shadow(sampler2DShadow sm, vec2 uv, float depth, float bias, float res) {
+float pcf_shadow(sampler2D sm, vec2 uv, float depth, float bias, float res) {
+    // T3c-4=①: 与 VK pcf() 逐字一致 —— 9 次原始深度采样 + 显式比较 + 平均
     float ts = 1.0 / res;
     float sh = 0.0;
     for (int y = -1; y <= 1; y++) {
         for (int x = -1; x <= 1; x++) {
-            sh += texture(sm, vec3(uv + vec2(float(x), float(y)) * ts, depth - bias));
+            float d = texture(sm, uv + vec2(float(x), float(y)) * ts).r;
+            if (d >= depth - bias) { sh += 1.0; }
         }
     }
     return sh / 9.0;

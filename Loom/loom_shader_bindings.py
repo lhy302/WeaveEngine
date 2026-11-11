@@ -6,12 +6,14 @@ GL 与 VK 共用这一张表：着色器里只写 `layout(binding = B_HDR)`，�
 """
 import re
 
+B_SCENE = 0      # 主 pass 场景 UBO（VK SceneC 就在 binding 0；GL 用 bind_to_uniform_block(0)）
 B_HDR = 0        # 主输入纹理（tonemap: color.hdr；bright: color.hdr；down: bloom.half）
 B_BLOOM = 1      # 第二输入纹理（tonemap: bloom 目标；其余 pass 复用同槽位）
 B_SAMPLER = 2    # 采样器
 B_PARAMS = 3     # std140 参数块（p0/p1）
 
 _TABLE = {
+    'B_SCENE': B_SCENE,
     'B_HDR': B_HDR,
     'B_BLOOM': B_BLOOM,
     'B_SAMPLER': B_SAMPLER,
@@ -23,7 +25,7 @@ def expand(src):
     """把 B_xxx 展开成数字（按标识符边界，避免误伤其它名字）。"""
     def _sub(m):
         return str(_TABLE[m.group(0)])
-    return re.sub(r"\bB_(HDR|BLOOM|SAMPLER|PARAMS)\b", _sub, src)
+    return re.sub(r"\bB_(SCENE|HDR|BLOOM|SAMPLER|PARAMS)\b", _sub, src)
 
 # ---------------- T3c-3: 实例属性布局（GL/VK 共用同一张表）----------------
 INSTANCE_STRIDE = 96           # T3c-3: 24 f32 / 实例（法线矩阵移到 GPU）

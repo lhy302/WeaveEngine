@@ -47,15 +47,25 @@ class ShadowMixin:
         sm = self._shadow_maps.get(light.guid)
         if sm is not None:
             return sm
+        # 2026-11-11 T3c-4=①: 手工比较（与 VK 逐字一致）—— 深度纹理关掉硬件 compare、
+        # 采样器用 NEAREST，shader 里 9 次 texture().r + 显式 `>= ref-bias` 比较。
+        def _manual_compare(tex):
+            try:
+                tex.compare_func = ''                      # NONE（默认比较模式）
+            except Exception:
+                pass
+            tex.filter = (moderngl.NEAREST, moderngl.NEAREST)
+            return tex
+
         if light.kind == 'directional':
-            tex = self.ctx.depth_texture((self._shadow_res, self._shadow_res))
-            # 阴影采样: 存真实深度 + pcf_shadow 传 ref=depth-bias
-            # (此驱动实测固定 stored>=ref=照亮, 忽略 compare_func; 反转深度方案已废弃)
+            tex = _manual_compare(
+                self.ctx.depth_texture((self._shadow_res, self._shadow_res)))
             sm = {'type': 'dir', 'tex': [tex],
                   'fbo': [self.ctx.framebuffer(depth_attachment=tex)]}
         else:
             res = self._shadow_point_res
-            texs = [self.ctx.depth_texture((res, res)) for _ in range(6)]
+            texs = [_manual_compare(self.ctx.depth_texture((res, res)))
+                    for _ in range(6)]
             sm = {'type': 'point', 'tex': texs,
                   'fbo': [self.ctx.framebuffer(depth_attachment=t) for t in texs]}
         self._shadow_maps[light.guid] = sm

@@ -210,7 +210,7 @@ class LightingMixin:
         if ul.get('scene') != raw:
             self._scene_ubo.write(raw)
             ul['scene'] = raw
-        self._scene_ubo.bind_to_uniform_block(_SB.B_PARAMS)
+        self._scene_ubo.bind_to_uniform_block(_SB.B_SCENE)
         samplers_t = tuple(sampler_units)
         if ul.get('u_shadow_maps') != samplers_t:
             self._uniform('u_shadow_maps').value = samplers_t

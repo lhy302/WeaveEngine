@@ -717,3 +717,19 @@ depth/raster/load/clear/绘制源/后处理阶段与参数）必须单一来源�
 | BGL 侧：texture `sample_type='depth'`、sampler `'comparison'` | wgpu 校验要求 |
 | 片段 `layout(location=N) in ...` 要求顶点段有同 location 的 out | 否则 naga 报输入不匹配 |
 | 实例属性用 `layout(location=N) in vec4`，VK 侧 `step_mode='instance'`、GL 侧 `divisor` | 两端语义对齐 |
+
+### 9.32 T3c-4=① 落地：GL 阴影改手工比较（2026-11-11）
+
+人类裁决 ①（都改手工比较）已执行：GL 阴影深度纹理改为 `compare_mode=NONE` + `NEAREST`，
+主片段 `u_shadow_maps` 从 `sampler2DShadow` 改成 `sampler2D`，`pcf_shadow()` 改为
+**9 次原始深度采样 + 显式 `d >= depth - bias` 比较 + 平均**，与 VK `pcf()` 逐字一致；
+点光 cube 阴影（GL 侧同样是 6 张 2D 面 + 同一 pcf_shadow）一并切换，距离归一与比较方向不变。
+
+**实测**：`ab_c_dir_shadow` GL/ref=**2.9e-5**、`ab_point_shadow`=**2.5e-5**、`ab_scene`=**2.6e-5**
+（均 ≤2e-4 门限，参考图**不重生成**）；`ab_gl_vk` 23/23 PASS；14 套 488 项 FAIL=0。
+**代价**：阴影边缘有 ≤3e-5 的软化差异（硬件双线性比较 vs 最近邻比较），文档留档。
+**帧时间**：`measure_engine --runs 3` 改前 214.6（213.2–217.1）/ 改后 209.1（209.1–216.8），
+区间重叠、差值在噪声内（每像素仍是 9 次阴影采样，带宽不变）。
+**WGSL 行数**：本轮未删除 VK 阴影 WGSL（其手工比较仍在 WGSL 里）；因两端算法现已逐字一致，
+下一步可把 `pcf` 单源化（VK 侧预计可删 ~12 行 WGSL）。
+

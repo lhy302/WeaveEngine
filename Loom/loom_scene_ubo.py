@@ -105,7 +105,7 @@ def glsl_block():
         "    vec4 params;   // bias, dir_res, point_far, dir_slot\n"
         "    vec4 extra;    // cos_inner, cos_outer, range, has_point_shadow\n"
         "};\n"
-        "layout(std140, binding = B_PARAMS) uniform Scene {\n"
+        "layout(std140, binding = B_SCENE) uniform Scene {\n"
         "    mat4 mvp;\n"
         "    vec4 cam;      // xyz view_pos, w ambient_scale\n"
         "    vec4 cnt;      // lights 0-3 flags\n"
