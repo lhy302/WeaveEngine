@@ -14,6 +14,20 @@ import moderngl
 
 from loom_post import HDR_TARGET, HALF_TARGET, QUARTER_TARGET, params
 
+
+_VS430 = _VS.replace('#version 330', '#version 430') if '_VS' in globals() else None
+
+
+def shared_frag(name):
+    """T3 Phase 0：读取 `Loom/shaders/<name>` 单源，展开兼容层（GL 用 #version 430）。"""
+    import os
+    base = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'shaders')
+    with open(os.path.join(base, name), encoding='utf-8') as fh:
+        src = fh.read()
+    with open(os.path.join(base, 'loom_shader_compat.glsl'), encoding='utf-8') as fh:
+        compat = fh.read()
+    return src.replace('//@@COMPAT@@', compat).replace('#version 450', '#version 430')
+
 _TARGETS = (HDR_TARGET, HALF_TARGET, QUARTER_TARGET)
 
 _VS = """#version 330
@@ -155,11 +169,11 @@ class GLPostChain:
             self._vbo = self.ctx.buffer(quad.tobytes())
             self._vao = {}
 
-    def _program(self, key, frag):
+    def _program(self, key, frag, vs=None):
         p = self._prog.get(key)
         if p is not None:
             return p
-        prog = self.ctx.program(vertex_shader=_VS, fragment_shader=frag)
+        prog = self.ctx.program(vertex_shader=vs or _VS, fragment_shader=frag)
         self._prog[key] = prog
         self._vao[key] = self.ctx.vertex_array(
             prog, [(self._vbo, '2f 2f', 'in_pos', 'in_uv')])
@@ -202,16 +216,30 @@ class GLPostChain:
             prog['u_texel'].value = (1.0 / max(1, half.width),
                                      1.0 / max(1, half.height))
         elif source == 'post.tonemap':
-            prog = self._program('tonemap', _TONEMAP)
+            # T3 Phase 0：片段改用**单源 GLSL**（与 VK 的 SPIR-V 同源），顶点仍是既有 quad VS
+            prog = self._program('tonemap', shared_frag('post_tonemap.frag'), vs=_VS430)
+            if getattr(self, '_ubo', None) is None:
+                self._ubo = self.ctx.buffer(reserve=32)
+                try:
+                    prog['Params'].binding = 3
+                except Exception:
+                    pass
             self.tex(HDR_TARGET).use(0)
             # 2a 补：无 down pass 时（LOOM_POST_STAGE=2）直接读 0.5 目标 —— 否则 bright 的
             # 输出没有消费者，档 2 会与档 1 逐位相同（死档）。
             _src = getattr(self.engine, '_post_bloom_src', QUARTER_TARGET)
             self.tex(_src).use(1)
-            prog['u_hdr'].value = 0
-            prog['u_bloom'].value = 1
-            prog['u_strength'].value = p['strength']
-            prog['u_exposure'].value = p['exposure']
+            try:
+                prog['u_hdr'].value = 0
+                prog['u_bloom'].value = 1
+            except Exception:
+                pass
+            # std140 Params：p0=(0,0,strength,exposure)  p1=(w,h,0,0)（GL 侧 uv 来自 varying）
+            import struct
+            self._ubo.write(struct.pack('8f', 0.0, 0.0, p['strength'], p['exposure'],
+                                        float(self.engine.width),
+                                        float(self.engine.height), 0.0, 0.0))
+            self._ubo.bind_to_uniform_block(3)
         else:
             raise KeyError('未知后处理绘制源: %s' % (source,))
         self._vao[{'post.bright': 'bright', 'post.down': 'down',

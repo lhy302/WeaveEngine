@@ -25,6 +25,7 @@ shader 双源 (Vk=WGSL; GL=现 GLSL)。矩阵全部行主序 tobytes() 直传。
 """
 import json
 import math
+import os
 from collections import OrderedDict
 
 import numpy as np
@@ -520,14 +521,7 @@ fn to_linear(c: vec3f) -> vec3f {
     return vec4f(c * 0.25, 1.0);
 }
 
-@fragment fn fs_tonemap(inp: FragIn) -> @location(0) vec4f {
-    let uv = uv_of(inp.pos.xy);
-    var c = to_linear(textureSample(t0, samp, uv).rgb);
-    c += textureSample(t1, samp, uv).rgb * par.p0.z;
-    c *= par.p0.w;
-    c = c / (1.0 + c);
-    return vec4f(pow(c, vec3f(1.0 / 2.2, 1.0 / 2.2, 1.0 / 2.2)), 1.0);
-}
+// T3 Phase 0: fs_tonemap 已删除 —— 片段改为单源 GLSL -> SPIR-V（Loom/shaders/post_tonemap.frag）
 """
 
 
@@ -1001,7 +995,13 @@ class VkRenderer:
                               'targets': [{'format': fmt}]})
             self._post_pipes = {'bright': _pipe2('fs_bright', fmts[0]),
                                 'down': _pipe2('fs_down', fmts[1]),
-                                'tonemap': _pipe2('fs_tonemap', fmts[2])}
+                                'tonemap': d.create_render_pipeline(
+                                    layout=lay,
+                                    vertex={'module': sh, 'entry_point': 'vs', 'buffers': []},
+                                    primitive={'topology': 'triangle-list', 'cull_mode': 'none'},
+                                    fragment={'module': self._post_tonemap_spv,
+                                              'entry_point': 'main',
+                                              'targets': [{'format': fmts[2]}]})}
             self._post_pipe_key = fmts
             return
         d = self.device
@@ -1028,13 +1028,29 @@ class VkRenderer:
                 primitive={'topology': 'triangle-list', 'cull_mode': 'none'},
                 fragment={'module': sh, 'entry_point': entry, 'targets': [tgt]})
 
+        # T3 Phase 0: tonemap 片段来自**单源 GLSL -> SPIR-V**（glslang 16.6.0，构建期生成）
+        _spv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                 'shaders', 'post_tonemap.frag.spv')
+        if not os.path.isfile(_spv_path):
+            raise RuntimeError('缺少 SPIR-V: %s（先跑 tools/build_shaders.py）' % _spv_path)
+        with open(_spv_path, 'rb') as _f:
+            _spv = _f.read()
+        self._post_tonemap_spv = d.create_shader_module(code=_spv)
         # 无独立 up pass（上采样合成在 tonemap 里做，与 GL 同口径）
         self._post_shader = sh
         self._post_lay = lay
+        def _pipe_spv(entry, fmt):
+            return d.create_render_pipeline(
+                layout=lay,
+                vertex={'module': sh, 'entry_point': 'vs', 'buffers': []},
+                primitive={'topology': 'triangle-list', 'cull_mode': 'none'},
+                fragment={'module': self._post_tonemap_spv, 'entry_point': 'main',
+                          'targets': [{'format': fmt}]})
         self._post_pipes = {
             'bright': _pipe('fs_bright', fmts[0]),
             'down': _pipe('fs_down', fmts[1]),
-            'tonemap': _pipe('fs_tonemap', fmts[2]),
+            # T3: 片段走 SPIR-V（顶点仍用 WGSL vs，接口=builtin(position)）
+            'tonemap': _pipe_spv('main', fmts[2]),
         }
         self._post_pipe_key = fmts
         self._post_layout = bgl
