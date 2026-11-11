@@ -7,13 +7,13 @@
 
 | # | 问题 | 选项 | 主审建议 | 状态 |
 |---|---|---|---|---|
-| **Q-PKG-1** | 源码包内嵌哪个 Python？（现在打包器仍嵌 **3.12.10**，元数据写 3.13.15，干净 3.13 发布机会直接 SystemExit） | A 跟随 3.13.15（改打包器解析 3.13 embeddable + 回写元数据）／ B 回退到 3.12 并改元数据／ C 源码包不内嵌 Python | **A** | 待答 |
-| **Q-PKG-2** | 包内 `python/` 被系统 Python 顶替的规则 | A 包内优先永不允许顶替／ B 允许顶替但**必须提示**／ C 维持静默 | **B** | 待答 |
-| **Q-PKG-3** | 编译包里的 `Loom.bat`（指向不存在的 `python\pythonw.exe + Loom.py`，已发货 beta5/beta6 都有此问题）+ README | A 修 bat／ B 修 bat + README（写明编译版双击 `Loom\Loom.exe`）／ C 删除 bat 与 README | **B** | 待答 |
-| **Q-VK-1** | 显式 `--backend vulkan` 失败时是否改写用户配置？ | A 不改写（尊重显式选择，本次仍走 GL 并提示）／ B 照常改写 | **A**（已按此口径实现，待你确认） | 主审暂定 |
-| **Q-VK-2** | VK 回退时写哪层配置？ | A 只写游戏设置.json（用户层 delta）／ B 同时写引擎层 设置.json（会顺带改编辑器默认后端） | **A**（已按此口径实现，待确认） | 主审暂定 |
-| **Q-PERF-1** | 是否安排一次**空闲窗口**重测 3.12 vs 3.13 的 FPS？（现有 −6%~−9% 是在并行负载下测的，R04 实测同配置可差 2.5x） | A 安排（约 20 分钟，需机器空闲）／ B 不重测，直接以现有数字定批次 D 的 ≥85 门槛 | **A** | 待答 |
-| **Q-HUB-1** | Hub「系统解释器覆盖包内嵌入 python」的规则（A-04 复核：包内依赖是 pip --target 装的，被系统 3.13 顶掉后 engine.py:24 ModuleNotFoundError，而 open_project 用 pythonw+LOOM_QUIET 不查存活 → 用户只看到「已启动」） | A 包内解释器权威 / B 系统权威（现状）/ C 包内优先但出声提示 | **A 或 C**（与 Q-PKG-2 同一问题，建议合并回答） | 待答 |
+| ~~Q-PKG-1~~ | 源码包内嵌哪个 Python | **已关闭（A）**：打包器按 `解释器.json.python_version` 解析 embeddable（现 3.13.15），版本不一致即打包失败 | — | 已关闭 |
+| ~~Q-PKG-2~~ | 包内 `python/` 被系统 Python 顶替 | **已关闭**：人类裁决**包内解释器权威**（不顶替）；Hub 侧同口径（Q-HUB-1 一并关闭） | — | 已关闭 |
+| ~~Q-PKG-3~~ | 编译包里的 `Loom.bat` | **已关闭（B）**：bat 现优先 `Loom\Loom.exe`（编译版）再回退 python；README 同步 | — | 已关闭 |
+| ~~Q-VK-1~~ | 显式 `--backend vulkan` 失败是否改写配置 | **已关闭（A）**：不改写；已实现 + `test_backend_fallback_policy` 覆盖 | — | 已关闭 |
+| ~~Q-VK-2~~ | VK 回退写哪层配置 | **已关闭（A）**：只写用户层 `游戏设置.json` | — | 已关闭 |
+| ~~Q-PERF-1~~ | 3.12 vs 3.13 FPS 重测 | **已关闭**：已测（D1 后编译版 90 FPS ≈ 3.12 基线）+ 人类裁决**性能下降可接受**，`FPS>=85` 不再是硬门 | — | 已关闭 |
+| ~~Q-HUB-1~~ | Hub 用包内还是系统解释器 | **已关闭**：与 Q-PKG-2 同口径——**包内权威**；已实现 + `test_hub_python_version` 覆盖 | — | 已关闭 |
 | **Q-HUB-2** | 源码包 embed 版本是否升格为发布硬门（元数据 3.13.15 与包内 3.12 不一致时拒绝出包） | A 升格为硬门 / B 只加断言 / C 现状 | **A** | 待答 |
 | **Q-HUB-3** | 冻结版（LoomHub.exe）兜底找解释器会再拉起 Hub 抢焦点 | A 接受不修 / B 改用 sys.version_info / C 仅落空时兜底一次 | **B** | 待答 |
 | ~~Q-REQ-1~~ | 源码包 requirements 是否补 culverin/game-audio | **已裁决 A（2026-11-10）**：已补进 requirements.txt 并把安装提示改 3.13 | — | 已关闭 |
