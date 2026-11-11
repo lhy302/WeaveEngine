@@ -5,11 +5,11 @@
 DECL_FRAG_UV
 LOOM_FRAG_OUT
 
-DECL_TEX2D(u_hdr, 0);      // color.hdr
-DECL_TEX2D(u_bloom, 1);    // bloom.quarter（档 2 时是 bloom.half）
-DECL_SAMPLER(u_smp, 2);
+DECL_TEX2D(u_hdr, B_HDR);      // color.hdr
+DECL_TEX2D(u_bloom, B_BLOOM);  // bloom.quarter（档 2 时是 bloom.half）
+DECL_SAMPLER(u_smp, B_SAMPLER);
 
-layout(std140, binding = 3) uniform Params {
+layout(std140, binding = B_PARAMS) uniform Params {
     vec4 p0;   // (0, 0, strength, exposure)
     vec4 p1;   // (target_w, target_h, 0, 0)
 } par;

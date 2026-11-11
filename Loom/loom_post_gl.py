@@ -15,73 +15,34 @@ import moderngl
 from loom_post import HDR_TARGET, HALF_TARGET, QUARTER_TARGET, params
 
 
-_VS430 = _VS.replace('#version 330', '#version 430') if '_VS' in globals() else None
 
 
-def shared_frag(name):
-    """T3 Phase 0：读取 `Loom/shaders/<name>` 单源，展开兼容层（GL 用 #version 430）。"""
+def shared_src(name):
+    """T3：读取 `Loom/shaders/<name>` 单源，展开兼容层 + 绑定号单点表（GL 用 #version 430）。"""
     import os
+    import loom_shader_bindings
     base = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'shaders')
     with open(os.path.join(base, name), encoding='utf-8') as fh:
         src = fh.read()
     with open(os.path.join(base, 'loom_shader_compat.glsl'), encoding='utf-8') as fh:
         compat = fh.read()
-    return src.replace('//@@COMPAT@@', compat).replace('#version 450', '#version 430')
+    src = src.replace('//@@COMPAT@@', compat)
+    src = loom_shader_bindings.expand(src)
+    return src.replace('#version 450', '#version 430')
+
+
+def shared_frag(name):
+    return shared_src(name)
+
+
+def shared_vert():
+    return shared_src('post_fullscreen.vert')
 
 _TARGETS = (HDR_TARGET, HALF_TARGET, QUARTER_TARGET)
 
-_VS = """#version 330
-in vec2 in_pos;
-in vec2 in_uv;
-out vec2 v_uv;
-void main() {
-    v_uv = in_uv;
-    gl_Position = vec4(in_pos, 0.0, 1.0);
-}"""
 
-_BRIGHT = """#version 330
-in vec2 v_uv;
-out vec4 frag_color;
-uniform sampler2D u_tex;
-uniform float u_threshold;
-uniform float u_knee;
-uniform float u_exposure;
-void main() {
-    // HDR 存 gamma 编码值 -> 反线性；再乘曝光（与 tonemap 同一曝光），阈值按曝光后线性亮度
-    vec3 c = pow(max(texture(u_tex, v_uv).rgb, vec3(0.0)), vec3(2.2)) * u_exposure;
-    float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
-    float w = smoothstep(u_threshold, u_threshold + max(u_knee, 1e-4), l);
-    frag_color = vec4(c * w, 1.0);
-}"""
 
-_DOWN = """#version 330
-in vec2 v_uv;
-out vec4 frag_color;
-uniform sampler2D u_tex;
-uniform vec2 u_texel;
-void main() {
-    vec2 o = u_texel;
-    vec3 c = texture(u_tex, v_uv + vec2(-o.x, -o.y)).rgb
-           + texture(u_tex, v_uv + vec2( o.x, -o.y)).rgb
-           + texture(u_tex, v_uv + vec2(-o.x,  o.y)).rgb
-           + texture(u_tex, v_uv + vec2( o.x,  o.y)).rgb;
-    frag_color = vec4(c * 0.25, 1.0);
-}"""
 
-_TONEMAP = """#version 330
-in vec2 v_uv;
-out vec4 frag_color;
-uniform sampler2D u_hdr;
-uniform sampler2D u_bloom;
-uniform float u_strength;
-uniform float u_exposure;
-void main() {
-    vec3 c = pow(max(texture(u_hdr, v_uv).rgb, vec3(0.0)), vec3(2.2));
-    c += texture(u_bloom, v_uv).rgb * u_strength;
-    c *= u_exposure;
-    c = c / (1.0 + c);                       // Reinhard（线性空间）
-    frag_color = vec4(pow(c, vec3(1.0 / 2.2)), 1.0);
-}"""
 
 
 def chain(engine):
@@ -169,14 +130,21 @@ class GLPostChain:
             self._vbo = self.ctx.buffer(quad.tobytes())
             self._vao = {}
 
-    def _program(self, key, frag, vs=None):
+    def _program(self, key, frag):
+        """T3 Phase 1：GL 也用单源（顶点=全屏三角，无顶点属性）。"""
         p = self._prog.get(key)
         if p is not None:
             return p
-        prog = self.ctx.program(vertex_shader=vs or _VS, fragment_shader=frag)
+        prog = self.ctx.program(vertex_shader=shared_vert(), fragment_shader=frag)
         self._prog[key] = prog
-        self._vao[key] = self.ctx.vertex_array(
-            prog, [(self._vbo, '2f 2f', 'in_pos', 'in_uv')])
+        # 无顶点属性：gl_VertexID 生成全屏三角（3 顶点）
+        self._vao[key] = self.ctx.vertex_array(prog, [])
+        if getattr(self, '_ubo', None) is None:
+            self._ubo = self.ctx.buffer(reserve=32)
+        try:
+            prog['Params'].binding = 3
+        except Exception:
+            pass
         return prog
 
     def fbo(self, name):
@@ -199,34 +167,39 @@ class GLPostChain:
 
     # ---------- 绘制（目标由 FramePlan 执行器绑定）----------
     def draw(self, source):
+        """T3 Phase 1：bright/down/tonemap 全部走单源 GLSL（参数一律 std140 UBO）。"""
+        import struct
         p = params()
-        if source == 'post.bright':
-            prog = self._program('bright', _BRIGHT)
+        _key = {'post.bright': 'bright', 'post.down': 'down',
+                'post.tonemap': 'tonemap'}.get(source)
+        if _key is None:
+            raise KeyError('未知后处理绘制源: %s' % (source,))
+        prog = self._program(_key, shared_frag({'bright': 'post_bright.frag',
+                                                'down': 'post_down.frag',
+                                                'tonemap': 'post_tonemap.frag'}[_key]))
+        _sizes = getattr(self.engine, '_post_sizes', None) or {}
+        hw, hh = _sizes.get(HALF_TARGET, (max(1, self.engine.width // 2),
+                                          max(1, self.engine.height // 2)))
+        qw, qh = _sizes.get(QUARTER_TARGET, (max(1, self.engine.width // 4),
+                                             max(1, self.engine.height // 4)))
+        if _key == 'bright':
             self.tex(HDR_TARGET).use(0)
-            prog['u_tex'].value = 0
-            prog['u_threshold'].value = p['threshold']
-            prog['u_knee'].value = p['knee']
-            prog['u_exposure'].value = p['exposure']
-        elif source == 'post.down':
-            prog = self._program('down', _DOWN)
-            half = self._tex[HALF_TARGET]
-            half.use(0)
-            prog['u_tex'].value = 0
-            # 4-tap 偏移按**源**（half）一个像素
-            prog['u_texel'].value = (1.0 / max(1, half.width),
-                                     1.0 / max(1, half.height))
-        elif source == 'post.tonemap':
-            # T3 Phase 0：片段改用**单源 GLSL**（与 VK 的 SPIR-V 同源），顶点仍是既有 quad VS
-            prog = self._program('tonemap', shared_frag('post_tonemap.frag'), vs=_VS430)
-            if getattr(self, '_ubo', None) is None:
-                self._ubo = self.ctx.buffer(reserve=32)
-                try:
-                    prog['Params'].binding = 3
-                except Exception:
-                    pass
+            try:
+                prog['u_hdr'].value = 0
+            except Exception:
+                pass
+            p0 = (p['threshold'], p['knee'], p['exposure'], 0.0)
+            p1 = (float(hw), float(hh), 0.0, 0.0)
+        elif _key == 'down':
+            self.tex(HALF_TARGET).use(0)
+            try:
+                prog['u_tex'].value = 0
+            except Exception:
+                pass
+            p0 = (0.0, 0.0, 0.0, 0.0)
+            p1 = (float(qw), float(qh), 1.0 / max(1, hw), 1.0 / max(1, hh))
+        else:
             self.tex(HDR_TARGET).use(0)
-            # 2a 补：无 down pass 时（LOOM_POST_STAGE=2）直接读 0.5 目标 —— 否则 bright 的
-            # 输出没有消费者，档 2 会与档 1 逐位相同（死档）。
             _src = getattr(self.engine, '_post_bloom_src', QUARTER_TARGET)
             self.tex(_src).use(1)
             try:
@@ -234,14 +207,8 @@ class GLPostChain:
                 prog['u_bloom'].value = 1
             except Exception:
                 pass
-            # std140 Params：p0=(0,0,strength,exposure)  p1=(w,h,0,0)（GL 侧 uv 来自 varying）
-            import struct
-            self._ubo.write(struct.pack('8f', 0.0, 0.0, p['strength'], p['exposure'],
-                                        float(self.engine.width),
-                                        float(self.engine.height), 0.0, 0.0))
-            self._ubo.bind_to_uniform_block(3)
-        else:
-            raise KeyError('未知后处理绘制源: %s' % (source,))
-        self._vao[{'post.bright': 'bright', 'post.down': 'down',
-                   'post.tonemap': 'tonemap'}[source]].render(
-            moderngl.TRIANGLES, vertices=6)
+            p0 = (0.0, 0.0, p['strength'], p['exposure'])
+            p1 = (float(self.engine.width), float(self.engine.height), 0.0, 0.0)
+        self._ubo.write(struct.pack('8f', *(list(p0) + list(p1))))
+        self._ubo.bind_to_uniform_block(3)
+        self._vao[_key].render(moderngl.TRIANGLES, vertices=3)

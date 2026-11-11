@@ -61,7 +61,11 @@ def _expand(src_path):
         src = f.read()
     with open(os.path.join(SHADERS, "loom_shader_compat.glsl"), encoding="utf-8") as f:
         compat = f.read()
-    return src.replace("//@@COMPAT@@", compat)
+    src = src.replace("//@@COMPAT@@", compat)
+    # T3c: 绑定号单点表（GL/VK 共用），着色器里只写 B_xxx
+    sys.path.insert(0, os.path.join(ROOT, "Loom"))
+    import loom_shader_bindings
+    return loom_shader_bindings.expand(src)
 
 
 def _targets():
