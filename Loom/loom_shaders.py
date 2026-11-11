@@ -10,46 +10,13 @@ engine.py 通过 `from loom_shaders import *` 重新导出这些名字，
 # 光照模型 (M20): Blinn-Phong 漫反射+镜面高光 + 半球环境光 + 边缘光(菲涅尔) + gamma 校正.
 # 之前的纯兰伯特(0.2+0.8*diff)无观察方向项, 立方体相邻面亮度可能完全相等(如 -Y/+Z 都停在环境光),
 # 导致分不出边缘. 现在: 高光/边缘光看观察角度, 半球环境光按法线朝向分离相邻面.
-_VERT_SRC = """#version 430
-layout(location = 0) in vec3 in_pos;
-layout(location = 1) in vec3 in_normal;
-layout(location = 2) in vec4 in_color;
-// A2 (2026-08-29) GL 实例化批绘制: 世界矩阵/饱和度/颜色走 per-instance 属性
-// (/i divisor), 桶内全部实例一次 draw —— 逐物体 u_model/uniform 上传循环取消.
-// ★构造约定: a_w# = 引擎 numpy M 的行 (行主序), GLSL mat4(a_w0..a_w3) 以"列"收
-// 参, 故 mat4 值 = M^T —— 与旧 u_model (M.tobytes() 直传) 数学逐位一致.
-// T3c-3: 实例属性 location 表与 VK 共用（见 loom_shader_bindings.INSTANCE_LAYOUT）
-layout(location = 3) in vec4 a_w0;
-layout(location = 4) in vec4 a_w1;
-layout(location = 5) in vec4 a_w2;
-layout(location = 6) in vec4 a_w3;
-layout(location = 7) in vec4 a_sat;   // x = 物体饱和度（T3c-3 表：nm 4 行在 64..127B，GL 不读）
-layout(location = 8) in vec4 a_col;   // rgb + w>0.5 = 材质单色覆盖
-layout(location = 13) in vec2 in_uv;   // M36 贴图: 逐顶点 UV
-//@@SCENE_UBO@@
-out vec4 v_color;
-out vec3 v_normal;
-out vec3 v_world_pos;
-out float v_sat;
-out vec2 v_uv;
-void main() {
-    mat4 u_model = mat4(a_w0, a_w1, a_w2, a_w3);
-    vec4 world = u_model * vec4(in_pos, 1.0);
-    gl_Position = u.mvp * world;
-    // 法线变换: 逆转置 (正确处理非等比缩放; 等比缩放时等价 R*n)
-    v_normal = transpose(inverse(mat3(u_model))) * in_normal;
-    v_world_pos = world.xyz;
-    v_color = (a_col.w > 0.5) ? vec4(a_col.rgb, 1.0) : in_color;
-    v_sat = a_sat.x;
-    v_uv = in_uv;
-}"""
 
 _FRAG_SRC = """#version 430
 const int MAX_LIGHTS = 8;
 //@@SCENE_UBO@@
-in vec4 v_color;
-in vec3 v_normal;
-in vec3 v_world_pos;
+layout(location = 0) in vec4 v_color;
+layout(location = 1) in vec3 v_normal;
+layout(location = 2) in vec3 v_world_pos;
 // M36 PBR (2026-10-14): (metallic, roughness, pbr_flag)。全局 u.misc.x 与逐实例
 // v_pbr.z 双门控 —— 默认(0)走原 Blinn-Phong 逐位不变 (向后兼容)。
 uniform float u_metallic;          // 材质金属度 (每桶 uniform, 对标 Unity Metallic)
@@ -60,14 +27,14 @@ uniform samplerCube u_env;
 uniform float u_has_env;           // 0=无 env (走原 ambient), 1=有
 uniform float u_env_max_lod;       // cubemap mip 级数 (粗糙度选级用)
 // M36 贴图: 颜色贴图 (albedo) 采样。无贴图材质绑 1x1 白纹理 (乘白=原色, 视觉不变)。
-in vec2 v_uv;
+layout(location = 5) in vec2 v_uv;
 uniform sampler2D u_albedo;
 // M36 法线贴图: 切线空间法线 (导数法 TBN, 无需预计算切线)。
 uniform sampler2D u_normal_map;
 uniform float u_has_normal_map;    // 0=无 (跳过整段), 1=有
 // 多光源 (最多 8 个): 平行光 / 点光源, 场景光源由用户手动添加 (无默认光源)
 // 2026-10-19 第1档序9 聚光灯: 内外锥角余弦 (避免每片元 cos 计算; Python 侧上传算好)
-in float v_sat;                          // A2: 物体饱和度改 per-instance (0=灰阶, 1=原始, >1=增艳)
+layout(location = 3) in float v_sat;
 // M29 阴影 (shadow mapping, 物体遮挡光线, 物理正确):
 // 全部阴影贴图平铺进 sampler 数组 (平行光 1 张 2D / 点光 6 面 2D),
 // 每光源记录起始槽位 u_shadow_slot; 平行光额外带 view-proj 与 beam 截面参数.
@@ -434,6 +401,23 @@ void main() {
 from loom_scene_ubo import glsl_block as _glsl_scene_block
 from loom_shader_bindings import expand as _expand_bindings
 _SCENE_UBO_GLSL = _expand_bindings(_glsl_scene_block())
-_VERT_SRC = _VERT_SRC.replace('//@@SCENE_UBO@@', _SCENE_UBO_GLSL)
 _FRAG_SRC = _FRAG_SRC.replace('//@@SCENE_UBO@@', _SCENE_UBO_GLSL)
+# _VERT_SRC 由 _shared_vert_src() 在文件末尾加载（单源 main.vert）
+
+
+
+def _shared_vert_src():
+    """T3a Phase-2a: GL 主 pass 顶点着色器读**同一份** shaders/main.vert（VK 走 SPIR-V）。"""
+    import os
+    base = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'shaders')
+    with open(os.path.join(base, 'main.vert'), encoding='utf-8') as fh:
+        src = fh.read()
+    with open(os.path.join(base, 'loom_shader_compat.glsl'), encoding='utf-8') as fh:
+        compat = fh.read()
+    src = src.replace('//@@COMPAT@@', compat)
+    src = src.replace('//@@SCENE_UBO@@', _SCENE_UBO_GLSL)
+    return src.replace('#version 450', '#version 430')
+
+
+_VERT_SRC = _shared_vert_src()
 

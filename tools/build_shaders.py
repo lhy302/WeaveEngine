@@ -65,6 +65,9 @@ def _expand(src_path):
     # T3c: 绑定号单点表（GL/VK 共用），着色器里只写 B_xxx
     sys.path.insert(0, os.path.join(ROOT, "Loom"))
     import loom_shader_bindings
+    import loom_scene_ubo
+    src = src.replace("//@@SCENE_UBO@@",
+                      loom_scene_ubo.glsl_block())
     return loom_shader_bindings.expand(src)
 
 

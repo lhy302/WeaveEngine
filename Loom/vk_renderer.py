@@ -103,43 +103,8 @@ struct VSOut {
     @location(4) matv: vec4f,   // (sat, metallic, roughness, pbr_flag)
     @location(5) uv: vec2f,
 }
-// 实例缓冲每实例 160B (40 f32): world(loc3-6) + nm(loc7-10) + satv(loc11) + color(loc12)
-// ★naga 0.32 顶点属性仅接受标量/向量 (mat 声明被拒, 标量属性触发 inter-stage
-// 误检) → 矩阵必须列拆 vec4, 全程无标量. 颜色 = 每实例覆盖标志 (w>0.5 用实例色,
-// 否则网格原生面颜色) —— 桶共享几何但各物体颜色可不同.
-// naga 的 WGSL 前端没有 inverse() —— 用伴随矩阵/行列式等价实现 transpose(inverse(m))
-fn normal_matrix(m: mat3x3<f32>) -> mat3x3<f32> {
-    let a = cross(m[1], m[2]);
-    let b = cross(m[2], m[0]);
-    let c = cross(m[0], m[1]);
-    let det = dot(m[0], a);
-    let inv_det = 1.0 / det;          // naga: 不支持矩阵/标量除法
-    return mat3x3<f32>(a, b, c) * inv_det;
-}
-
-@vertex fn vs(
-    @location(0) p: vec3f,
-    @location(1) n: vec3f,
-    @location(2) c: vec4f,
-    @location(3) c0: vec4f, @location(4) c1: vec4f,
-    @location(5) c2: vec4f, @location(6) c3: vec4f,
-    @location(7) isatv: vec4f,
-    @location(8) icol: vec4f,
-    @location(13) uv0: vec2f,
-) -> VSOut {
-    var o: VSOut;
-    let iw = mat4x4<f32>(c0, c1, c2, c3);        // 列主序解释 = 数学行主序 (同引擎)
-    // T3c-3: 法线矩阵从 CPU 移到 GPU（实例块只留 world 16 + sat 4 + color 4 = 96B）
-    let m3 = mat3x3<f32>(iw[0].xyz, iw[1].xyz, iw[2].xyz);
-    o.n = normal_matrix(m3) * n;
-    o.wpos = (iw * vec4f(p, 1.0)).xyz;
-    o.pos = sc.mvp * iw * vec4f(p, 1.0);
-    o.color = select(c, vec4f(icol.rgb, c.a), icol.w > 0.5);  // 实例色覆盖 (网格原生面颜色)
-    o.sat = isatv.x;
-    o.matv = isatv;             // 2026-11-06 PBR: y=metallic z=roughness w=pbr
-    o.uv = uv0;
-    return o;
-}
+// T3a Phase-2a: 顶点着色器已单源化（Loom/shaders/main.vert -> SPIR-V），
+// 这里只保留 FS 需要的 SceneC/LightX/VSOut 定义与 bindings。
 """
 
 _MAIN_FRAG = """
@@ -753,6 +718,19 @@ class VkRenderer:
     def pbr_enabled(self, v):
         self._pbr_enabled = bool(v)
 
+    def _main_vs_module(self):
+        """T3a Phase-2a: 主 pass 顶点着色器来自单源 main.vert 的 SPIR-V。"""
+        m = getattr(self, '_main_vs_spv', None)
+        if m is not None:
+            return m
+        p = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                         'shaders', 'main.vert.spv')
+        if not os.path.isfile(p):
+            raise RuntimeError('缺少 SPIR-V: %s（先跑 tools/build_shaders.py）' % p)
+        with open(p, 'rb') as fh:
+            self._main_vs_spv = self.device.create_shader_module(code=fh.read())
+        return self._main_vs_spv
+
     def _build_pipelines(self):
         d = self.device
         if self.stage == 'p1':
@@ -769,7 +747,7 @@ class VkRenderer:
                 fragment={'module': shader, 'entry_point': 'fs',
                           'targets': [{'format': self.format}]})
             return
-        shader = d.create_shader_module(code=_MAIN_VERT + _MAIN_FRAG)
+        shader = d.create_shader_module(code=_MAIN_VERT + _MAIN_FRAG)   # 仅 FS
         self._bgl = d.create_bind_group_layout(entries=[
             {'binding': 0, 'visibility': wgpu.ShaderStage.VERTEX
              | wgpu.ShaderStage.FRAGMENT, 'buffer': {'type': 'uniform'}},
@@ -795,10 +773,11 @@ class VkRenderer:
              'texture': {'sample_type': 'unfilterable-float', 'view_dimension': '2d'}},
             {'binding': 11, 'visibility': wgpu.ShaderStage.FRAGMENT,
              'sampler': {'type': 'non-filtering'}}])
-        # 主管线: 顶点(48B, pos/normal/color/uv) + 实例(160B: world/nm/sat/color)
+        # 主管线: 顶点(48B) + 实例(96B: world/sat/color)；顶点着色器 = 单源 SPIR-V
         self._pipeline = d.create_render_pipeline(
             layout=d.create_pipeline_layout(bind_group_layouts=[self._bgl]),
-            vertex=self._vertex_desc(shader, 'vs', inst=_INST_BYTES, nattr=6),
+            vertex=self._vertex_desc(self._main_vs_module(), 'main',
+                                     inst=_INST_BYTES, nattr=6),
             primitive=self._prim(),
             depth_stencil={'format': 'depth32float',
                            'depth_write_enabled': True, 'depth_compare': 'less'},
@@ -879,10 +858,11 @@ class VkRenderer:
         if fmt == self.format and dkey is None and rkey is None:
             self._pipeline = self._pipeline_base
         else:
-            shader = d.create_shader_module(code=_MAIN_VERT + _MAIN_FRAG)
+            shader = d.create_shader_module(code=_MAIN_VERT + _MAIN_FRAG)   # 仅 FS
             self._pipeline = d.create_render_pipeline(
                 layout=d.create_pipeline_layout(bind_group_layouts=[self._bgl]),
-                vertex=self._vertex_desc(shader, 'vs', inst=_INST_BYTES, nattr=6),
+                vertex=self._vertex_desc(self._main_vs_module(), 'main',
+                                         inst=_INST_BYTES, nattr=6),
                 primitive=pr,
                 depth_stencil=di,
                 fragment={'module': shader, 'entry_point': 'fs',
