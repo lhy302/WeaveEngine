@@ -378,6 +378,23 @@ def t_scene_ubo():
                                        'u_shadow_slot', 'u_view_pos',
                                        'u_pbr_mode', 'u_ambient_scale')),
           '')
+    import loom_shader_bindings as SB
+    import vk_renderer as VR2
+    check('H11 实例布局表 stride = 96', SB.INSTANCE_STRIDE == 96, SB.INSTANCE_STRIDE)
+    check('H12 VK _INST_BYTES == 表 stride', VR2._INST_BYTES == SB.INSTANCE_STRIDE,
+          (VR2._INST_BYTES, SB.INSTANCE_STRIDE))
+    check('H13 表末字段偏移+16 == stride',
+          SB.INSTANCE_LAYOUT[-1][2] + 16 == SB.INSTANCE_STRIDE,
+          (SB.INSTANCE_LAYOUT[-1], SB.INSTANCE_STRIDE))
+    _locs = [x[0] for x in SB.INSTANCE_LAYOUT]
+    check('H14 实例 location 表 == 3..8 连续',
+          _locs == list(range(3, 9)), _locs)
+    check('H15 GL shader 的实例 location 与表一致',
+          all('layout(location = %d) in vec4 %s' % (loc, name) in SH._VERT_SRC
+              for loc, name, _off in SB.INSTANCE_LAYOUT),
+          '')
+    check('H16 顶点布局表 0/1/2/13 与 VK 一致',
+          [x[0] for x in SB.VERTEX_LAYOUT] == [0, 1, 2, 13], SB.VERTEX_LAYOUT)
     check('H10 GL shader 结构体字段顺序 == 表',
           SH._FRAG_SRC.index('mat4 mvp;') < SH._FRAG_SRC.index('vec4 cam;')
           < SH._FRAG_SRC.index('vec4 cnt;') < SH._FRAG_SRC.index('Light lights[8];'),

@@ -26,12 +26,11 @@ def expand(src):
     return re.sub(r"\bB_(HDR|BLOOM|SAMPLER|PARAMS)\b", _sub, src)
 
 # ---------------- T3c-3: 实例属性布局（GL/VK 共用同一张表）----------------
-INSTANCE_STRIDE = 160          # 40 f32 / 实例
+INSTANCE_STRIDE = 96           # T3c-3: 24 f32 / 实例（法线矩阵移到 GPU）
 INSTANCE_LAYOUT = (
-    (3,  'a_w0', 0),    (4, 'a_w1', 16),   (5, 'a_w2', 32),   (6, 'a_w3', 48),
-    (7,  'a_nm0', 64),  (8, 'a_nm1', 80),  (9, 'a_nm2', 96),  (10, 'a_nm3', 112),
-    (11, 'a_sat', 128),
-    (12, 'a_col', 144),
+    (3, 'a_w0', 0),  (4, 'a_w1', 16), (5, 'a_w2', 32), (6, 'a_w3', 48),
+    (7, 'a_sat', 64),
+    (8, 'a_col', 80),
 )
 
 # 顶点属性（非实例）：pos/normal/color/uv —— VK 与 GL 用同一 location 表

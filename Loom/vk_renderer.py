@@ -51,11 +51,10 @@ from vk_ui import (VkUIEngine, VkUIPipeline,   # 2026-11-06 Canvas UI / HUD (独
 
 _VERT_BYTES = 12 * 4          # 每顶点 48 字节: pos3f + normal3f + color4f + uv2f
 _VERT_FLOATS = 12
-_INST_BYTES = 160             # 每实例 40 f32: world(16)+nm(16)+satvec(4)+color(4, 覆盖标志)
+_INST_BYTES = 96              # T3c-3: 每实例 24 f32: world(16)+satvec(4)+color(4)
 _R_WORLD = 0                  # loc3-6  (mat4)
-_R_NM = 16                    # loc7-10 (mat4)
-_R_SAT = 32                   # loc11   (vec4, .x=sat)
-_R_COLOR = 36                 # loc12   (vec4, rgb+覆標w)
+_R_SAT = 16                   # loc7    (vec4, .x=sat)
+_R_COLOR = 20                 # loc8    (vec4, rgb+覆盖w)
 _INST_SHADOW_BYTES = 64       # 阴影实例: world@光VP (mat4)
 _SCENE_CAP = 64               # 空余实例槽 (扩容单位)
 _SHADOW_RES = 1024
@@ -108,22 +107,31 @@ struct VSOut {
 // ★naga 0.32 顶点属性仅接受标量/向量 (mat 声明被拒, 标量属性触发 inter-stage
 // 误检) → 矩阵必须列拆 vec4, 全程无标量. 颜色 = 每实例覆盖标志 (w>0.5 用实例色,
 // 否则网格原生面颜色) —— 桶共享几何但各物体颜色可不同.
+// naga 的 WGSL 前端没有 inverse() —— 用伴随矩阵/行列式等价实现 transpose(inverse(m))
+fn normal_matrix(m: mat3x3<f32>) -> mat3x3<f32> {
+    let a = cross(m[1], m[2]);
+    let b = cross(m[2], m[0]);
+    let c = cross(m[0], m[1]);
+    let det = dot(m[0], a);
+    let inv_det = 1.0 / det;          // naga: 不支持矩阵/标量除法
+    return mat3x3<f32>(a, b, c) * inv_det;
+}
+
 @vertex fn vs(
     @location(0) p: vec3f,
     @location(1) n: vec3f,
     @location(2) c: vec4f,
     @location(3) c0: vec4f, @location(4) c1: vec4f,
     @location(5) c2: vec4f, @location(6) c3: vec4f,
-    @location(7) n0: vec4f, @location(8) n1: vec4f,
-    @location(9) n2: vec4f, @location(10) n3: vec4f,
-    @location(11) isatv: vec4f,
-    @location(12) icol: vec4f,
+    @location(7) isatv: vec4f,
+    @location(8) icol: vec4f,
     @location(13) uv0: vec2f,
 ) -> VSOut {
     var o: VSOut;
     let iw = mat4x4<f32>(c0, c1, c2, c3);        // 列主序解释 = 数学行主序 (同引擎)
-    let inm = mat4x4<f32>(n0, n1, n2, n3);
-    o.n = (inm * vec4f(n, 0.0)).xyz;             // 逆转置 (CPU 预算, 非等比缩放正确)
+    // T3c-3: 法线矩阵从 CPU 移到 GPU（实例块只留 world 16 + sat 4 + color 4 = 96B）
+    let m3 = mat3x3<f32>(iw[0].xyz, iw[1].xyz, iw[2].xyz);
+    o.n = normal_matrix(m3) * n;
     o.wpos = (iw * vec4f(p, 1.0)).xyz;
     o.pos = sc.mvp * iw * vec4f(p, 1.0);
     o.color = select(c, vec4f(icol.rgb, c.a), icol.w > 0.5);  // 实例色覆盖 (网格原生面颜色)
@@ -790,7 +798,7 @@ class VkRenderer:
         # 主管线: 顶点(48B, pos/normal/color/uv) + 实例(160B: world/nm/sat/color)
         self._pipeline = d.create_render_pipeline(
             layout=d.create_pipeline_layout(bind_group_layouts=[self._bgl]),
-            vertex=self._vertex_desc(shader, 'vs', inst=_INST_BYTES, nattr=10),
+            vertex=self._vertex_desc(shader, 'vs', inst=_INST_BYTES, nattr=6),
             primitive=self._prim(),
             depth_stencil={'format': 'depth32float',
                            'depth_write_enabled': True, 'depth_compare': 'less'},
@@ -874,7 +882,7 @@ class VkRenderer:
             shader = d.create_shader_module(code=_MAIN_VERT + _MAIN_FRAG)
             self._pipeline = d.create_render_pipeline(
                 layout=d.create_pipeline_layout(bind_group_layouts=[self._bgl]),
-                vertex=self._vertex_desc(shader, 'vs', inst=_INST_BYTES, nattr=10),
+                vertex=self._vertex_desc(shader, 'vs', inst=_INST_BYTES, nattr=6),
                 primitive=pr,
                 depth_stencil=di,
                 fragment={'module': shader, 'entry_point': 'fs',
@@ -2058,8 +2066,7 @@ class VkRenderer:
             inst_sha = self._inst_sha_stage = np.zeros(
                 (self._inst_cap, _INST_SHADOW_BYTES // 4), dtype=np.float32)
         inst[:n_vis, _R_WORLD:_R_WORLD + 16] = worlds.reshape(n_vis, 16)
-        inv = np.linalg.inv(worlds)
-        inst[:n_vis, _R_NM:_R_NM + 16] = np.transpose(inv, (0, 2, 1)).reshape(n_vis, 16)
+        # T3c-3: 法线矩阵改由顶点着色器算（不再上传 nm）
         for i, m in enumerate(vis):
             mat = getattr(m, 'renderer', None).material if hasattr(m, 'renderer') else None
             if mat is not None and hasattr(mat, '_sat_f32'):
