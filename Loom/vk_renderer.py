@@ -1942,21 +1942,15 @@ class VkRenderer:
             params.w = 平行光阴影槽位号 (0/1, -1=该灯无贴图 -> 无阴影)
           · misc.x = 全局 PBR 开关
         """
-        buf = np.zeros(_SCENE_FLOATS, dtype=np.float32)
-        buf[_R_MVP:_R_MVP + 16] = vp.reshape(16)
-        buf[_R_CAM:_R_CAM + 4] = (camera_pos[0], camera_pos[1], camera_pos[2],
-                                  1.0 if lights else 0.2)
-        # 2026-11-07 修复: 原读 self.pbr_enabled (属性名拼错, 真实开关是
-        # engine._pbr_enabled) -> 永远落到 getattr 缺省 True, pbr_enabled=False
-        # 在 Vk 后端等于没设。现统一走 property, 语义与 GL 一致。
-        buf[_R_MISC] = 1.0 if self.pbr_enabled else 0.0
-        n_on = min(len(lights), 8)
+        # 2026-11-11 T3c-1: 打包改由 loom_scene_ubo 单点表提供（布局逐字节不变）
+        import loom_scene_ubo as _sub
         _dir_slots = getattr(self, "_dir_shadow_slots", {})
-        for i in range(8):
-            if i < 4:
-                buf[_R_CNT + i] = 1.0 if i < n_on else 0.0
-            else:
-                buf[_R_CNT2 + (i - 4)] = 1.0 if i < n_on else 0.0
+        buf = _sub.pack(vp, lights, camera_pos, bool(self.pbr_enabled),
+                        point_far=_POINT_FAR, point_res=float(_POINT_SHADOW_RES),
+                        dir_res=float(_SHADOW_RES), dir_bias=0.002,
+                        dir_slots=_dir_slots,
+                        light_vps=getattr(self, '_light_vps', {}),
+                        point_shadow_guid=getattr(self, '_point_shadow_guid', None))
         for i, l in enumerate(lights[:8]):
             b = _R_L0 + i * _LIGHT_F32
             kind = 0.0

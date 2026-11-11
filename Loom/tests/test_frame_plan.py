@@ -335,6 +335,43 @@ def t_post():
     check('F9 开关默认开启（未设 LOOM_POST）', post_enabled() is True, '')
 
 
+# ---------------- T3c-1: 场景参数 UBO 单一来源 ----------------
+def t_scene_ubo():
+    print('=== H. T3c-1 场景 UBO 单点表 ===')
+    import loom_scene_ubo as SU
+    import vk_renderer as VR
+    check('H1 字段表：头 32 + 8*40 = 352 f32', SU.assert_layout() == 352, SU.FLOATS)
+    check('H2 字节数 = 1408', SU.BYTES == 1408, SU.BYTES)
+    check('H3 VK 旧常量与表一致',
+          VR._SCENE_FLOATS == SU.FLOATS and VR._R_L0 == SU.HEAD
+          and VR._LIGHT_F32 == SU.LIGHT_F32,
+          (VR._SCENE_FLOATS, VR._R_L0, VR._LIGHT_F32))
+    check('H4 每灯基址：0 -> 32，7 -> 312',
+          SU.light_base(0) == 32 and SU.light_base(7) == 312,
+          (SU.light_base(0), SU.light_base(7)))
+    import numpy as np
+    class _L:
+        kind = 'directional'
+        mode = 'full'
+        shape = 'circle'
+        shadow = True
+        color = (1.0, 1.0, 1.0)
+        intensity = 1.0
+        direction = type('V', (), {'x': 0.0, 'y': -1.0, 'z': 0.0})()
+        position = type('V', (), {'x': 0.0, 'y': 0.0, 'z': 0.0})()
+        guid = 'g1'
+        range = 10.0
+        spot_inner_angle = 30.0
+        spot_outer_angle = 60.0
+    buf = SU.pack(np.eye(4), [_L()], (1.0, 2.0, 3.0), True, dir_slots={'g1': 0})
+    check('H5 pack 输出长度 = 352 f32', len(buf) == 352, len(buf))
+    check('H6 pack 输出字节 = 1408', buf.tobytes().__len__() == 1408,
+          len(buf.tobytes()))
+    check('H7 头字段：pbr=1 / count=1 / 灯槽位=0',
+          buf[28] == 1.0 and buf[29] == 1.0 and buf[32 + 35] == 0.0,
+          (buf[28], buf[29], buf[32 + 35]))
+
+
 # ---------------- Q-D1-3=A: profiler 默认空实现 ----------------
 def t_profiler_defaults():
     print('=== G. Q-D1-3=A: RenderMixin 的 profiler 默认空实现 ===')
@@ -412,6 +449,7 @@ def main():
     t_executor()
     t_s3s4()
     t_post()
+    t_scene_ubo()
     t_profiler_defaults()
     t_real_gl()
     print('')
