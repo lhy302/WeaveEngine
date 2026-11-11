@@ -906,6 +906,12 @@ class RenderMixin:
             n_main = int(cnt[bi])
             mbn[key] = n_main
             if n_main:
+                # T3c-2c: 快路径（C 内核只打包 world/sat/color）补 matv.y/z/w；
+                # 桶已按材质分组，同桶一致（key[5]=(metallic,roughness,pbr)）。
+                _pbr = key[5] if len(key) > 5 else (0.0, 0.5, 0)
+                main_st[a:a + n_main, 17] = float(_pbr[0])
+                main_st[a:a + n_main, 18] = float(_pbr[1])
+                main_st[a:a + n_main, 19] = float(_pbr[2])
                 inst['main'].write(main_st[a:a + n_main], 0)
             inst['sha'].write(sha_st[a:a + k], 0)
             a += k

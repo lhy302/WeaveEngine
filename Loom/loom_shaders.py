@@ -152,9 +152,9 @@ void main() {
     vec3 v = normalize(u.cam.xyz - v_world_pos);
     // M36 PBR: 底色提前算 (Blinn-Phong 与 PBR 共用)
     vec3 base = v_color.rgb * texture(u_albedo, v_uv).rgb;
-    bool use_pbr = (u.misc.x > 0.5) && (bkt.pbr > 0.5);
-    float metal = clamp(bkt.metallic, 0.0, 1.0);
-    float rough = clamp(bkt.roughness, 0.04, 1.0);
+    bool use_pbr = (u.misc.x > 0.5) && (v_matv.w > 0.5);
+    float metal = clamp(v_matv.y, 0.0, 1.0);
+    float rough = clamp(v_matv.z, 0.04, 1.0);
     vec3 pbr_acc = vec3(0.0);
     // 半球环境光: 朝上面更亮/朝下面更暗 (按法线朝向分离相邻面)
     // 系数已压低: 顶面 0.30 / 侧面 0.16 / 底面 0.02 —— 避免旧版(顶面 0.50)把纯色面洗白
