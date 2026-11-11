@@ -69,9 +69,9 @@ _R_CAM = 16
 _R_CNT = 20
 _R_CNT2 = 24          # 2026-11-06 对齐 GL: 8 盏灯 (原 4 盏)
 _R_MISC = 28          # x = 全局 PBR 开关
-_R_L0 = 32
+_R_L0 = 36            # 2026-11-11 T3c-1: 头加 misc2(vec4) -> 36
 _LIGHT_F32 = 40       # +extra vec4 (cos_inner, cos_outer, range, pad)
-_SCENE_FLOATS = _R_L0 + 8 * _LIGHT_F32   # 352
+_SCENE_FLOATS = _R_L0 + 8 * _LIGHT_F32   # 356
 
 # ---------------- WGSL: 主 pass ----------------
 _MAIN_VERT = """
@@ -80,7 +80,8 @@ struct SceneC {
     cam: vec4f,               // xyz view_pos, w ambient_scale
     cnt: vec4f,               // 灯 0-3 激活标志 (固定展开)
     cnt2: vec4f,              // 灯 4-7 (2026-11-06 对齐 GL: 8 盏)
-    misc: vec4f,              // x = 全局 PBR 开关 (GL u_pbr_mode 同语义)
+    misc: vec4f,              // x = PBR 开关, y = 灯数, z = dir_res, w = point_res
+    misc2: vec4f,             // x = dir_bias, y = point_bias, z = point_far
     l0: LightX, l1: LightX, l2: LightX, l3: LightX,
     l4: LightX, l5: LightX, l6: LightX, l7: LightX,
 }

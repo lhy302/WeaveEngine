@@ -93,9 +93,7 @@ class LightingMixin:
         多核优化 (2026-08-14): 缓冲惰性建一次, 每帧原地清零复用, 消除每帧 ~9 次
         numpy 数组分配 (GC/CPU 开销)."""
         n = min(len(self.lights), 8)
-        if self._u_last.get('u_light_count') != n:
-            self._uniform('u_light_count').value = n
-            self._u_last['u_light_count'] = n
+        # T3c-1: 灯数已进 Scene UBO（misc.y），不再单独上传 uniform
         b = getattr(self, '_light_bufs', None)
         if b is None:
             b = self._light_bufs = {
@@ -191,38 +189,32 @@ class LightingMixin:
                     # 各 1 槽): 关掉这盏灯的 shadow (降级, 不崩), 只打印一次警告。
                     light.shadow = False
                     self._warn_shadow_slot_overflow(light)
-        # 组6件3: 8 组灯光 uniform 差分上传 —— 缓冲原地填充后 bytes 比较,
-        # 同值跳过 glBufferSubData (GL uniform 状态机语义等价); u_ascontiguousarray
-        # 对本缓冲是 no-op (C 连续), 保留与旧路径同形. 消每帧 8×tobytes+8×write.
+        # 2026-11-11 T3c-1: 场景参数**一次 pack + 一次 write + bind**（单点表，
+        # 不再逐个 uniform 上传）。阴影采样器数组仍走 sampler 绑定（不能进 UBO）。
+        import loom_scene_ubo as _SU
+        import loom_shader_bindings as _SB
         ul = self._u_last
-        for name, arr in (('u_light_dir', b['dirs']), ('u_light_pos', b['poss']),
-                          ('u_light_color', b['cols']), ('u_light_intensity', b['ints']),
-                          ('u_light_kind', b['kinds']), ('u_light_range', b['ranges']),
-                          ('u_light_spot_inner', b['spot_inner']),
-                          ('u_light_spot_outer', b['spot_outer']),
-                          ('u_light_mode', b['modes']),
-                          ('u_light_shape', b['shapes']), ('u_light_ortho', b['orthos'])):
-            raw = arr.tobytes()
-            if ul.get(name) != raw:
-                self._uniform(name).write(raw)
-                ul[name] = raw
-        slots_t = tuple(int(x) for x in b['slots'])
+        _cam = (self.camera.x, self.camera.y, self.camera.z)
+        raw = _SU.pack_arrays(
+            self._vp, _cam, bool(getattr(self, '_pbr_enabled', True)), n,
+            b['dirs'], b['poss'], b['cols'], b['ints'], b['kinds'], b['ranges'],
+            b['spot_inner'], b['spot_outer'], b['modes'], b['shapes'],
+            b['orthos'], b['slots'],
+            dir_res=float(self._shadow_res),
+            point_res=float(self._shadow_point_res),
+            dir_bias=0.002, point_bias=0.004,
+            point_far=float(self._shadow_point_far)).tobytes()
+        if getattr(self, '_scene_ubo', None) is None:
+            self._scene_ubo = self.ctx.buffer(reserve=_SU.BYTES)
+            ul.pop('scene', None)
+        if ul.get('scene') != raw:
+            self._scene_ubo.write(raw)
+            ul['scene'] = raw
+        self._scene_ubo.bind_to_uniform_block(_SB.B_PARAMS)
         samplers_t = tuple(sampler_units)
         if ul.get('u_shadow_maps') != samplers_t:
             self._uniform('u_shadow_maps').value = samplers_t
             ul['u_shadow_maps'] = samplers_t
-        if ul.get('u_shadow_slot') != slots_t:
-            self._uniform('u_shadow_slot').value = slots_t       # int 数组用 tuple
-            ul['u_shadow_slot'] = slots_t
-        for name, val in (('u_shadow_res', self._shadow_res),
-                          ('u_shadow_point_res', self._shadow_point_res),
-                          ('u_shadow_bias', 0.002),
-                          ('u_shadow_point_bias', 0.004),
-                          ('u_light_far', self._shadow_point_far),
-                          ('u_ambient_scale', 1.0 if n > 0 else 0.2)):
-            if ul.get(name) != val:
-                self._uniform(name).value = val
-                ul[name] = val
 
     def _warn_shadow_slot_overflow(self, light):
         """阴影贴图槽位预算 (u_shadow_maps 16 个采样器) 用尽时的降级告警

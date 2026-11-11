@@ -2420,9 +2420,8 @@ class EditorApp(GLEngine):
         self._vp = V @ P
         self._prof_add('mt_mp_camera', _t)
         _t = self._prof_t0()
-        self.prog['u_view_proj'].write(np.ascontiguousarray(self._vp, dtype='f4').tobytes())
-        self._upload_lights()                     # M21: 多光源 uniform 整块上传
-        self.prog['u_view_pos'].value = (self.camera.x, self.camera.y, self.camera.z)
+        # T3c-1: mvp/cam/灯光 全部由 _upload_lights() 一次性写 Scene UBO
+        self._upload_lights()
         self._prof_add('mt_mp_uniforms', _t)
         self._t_mp_draws = self._prof_t0()
 

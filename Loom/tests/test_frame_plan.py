@@ -340,14 +340,14 @@ def t_scene_ubo():
     print('=== H. T3c-1 场景 UBO 单点表 ===')
     import loom_scene_ubo as SU
     import vk_renderer as VR
-    check('H1 字段表：头 32 + 8*40 = 352 f32', SU.assert_layout() == 352, SU.FLOATS)
-    check('H2 字节数 = 1408', SU.BYTES == 1408, SU.BYTES)
+    check('H1 字段表：头 36 + 8*40 = 356 f32', SU.assert_layout() == 356, SU.FLOATS)
+    check('H2 字节数 = 1424', SU.BYTES == 1424, SU.BYTES)
     check('H3 VK 旧常量与表一致',
           VR._SCENE_FLOATS == SU.FLOATS and VR._R_L0 == SU.HEAD
           and VR._LIGHT_F32 == SU.LIGHT_F32,
           (VR._SCENE_FLOATS, VR._R_L0, VR._LIGHT_F32))
-    check('H4 每灯基址：0 -> 32，7 -> 312',
-          SU.light_base(0) == 32 and SU.light_base(7) == 312,
+    check('H4 每灯基址：0 -> 36，7 -> 316',
+          SU.light_base(0) == 36 and SU.light_base(7) == 316,
           (SU.light_base(0), SU.light_base(7)))
     import numpy as np
     class _L:
@@ -364,9 +364,24 @@ def t_scene_ubo():
         spot_inner_angle = 30.0
         spot_outer_angle = 60.0
     buf = SU.pack(np.eye(4), [_L()], (1.0, 2.0, 3.0), True, dir_slots={'g1': 0})
-    check('H5 pack 输出长度 = 352 f32', len(buf) == 352, len(buf))
-    check('H6 pack 输出字节 = 1408', buf.tobytes().__len__() == 1408,
+    check('H5 pack 输出长度 = 356 f32', len(buf) == 356, len(buf))
+    check('H6 pack 输出字节 = 1424', buf.tobytes().__len__() == 1424,
           len(buf.tobytes()))
+    import loom_shaders as SH
+    from loom_shader_bindings import expand as _exp
+    _blk = _exp(SU.glsl_block())
+    check('H8 GL 主片段结构体 == 生成器输出（不手写第二份）',
+          _blk in SH._FRAG_SRC and _blk in SH._VERT_SRC, '')
+    _code = '\n'.join(ln.split('//')[0] for ln in SH._FRAG_SRC.splitlines())
+    check('H9 GL shader 残留具名 uniform = 0（注释不算）',
+          not any(k in _code for k in ('u_light_dir', 'u_light_kind',
+                                       'u_shadow_slot', 'u_view_pos',
+                                       'u_pbr_mode', 'u_ambient_scale')),
+          '')
+    check('H10 GL shader 结构体字段顺序 == 表',
+          SH._FRAG_SRC.index('mat4 mvp;') < SH._FRAG_SRC.index('vec4 cam;')
+          < SH._FRAG_SRC.index('vec4 cnt;') < SH._FRAG_SRC.index('Light lights[8];'),
+          '')
     check('H7 头字段：pbr=1 / count=1 / 灯槽位=0',
           buf[28] == 1.0 and buf[29] == 1.0 and buf[32 + 35] == 0.0,
           (buf[28], buf[29], buf[32 + 35]))
