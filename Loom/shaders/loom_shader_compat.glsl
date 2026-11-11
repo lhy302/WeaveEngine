@@ -18,6 +18,17 @@
   #define DECL_FRAG_UV           /* VK：无 varying 输入 */
   #define LOOM_FRAG_UV           (gl_FragCoord.xy / par.p1.xy)
   #define LOOM_FRAG_OUT layout(location = 0) out vec4 frag_color;
+  // ---- T3c-2b: 阴影采样抽象（VK：分离 texture+sampler；平行光两槽 select，点光 2d-array）----
+  #define DECL_SHADOW2D(b)    layout(binding = b) uniform texture2D t_shadow; \
+                              layout(binding = b##2) uniform sampler s_shadow
+  #define DECL_SHADOWCUBE(b)  layout(binding = b) uniform texture2DArray t_shadow_arr; \
+                              layout(binding = b##2) uniform sampler s_shadow_arr
+  #define SAMPLE_SHADOW2D(slot, uv) \
+      (((slot) < 0.5) ? texture(sampler2D(t_shadow, s_shadow), (uv)).r \
+                      : texture(sampler2D(t_shadow2, s_shadow2), (uv)).r)
+  #define SAMPLE_SHADOWCUBE(slot, face, uv) \
+      texture(sampler2DArray(t_shadow_arr, s_shadow_arr), \
+              vec3((uv), float(face))).r
 #else
   #define LOOM_VERTEX_ID gl_VertexID
   #define DECL_TEX2D(name, b)    layout(binding = b) uniform sampler2D name
@@ -27,6 +38,12 @@
   #define DECL_FRAG_UV           layout(location = 0) in vec2 v_uv;
   #define LOOM_FRAG_UV           v_uv
   #define LOOM_FRAG_OUT out vec4 frag_color;
+  // ---- T3c-2b: 阴影采样抽象（GL：组合式 sampler 数组，槽位/面都是数组下标）----
+  #define DECL_SHADOW2D(b)    /* GL：u_shadow_maps[16] 已在着色器里声明 */
+  #define DECL_SHADOWCUBE(b)  /* GL：点光 6 面 = 6 个连续槽位 */
+  #define SAMPLE_SHADOW2D(slot, uv)        texture(u_shadow_maps[(slot)], (uv)).r
+  #define SAMPLE_SHADOWCUBE(slot, face, uv) \
+      texture(u_shadow_maps[(slot) + (face)], (uv)).r
 #endif
 
 #endif // LOOM_SHADER_COMPAT_GLSL

@@ -12,6 +12,7 @@ engine.py 通过 `from loom_shaders import *` 重新导出这些名字，
 # 导致分不出边缘. 现在: 高光/边缘光看观察角度, 半球环境光按法线朝向分离相邻面.
 
 _FRAG_SRC = """#version 430
+//@@COMPAT@@
 const int MAX_LIGHTS = 8;
 //@@SCENE_UBO@@
 layout(location = 0) in vec4 v_color;
@@ -76,13 +77,25 @@ vec3 pbr_light(vec3 N, vec3 V, vec3 L, vec3 radiance, vec3 albedo,
 // (忽略 compare_func, 实测 ref<=存值=照亮; 与 moderngl 上报的 '<=' 相反).
 // 阴影贴图存真实深度(近=小), 故传 ref = depth-bias (负 bias 把判定阈值推向光源,
 // 防自阴影 acne): stored>=depth-bias <=> 遮挡面在片元之后 -> 片元不被挡=照亮.
-float pcf_shadow(sampler2D sm, vec2 uv, float depth, float bias, float res) {
-    // T3c-4=①: 与 VK pcf() 逐字一致 —— 9 次原始深度采样 + 显式比较 + 平均
+// T3c-2b: 阴影采样经宏统一（GL: 数组下标 / VK: 分离纹理或 2d-array）
+float pcf_shadow(int slot, vec2 uv, float depth, float bias, float res) {
     float ts = 1.0 / res;
     float sh = 0.0;
     for (int y = -1; y <= 1; y++) {
         for (int x = -1; x <= 1; x++) {
-            float d = texture(sm, uv + vec2(float(x), float(y)) * ts).r;
+            float d = SAMPLE_SHADOW2D(slot, uv + vec2(float(x), float(y)) * ts);
+            if (d >= depth - bias) { sh += 1.0; }
+        }
+    }
+    return sh / 9.0;
+}
+
+float pcf_shadow_cube(int slot, int face, vec2 uv, float depth, float bias, float res) {
+    float ts = 1.0 / res;
+    float sh = 0.0;
+    for (int y = -1; y <= 1; y++) {
+        for (int x = -1; x <= 1; x++) {
+            float d = SAMPLE_SHADOWCUBE(slot, face, uv + vec2(float(x), float(y)) * ts);
             if (d >= depth - bias) { sh += 1.0; }
         }
     }
@@ -109,12 +122,12 @@ float point_shadow(int slot, vec3 rd) {
     vec2 uv = fc * 0.5 + 0.5;
     float depth = length(rd) / u.misc2.z;     // 与点光深度贴图一致 (距离/far 归一)
     if (depth > 1.0) return 1.0;                // 超出阴影覆盖范围不算遮
-    if (face == 0) return pcf_shadow(u_shadow_maps[slot],     uv, depth, u.misc2.y, u.misc.w);
-    if (face == 1) return pcf_shadow(u_shadow_maps[slot + 1], uv, depth, u.misc2.y, u.misc.w);
-    if (face == 2) return pcf_shadow(u_shadow_maps[slot + 2], uv, depth, u.misc2.y, u.misc.w);
-    if (face == 3) return pcf_shadow(u_shadow_maps[slot + 3], uv, depth, u.misc2.y, u.misc.w);
-    if (face == 4) return pcf_shadow(u_shadow_maps[slot + 4], uv, depth, u.misc2.y, u.misc.w);
-    return              pcf_shadow(u_shadow_maps[slot + 5], uv, depth, u.misc2.y, u.misc.w);
+    if (face == 0) return pcf_shadow_cube(slot, 0, uv, depth, u.misc2.y, u.misc.w);
+    if (face == 1) return pcf_shadow_cube(slot, 1, uv, depth, u.misc2.y, u.misc.w);
+    if (face == 2) return pcf_shadow_cube(slot, 2, uv, depth, u.misc2.y, u.misc.w);
+    if (face == 3) return pcf_shadow_cube(slot, 3, uv, depth, u.misc2.y, u.misc.w);
+    if (face == 4) return pcf_shadow_cube(slot, 4, uv, depth, u.misc2.y, u.misc.w);
+    return              pcf_shadow_cube(slot, 5, uv, depth, u.misc2.y, u.misc.w);
 }
 void main() {
     vec3 n = normalize(v_normal);
@@ -215,7 +228,7 @@ void main() {
                 } else {
                     // 2026-08-22: pcf × 形状遮罩 —— 阴影采样只决定"遮挡",
                     // 截面形状由 g_in_shape 决定 (修复"阴影开时锁圆")
-                    sh = pcf_shadow(u_shadow_maps[int(u.lights[i].params.w)], uv, depth,
+                    sh = pcf_shadow(int(u.lights[i].params.w), uv, depth,
                                     u.misc2.x, u.misc.z) * g_in_shape;
                 }
             }
@@ -402,6 +415,8 @@ from loom_shader_bindings import bucket_block_glsl as _bucket_block
 _BUCKET_UBO_GLSL = _expand_bindings(_bucket_block())
 _FRAG_SRC = _FRAG_SRC.replace('//@@SCENE_UBO@@', _SCENE_UBO_GLSL)
 _FRAG_SRC = _FRAG_SRC.replace('//@@BUCKET_UBO@@', _BUCKET_UBO_GLSL)
+from loom_shader_compat_src import compat_src as _compat_src
+_FRAG_SRC = _FRAG_SRC.replace('//@@COMPAT@@', _compat_src())
 # _VERT_SRC 由 _shared_vert_src() 在文件末尾加载（单源 main.vert）
 
 
