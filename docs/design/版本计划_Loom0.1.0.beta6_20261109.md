@@ -707,3 +707,13 @@ depth/raster/load/clear/绘制源/后处理阶段与参数）必须单一来源�
 - wgpu 能直接吃 GLSL，但 naga 的 GLSL 前端**不支持任何 sampler** → 直喂不可行
 - GLSL → `glslang -V` → SPIR-V → wgpu：**UBO/SSBO/无描述符均 OK**；**合并采样器失败**（`invalid id %14`）；**分离采样器（texture2D + sampler）OK**
 → 结论：源语言选 **GLSL**；VK 侧走 SPIR-V；采样器差异由兼容宏切换。
+
+#### T3 实现约定（Step A spike 实测，2026-11-11）
+
+| 约定 | 原因 |
+|---|---|
+| 比较采样器必须写 `uniform samplerShadow`（不是 `sampler`） | 写普通 sampler 会在**模块创建期**被 naga 拒（`inconsistent comparison sampling`） |
+| shadow 采样用 `texture2D`/`textureCube` + `samplerShadow`（不存在 `texture2DShadow` 类型，glslang 直接语法错） | 分离采样器写法 |
+| BGL 侧：texture `sample_type='depth'`、sampler `'comparison'` | wgpu 校验要求 |
+| 片段 `layout(location=N) in ...` 要求顶点段有同 location 的 out | 否则 naga 报输入不匹配 |
+| 实例属性用 `layout(location=N) in vec4`，VK 侧 `step_mode='instance'`、GL 侧 `divisor` | 两端语义对齐 |
