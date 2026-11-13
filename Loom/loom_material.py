@@ -2,14 +2,16 @@
 """loom_material.py — 材质资产 (M23)。
 
 原属 engine.py（"材质资产 (M23)" 段）。依赖 numpy、loom_color._hex_rgba。
-Material._bump_appearance 需 bump GameObject._appearance_gen —— 原靠同一模块
-全局命名空间运行期解析；拆出后改为函数内延迟 import engine（同语义，无循环风险）。
-engine.py 通过 `from loom_material import Material` 重新导出。
+Material._bump_appearance 需 bump 外观代计数器 —— 2026-11-13 起写 loom_appearance
+（不依赖 engine；原函数内 `from engine import GameObject` 会把整个渲染引擎拖进
+build_game 的静态 import 图）。engine.py 通过 `from loom_material import Material`
+重新导出。
 """
 import uuid
 
 import numpy as np
 
+import loom_appearance
 from loom_color import _hex_rgba
 
 
@@ -128,6 +130,6 @@ class Material:
         """组6件1 (2026-09-02): 材质内容变化 → bump 桶实例数据代计数器.
         类级 (Material 定义在 GameObject 前, 运行时按名解析无循环依赖);
         引擎 _prepare_bucket_frame 每帧比较代数, 无变化帧整段跳过实例上传.
-        多 bump 无害 (只多一次提交)."""
-        from engine import GameObject   # 延迟 import：运行时 engine 已加载（原同模块直引，语义不变）
-        GameObject._appearance_gen += 1
+        多 bump 无害 (只多一次提交).
+        2026-11-13: 计数器下沉到 loom_appearance，断掉 `from engine import ...` 静态边。"""
+        loom_appearance.bump()

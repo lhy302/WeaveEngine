@@ -18,6 +18,8 @@ import weakref
 
 import numpy as np
 
+import loom_appearance
+
 try:
     import pygame
 except ImportError:            # 无头环境/测试桩: 仅 from_rgba 可用
@@ -233,10 +235,10 @@ class Texture:
         self._gl_ctx_id = None
 
     def bump_appearance(self):
-        """内容变化 -> 通知外观代计数器 (材质/贴图变化走同款失效)。"""
+        """内容变化 -> 通知外观代计数器 (材质/贴图变化走同款失效)。
+        2026-11-13: 计数器下沉到 loom_appearance，断掉 `from engine import ...` 静态边。"""
         try:
-            from engine import GameObject
-            GameObject._appearance_gen += 1
+            loom_appearance.bump()
         except Exception:
             pass
 

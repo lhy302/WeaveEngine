@@ -51,7 +51,15 @@ import zlib
 import base64
 import math
 
-from engine import Point3D, wrap_deg
+# 2026-11-13 构建器瘦身: 原来写 `from engine import Point3D, wrap_deg` ——
+# 这会为了两个纯数据/纯数学符号把**整个编辑器引擎**拖进 import 图（engine.py 在模块级
+# import numpy/pygame/moderngl），导致 `build_game` 的打包产物白白背上 pygame 9MB、
+# moderngl/glfw 与一大批渲染模块。改为直接从定义处导入，二者都不依赖引擎：
+#   · Point3D     在 loom_types（只依赖 collections.namedtuple）
+#   · wrap_deg    在 loom_scene_entities（只依赖 math/uuid/loom_types）
+# 场景 I/O 里其余所有 `engine.` 引用都是**函数参数**名（Engine 实例），不是模块。
+from loom_types import Point3D
+from loom_scene_entities import wrap_deg
 from loom_components import animator_from_dict, animator_to_dict
 from mesh import create_cube, spec_to_mesh
 

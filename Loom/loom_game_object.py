@@ -8,6 +8,7 @@
 engine.py 通过 `from loom_game_object import GameObject` 重导出。
 """
 
+import loom_appearance   # 组6件1: 外观代计数器 (原类属性 _appearance_gen 的真身)
 from loom_types import Point3D
 from loom_components import (
     TransformComponent, MeshRendererComponent, ScriptComponent,
@@ -56,14 +57,30 @@ def _normalize_scale(v):
 
 
 # ================ 模型状态 (场景物体) ================
-class GameObject:
+class _AppearanceGenMeta(type):
+    """类级 `_appearance_gen` 兼容视图：读写都落到 loom_appearance.
+
+    2026-11-13 构建器瘦身: 计数器真身下沉到 loom_appearance（不依赖 engine），
+    这样 loom_material / loom_texture 的 bump 不必 `from engine import GameObject`
+    （函数内 import 也会被 Nuitka 静态跟随，把整张渲染引擎图拖进 build_game）。
+    这里保留 `GameObject._appearance_gen` 的类属性读写语义（engine / loom_render /
+    loom_lighting 的 stamp 比较与既有外部代码都不用改）。
+    """
+
+    @property
+    def _appearance_gen(cls):
+        return loom_appearance.gen()
+
+    @_appearance_gen.setter
+    def _appearance_gen(cls, value):
+        loom_appearance.set_value(value)
+
+
+class GameObject(metaclass=_AppearanceGenMeta):
     """场景物体 (M25 组件化): 容器 + 组件列表.
     组成: TransformComponent + MeshRendererComponent + ScriptComponent[] (可多个).
     便捷属性 (position/color/script_id/...) 委托到组件, 兼容旧代码;
     新代码应直接访问 self.transform / self.renderer / self.scripts."""
-
-    # 组6件1: 材质外观代计数器 (Material.color/saturation setter bump; 见上)
-    _appearance_gen = 0
 
     def __init__(self, mesh, position, rotation,
                  name=None, scale=None, visible=True,

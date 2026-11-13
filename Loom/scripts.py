@@ -28,7 +28,11 @@ import os
 import re
 import sys
 import types
-from engine import Point3D
+
+# 2026-11-13 构建器瘦身: 原 `from engine import Point3D` 会把 engine（模块级
+# import pygame/moderngl）拖进 build_game 的静态 import 图。Point3D 的定义处是
+# loom_types（engine 也是从那里导入的），直接取同一个类，语义不变。
+from loom_types import Point3D
 
 # 脚本注册表: script_id -> Script 子类 (dict 保持注册顺序)
 SCRIPTS = {}
