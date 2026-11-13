@@ -72,45 +72,8 @@ _R_L0 = 36            # 2026-11-11 T3c-1: 头加 misc2(vec4) -> 36
 _LIGHT_F32 = 40       # +extra vec4 (cos_inner, cos_outer, range, pad)
 _SCENE_FLOATS = _R_L0 + 8 * _LIGHT_F32   # 356
 
-# ---------------- WGSL: 阴影 pass (实例矩阵, R32Float) ----------------
-_SHADOW_VERT = """
-// 2026-11-06 点光阴影: 平行光走"实例=world@光VP + 模式0(投影深度)",
-// 点光走"实例=world + u_vp=面VP + 模式1(到光源距离/far)"。
-struct SU {
-    vp: mat4x4<f32>,
-    pos: vec4f,
-    params: vec4f,      // x=模式(0 投影深度 / 1 距离), y=far
-}
-@group(0) @binding(0) var<uniform> su: SU;
-
-struct SVOut {
-    @builtin(position) pos: vec4f,
-    @location(0) wpos: vec3f,
-}
-
-@vertex fn vs(
-    @location(0) p: vec3f,
-    @location(3) c0: vec4f, @location(4) c1: vec4f,
-    @location(5) c2: vec4f, @location(6) c3: vec4f,
-) -> SVOut {
-    let m = mat4x4<f32>(c0, c1, c2, c3);
-    let w = m * vec4f(p, 1.0);
-    var o: SVOut;
-    o.pos = su.vp * w;
-    o.wpos = w.xyz;
-    return o;
-}
-
-@fragment fn fs(in: SVOut) -> @location(0) vec4f {
-    var d: f32;
-    if (su.params.x > 0.5) {
-        d = clamp(length(in.wpos - su.pos.xyz) / max(su.params.y, 1e-3), 0.0, 1.0);
-    } else {
-        d = in.pos.z / in.pos.w;
-    }
-    return vec4f(d, 0.0, 0.0, 1.0);
-}
-"""
+# T3b (2026-11-13): 阴影 pass 手写 WGSL 已删除 —— VK 改喂 Loom/shaders/shadow.vert|frag
+# 编译出的 SPIR-V（与 GL 同一份 GLSL 源）。入口名 'main'（glslang 产物不是 'vs'/'fs'）。
 
 # ---------------- WGSL: P1 逃生舱 ----------------
 _MAIN_P1_VERT = """
@@ -132,36 +95,8 @@ _MAIN_P1_FRAG = """
 }
 """
 
-_SKY_WGSL = """
-// 2026-11-06 天空盒: 全屏三角 + 反投影采样 cubemap (与 GL _SKY_FRAG 同式)
-struct SkyC {
-    inv_vp: mat4x4<f32>,
-    cam: vec4f,
-    tint: vec4f,
-    size: vec4f,      // x=宽 y=高
-}
-@group(0) @binding(0) var<uniform> sky: SkyC;
-@group(0) @binding(1) var t_cube: texture_cube<f32>;
-@group(0) @binding(2) var s_cube: sampler;
-
-@vertex fn vs(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4f {
-    var p = vec2f(-1.0, -1.0);
-    if (vi == 1u) { p = vec2f(3.0, -1.0); }
-    if (vi == 2u) { p = vec2f(-1.0, 3.0); }
-    return vec4f(p, 1.0, 1.0);
-}
-
-@fragment fn fs(@builtin(position) frag: vec4f) -> @location(0) vec4f {
-    // 与 GL 一致: clip=(ndc.x, ndc.y, 1, 1), world = clip @ inv(VP)
-    let ndc = vec2f(frag.x / max(sky.size.x, 1.0) * 2.0 - 1.0,
-                    1.0 - frag.y / max(sky.size.y, 1.0) * 2.0);
-    let clip = vec4f(ndc.x, ndc.y, 1.0, 1.0);
-    let world = sky.inv_vp * clip;
-    let dir = normalize(world.xyz / max(world.w, 1e-6) - sky.cam.xyz);
-    let col = textureSample(t_cube, s_cube, dir).rgb * sky.tint.rgb;
-    return vec4f(col, 1.0);
-}
-"""
+# T3b (2026-11-13): 天空盒手写 WGSL 已删除 —— VK 改喂 Loom/shaders/sky.vert|frag
+# 编译出的 SPIR-V（与 GL 同一份 GLSL 源）。入口名 'main'。
 
 
 
@@ -460,6 +395,27 @@ class VkRenderer:
             self._main_fs_spv = self.device.create_shader_module(code=fh.read())
         return self._main_fs_spv
 
+    def _spv_module(self, name):
+        """T3 单源: Loom/shaders/<name>.spv -> wgpu shader module（按名缓存）。
+
+        name 例: 'shadow.vert' / 'sky.frag' / 'mip_downsample.frag'。
+        缺文件直接报错（不静默回退手写 WGSL —— 手写版本已全部删除）。
+        """
+        cache = getattr(self, '_spv_mods', None)
+        if cache is None:
+            cache = self._spv_mods = {}
+        m = cache.get(name)
+        if m is not None:
+            return m
+        p = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                         'shaders', name + '.spv')
+        if not os.path.isfile(p):
+            raise RuntimeError('缺少 SPIR-V: %s（先跑 tools/build_shaders.py）' % p)
+        with open(p, 'rb') as fh:
+            m = self.device.create_shader_module(code=fh.read())
+        cache[name] = m
+        return m
+
     def _build_pipelines(self):
         d = self.device
         if self.stage == 'p1':
@@ -517,7 +473,8 @@ class VkRenderer:
                       'targets': [{'format': self.format}]})
         # 阴影管线: 顶点(40B) + 实例(64B: world@光VP), R32Float 手动比较
         # 布局 = 空 (shader 无绑定, 矩阵走实例属性)
-        shad = d.create_shader_module(code=_SHADOW_VERT)
+        shad_vs = self._spv_module('shadow.vert')   # T3b: 单源 shadow.vert -> SPIR-V
+        shad_fs = self._spv_module('shadow.frag')   # T3b: 单源 shadow.frag -> SPIR-V
         # 2026-11-06 点光阴影: 阴影 pass 需要一个 uniform (面VP/光源位置/模式)
         self._shadow_bgl = d.create_bind_group_layout(entries=[
             {'binding': 0, 'visibility': wgpu.ShaderStage.VERTEX
@@ -551,9 +508,10 @@ class VkRenderer:
                                                        'offset': 0, 'size': 96}}])]
         self._shadow_pipeline = d.create_render_pipeline(
             layout=d.create_pipeline_layout(bind_group_layouts=[self._shadow_bgl]),
-            vertex=self._vertex_desc(shad, 'vs', inst=_INST_SHADOW_BYTES, nattr=4),
+            vertex=self._vertex_desc(shad_vs, 'main', inst=_INST_SHADOW_BYTES,
+                                     nattr=4),
             primitive=self._prim(),
-            fragment={'module': shad, 'entry_point': 'fs',
+            fragment={'module': shad_fs, 'entry_point': 'main',
                       'targets': [{'format': 'r32float'}]})
 
     # ---------------- 2026-11-10 阶段 2B2: 后处理（HDR + bloom + tonemap） ----------------
@@ -898,7 +856,8 @@ class VkRenderer:
             return False
         h, w = faces[0].shape[0], faces[0].shape[1]
         if self._sky_pipe is None:
-            shader = d.create_shader_module(code=_SKY_WGSL)
+            sky_vs = self._spv_module('sky.vert')   # T3b: 单源 sky.vert -> SPIR-V
+            sky_fs = self._spv_module('sky.frag')   # T3b: 单源 sky.frag -> SPIR-V
             bgl = d.create_bind_group_layout(entries=[
                 {'binding': 0, 'visibility': wgpu.ShaderStage.VERTEX | wgpu.ShaderStage.FRAGMENT,
                  'buffer': {'type': 'uniform'}},
@@ -908,13 +867,13 @@ class VkRenderer:
                  'sampler': {'type': 'filtering'}}])
             self._sky_pipe = d.create_render_pipeline(
                 layout=d.create_pipeline_layout(bind_group_layouts=[bgl]),
-                vertex={'module': shader, 'entry_point': 'vs', 'buffers': []},
+                vertex={'module': sky_vs, 'entry_point': 'main', 'buffers': []},
                 # 2a: 天空的 depth/raster 也来自共享描述（缺省 = 原 VK 语义）
                 primitive=self._prim(_sk.raster if _sk is not None else None),
                 depth_stencil={'format': 'depth32float',
                                'depth_write_enabled': (False if _dkey is None else _dkey[0]),
                                'depth_compare': ('always' if _dkey is None else _dkey[1])},
-                fragment={'module': shader, 'entry_point': 'fs',
+                fragment={'module': sky_fs, 'entry_point': 'main',
                           'targets': [{'format': getattr(self, '_frame_fmt', self.format)}]})
             self._sky_bgl = bgl
             # SkyC: inv_vp 64B + cam 16B + tint 16B + size 16B = 112B
@@ -1282,21 +1241,9 @@ class VkRenderer:
             rp.draw(6, 1, base, 0)
         return len(groups)
 
-    _MIP_WGSL = """
-@group(0) @binding(0) var t_src: texture_2d<f32>;
-@group(0) @binding(1) var s_src: sampler;
-@vertex fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
-    var p = vec2f(-1.0, -1.0);
-    if (i == 1u) { p = vec2f(3.0, -1.0); }
-    if (i == 2u) { p = vec2f(-1.0, 3.0); }
-    return vec4f(p, 0.0, 1.0);
-}
-@fragment fn fs(@builtin(position) frag: vec4f) -> @location(0) vec4f {
-    // 目标 mip 尺寸 = 源的一半; uv 必须按**目标**像素归一 (按源归一只能采到 1/4 区域)
-    let dst = max(vec2f(textureDimensions(t_src, 0)) * 0.5, vec2f(1.0));
-    return textureSampleLevel(t_src, s_src, frag.xy / dst, 0.0);
-}
-"""
+    # T3b (2026-11-13): mip 手写 WGSL 已删除 —— VK 改喂 Loom/shaders/mip_downsample.frag
+    # 的 SPIR-V（顶点复用 post_fullscreen.vert）。GL 侧无对应 shader 实现（驱动
+    # glGenerateMipmap），差异已登记到 docs/audit/impl_T3_remaining_20261113.md。
 
     def _ensure_mip_pipeline(self, fmt='rgba8unorm'):
         # 2B2: 目标格式参数化（旧实现写死 rgba8unorm，HDR/半分辨率链会立刻踩到）
@@ -1304,7 +1251,8 @@ class VkRenderer:
                 getattr(self, '_mip_fmt', None) == fmt:
             return
         d = self.device
-        shader = d.create_shader_module(code=self._MIP_WGSL)
+        mip_vs = self._spv_module('post_fullscreen.vert')   # 全屏三角（复用 post 链）
+        mip_fs = self._spv_module('mip_downsample.frag')    # T3b: 单源 mip 降采样
         bgl = d.create_bind_group_layout(entries=[
             {'binding': 0, 'visibility': wgpu.ShaderStage.FRAGMENT,
              'texture': {'sample_type': 'float', 'view_dimension': '2d'}},
@@ -1313,9 +1261,9 @@ class VkRenderer:
         self._mip_bgl = bgl
         self._mip_pipe = d.create_render_pipeline(
             layout=d.create_pipeline_layout(bind_group_layouts=[bgl]),
-            vertex={'module': shader, 'entry_point': 'vs', 'buffers': []},
+            vertex={'module': mip_vs, 'entry_point': 'main', 'buffers': []},
             primitive={'topology': 'triangle-list'},
-            fragment={'module': shader, 'entry_point': 'fs',
+            fragment={'module': mip_fs, 'entry_point': 'main',
                       'targets': [{'format': fmt}]})
         self._mip_fmt = fmt
         self._mip_sampler = d.create_sampler(

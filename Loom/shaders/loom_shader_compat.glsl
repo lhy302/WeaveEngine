@@ -1,4 +1,5 @@
-// loom_shader_compat.glsl — T3 单源兼容层（2026-11-11；2026-11-13 补 samplerless 扩展 + 阴影坐标约定）
+// loom_shader_compat.glsl — T3 单源兼容层（2026-11-11；2026-11-13 补 samplerless 扩展 + 阴影坐标约定；
+// 2026-11-13 T3b：补天空 / 阴影 pass / mip 三块剩余手写的宏）
 //
 // 约定：#ifdef LOOM_VK **只允许出现在本文件**。着色器正文只用下面的宏。
 // 本文件为**单一来源**：每个宏只定义一次（GL / VK 各一份分支）。
@@ -20,6 +21,12 @@
   #define SB_SHADOW2 10
   #define SB_SHADOW_ARR 3
   #define SB_ARR_SMP 4
+  // 天空 pass 独立 bind group：0=UBO(SkyC) 1=textureCube 2=sampler
+  #define SB_SKY_UBO 0
+  #define SB_SKY_CUBE 1
+  #define SB_SKY_SAMP 2
+  // 阴影 pass 独立 bind group：0=UBO(ShadowU)
+  #define SB_SHADOW_U 0
   // ---------- 顶点/片段基础 ----------
   #define LOOM_VERTEX_ID gl_VertexIndex
   #define DECL_FRAG_UV           /* VK：无 varying 输入（用 gl_FragCoord） */
@@ -34,6 +41,32 @@
   #define DECL_TEXCUBE(name, b)  layout(binding = b) uniform textureCube name
   #define SAMPLECUBE(name, smp, dir) texture(samplerCube(name, smp), (dir))
   #define SAMPLECUBE_LOD(name, smp, dir, lod) textureLod(samplerCube(name, smp), (dir), (lod))
+  // ---------- 天空（VK：SkyC 一次进 UBO；全屏三角无顶点输入）----------
+  // 落盘布局与 vk_renderer._draw_sky 的 28 f32 逐字节一致：
+  //   inv_vp[0..16) cam[16..20) tint[20..24) size[24..28)
+  #define DECL_SKY_UNI layout(std140, binding = SB_SKY_UBO) uniform SkyC { \
+        mat4 sky_inv_vp; vec4 sky_cam; vec4 sky_tint; vec4 sky_size; } sky;
+  #define SKY_INV_VP sky.sky_inv_vp
+  #define SKY_CAM    sky.sky_cam.xyz
+  #define SKY_TINT   sky.sky_tint.xyz
+  #define DECL_SKY_INPUT        /* VK：全屏三角，无顶点属性 */
+  #define SKY_VERT_NDC (vec2((gl_VertexIndex == 1) ? 3.0 : -1.0, \
+                             (gl_VertexIndex == 2) ? 3.0 : -1.0))
+  // ---------- 阴影 pass（VK：ShadowU 一次进 UBO；深度写进 r32float 颜色附件）----------
+  // 落盘布局与 vk_renderer._exec_shadow_maps 的 24 f32 逐字节一致：
+  //   vp[0..16) pos[16..20) params[20..24)（x=模式, y=far）
+  #define DECL_SHADOW_UNI layout(std140, binding = SB_SHADOW_U) uniform ShadowU { \
+        mat4 sh_vp; vec4 sh_pos; vec4 sh_params; } sh;
+  #define DECL_SHADOW_PARAMS    /* VK：参数已在上面的 ShadowU 里 */
+  #define SHADOW_VP          sh.sh_vp
+  #define SHADOW_IS_DISTANCE (sh.sh_params.x > 0.5)
+  #define SHADOW_LIGHT_POS   sh.sh_pos.xyz
+  #define SHADOW_FAR         max(sh.sh_params.y, 1e-3)
+  // wgpu 的 NDC z 就是 [0,1]，窗口深度 = clipz（GL 是 0.5*clipz+0.5，但那边
+  // gl_FragCoord.z 本来就已经是窗口深度 —— 两边都用 gl_FragCoord.z 即同一语义）。
+  #define SHADOW_STAGE_DEPTH (gl_FragCoord.z)
+  #define SHADOW_STORE_DEPTH(d) frag_color = vec4((d), 0.0, 0.0, 1.0)
+  #define DECL_SHADOW_OUT layout(location = 0) out vec4 frag_color;
   // ---------- 阴影（VK：平行光两槽 select；点光 2d-array + texelFetch）----------
   #define DECL_SHADOW2D(slot)   layout(binding = SB_SHADOW) uniform texture2D t_shadow; \
                                 layout(binding = 2) uniform sampler s_shadow; \
@@ -69,6 +102,10 @@
   #define SB_SHADOW2 0
   #define SB_SHADOW_ARR 0
   #define SB_ARR_SMP 0
+  #define SB_SKY_UBO 0
+  #define SB_SKY_CUBE 0
+  #define SB_SKY_SAMP 0
+  #define SB_SHADOW_U 0
   #define LOOM_VERTEX_ID gl_VertexID
   #define DECL_FRAG_UV           layout(location = 0) in vec2 v_uv;
   #define LOOM_FRAG_UV           v_uv
@@ -81,6 +118,27 @@
   #define DECL_TEXCUBE(name, b)  layout(binding = b) uniform samplerCube name
   #define SAMPLECUBE(name, smp, dir) texture(name, (dir))
   #define SAMPLECUBE_LOD(name, smp, dir, lod) textureLod(name, (dir), (lod))
+  // ---------- 天空（GL：独立 uniform + 0..1 quad 顶点属性）----------
+  #define DECL_SKY_UNI uniform mat4 u_inv_view_proj; \
+                       uniform vec3 u_camera_pos; \
+                       uniform vec3 u_skybox_tint;
+  #define SKY_INV_VP u_inv_view_proj
+  #define SKY_CAM    u_camera_pos
+  #define SKY_TINT   u_skybox_tint
+  #define DECL_SKY_INPUT in vec2 in_pos;
+  #define SKY_VERT_NDC ((in_pos) * 2.0 - 1.0)
+  // ---------- 阴影 pass（GL：独立 uniform；深度写 gl_FragDepth）----------
+  #define DECL_SHADOW_UNI uniform mat4 u_light_vp;
+  #define DECL_SHADOW_PARAMS uniform int u_depth_kind; \
+                             uniform vec3 u_light_pos; \
+                             uniform float u_light_far;
+  #define SHADOW_VP          u_light_vp
+  #define SHADOW_IS_DISTANCE (u_depth_kind > 0)
+  #define SHADOW_LIGHT_POS   u_light_pos
+  #define SHADOW_FAR         u_light_far
+  #define SHADOW_STAGE_DEPTH (gl_FragCoord.z)
+  #define SHADOW_STORE_DEPTH(d) gl_FragDepth = (d)
+  #define DECL_SHADOW_OUT        /* GL：阴影 pass 只有深度附件，不写颜色 */
   #define DECL_SHADOW2D(slot)   uniform sampler2D u_shadow_maps[16]
   #define DECL_SHADOWCUBE(face) /* GL：点光 6 面在 u_shadow_maps 里 */
   #define SAMPLE_SHADOW2D(slot, uv)        texelFetch(u_shadow_maps[(slot)], ivec2((uv) * vec2(textureSize(u_shadow_maps[(slot)], 0))), 0).r

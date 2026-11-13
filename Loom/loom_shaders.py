@@ -84,35 +84,9 @@ void main() {
 # 深度贴图存真实深度 (近=小, 默认 gl_FragCoord.z / 点光=距离/far):
 # 本驱动阴影采样实测 stored>=ref 为照亮, 主 pass 传 ref = depth-bias,
 # 故遮挡面(stored)在片元之后(stored>=depth-bias)=照亮. 反转深度方案已废弃.
-_SHADOW_VERT = """#version 330
-in vec3 in_pos;
-// A2 (2026-08-29): 阴影 pass 同样走实例化 (world 矩阵 per-instance, 光 VP 仍 uniform)
-in vec4 a_w0; in vec4 a_w1; in vec4 a_w2; in vec4 a_w3;
-uniform mat4 u_light_vp;
-out vec3 v_world_pos;
-void main() {
-    mat4 u_model = mat4(a_w0, a_w1, a_w2, a_w3);
-    vec4 world = u_model * vec4(in_pos, 1.0);
-    v_world_pos = world.xyz;
-    gl_Position = u_light_vp * world;
-}"""
-
-_SHADOW_FRAG = """#version 330
-uniform int u_depth_kind;      // 0= 默认深度(z), 1= 到光源距离 (点光)
-uniform vec3 u_light_pos;
-uniform float u_light_far;     // 点光阴影远平面（阴影 pass 独立程序，不进 Scene UBO）
-in vec3 v_world_pos;
-void main() {
-    // 存真实深度 (近=小): 本驱动阴影采样器实测固定比较 stored >= ref (忽略 compare_func),
-    // 主 pass 传 ref = depth - bias, 遮挡面在片元之后 => stored >= depth-bias => 照亮.
-    // 深度测试用默认 GL_LESS (近小大远), 近的遮挡面正确覆盖远的.
-    // 必须无条件写 gl_FragDepth (分支不取时值未定义, 某些驱动写 0.0).
-    if (u_depth_kind > 0) {
-        gl_FragDepth = clamp(length(v_world_pos - u_light_pos) / u_light_far, 0.0, 1.0);
-    } else {
-        gl_FragDepth = gl_FragCoord.z;
-    }
-}"""
+# T3b (2026-11-13): 阴影 pass 顶点+片段已单源化 —— GL 与 VK 读同一份
+# Loom/shaders/shadow.vert / shadow.frag（VK 走 glslang 出来的 .spv）。
+# 由本文件末尾的 _shared_shader_src() 加载，这里不再保留第二份 GLSL 文本。
 
 
 # ================ 通用常量 (2026-11-09 人类裁决 Q2=A: 收敛到一处) ================
@@ -129,31 +103,9 @@ CLEAR_COLOR_RGBA = (0.10, 0.12, 0.16, 1.0)
 # 反投影数学（与 engine._ray_from_screen 逐位一致: 行向量约定 clip @ inv(VP) = world）:
 #   frag NDC(x, y, 1.0) -> world = clip @ inv(VP) -> dir = normalize(world.xyz/w - cam_pos)
 # 复用 engine._quad_vbo（2f 2f = pos + uv，其中 pos 是 0..1 归一化 quad）
-_SKY_VERT = """#version 330
-in vec2 in_pos;   // quad 顶点位置 (0..1 归一化)
-out vec2 v_ndc;
-void main() {
-    // 全屏 quad: 0..1 -> NDC -1..1, z=1.0 = 远平面
-    v_ndc = in_pos * 2.0 - 1.0;
-    gl_Position = vec4(v_ndc, 1.0, 1.0);
-}"""
-
-_SKY_FRAG = """#version 330
-in vec2 v_ndc;
-uniform mat4 u_inv_view_proj;   // CPU 侧算好的 inv(VP)（行向量约定）
-uniform vec3 u_camera_pos;
-uniform samplerCube u_skybox;
-uniform vec3 u_skybox_tint;
-out vec4 frag_color;
-void main() {
-    // 行向量约定: clip = (ndc.x, ndc.y, 1.0, 1.0), world = clip @ inv(VP)
-    // GLSL 是列主序, u_inv_view_proj * v 等价 numpy 的 v @ M（M 是行主序存储）
-    vec4 clip = vec4(v_ndc.x, v_ndc.y, 1.0, 1.0);
-    vec4 world = u_inv_view_proj * clip;
-    vec3 dir = normalize(world.xyz / max(world.w, 1e-6) - u_camera_pos);
-    vec3 col = texture(u_skybox, dir).rgb * u_skybox_tint;
-    frag_color = vec4(col, 1.0);
-}"""
+# T3b (2026-11-13): 天空盒顶点+片段已单源化 —— GL 与 VK 读同一份
+# Loom/shaders/sky.vert / sky.frag（VK 走 glslang 出来的 .spv）。
+# 由本文件末尾的 _shared_shader_src() 加载，这里不再保留第二份 GLSL 文本。
 # 2026-11-11 T3c-1: 场景 block **由字段表生成**（不许手写第二份）
 from loom_scene_ubo import glsl_block as _glsl_scene_block
 from loom_shader_bindings import expand as _expand_bindings
@@ -161,6 +113,27 @@ _SCENE_UBO_GLSL = _expand_bindings(_glsl_scene_block())
 from loom_shader_bindings import bucket_block_glsl as _bucket_block
 _BUCKET_UBO_GLSL = _expand_bindings(_bucket_block())
 from loom_shader_compat_src import compat_src as _compat_src
+
+
+def _shared_shader_src(name):
+    """T3b: 读 Loom/shaders/<name> 单源（GL 侧用；VK 侧走同一份源编译出的 .spv）。
+
+    与 main.frag/main.vert 同款：展开 COMPAT，并把 #version 450 降到 GL 4.3 的 430。
+    天空/阴影源里没有 SCENE/BUCKET 标记，故不替换那两个块。
+    """
+    import os
+    base = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'shaders')
+    with open(os.path.join(base, name), encoding='utf-8') as fh:
+        src = fh.read()
+    src = src.replace('//@@COMPAT@@', _compat_src())
+    return src.replace('#version 450', '#version 430')
+
+
+# T3b: 阴影 pass / 天空盒 = 单一来源（GL 与 VK 同一份 GLSL）
+_SHADOW_VERT = _shared_shader_src('shadow.vert')
+_SHADOW_FRAG = _shared_shader_src('shadow.frag')
+_SKY_VERT = _shared_shader_src('sky.vert')
+_SKY_FRAG = _shared_shader_src('sky.frag')
 
 
 def _shared_frag_src():
