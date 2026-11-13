@@ -46,7 +46,7 @@
   `Loom/` 产品树手写 WGSL 只剩 P1 诊断逃生舱（`--stage p1`，**14 个非空行**）。
   **豁免前提如实说**：`tests/test_vk_p1_stage.py` 用假设备（只记录调用、**不解析 WGSL**），能证明「管线对象被创建」，但**证明不了那段 WGSL 语法一定正确** —— 真机 p1 路径无测试（已登记）。
 - 像素门实测（2026-11-13，本机，`py -3.13 tests/test_ab_gl_vk.py`）：
-  **25 场景 / 失败 0 / 跳过 0**，三向 MAE 最大 = GL/参考 **5.7e-5**、VK/参考 **6.6e-5**、GL↔VK **5.3e-5**（均为 `ab_point_shadow`）；
+  **26 场景 / 失败 0 / 跳过 0**（含新增 `ab_world_canvas`），三向 MAE 最大 = GL/参考 **5.7e-5**、VK/参考 **6.6e-5**、GL↔VK **5.3e-5**（均为 `ab_point_shadow`）；
   UI 专项：`ab_ui_scene` **1.10e-4**、新增纯 UI 场景 `ab_ui_only` **2.726e-3**（门限沿用既有 `ui_mae_abs=5e-3`）；
   闸门 `mae_abs=2e-4`、漂移容差 `5e-5`；场景级例外仅 `ab_mip_minify`（VK/参考与 GL/VK 用 `mae_abs=1e-3`，GL/参考仍 2e-4）。
 - 13 个 `.spv` 可由 HEAD 源逐字节复现（glslang 16.6.0 + 与 `tools/build_shaders.py` 同一条展开链路，
@@ -58,8 +58,8 @@
 
 - source 包：包内引擎 `.py` **97 / HEAD 97**，内容不一致 **0**、包多出 **0**、包缺失 **0**
   （CRLF 归一后逐文件 sha256 对拍；`sceneio.py`/`agent_commands.py`/`loom_post.py`/`loom_assets.py` 四个关键文件同判）。
-- compiled 包：`build_info.git_head=75b8082…` 与 HEAD **相等**（`equal`）、`git_dirty=False`、
-  `smoke_passed_at=2026-11-13 15:59:20 > built_at=2026-11-13 15:46:17`。
+- compiled 包：`build_info.git_head=051fff0…` 与 HEAD **相等**（`equal`）、`git_dirty=False`、
+  `smoke_passed_at=2026-11-13 20:07:05 > built_at=2026-11-13 19:36:46`。
 - 包内元数据：顶层 `0.1.0.beta6` / 嵌套运行时 `0.1.0.beta6` / 目标 `0.1.0.beta6` 三处一致。
 - 着色器实到（打开 zip 逐条数，不是看脚本注释）：compiled 包 **81** 条 `/shaders/`（3×27：`Loom/shaders/` + 运行时 dist + 构建器 dist 各 27 = 13 `.spv` + 13 源 + `loom_shader_compat.glsl`），source 包 **54** 条；
   包内 13 个 `.spv` 与 HEAD 逐字节相同（39/39 副本全等）。
@@ -69,8 +69,8 @@
 
 | 产物 | 字节 | 显示大小 | sha256 | git_head |
 |---|---|---|---|---|
-| `Loom-0.1.0.beta6-compiled.zip` | 145 282 279 | 138.55 MB | `dd4dcd5a73253d9026b1b3f9caadd9e5939f0f867c70572caf050dff7478698b` | `75b808245da329319b2ed202d325c2f1c9aefe7a` |
-| `Loom-0.1.0.beta6-source.zip` | 358 723 332 | 342.11 MB | `05113b66c51d07faa8445d0ac11d7ec00631969438205711ab7351fe063060cf` | `75b808245da329319b2ed202d325c2f1c9aefe7a` |
+| `Loom-0.1.0.beta6-compiled.zip` | 145 283 966 | 138.55 MB | `fab9ad3af5ac0dfe724f45fd699eb0501779f7e36d8e3f1f5b6fd40f46a32c43` | `051fff0801bd87156ebd008295ac5408697ac2ee` |
+| `Loom-0.1.0.beta6-source.zip` | 358 724 816 | 342.11 MB | `5be8a63dbabe2fe3332b610408aa33a18de76dc2d8269c59afc3261635024e40` | `051fff0801bd87156ebd008295ac5408697ac2ee` |
 | `LoomHub-0.1.4-Setup.exe` | 27 363 292 | 26.10 MB | `ac75dccfb37b9550e99d2cceb733b26dba4bdc920cddbd535c352101f8b26682` | （Hub 无独立 git_head；版本真源 `LoomHub/版本.json`=0.1.4） |
 
 - 三件同日同 HEAD 产出：编辑器 dist **150.23 MB**、构建器 **onedir 80.08 MB**（`build_game.exe` 26.37 MB）、玩家运行时 dist **143.43 MB**。
