@@ -1,12 +1,10 @@
 #version 450
 // main.frag — T3a 单源主 pass 片段（GL 直接用同一份，VK 走 SPIR-V）
+// 语义来源：原 loom_shaders._FRAG_SRC（GL 现役主片段），逐段转写；采样器/绑定走 compat 宏，
+// 阴影坐标深度走 SHADOW_UV/SHADOW_DEPTH（GL/VK 窗口深度与纹理行序不同，见 compat）。
 //@@COMPAT@@
 //@@SCENE_UBO@@
 //@@BUCKET_UBO@@
-// loom_shader_compat.glsl — T3 单源兼容层（2026-11-11）
-//
-// 约定：#ifdef LOOM_VK **只允许出现在本文件**。着色器正文只用下面的宏。
-// 本文件为**单一来源**：每个宏只定义一次（GL / VK 各一份分支）。
 
 const int MAX_LIGHTS = 8;
 
@@ -199,7 +197,7 @@ void main() {
         float g_in_shape = 1.0;
         if (u.lights[i].kind < 0.5 && u.lights[i].mode > 0.5) {
             vec4 lp = u.lights[i].ortho * vec4(v_world_pos, 1.0);
-            vec2 uv = lp.xy * 0.5 + 0.5;
+            vec2 uv = SHADOW_UV(lp);
             float in_shape = 0.0;
             if (uv.x >= 0.0 && uv.x <= 1.0 && uv.y >= 0.0 && uv.y <= 1.0) {
                 vec2 xy = uv * 2.0 - 1.0;
@@ -216,8 +214,8 @@ void main() {
                 sh = point_shadow(int(u.lights[i].params.w), v_world_pos - u.lights[i].pos.xyz);
             } else {
                 vec4 lp = u.lights[i].ortho * vec4(v_world_pos, 1.0);
-                float depth = (lp.z / lp.w) * 0.5 + 0.5;   // 引擎深度约定 (near->0.5, far->1)
-                vec2 uv = lp.xy * 0.5 + 0.5;
+                float depth = SHADOW_DEPTH(lp);   // 深度约定见 compat（GL 重映射 / wgpu 已是 [0,1]）
+                vec2 uv = SHADOW_UV(lp);
                 if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
                     // beam: 出覆盖保留独立遮罩结果; full: 出范围不遮
                     sh = (u.lights[i].mode > 0.5) ? sh : 1.0;

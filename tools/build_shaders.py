@@ -68,6 +68,9 @@ def _expand(src_path):
     import loom_scene_ubo
     src = src.replace("//@@SCENE_UBO@@",
                       loom_scene_ubo.glsl_block())
+    # T3c-2a 桶级 UBO：与 SCENE 完全同一做法（字段表生成，GL/VK 同构）
+    src = src.replace("//@@BUCKET_UBO@@",
+                      loom_shader_bindings.bucket_block_glsl())
     return loom_shader_bindings.expand(src)
 
 

@@ -58,7 +58,9 @@ BUCKET_BYTES = 32
 def bucket_block_glsl():
     """由表生成 GL 的桶级 UBO 声明（字段名/顺序与 VK Bucket 一致）。"""
     return (
-        "layout(std140, binding = B_BUCKET) uniform Bucket {\n"
+        # 绑定号走 compat 的 SB_BUCKET（GL=1 绑定点 / VK=8 descriptor）；
+        # 不能写死 B_BUCKET —— 它只是 GL 侧的绑定点号，VK 的 SPIR-V 会落到 1 号与 t_shadow 冲突。
+        "layout(std140, binding = SB_BUCKET) uniform Bucket {\n"
         "    float metallic;\n"
         "    float roughness;\n"
         "    float pbr;\n"

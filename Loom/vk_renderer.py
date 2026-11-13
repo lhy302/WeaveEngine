@@ -72,296 +72,6 @@ _R_L0 = 36            # 2026-11-11 T3c-1: 头加 misc2(vec4) -> 36
 _LIGHT_F32 = 40       # +extra vec4 (cos_inner, cos_outer, range, pad)
 _SCENE_FLOATS = _R_L0 + 8 * _LIGHT_F32   # 356
 
-# ---------------- WGSL: 主 pass ----------------
-_MAIN_VERT = """
-struct SceneC {
-    mvp: mat4x4<f32>,         // 公共 V@P
-    cam: vec4f,               // xyz view_pos, w ambient_scale
-    cnt: vec4f,               // 灯 0-3 激活标志 (固定展开)
-    cnt2: vec4f,              // 灯 4-7 (2026-11-06 对齐 GL: 8 盏)
-    misc: vec4f,              // x = PBR 开关, y = 灯数, z = dir_res, w = point_res
-    misc2: vec4f,             // x = dir_bias, y = point_bias, z = point_far
-    l0: LightX, l1: LightX, l2: LightX, l3: LightX,
-    l4: LightX, l5: LightX, l6: LightX, l7: LightX,
-}
-struct LightX {
-    kind: f32, mode: f32, shape: f32, shadow: f32,
-    color: vec4f,             // rgb + intensity (a)
-    dir: vec4f,
-    pos: vec4f,
-    ortho: mat4x4<f32>,
-    params: vec4f,            // shadow_bias, shadow_res, beam size, pad
-    extra: vec4f,             // cos(inner), cos(outer), range, pad
-}
-@group(0) @binding(0) var<uniform> sc: SceneC;
-struct VSOut {
-    @builtin(position) pos: vec4f,
-    @location(0) color: vec4f,
-    @location(1) n: vec3f,
-    @location(2) wpos: vec3f,
-    @location(3) sat: f32,
-    @location(4) matv: vec4f,   // (sat, metallic, roughness, pbr_flag)
-    @location(5) uv: vec2f,
-}
-// T3a Phase-2a: 顶点着色器已单源化（Loom/shaders/main.vert -> SPIR-V），
-// 这里只保留 FS 需要的 SceneC/LightX/VSOut 定义与 bindings。
-"""
-
-_MAIN_FRAG = """
-// SceneC / LightX 定义见 _MAIN_VERT (同一 module); fragment 引用 sc 公共块
-@group(0) @binding(1) var t_shadow: texture_2d<f32>;
-@group(0) @binding(2) var s_shadow: sampler;
-// 2026-11-06 点光阴影 (对齐 GL): 6 面深度存 r32float cube, 方向采样
-// 2026-11-06 点光阴影: 6 层 2d-array + textureLoad 手算面/UV (避开 cube 约定差异)
-@group(0) @binding(3) var t_shadow_arr: texture_2d_array<f32>;
-// 2026-11-06 贴图 (与 GL u_albedo 同语义): 无贴图时绑 1x1 白
-@group(0) @binding(5) var t_albedo: texture_2d<f32>;
-@group(0) @binding(6) var s_albedo: sampler;
-// 2026-11-06 法线贴图 (与 GL u_normal_map 同式); 无贴图时绑 1x1 平直法线(0.5,0.5,1)
-@group(0) @binding(7) var t_normal: texture_2d<f32>;
-// 2026-11-06: 每桶参数 x = 是否有法线贴图 (GL u_has_normal_map 同语义)
-// T3c-2a: 桶级参数与 GL 同一张表（loom_shader_bindings.BUCKET_FIELDS，32B）
-struct Bucket {
-    metallic: f32, roughness: f32, pbr: f32,
-    has_normal_map: f32, has_env: f32, env_max_lod: f32,
-    pad0: f32, pad1: f32,
-}
-@group(0) @binding(8) var<uniform> bkt: Bucket;
-// 2026-11-06 PBR 环境反射 (与 GL u_env 同式); y=has_env z=env_max_lod
-@group(0) @binding(9) var t_env: texture_cube<f32>;
-// 2026-11-07 第 2 张平行光阴影贴图 (binding 10/11): 第 2 盏投影平行光专用.
-// 主着色器按 LightX.params.w 的槽位号分支选贴图, 不做动态纹理数组索引.
-@group(0) @binding(10) var t_shadow2: texture_2d<f32>;
-@group(0) @binding(11) var s_shadow2: sampler;
-
-fn pcf(uv: vec2f, depth: f32, bias: f32, res: f32) -> f32 {
-    let ts = 1.0 / res;
-    var sh = 0.0;
-    for (var y = -1; y <= 1; y++) {
-        for (var x = -1; x <= 1; x++) {
-            let d = textureSample(t_shadow, s_shadow,
-                                  uv + vec2f(f32(x), f32(y)) * ts).x;
-            if (d >= depth - bias) { sh += 1.0; }
-        }
-    }
-    return sh / 9.0;
-}
-
-// 槽位 1 的 PCF: 与 pcf 逐式相同, 只换贴图/采样器 (WGSL 不支持动态选纹理).
-fn pcf2(uv: vec2f, depth: f32, bias: f32, res: f32) -> f32 {
-    let ts = 1.0 / res;
-    var sh = 0.0;
-    for (var y = -1; y <= 1; y++) {
-        for (var x = -1; x <= 1; x++) {
-            let d = textureSample(t_shadow2, s_shadow2,
-                                  uv + vec2f(f32(x), f32(y)) * ts).x;
-            if (d >= depth - bias) { sh += 1.0; }
-        }
-    }
-    return sh / 9.0;
-}
-
-// ---------------- 2026-11-06 PBR (与 GL _FRAG_SRC 逐式一致) ----------------
-fn _d_ggx(N: vec3f, H: vec3f, rough: f32) -> f32 {
-    let a = rough * rough;
-    let a2 = a * a;
-    let NdotH = max(dot(N, H), 0.0);
-    let d = NdotH * NdotH * (a2 - 1.0) + 1.0;
-    return a2 / max(3.14159265 * d * d, 1e-7);
-}
-fn _g_smith(N: vec3f, V: vec3f, L: vec3f, rough: f32) -> f32 {
-    let r = rough + 1.0;
-    let k = (r * r) / 8.0;
-    let NdotV = max(dot(N, V), 0.0);
-    let NdotL = max(dot(N, L), 0.0);
-    let gv = NdotV / (NdotV * (1.0 - k) + k);
-    let gl = NdotL / (NdotL * (1.0 - k) + k);
-    return gv * gl;
-}
-fn _f_schlick(cosT: f32, F0: vec3f) -> vec3f {
-    return F0 + (1.0 - F0) * pow(clamp(1.0 - cosT, 0.0, 1.0), 5.0);
-}
-fn pbr_light(N: vec3f, V: vec3f, L: vec3f, radiance: vec3f, albedo: vec3f,
-             metal: f32, rough: f32, NdotL: f32) -> vec3f {
-    let H = normalize(V + L);
-    let F0 = mix(vec3f(0.04), albedo, vec3f(metal));
-    let D = _d_ggx(N, H, rough);
-    let G = _g_smith(N, V, L, rough);
-    let NdotV = max(dot(N, V), 1e-4);
-    let F = _f_schlick(max(dot(H, V), 0.0), F0);
-    let spec = (D * G * F) / max(4.0 * NdotL * NdotV, 1e-4);
-    let kD = (1.0 - F) * (1.0 - metal);
-    let diff = kD * albedo / 3.14159265;
-    return (diff + spec) * radiance * NdotL;
-}
-
-// 单灯双路输出 (Blinn-Phong / PBR), 与 GL 两段累加同式
-struct LC { bl: vec3f, pb: vec3f }
-fn light_pair(L: LightX, n: vec3f, v: vec3f, wpos: vec3f,
-              albedo: vec3f, metal: f32, rough: f32, use_pbr: bool) -> LC {
-    var l: vec3f;
-    var diff: f32;
-    var atten: f32 = 1.0;
-    if (L.kind > 0.5) {
-        let to_l = L.pos.xyz - wpos;
-        let dist = max(length(to_l), 1e-4);
-        l = to_l / dist;
-        diff = max(dot(n, l), 0.0);
-        atten = 1.0 / (1.0 + 0.09 * dist + 0.045 * dist * dist);
-        let rng = max(L.extra.z, 1e-3);
-        let fade = clamp(1.0 - (dist * dist) / (rng * rng), 0.0, 1.0);
-        atten *= fade * fade;
-        if (L.kind > 1.5) {
-            let spot_dir = normalize(L.dir.xyz);
-            let frag_dir = -to_l / dist;
-            let cos_theta = dot(frag_dir, spot_dir);
-            let inner = L.extra.x;
-            let outer = L.extra.y;
-            atten *= clamp((cos_theta - outer) / max(inner - outer, 1e-4), 0.0, 1.0);
-        }
-    } else {
-        l = normalize(-L.dir.xyz);
-        diff = max(dot(n, l), 0.0);
-    }
-    let h = normalize(l + v);
-    let spec = pow(max(dot(n, h), 0.0), 24.0);
-    var sh: f32 = 1.0;
-    var g_in_shape: f32 = 1.0;
-    if (L.kind < 0.5 && L.mode > 0.5) {
-        let lp = L.ortho * vec4f(wpos, 1.0);
-        let uv = vec2f(lp.x / lp.w * 0.5 + 0.5, 0.5 - lp.y / lp.w * 0.5);
-        var in_shape = 0.0;
-        if (uv.x >= 0.0 && uv.x <= 1.0 && uv.y >= 0.0 && uv.y <= 1.0) {
-            let xy = uv * 2.0 - 1.0;
-            if (L.shape > 0.5) {
-                in_shape = select(0.0, 1.0, max(abs(xy.x), abs(xy.y)) <= 1.0);
-            } else {
-                in_shape = select(0.0, 1.0, length(xy) <= 1.0);
-            }
-        }
-        g_in_shape = in_shape;
-        if (in_shape < 0.5) { sh = 0.0; }
-    }
-    // 点光/聚光阴影: 方向采样 cube 深度 (extra.w = 本灯有点光阴影贴图)
-    if (L.kind > 0.5 && L.shadow > 0.5 && L.extra.w > 0.5) {
-        let rd = wpos - L.pos.xyz;
-        let dist = max(length(rd), 1e-6);
-        let adx = abs(rd.x); let ady = abs(rd.y); let adz = abs(rd.z);
-        var face: i32 = 0;
-        var fc: vec2f = vec2f(0.0);
-        if (adx >= ady && adx >= adz) {
-            if (rd.x > 0.0) { face = 0; fc = vec2f( rd.z, -rd.y) / rd.x; }
-            else            { face = 1; fc = vec2f( rd.z,  rd.y) / rd.x; }
-        } else if (ady >= adz) {
-            if (rd.y > 0.0) { face = 2; fc = vec2f( rd.x, -rd.z) / rd.y; }
-            else            { face = 3; fc = vec2f( rd.x,  rd.z) / rd.y; }
-        } else {
-            if (rd.z > 0.0) { face = 4; fc = vec2f(-rd.x, -rd.y) / rd.z; }
-            else            { face = 5; fc = vec2f(-rd.x,  rd.y) / rd.z; }
-        }
-        var uv = fc * 0.5 + 0.5;
-        uv.y = 1.0 - uv.y;              // wgpu 帧缓冲 y 向下, GL 的 uv 假设 y 向上
-        let res: i32 = 512;             // _POINT_SHADOW_RES
-        let px = clamp(i32(uv.x * f32(res)), 0, res - 1);
-        let py = clamp(i32(uv.y * f32(res)), 0, res - 1);
-        let stored = textureLoad(t_shadow_arr, vec2<i32>(px, py), face, 0).x;
-        let refd = dist / max(L.params.z, 1e-3);
-        sh = select(0.0, 1.0, stored >= refd - L.params.x);
-    }
-    if (L.shadow > 0.5 && L.kind < 0.5) {
-        let lp = L.ortho * vec4f(wpos, 1.0);
-        let depth = lp.z / lp.w;
-        let uv = vec2f(lp.x / lp.w * 0.5 + 0.5, 0.5 - lp.y / lp.w * 0.5);
-        if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
-            sh = select(1.0, sh, L.mode > 0.5);
-        } else if (L.params.w < -0.5) {
-            // 第 3 盏及以后: 没有分配阴影贴图槽位 -> 不采样任何图 (不拿错图),
-            // 该灯无阴影 (已知限制, CPU 侧 _pack_light_vps 打印一次警告).
-            sh = g_in_shape;
-        } else {
-            // params.w = 槽位号 (0 -> t_shadow, 1 -> t_shadow2): 分支选图,
-            // 不做动态纹理数组索引 (本机驱动对数组动态索引有死锁史).
-            if (L.params.w < 0.5) {
-                sh = pcf(uv, depth, L.params.x, L.params.y) * g_in_shape;
-            } else {
-                sh = pcf2(uv, depth, L.params.x, L.params.y) * g_in_shape;
-            }
-        }
-    }
-    let radiance = L.color.rgb * L.color.a * atten * sh;
-    var out: LC;
-    out.bl = L.color.rgb * L.color.a * (0.60 * diff + 0.25 * spec) * atten * sh;
-    if (use_pbr) {
-        out.pb = pbr_light(n, v, l, radiance, albedo, metal, rough, diff);
-    } else {
-        out.pb = vec3f(0.0);
-    }
-    return out;
-}
-
-@fragment fn fs(in: VSOut) -> @location(0) vec4f {
-    var n = normalize(in.n);
-    if (bkt.has_normal_map > 0.5) {
-        // 与 GL 一致的导数 TBN: dp/duv 解切线/副切线, Gram-Schmidt 正交化
-        let dp1 = dpdx(in.wpos);
-        let dp2 = dpdy(in.wpos);
-        let duv1 = dpdx(in.uv);
-        let duv2 = dpdy(in.uv);
-        let det = duv1.x * duv2.y - duv2.x * duv1.y;
-        if (abs(det) > 1e-8) {
-            var T = normalize((dp1 * duv2.y - dp2 * duv1.y) / det);
-            var B = normalize((dp2 * duv1.x - dp1 * duv2.x) / det);
-            T = normalize(T - n * dot(n, T));
-            B = cross(n, T);
-            let nm = textureSample(t_normal, s_albedo, in.uv).rgb * 2.0 - 1.0;
-            n = normalize(mat3x3<f32>(T, B, n) * nm);
-        }
-    }
-    let v = normalize(sc.cam.xyz - in.wpos);
-    let hemi = clamp(0.5 + 0.5 * n.y, 0.0, 1.0);
-    let amb = (0.02 + 0.28 * hemi) * sc.cam.w;
-    // 2026-11-06 贴图: 实测**不翻转 v** 与 GL 一致 (翻转后 MAE 0.0004 -> 0.0058),
-    // 因为上传的 _rgba 行序与 GL 上传同源, 两侧约定恰好抵销。
-    let base = in.color.rgb * textureSample(t_albedo, s_albedo, in.uv).rgb;
-    let use_pbr = (sc.misc.x > 0.5) && (in.matv.w > 0.5);
-    let metal = clamp(in.matv.y, 0.0, 1.0);
-    let rough = clamp(in.matv.z, 0.04, 1.0);
-    var acc = vec3f(0.0);
-    var pbr_acc = vec3f(0.0);
-    var r: LC;
-    if (sc.cnt.x > 0.5) { r = light_pair(sc.l0, n, v, in.wpos, base, metal, rough, use_pbr); acc += r.bl; pbr_acc += r.pb; }
-    if (sc.cnt.y > 0.5) { r = light_pair(sc.l1, n, v, in.wpos, base, metal, rough, use_pbr); acc += r.bl; pbr_acc += r.pb; }
-    if (sc.cnt.z > 0.5) { r = light_pair(sc.l2, n, v, in.wpos, base, metal, rough, use_pbr); acc += r.bl; pbr_acc += r.pb; }
-    if (sc.cnt.w > 0.5) { r = light_pair(sc.l3, n, v, in.wpos, base, metal, rough, use_pbr); acc += r.bl; pbr_acc += r.pb; }
-    if (sc.cnt2.x > 0.5) { r = light_pair(sc.l4, n, v, in.wpos, base, metal, rough, use_pbr); acc += r.bl; pbr_acc += r.pb; }
-    if (sc.cnt2.y > 0.5) { r = light_pair(sc.l5, n, v, in.wpos, base, metal, rough, use_pbr); acc += r.bl; pbr_acc += r.pb; }
-    if (sc.cnt2.z > 0.5) { r = light_pair(sc.l6, n, v, in.wpos, base, metal, rough, use_pbr); acc += r.bl; pbr_acc += r.pb; }
-    if (sc.cnt2.w > 0.5) { r = light_pair(sc.l7, n, v, in.wpos, base, metal, rough, use_pbr); acc += r.bl; pbr_acc += r.pb; }
-    let rim = 0.12 * pow(1.0 - max(dot(n, v), 0.0), 3.0);
-    var col: vec3f;
-    if (use_pbr) {
-        if (bkt.has_env > 0.5) {
-            let F0e = mix(vec3f(0.04), base, vec3f(metal));
-            let R = reflect(-v, n);
-            let spec_env = textureSampleLevel(t_env, s_albedo, R,
-                                              rough * bkt.env_max_lod).rgb * F0e;
-            let diff_env = textureSampleLevel(t_env, s_albedo, n, 0.0).rgb
-                           * base * (1.0 - metal);
-            col = pbr_acc + diff_env + spec_env + vec3f(rim);
-        } else {
-            let amb_pbr = base * amb * (1.0 - metal);
-            col = pbr_acc + amb_pbr + vec3f(rim);
-        }
-    } else {
-        col = base * (amb + acc) + vec3f(rim);
-    }
-    col = pow(clamp(col, vec3f(0.0), vec3f(1.0)), vec3f(1.0 / 2.2));
-    let lum = dot(col, vec3f(0.299, 0.587, 0.114));
-    col = mix(vec3f(lum), col, in.sat);
-    return vec4f(col, 1.0);
-}
-"""
-
 # ---------------- WGSL: 阴影 pass (实例矩阵, R32Float) ----------------
 _SHADOW_VERT = """
 // 2026-11-06 点光阴影: 平行光走"实例=world@光VP + 模式0(投影深度)",
@@ -737,6 +447,19 @@ class VkRenderer:
             self._main_vs_spv = self.device.create_shader_module(code=fh.read())
         return self._main_vs_spv
 
+    def _main_fs_module(self):
+        """T3a 主 pass 片段着色器来自单源 main.frag 的 SPIR-V（入口名 main）。"""
+        m = getattr(self, '_main_fs_spv', None)
+        if m is not None:
+            return m
+        p = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                         'shaders', 'main.frag.spv')
+        if not os.path.isfile(p):
+            raise RuntimeError('缺少 SPIR-V: %s（先跑 tools/build_shaders.py）' % p)
+        with open(p, 'rb') as fh:
+            self._main_fs_spv = self.device.create_shader_module(code=fh.read())
+        return self._main_fs_spv
+
     def _build_pipelines(self):
         d = self.device
         if self.stage == 'p1':
@@ -753,7 +476,7 @@ class VkRenderer:
                 fragment={'module': shader, 'entry_point': 'fs',
                           'targets': [{'format': self.format}]})
             return
-        shader = d.create_shader_module(code=_MAIN_VERT + _MAIN_FRAG)   # 仅 FS
+        shader = self._main_fs_module()   # T3a: 单源 main.frag -> SPIR-V（入口 main）
         self._bgl = d.create_bind_group_layout(entries=[
             {'binding': 0, 'visibility': wgpu.ShaderStage.VERTEX
              | wgpu.ShaderStage.FRAGMENT, 'buffer': {'type': 'uniform'}},
@@ -790,7 +513,7 @@ class VkRenderer:
             primitive=self._prim(),
             depth_stencil={'format': 'depth32float',
                            'depth_write_enabled': True, 'depth_compare': 'less'},
-            fragment={'module': shader, 'entry_point': 'fs',
+            fragment={'module': shader, 'entry_point': 'main',
                       'targets': [{'format': self.format}]})
         # 阴影管线: 顶点(40B) + 实例(64B: world@光VP), R32Float 手动比较
         # 布局 = 空 (shader 无绑定, 矩阵走实例属性)
@@ -867,14 +590,14 @@ class VkRenderer:
         if fmt == self.format and dkey is None and rkey is None:
             self._pipeline = self._pipeline_base
         else:
-            shader = d.create_shader_module(code=_MAIN_VERT + _MAIN_FRAG)   # 仅 FS
+            shader = self._main_fs_module()   # T3a: 单源 main.frag -> SPIR-V（入口 main）
             self._pipeline = d.create_render_pipeline(
                 layout=d.create_pipeline_layout(bind_group_layouts=[self._bgl]),
                 vertex=self._vertex_desc(self._main_vs_module(), 'main',
                                          inst=_INST_BYTES, nattr=6),
                 primitive=pr,
                 depth_stencil=di,
-                fragment={'module': shader, 'entry_point': 'fs',
+                fragment={'module': shader, 'entry_point': 'main',
                           'targets': [{'format': fmt}]})
         self._main_pipe_fmt = fmt
         self._main_pipe_dkey = dkey
@@ -1947,6 +1670,9 @@ class VkRenderer:
         _dir_slots = getattr(self, "_dir_shadow_slots", {})
         buf = _sub.pack(vp, lights, camera_pos, bool(self.pbr_enabled),
                         point_far=_POINT_FAR, point_res=float(_POINT_SHADOW_RES),
+                        # 与 GL 同值（loom_lighting.scene_ubo 的 point_bias=0.004）：
+                        # 单源片段对点光是 9 tap PCF，0.002 会大面积自阴影 acne。
+                        point_bias=0.004,
                         dir_res=float(_SHADOW_RES), dir_bias=0.002,
                         dir_slots=_dir_slots,
                         light_vps=getattr(self, '_light_vps', {}),
@@ -1975,9 +1701,16 @@ class VkRenderer:
             # params.z = 点光阴影 far 平面 (GL u_light_far 同义), params.x = bias,
             # params.w = 平行光阴影槽位号 (2026-11-07: 0/1, -1=无贴图; 点光不用)
             _has_ps = 1.0 if getattr(self, "_point_shadow_guid", None) == l.guid else 0.0
-            _slot = 0.0                 # 点光/聚光不用 (保持旧值)
+            # 与 GL 打包同一条规则（loom_lighting: b['slots'] 初始 -1，只有真正拿到
+            # 阴影贴图的灯才 >= 0 —— 平行光 1 张 / 点光、聚光 6 面）。VK 只有一套
+            # 点光 6 面 array，故基准槽位恒为 0；没拿到贴图 = -1（无阴影）。
+            # 旧实现这里恒为 0，单源 GLSL 的 int(params.w)>=0 门控会让所有点光都去
+            # 采样唯一那张点光阴影图（旧手写 WGSL 额外用 extra.w 兜住了这一点）。
+            _slot = 0.0
             if kind < 0.5:
                 _slot = float(_dir_slots.get(l.guid, -1))
+            else:
+                _slot = 0.0 if _has_ps > 0.5 else -1.0
             buf[b + 32:b + 36] = (0.002, float(_SHADOW_RES), float(_POINT_FAR), _slot)
             inner = math.cos(math.radians(float(getattr(l, "spot_inner_angle", 30.0))))
             outer = math.cos(math.radians(float(getattr(l, "spot_outer_angle", 60.0))))
