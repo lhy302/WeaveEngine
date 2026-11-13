@@ -353,8 +353,10 @@ def t_hub_write_whitelist():
         with mock.patch.object(hc.inst, 'install_from_zip',
                                return_value='dummy') as m:
             r = _r('interpreter_install_zip', {'zip': z, 'version': '1.0.0'})
-            check("无 root 参数 -> 默认安装根放行", r['ok']
-                  and m.call_args[1]['target_root'] == cfg.DEFAULT_INSTALL_ROOT, r)
+            # 2026-11-13 裁决: 无 root 时用「推荐安装根」（跟随 LoomHub 自身位置），
+            # 不再写死 Program Files；本测试环境 Hub 在源码树里 -> 判定 portable -> 用户目录。
+            check("无 root 参数 -> 推荐安装根放行", r['ok']
+                  and m.call_args[1]['target_root'] == cfg.recommended_install_root(), r)
             r = _r('interpreter_install_zip',
                    {'zip': z, 'version': '1.0.0',
                     'root': cfg.DEFAULT_INSTALL_ROOT})

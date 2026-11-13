@@ -240,12 +240,86 @@ def root_writable(path):
     return bool(p) and os.path.isdir(p) and os.access(p, os.W_OK)
 
 
-def default_install_root():
-    r"""默认引擎安装根：Program Files 可写就用它；不可写 -> 用户目录。
+def hub_install_dir():
+    """LoomHub 自身所在目录（判定安装位置性质用）。
 
-    2026-11-10 b): 非管理员机器上 C:\Program Files\Loom 不可写，
-    第一次装引擎必然 WinError 5 —— 启动时自适应到用户目录，不再让用户撞墙。
+    两种运行形态都要处理：
+      · PyInstaller onedir 安装版：sys.frozen=True，sys.executable 就是 <安装目录>\\LoomHub.exe；
+      · 源码运行：sys.executable 是 python.exe（与 Hub 安装位置无关）→ 回退 HUB_DIR。
     """
+    if getattr(sys, 'frozen', False):
+        try:
+            exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+            if exe_dir:
+                return exe_dir
+        except Exception:
+            pass
+    return HUB_DIR
+
+
+def hub_install_kind(program_dir=None):
+    r"""LoomHub 自身安装位置的性质: 'system' | 'user' | 'portable'。
+
+    2026-11-13 人类裁决：引擎**默认安装根跟随 Hub 自身位置**——
+      · system   : Hub 在 ProgramFiles / ProgramFiles(x86) 下（管理员安装）
+      · user     : Hub 在 %LOCALAPPDATA% / %USERPROFILE% 下（普通用户安装）
+      · portable : 其它（例如解压在 D 盘）
+    program_dir 仅供测试注入；默认取 hub_install_dir()。
+    """
+    try:
+        d = os.path.normcase(os.path.abspath(str(program_dir or hub_install_dir() or '')))
+    except (OSError, ValueError):
+        return 'portable'
+    if not d:
+        return 'portable'
+
+    def _under(base):
+        try:
+            b = os.path.normcase(os.path.abspath(str(base)))
+        except (OSError, ValueError):
+            return False
+        return bool(b) and (d == b or d.startswith(b.rstrip('\\/') + os.sep))
+
+    for env in ('ProgramFiles', 'ProgramFiles(x86)', 'ProgramW6432'):
+        v = os.environ.get(env)
+        if v and _under(v):
+            return 'system'
+    for env in ('LOCALAPPDATA', 'USERPROFILE'):
+        v = os.environ.get(env)
+        if v and _under(v):
+            return 'user'
+    return 'portable'
+
+
+def recommended_install_root(program_dir=None):
+    r"""推荐的引擎安装根（跟随 LoomHub 自身安装性质，2026-11-13 裁决）。
+
+    system   -> Program Files\\Loom（DEFAULT_INSTALL_ROOT）
+    user / portable -> %LOCALAPPDATA%\\Programs\\Loom（user_install_root）
+    推荐位置不可写时退回另一个（装得下去优先于口味）。
+    """
+    kind = hub_install_kind(program_dir)
+    if kind == 'system':
+        first, second = DEFAULT_INSTALL_ROOT, user_install_root()
+    else:
+        first, second = user_install_root(), DEFAULT_INSTALL_ROOT
+    if root_writable(first):
+        return first
+    if root_writable(second):
+        return second
+    return first
+
+
+def default_install_root():
+    r"""默认引擎安装根：**先按推荐位置**（跟随 Hub 安装性质），再走可写自适应。
+
+    2026-11-13 裁决：默认值不再无条件优先 Program Files —— Hub 装在用户目录/便携目录时，
+    推荐用户目录；Hub 装在 Program Files（管理员安装）时仍推荐 Program Files。
+    两级都不可写时保持旧行为回退 DEFAULT_INSTALL_ROOT（保留 Program Files 在允许集合里）。
+    """
+    rec = recommended_install_root()
+    if root_writable(rec):
+        return rec
     if root_writable(DEFAULT_INSTALL_ROOT):
         return DEFAULT_INSTALL_ROOT
     u = user_install_root()

@@ -191,10 +191,11 @@ def _safe_install_root(root):
     """校验自定义安装根在白名单内（2026-10-19 放开自定义根）.
 
     白名单: DEFAULT_INSTALL_ROOT / %LOCALAPPDATA% / %USERPROFILE% 下路径.
-    root=None/空 -> 用 DEFAULT_INSTALL_ROOT. 非法返回 None.
+    root=None/空 -> 用 recommended_install_root()（2026-11-13: 跟随 Hub 安装性质推荐，
+    不再写死 Program Files；推荐值本身必落在白名单内）。非法返回 None.
     """
     if root is None or root == '':
-        return cfg.DEFAULT_INSTALL_ROOT
+        return cfg.recommended_install_root()
     try:
         r = os.path.abspath(os.path.normpath(str(root)))
     except Exception:

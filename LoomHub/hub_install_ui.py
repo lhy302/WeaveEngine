@@ -22,6 +22,7 @@ import threading
 import tkinter as tk
 from tkinter import ttk, messagebox
 
+import hub_config as cfg
 import hub_github as gh
 import hub_install as inst
 
@@ -47,7 +48,7 @@ def show_zip_preview(parent, controller, zip_path, on_success=None):
 
     dlg = tk.Toplevel(parent)
     dlg.title('安装 Loom 解释器')
-    dlg.geometry('560x400')
+    dlg.geometry('560x470')
     dlg.resizable(False, False)   # 2026-10-19: 锁定窗口大小
     dlg.transient(parent)
     dlg.grab_set()
@@ -85,7 +86,9 @@ def show_zip_preview(parent, controller, zip_path, on_success=None):
     loc_row = tk.Frame(body)
     loc_row.grid(row=len(rows), column=0, columnspan=2, sticky='ew', pady=(15, 0))
     tk.Label(loc_row, text='安装到:', fg='#666').pack(side='left')
-    loc_var = tk.StringVar(value=controller.install_root)
+    # 2026-11-13 裁决: 初始值 = 推荐位置（跟随 LoomHub 自身安装性质）。
+    _recommended = cfg.recommended_install_root()
+    loc_var = tk.StringVar(value=_recommended)
     loc_entry = tk.Entry(loc_row, textvariable=loc_var)
     loc_entry.pack(side='left', fill='x', expand=True, padx=6)
 
@@ -96,9 +99,34 @@ def show_zip_preview(parent, controller, zip_path, on_success=None):
             loc_var.set(d)
     tk.Button(loc_row, text='浏览...', command=_browse).pack(side='left')
 
+    # 快捷选择（系统目录 / 用户目录）；手输与浏览保持不变。
+    quick_row = tk.Frame(body)
+    quick_row.grid(row=len(rows) + 1, column=0, columnspan=2, sticky='w', pady=(4, 0))
+    tk.Label(quick_row, text='快捷:', fg='#666').pack(side='left')
+    tk.Button(quick_row, text='系统目录',
+              command=lambda: loc_var.set(cfg.DEFAULT_INSTALL_ROOT)).pack(
+        side='left', padx=(6, 0))
+    tk.Button(quick_row, text='用户目录',
+              command=lambda: loc_var.set(cfg.user_install_root())).pack(
+        side='left', padx=(6, 0))
+
+    # 通用安全提示（不只 360：关键目录写疑似系统 DLL 时几乎所有安全软件都会提示）
+    _kind = cfg.hub_install_kind()
+    _kind_label = {'system': '系统目录（Program Files）',
+                   'user': '用户目录',
+                   'portable': '便携目录（非系统/非用户目录）'}.get(_kind, _kind)
+    tk.Label(body,
+             text='提示: 在 Program Files 安装时，安全软件会提示「修改配置」与'
+                  '「写入 DLL」，属正常安装行为，请允许。\n'
+                  '当前推荐：%s（因 LoomHub 安装于 %s，判定为%s）'
+                  % (_recommended, cfg.hub_install_dir(), _kind_label),
+             fg='#999', font=('Microsoft YaHei UI', 8),
+             wraplength=430, justify='left').grid(
+        row=len(rows) + 2, column=0, columnspan=2, sticky='w', pady=(6, 0))
+
     tk.Label(body, text='提示: 已存在同版本会覆盖安装目录。',
              fg='#999', font=('Microsoft YaHei UI', 8)).grid(
-        row=len(rows) + 1, column=0, columnspan=2, sticky='w', pady=(6, 0))
+        row=len(rows) + 3, column=0, columnspan=2, sticky='w', pady=(6, 0))
 
     # 底部按钮
     btns = tk.Frame(dlg, pady=10)
