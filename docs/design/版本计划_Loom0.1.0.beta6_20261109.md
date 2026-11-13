@@ -833,6 +833,8 @@ depth/raster/load/clear/绘制源/后处理阶段与参数）必须单一来源�
 
 **遗留**：23 场景的 FramePlan 未开 `include_world_canvas`（`editor.py:2490-2492`），world Canvas 在真实夹具里没被像素门覆盖 —— **预存在的夹具缺口**，本次用直接对拍补证；补场景属 A2-2 探针工作。
 
+**A1-7（设计稿遗留的 `VertexLayout`/`ShaderSet`）同时裁决**：`VertexLayout` 不需要新建 —— `loom_shader_bindings.VERTEX_LAYOUT`（location 0/1/2/13，48B stride）与 `INSTANCE_LAYOUT`（96B）就是两端共用的布局单点表，T3c-3 落地且有 `test_bucket_pack` 断言；`ShaderSet` **明确不实现** —— T3 之后每个 pass 就是固定 vert+frag 一对，而 wgpu 的 `create_shader_module` 一个模块只能装一个 stage，再包一层只是套壳。设计稿按此标注「不实现」。
+
 ---
 
 ## 10. 延迟项落盘规则（人类要求，2026-11-09；2026-11-13 移到文末，此前误插在 §9.1 与 §9.2 之间）
