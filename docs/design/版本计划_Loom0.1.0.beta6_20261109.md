@@ -945,6 +945,45 @@ VK 在 **0 个可见实例**时会走 `queue.write_buffer` 空写并抛 `ValueEr
 
 完整报告：`docs/audit/final4_01_收尾倒查_20261113.md`。
 
+### 9.39 world Canvas 像素探针 → 暴露并修好「默认后处理下 World Space UI 不可见」（2026-11-13）
+
+**起因**：收尾倒查指出 T2 的 D-05（UI 光栅化）只覆盖 screen canvas，**world Canvas 一半没有像素探针**。补探针时立刻现形一个真缺陷。
+
+**症状（补探针前无人知晓）**
+
+| 配置 | world Canvas 表现 |
+|---|---|
+| **默认（post on）** | **VK 贡献为 0**（with/without canvas 的 MAE 完全相同）；**GL 播放态**把 quad 画到屏幕 FBO，随后被 tonemap 覆盖 → 同样看不见 |
+| post off | 两端都画，GL/VK **1.0514e-4** |
+
+即：**这个功能在默认配置下根本不可见**，而 23/25 个场景没有一个带 world canvas。
+
+**根因**
+
+1. **VK**：`render_world_canvases` 在 pass 循环**之前**建 `VkWorldUIPipeline` 与其 BGL，此时 `_frame_fmt` 还是 `present_format`(rgba8)；随后 `world_ui` pass 把 `_frame_fmt` 换成 HDR(rgba16float) 并重建 pipeline（新 BGL），但 `_world_targets` 里的 **bind group 仍绑旧 BGL / 旧 uniform buffer** → draw 无效。
+2. **GL**：`_draw_one_world_canvas` 的 `finally` 无条件 `_screen_fb().use()`；post on 时 pass 目标是 HDR，不是屏幕 → quad 画错目标后被 tonemap 覆盖。
+
+**修法（三处，均为最小改动）**
+
+| 文件 | 修法 |
+|---|---|
+| `vk_renderer.py:1699-1709` | 在 `render_world_canvases` 前按「本帧是否有 world Canvas」把 `_frame_fmt` 定为 `rgba16float`(post on) / `self.format`(post off)，让 pipeline/BGL 与随后 pass 目标一致；**不改渲染顺序** |
+| `loom_render.py:322-357` | `_draw_one_world_canvas` 用 `ctx.detect_framebuffer()` **保存/恢复调用前的绑定 FBO**（而不是无条件 `_screen_fb().use()`），播放态与编辑态一起修 |
+| `editor.py:2489-2502` | 编辑器 `frame_plan(...)` 补 `include_world_canvas`，判据是 **`canvas_type == world`**（`ui.canvases` 恒含一个默认 screen Canvas，不能用非空判定）；为绕坑加的临时 override 已删 |
+
+**前后数字（同一场景 `ab_world_canvas`）**
+
+| 指标 | 修前 | 修后 |
+|---|---|---|
+| post on GL/VK MAE | **1.6479e-2**（门限 2e-4 的 82 倍） | **5.22e-5** |
+| VK canvas 贡献（with − without） | **0** | **1.6468e-2** |
+| post off GL/VK MAE | 1.0514e-4 | **1.0514e-4（逐值不变）** |
+| 既有 25 场景三向 MAE / 参考图 sha256 | — | **逐值不变** |
+
+**探针有牙自证**：临时把 `include_world_canvas` 关掉 → `FAIL ab_world_canvas`（GL/参考 0.012757、GL/VK 0.012742，EXIT=1）；还原后 PASS。
+
+**验收**：26 场景 / 失败 0 / EXIT=0；`run_all` **136 全绿**；新场景无场景级容差（全局 2e-4 未动）。
+
 ---
 
 ## 10. 延迟项落盘规则（人类要求，2026-11-09；2026-11-13 移到文末，此前误插在 §9.1 与 §9.2 之间）

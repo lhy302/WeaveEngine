@@ -69,10 +69,11 @@
 | 探针 | 现状 | 覆盖 |
 |---|---|---|
 | `Loom/tests/test_frame_plan_vk.py`（T1 七类反例矩阵） | ✅ 受跟踪 | D-01/D-03 的「描述层」部分 + I-01 的语义面 |
-| `Loom/tests/test_ab_gl_vk.py`（**25 场景**三向） | ✅ 受跟踪 | D-03/D-04/D-05/R-01/R-03 的像素面 |
+| `Loom/tests/test_ab_gl_vk.py`（**26 场景**三向） | ✅ 受跟踪 | D-03/D-04/D-05/R-01/R-03 的像素面 |
 | `Loom/tests/test_bucket_pack.py` | ✅ 受跟踪 | D-04 的实例字段表 |
 | **`ab_mip_minify`（R-03 专用）** | ✅ 受跟踪 | 301×301 非 2 的幂贴图 + 强缩小；mip 关/开对拍证明 GL/VK 差异来自 mip 链 |
-| **`ab_ui_only [UI]`（D-05 实现差异 / R-04 视觉后果）** | ✅ 受跟踪 | 纯 UI 占满整帧（无可见 3D 像素），[UI] MAE 2.726e-3 / 门限 5e-3；差异像素 0.87% 全在边缘 |
+| **`ab_ui_only [UI]`（D-05 screen 半边 / R-04 视觉后果）** | ✅ 受跟踪 | 纯 UI 占满整帧（无可见 3D 像素），[UI] MAE 2.726e-3 / 门限 5e-3；差异像素 0.87% 全在边缘 |
+| **`ab_world_canvas`（D-05 world 半边，2026-11-13 补）** | ✅ 受跟踪 | world 空间 canvas（文字/边框/圆点/折线/贴图）+ 3D 参照物；三向 MAE 0 / **5.22e-5** / 5.22e-5（门限 2e-4，无场景容差）。**这条探针一加就暴露了「默认后处理下 World Space UI 两端都不可见」的真缺陷**（计划 §9.39），修好后才有现在的数字 |
 
 > **D-05 夹具状态修正（2026-11-13）**：GL 的 Shape 描边走 `draw_lines`，不像 panel/text 在自己 `ctx.scope` 里关深度；测试夹具在 `ui.draw_all` 前补 `ctx.disable(DEPTH_TEST)`，避免把上一个 pass 的深度状态当成 UI 差异（UI 元素自己的 `ctx.scope` 也关深度）。既有 `ab_ui_scene [UI]` 输出逐字节不变（MAE=0）；引擎侧「Shape 线依赖调用方深度状态」的健壮性缺口见计划 §9.36，未改引擎。
 
@@ -80,7 +81,7 @@
 
 ```powershell
 py -3.13 tests/test_ab_gl_vk.py                       # 25/25，EXIT=0
-LOOM_AB_SCENES=ab_ui_only.json,ab_mip_minify.json py -3.13 tests/test_ab_gl_vk.py
+LOOM_AB_SCENES=ab_ui_only.json,ab_mip_minify.json,ab_world_canvas.json py -3.13 tests/test_ab_gl_vk.py
 ```
 
 ## 7. 维护规则
