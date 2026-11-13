@@ -1,6 +1,6 @@
 # Loom 引擎 0.1.0.beta6（内测 · 草稿）
 
-本版是**编译版引擎包**（Nuitka standalone 编辑器 + onefile 构建器 + 编译版播放器运行时），
+本版是**编译版引擎包**（Nuitka standalone 编辑器 + **onedir 构建器**（`builder\build_game.exe`）+ 编译版播放器运行时），
 可直接安装/解压后由 LoomHub 添加为解释器（`kind=exe`）。实测工具链：Python 3.13.15 + Nuitka 4.3.5 + MSVC cl 14.3。
 
 ## 一、场景格式 v12 起**单向不兼容**（重要）
@@ -13,10 +13,12 @@
   回退前请用 beta5 重新导出/或保留 beta5 时代的场景副本。
 - beta6 打开 beta5 旧场景：自动迁移（旧路径字段可读 + 告警），可正常使用。
 
-## 二、语义面评估：当前 11.5，**未达成**（待人类裁决）
+## 二、三大目标：T1/T2/T3 均达成（2026-11-13 收尾倒查独立复核）
 
-- 语义面（场景→运行时语义一致性）本轮评估为 **11.5**，未达到发布门槛。
-- 处置方式（计入 beta6 / 推迟 beta7 / 限定范围发布）**待人类裁决**；本包按"契约与工具链优先"先行。
+- **T1 描述层共享** ✅：pass 顺序 / 目标名与格式 / load·clear / depth / raster / 绘制源 / 后处理阶段与参数，全部由 FramePlan 消费；7 类反例矩阵固化在 `tests/test_frame_plan_vk.py`（改 plan → 两端同向，幅度比 1.000）。
+- **T2 差异清单化** ✅：`docs/design/T2差异清单_beta6.md` = **4 条不共享（D-01/03/04/05）+ 4 条合理差异（R-01..R-04）+ 1 条实现细节（I-01）**，每条绑定可复跑探针。
+- **T3 着色器单源** ✅：一份 GLSL → 13 个 SPIR-V，GL 与 VK 同源；`Loom/` 产品树手写 WGSL 只剩 P1 诊断逃生舱（见 §五）。
+- 旧「语义面 11.5 / 未达成」的判据已由版本计划 §9.31 的人类裁决**废除**（不再折算成分数）。
 
 ## 三、构建器 P0 已修（两条，都被冒烟 `[6/7]` 守住）
 
@@ -41,10 +43,12 @@
 ## 五、T3 着色器单源化（beta6 代码目标收口）
 
 - 13 个 SPIR-V（主 pass vs/fs、post 链 4 个、天空、阴影、mip、UI 各一对），GL 与 VK **同源**；
-  全仓手写 WGSL 只剩 P1 诊断逃生舱 **16 行**（按 A1-8 裁决豁免，且已有假设备管线测试兜住）。
+  `Loom/` 产品树手写 WGSL 只剩 P1 诊断逃生舱（`--stage p1`，**14 个非空行**）。
+  **豁免前提如实说**：`tests/test_vk_p1_stage.py` 用假设备（只记录调用、**不解析 WGSL**），能证明「管线对象被创建」，但**证明不了那段 WGSL 语法一定正确** —— 真机 p1 路径无测试（已登记）。
 - 像素门实测（2026-11-13，本机，`py -3.13 tests/test_ab_gl_vk.py`）：
-  **23 场景 / 失败 0 / 跳过 0**，三向 MAE 最大 = GL/参考 **5.7e-5**、VK/参考 **6.6e-5**、GL↔VK **5.3e-5**；
-  UI 专项 MAE **1.10e-4**（等于基线 1.10e-4）；闸门 `mae_abs=2e-4`、漂移容差 `5e-5`。
+  **25 场景 / 失败 0 / 跳过 0**，三向 MAE 最大 = GL/参考 **5.7e-5**、VK/参考 **6.6e-5**、GL↔VK **5.3e-5**（均为 `ab_point_shadow`）；
+  UI 专项：`ab_ui_scene` **1.10e-4**、新增纯 UI 场景 `ab_ui_only` **2.726e-3**（门限沿用既有 `ui_mae_abs=5e-3`）；
+  闸门 `mae_abs=2e-4`、漂移容差 `5e-5`；场景级例外仅 `ab_mip_minify`（VK/参考与 GL/VK 用 `mae_abs=1e-3`，GL/参考仍 2e-4）。
 - 13 个 `.spv` 可由 HEAD 源逐字节复现（glslang 16.6.0 + 与 `tools/build_shaders.py` 同一条展开链路，
   重编后 sha256 **13/13 相同**）。
 
@@ -52,26 +56,26 @@
 
 `py -3.13 tools/verify_pkg_vs_head.py <source.zip> <compiled.zip>`（exit 0）：
 
-- source 包：包内引擎 `.py` **96 / HEAD 96**，内容不一致 **0**、包多出 **0**、包缺失 **0**
+- source 包：包内引擎 `.py` **97 / HEAD 97**，内容不一致 **0**、包多出 **0**、包缺失 **0**
   （CRLF 归一后逐文件 sha256 对拍；`sceneio.py`/`agent_commands.py`/`loom_post.py`/`loom_assets.py` 四个关键文件同判）。
-- compiled 包：`build_info.git_head=2e69b38…` 与 HEAD **相等**（`equal`）、`git_dirty=False`、
-  `smoke_passed_at=2026-11-13 14:38:22 > built_at=2026-11-13 14:17:49`。
+- compiled 包：`build_info.git_head=75b8082…` 与 HEAD **相等**（`equal`）、`git_dirty=False`、
+  `smoke_passed_at=2026-11-13 15:59:20 > built_at=2026-11-13 15:46:17`。
 - 包内元数据：顶层 `0.1.0.beta6` / 嵌套运行时 `0.1.0.beta6` / 目标 `0.1.0.beta6` 三处一致。
-- 着色器实到（打开 zip 逐条数，不是看脚本注释）：两个包各 **54** 条 `/shaders/` 条目 =
-  `Loom/shaders/` **27**（13 `.spv` + 13 源 + `loom_shader_compat.glsl`）+ 运行时
-  `Loom/player_runtime/game_player.dist/shaders/` **27**（同样 13 `.spv`）。
+- 着色器实到（打开 zip 逐条数，不是看脚本注释）：compiled 包 **81** 条 `/shaders/`（3×27：`Loom/shaders/` + 运行时 dist + 构建器 dist 各 27 = 13 `.spv` + 13 源 + `loom_shader_compat.glsl`），source 包 **54** 条；
+  包内 13 个 `.spv` 与 HEAD 逐字节相同（39/39 副本全等）。
+- 构建器实到：`Loom/builder/build_game.exe` **平铺**（**没有** `builder/build_game.dist/` 双层），与 `C:\loom_build\builder\build_game.dist\build_game.exe` 逐字节相同；用包内该构建器真跑最小出包 **ExitCode=0**（`_bin_dir()` 解析到包内 `Loom/`，无「找不到引擎数据根」警告）。
 
 ## 七、本次交付包（2026-11-13 重打，替换 `153c7896` 的旧包）
 
 | 产物 | 字节 | 显示大小 | sha256 | git_head |
 |---|---|---|---|---|
-| `Loom-0.1.0.beta6-compiled.zip` | 139 227 547 | 132.78 MB | `3df4813f7d5a99268b4d676d8fb8da9fd7810e5eb38e3538bc86c15dcc36b803` | `2e69b38110b8a42f156a1094928e440477ac407e` |
-| `Loom-0.1.0.beta6-source.zip` | 358 713 934 | 342.10 MB | `037ca8d922628c082002e88936b54aa1ad0c851497e77e0dc543815673c177d2` | `2e69b38110b8a42f156a1094928e440477ac407e` |
-| `LoomHub-0.1.4-Setup.exe` | 27 363 292 | 26.10 MB | `ac75dccfb37b9550e99d2cceb733b26dba4bdc920cddbd535c352101f8b26682` | `2e69b38110b8a42f156a1094928e440477ac407e` |
+| `Loom-0.1.0.beta6-compiled.zip` | 145 282 279 | 138.55 MB | `dd4dcd5a73253d9026b1b3f9caadd9e5939f0f867c70572caf050dff7478698b` | `75b808245da329319b2ed202d325c2f1c9aefe7a` |
+| `Loom-0.1.0.beta6-source.zip` | 358 723 332 | 342.11 MB | `05113b66c51d07faa8445d0ac11d7ec00631969438205711ab7351fe063060cf` | `75b808245da329319b2ed202d325c2f1c9aefe7a` |
+| `LoomHub-0.1.4-Setup.exe` | 27 363 292 | 26.10 MB | `ac75dccfb37b9550e99d2cceb733b26dba4bdc920cddbd535c352101f8b26682` | （Hub 无独立 git_head；版本真源 `LoomHub/版本.json`=0.1.4） |
 
-- 三件同日同 HEAD 产出：编辑器 dist **150.2 MB**、构建器 onefile **23.5 MB**、玩家运行时 dist **143.4 MB**。
-- 冒烟三件分别盖章（`--stamp` 只盖本次真跑过的）：引擎 dist / 构建器 / 运行时 dist 各自
-  `smoke_passed_at=2026-11-13 14:38:22`；三次冒烟耗时 6.1s / 6.9s / 8.0s（预算 60s）。
+- 三件同日同 HEAD 产出：编辑器 dist **150.23 MB**、构建器 **onedir 80.08 MB**（`build_game.exe` 26.37 MB）、玩家运行时 dist **143.43 MB**。
+- 构建器 2026-11-13 起由 onefile 改 **onedir**：不再自解压到 `%TEMP%`（安全软件的投放器特征），并给三个 exe 补完整版本资源（`CompanyName=lhy302` / `ProductName=Loom` / `FileDescription` / `FileVersion=0.1.0.6`）。实测该形态改变后本机 360 不再对构建器报毒（单机单样本）。
+- 冒烟三件分别盖章（`--stamp` 只盖本次真跑过的）：引擎 dist / 构建器 / 运行时 dist 各自 `smoke_passed_at=2026-11-13 15:59:20`；**7/7 全 PASS**，耗时 6.5s（预算 60s）。
   读数：models=126、fps **96–101**、tps **30.12–30.27**；构建器 `--help` exit=0；运行时最小启动 exit=1（无游戏包，属预期）。
 
 ## 八、发布命令（**未执行**，等人类裁决后统一跑）
