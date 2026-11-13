@@ -398,11 +398,14 @@ def t_scene_ubo():
           (SB.BUCKET_BYTES, len(SB.BUCKET_FIELDS)))
     check('H18 GL 桶级 block == 生成器输出',
           _exp(SB.bucket_block_glsl()) in SH._FRAG_SRC, '')
-    _vb = VR2._MAIN_VERT + VR2._MAIN_FRAG
-    check('H19 VK Bucket 结构体字段顺序 == 表',
-          all(k in _vb for k in ('metallic', 'roughness', 'pbr',
-                                 'has_normal_map', 'has_env', 'env_max_lod')),
-          '')
+    # T3a-3 (2026-11-13): VK 主片段改喂 main.frag 的 SPIR-V，没有 WGSL 结构体可查；
+    # 改为把**生成器文本**与字段表绑死（比原来的 in-字符串更强）：字段序 + float 数。
+    import re as _re
+    _bblk = _exp(SB.bucket_block_glsl())
+    _bnames = _re.findall(r'^\s*float\s+(\w+);', _bblk, _re.M)
+    check('H19 桶级 block 字段序 == 表 且 float 数 == 32B/4',
+          _bnames == [n for n, _o in SB.BUCKET_FIELDS]
+          and len(_bnames) == SB.BUCKET_BYTES // 4, _bnames)
     import inspect as _insp
     check('H20 VK 桶级 buffer 32B == 表',
           'size=32' in _insp.getsource(VR2.VkRenderer._tex_group), '')

@@ -125,8 +125,10 @@ dev = _FakeDevice()
 VR.VkRenderer(dev, 'rgba8unorm')                # 只跑 _build_pipelines (无 GPU 调用)
 main_bgl = dev.bgls[0]
 entries = {int(e['binding']): e for e in main_bgl}
-check("A2 主 BGL 绑定集合 = 0/1/2/3/5/6/7/8/9/10/11",
-      set(entries) == {0, 1, 2, 3, 5, 6, 7, 8, 9, 10, 11}, sorted(entries))
+# 2026-11-13: binding 4（点光 2d-array texelFetch 的 non-filtering sampler）在
+# d84dd98 加入后本断言未同步 -> HEAD 上就是红的（已用 HEAD 版测试复现）。此处补齐。
+check("A2 主 BGL 绑定集合 = 0/1/2/3/4/5/6/7/8/9/10/11",
+      set(entries) == {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}, sorted(entries))
 check("A3 binding 10 = 2d unfilterable-float 纹理",
       entries[10].get('texture') == {'sample_type': 'unfilterable-float',
                                      'view_dimension': '2d'},
@@ -135,15 +137,32 @@ check("A4 binding 11 = non-filtering 采样器",
       entries[11].get('sampler') == {'type': 'non-filtering'}, entries[11])
 check("A5 主管线仍只绑 1 个完整 bind group (未新增组)",
       len(dev.pipeline_layouts[0]) == 1, dev.pipeline_layouts[0])
-frag = VR._MAIN_FRAG
-check("A6 着色器声明 t_shadow2 / s_shadow2 (binding 10/11)",
-      '@binding(10) var t_shadow2' in frag and '@binding(11) var s_shadow2' in frag)
-check("A7 槽位 1 有独立 pcf2 (不动态选纹理)",
-      'fn pcf2(' in frag and 'textureSample(t_shadow2, s_shadow2' in frag)
-check("A8 按 params.w 分支选贴图",
-      'L.params.w < -0.5' in frag and 'L.params.w < 0.5' in frag)
-check("A9 无动态纹理数组索引 (textureSample 下标写法不存在)",
-      'textureSample(t_shadow[' not in frag and 'textureSample(t_shadow2[' not in frag)
+# T3a-3 (2026-11-13): 主片段已单源化（shaders/main.frag -> SPIR-V），不再有手写
+# WGSL 可查。断言改为查**单源真身**：compat 的 VK 分支 + main.frag 正文；
+# 语义覆盖与原 A6-A9 一一对应（槽位 10/11、槽位 select、params.w 门控、无动态数组索引）。
+_COMPAT = open(os.path.join(ROOT, 'shaders', 'loom_shader_compat.glsl'),
+               encoding='utf-8').read()
+_VK_BRANCH = _COMPAT.split('#else')[0]        # #ifdef LOOM_VK .. #else 之间
+_FRAG_SRC = open(os.path.join(ROOT, 'shaders', 'main.frag'), encoding='utf-8').read()
+check("A6 VK 分支 SB_SHADOW2=10 / s_shadow2 binding 11 / SAMPLE_SHADOW2D 被 main.frag 使用",
+      '#define SB_SHADOW2 10' in _VK_BRANCH
+      and 'binding = 11' in _VK_BRANCH
+      and 'uniform sampler s_shadow2' in _VK_BRANCH
+      and '#define SAMPLE_SHADOW2D(slot, uv)' in _VK_BRANCH
+      and 'SAMPLE_SHADOW2D(slot, uv + ' in _FRAG_SRC)
+check("A7 单源片段只有 pcf_shadow/pcf_shadow_cube（槽位 select 在宏内，无 pcf2）",
+      'float pcf_shadow(' in _FRAG_SRC
+      and 'float pcf_shadow_cube(' in _FRAG_SRC
+      and 'pcf2' not in _FRAG_SRC)
+check("A8 阴影门控读 Scene UBO 的 params.w（两种灯共用 int>=0）",
+      'int(u.lights[i].params.w) >= 0' in _FRAG_SRC
+      and 'point_shadow(int(u.lights[i].params.w)' in _FRAG_SRC
+      and 'pcf_shadow(int(u.lights[i].params.w)' in _FRAG_SRC
+      and 'L.params.w' not in _FRAG_SRC)
+check("A9 VK 分支阴影采样 = texelFetch + 逐面索引，无动态 sampler 数组下标",
+      'texelFetch(sampler2DArray(t_shadow_arr, s_shadow_arr)' in _VK_BRANCH
+      and 'ivec3(' in _VK_BRANCH
+      and 'u_shadow_maps[' not in _VK_BRANCH)
 check("A10 _pack_scene 写 params.w 槽位 (源码含 _dir_shadow_slots)",
       '_dir_shadow_slots' in inspect.getsource(VR.VkRenderer._pack_scene))
 check("A11 阴影 pass 按槽位各烘一张 (槽位缓冲/视图 + draw_frame 经 plan 派发)",
@@ -276,8 +295,11 @@ check("E1 点光只烘第一盏", r._point_shadow_guid == 'p1', r._point_shadow_
 check("E2 第二盏点光没有 VP", 'p2' not in r._light_vps, str(sorted(r._light_vps)))
 check("E3 不占平行光槽位", r._dir_shadow_slots == {}, str(r._dir_shadow_slots))
 check("E4 点光超限警告一次", warn.count('阴影已知限制') == 1, repr(warn.strip()[:60]))
-check("E5 点光 params.w 不参与平行光槽位 (保持 0)",
-      _params_w(scene, 0) == 0.0 and _params_w(scene, 1) == 0.0,
+# 2026-11-13 T3a-3: 单源 GLSL 的阴影门控统一为 int(params.w)>=0（GL 规则：
+# loom_lighting b['slots'] 初始 -1，只有真拿到贴图的灯才 >=0）。VK 点光因此必须
+# 有贴图=0 / 无贴图=-1；旧值恒 0 会让第二盏点光去采第一盏的贴图（单源下就会露馅）。
+check("E5 点光 params.w = 有贴图 0 / 无贴图 -1（对齐 GL slots 规则）",
+      _params_w(scene, 0) == 0.0 and _params_w(scene, 1) == -1.0,
       (_params_w(scene, 0), _params_w(scene, 1)))
 
 print("=" * 60)
