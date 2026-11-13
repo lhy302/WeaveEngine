@@ -7,13 +7,13 @@
     "ui_mae_abs": 0.005,
     "ui_mae_drift": 0.002
   },
-  "generated_at": "2026-11-10T23:13:29",
+  "generated_at": "2026-11-13T15:29:56",
   "reference_dir": "ab_scenes_ref_next",
   "resolution": [
     480,
     320
   ],
-  "scene_count": 23,
+  "scene_count": 25,
   "scenes": {
     "ab_bloom.json": {
       "mae": 3e-08,
@@ -68,6 +68,13 @@
       "max": 0.0,
       "ncc": 1.0,
       "ref_sha256": "497d9b5dc41892f04b2d81b05360b31edb042441aa30e02ab840557591a0c102"
+    },
+    "ab_mip_minify.json": {
+      "mae": 0.00058264,
+      "mae_abs": 0.001,
+      "max": 0.160784,
+      "ncc": 0.98851881,
+      "ref_sha256": "d492ecc54e57779a62e516edb5cd9c984cb83116b7cdeef0564717c127f14cf5"
     },
     "ab_nrm.json": {
       "mae": 0.0,
@@ -146,6 +153,18 @@
       "max": 0.0,
       "ncc": 1.0,
       "ref_sha256": "8c7d123f296c652fe1554ecc774769234e50d823ffc745c77e6822a3fe55dd13"
+    },
+    "ab_ui_only.json": {
+      "mae": 0.0,
+      "max": 0.0,
+      "ncc": 0.0,
+      "ref_sha256": "a2d3668af96a66961dee7cc18e53a6b1c4240efa9fecebc0642e356ef88cfc08",
+      "ui": {
+        "mae": 0.00272581,
+        "max": 0.913725,
+        "ncc": 0.9559571,
+        "ref_sha256": "f561782300437fa1d8e19a71517ababa8e1e0bb8630cbeb6b18f59630c805f98"
+      }
     },
     "ab_ui_scene.json": {
       "mae": 6.558e-05,

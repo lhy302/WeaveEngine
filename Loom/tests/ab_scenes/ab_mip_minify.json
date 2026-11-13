@@ -1,0 +1,83 @@
+{
+  "version": 21,
+  "camera": {
+    "target": [
+      0,
+      0,
+      0
+    ],
+    "distance": 16,
+    "yaw": 0,
+    "pitch": 0
+  },
+  "gravity": -9.8,
+  "materials": [
+    {
+      "id": "m_mip",
+      "name": "mip_minify",
+      "color": "#ffffff",
+      "saturation": 1,
+      "metallic": 0,
+      "roughness": 0.6,
+      "pbr": false,
+      "albedo": {
+        "guid": "tex_ab_mip_301",
+        "path": "assets/tex/ab_mip_checker_301.png",
+        "name": "ab_mip_checker_301",
+        "mipmaps": true,
+        "wrap": "clamp",
+        "filter_mode": "trilinear"
+      }
+    }
+  ],
+  "objects": [
+    {
+      "id": "mip_quad",
+      "name": "mip_quad",
+      "type": "plane",
+      "params": {
+        "width": 4.0,
+        "depth": 4.0
+      },
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "rotation": [
+        -90,
+        0,
+        0
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "color": "#ffffff",
+      "visible": true,
+      "material_id": "m_mip"
+    }
+  ],
+  "lights": [
+    {
+      "id": "sun",
+      "kind": "directional",
+      "direction": [
+        0.25,
+        0.35,
+        1.0
+      ],
+      "color": [
+        1,
+        1,
+        1
+      ],
+      "intensity": 1.0,
+      "shadow": false,
+      "mode": "full",
+      "shape": "circle",
+      "size": 5
+    }
+  ]
+}

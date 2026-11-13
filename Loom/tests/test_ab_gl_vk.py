@@ -6,6 +6,7 @@
 #   · tests/ab_gl_vk_baseline.json —— 每场景三指标 + 参考图 sha256 + 门限。
 # 判定（每场景全部要过）:
 #   ① GL vs 参考 <= mae_abs   ② VK vs 参考 <= mae_abs   ③ GL vs VK <= mae_abs
+#   （场景级例外仅 D-06 ab_mip_minify：②③ 用基线行的 mae_abs=1e-3，Q-T2-1=A；① 仍 2e-4）
 #   ④ 相对基线不漂移: MAE <= 基线 + mae_drift 且 NCC >= 基线 - ncc_drift（float64 累加）
 #   ⑤ MAX <= max(max_abs, 基线MAX+0.03)（只在灾难性边缘破坏时触发）
 #   ⑥ UI 场景（有 canvas 的）额外比 UI 三路（阈值 ui_mae_abs，契约见 vk_ui.py:48-60）
@@ -17,6 +18,9 @@
 #   py tests/test_ab_gl_vk.py                    # 全场景对基线（失败即 rc=1）
 #   py tests/test_ab_gl_vk.py --update-baseline  # 重建参考图+基线（有 FAIL 不写）
 #   py tests/test_ab_gl_vk.py --update-baseline --force   # 允许场景数变少
+#   LOOM_AB_SCENES=a.json,b.json py tests/test_ab_gl_vk.py --next --append-baseline
+#                                                # 只渲染选中场景并**追加**到新基线
+#                                                # （既有场景条目/参考图不重生成）
 #   py tests/test_ab_gl_vk.py                   # 自动跟随 LOOM_POST（默认=后处理口径的新基线）
 #   py tests/test_ab_gl_vk.py --legacy           # 强制旧参考/旧基线（= LOOM_POST=0 口径）
 #   LOOM_POST=0 py tests/test_ab_gl_vk.py         # 关后处理 -> 旧基线必须全绿（回退证明）
@@ -55,9 +59,18 @@ BASELINE_PATH = os.path.join(HERE, 'ab_gl_vk_baseline.json')
 REF_DIR_NEXT = os.path.join(HERE, 'ab_scenes_ref_next')
 BASELINE_NEXT = os.path.join(HERE, 'ab_gl_vk_baseline_next.json')
 SCHEMA = 2
-# 只在后处理口径存在的场景：旧基线（LOOM_POST=0）里没有它们，
+# 只在新基线里存在的场景：旧基线（LOOM_POST=0）没有它们，
 # legacy 模式下按**显式白名单**跳过（不是静默放过——其它新场景仍然 FAIL）。
-POST_ONLY = {'ab_bloom.json'}
+# ab_ui_only / ab_mip_minify 是 T2 新增探针（2026-11-13），用 --append-baseline
+# 只写进了新基线，旧基线保持 23 场景不变。
+POST_ONLY = {'ab_bloom.json', 'ab_ui_only.json', 'ab_mip_minify.json'}
+
+# 场景级绝对 MAE 上限（缺省 = 全局 mae_abs=2e-4）。
+# 仅 D-06：GL 的 glGenerateMipmap 与 VK 的 shader 逐级降采样是两条算法，
+# 强缩小下必然不逐像素相等；人类裁决 Q-T2-1=A「接受为合理差异并给容差」。
+# ★ 2e-4 全局门**不动**：GL vs 参考仍走 2e-4（共享回归），漂移门仍是基线+5e-5
+#   （比场景上限更紧，mip 行为变化仍会红）。实测 5.8264e-4 -> 上限 1.0e-3。
+SCENE_MAE_ABS = {'ab_mip_minify.json': 0.001}
 
 DEFAULT_GATE = {
     'mae_abs': 0.0002,
@@ -175,6 +188,14 @@ def render_gl(data, with_ui=False):
     if with_ui:
         ui = getattr(ed, 'ui', None)
         if ui is not None:
+            # 2026-11-13 T2-D05: 显式把 UI 叠加层置于「无深度测试」状态。ed.render() 结束时
+            # 深度测试仍由最后一个 pass 开着；GL 的 Shape 描边走 draw_lines，不会像
+            # panel/text 那样在自己的 ctx.scope 里关深度 -> 3D 深度非 1 的像素上整条
+            # 线被深度测试丢掉（实测 480x320 场景条线 0 像素；先 disable 深度后正常）。
+            # 这是**测试夹具**的状态对齐，不改引擎；既有 ab_ui_scene [UI] 渲染结果
+            # 逐字节不变（2026-11-13 实测 MAE=0.00000000, MAX=0）。
+            import moderngl as _mgl
+            ctx.disable(_mgl.DEPTH_TEST)
             ui.draw_all(ed)          # 画进 ed._screen_fb() = 我们的 fbo
     raw = fbo.read(components=3)
     img = np.frombuffer(raw, dtype='u1').reshape(H, W, 3).astype(np.float32) / 255.0
@@ -327,17 +348,27 @@ def _check_scene(name, g, v, base, ref_dir, gate):
             got = _sha(rp)
             if got != want_sha:
                 reasons.append('参考图哈希不符（被改过/重建未同步）')
+    # 场景级容差只作用于 VK/参考与 GL/VK；GL/参考仍用全局 2e-4，
+    # 保证"两端一起回归"仍会被共享回归门抓住（Q-T2-1=A）。
+    scene_mae_abs = gate['mae_abs']
+    if base is not None:
+        try:
+            scene_mae_abs = max(scene_mae_abs, float(base.get('mae_abs') or 0.0))
+        except (TypeError, ValueError):
+            pass
     mgr = mvr = None
     if ref is not None:
         mgr = metrics(g, ref)
         mvr = metrics(v, ref)
         if mgr[0] > gate['mae_abs']:
             reasons.append('GL vs 参考 MAE=%.6f > %.6f（共享回归）' % (mgr[0], gate['mae_abs']))
-        if mvr[0] > gate['mae_abs']:
-            reasons.append('VK vs 参考 MAE=%.6f > %.6f' % (mvr[0], gate['mae_abs']))
+        _tag = '（场景容差）' if scene_mae_abs > gate['mae_abs'] else ''
+        if mvr[0] > scene_mae_abs:
+            reasons.append('VK vs 参考 MAE=%.6f > %.6f%s' % (mvr[0], scene_mae_abs, _tag))
     mgv = metrics(g, v)
-    if mgv[0] > gate['mae_abs']:
-        reasons.append('GL vs VK MAE=%.6f > %.6f' % (mgv[0], gate['mae_abs']))
+    if mgv[0] > scene_mae_abs:
+        _tag = '（场景容差）' if scene_mae_abs > gate['mae_abs'] else ''
+        reasons.append('GL vs VK MAE=%.6f > %.6f%s' % (mgv[0], scene_mae_abs, _tag))
     if base is not None:
         if mgv[0] > float(base.get('mae', 0.0)) + gate['mae_drift']:
             reasons.append('MAE 漂移 %.6f > 基线 %.6f + %.6f'
@@ -365,6 +396,8 @@ def format_line(mgr, mvr, mgv, base):
     parts.append('NCC=%.6f' % mgv[2])
     if base is not None:
         parts.append('基线 %.6f' % float(base.get('mae', 0.0)))
+        if base.get('mae_abs'):
+            parts.append('场景门限 %.6f' % float(base['mae_abs']))
     return '  '.join(parts)
 
 
@@ -422,6 +455,10 @@ def run_gate(files, baseline_path=None, ref_dir=None, gate=None, allow_no_vk=Non
     print('闸门: MAE<=%g（GL/参考 + VK/参考 + GL/VK 三路）且 <=基线+%g, NCC>=基线-%g, MAX<=%g, UI MAE<=%g'
           % (gate['mae_abs'], gate['mae_drift'], gate['ncc_drift'],
              gate['max_abs'], gate['ui_mae_abs']))
+    if SCENE_MAE_ABS:
+        print('场景级容差（仅 VK/参考 与 GL/VK；GL/参考仍 %g）: %s'
+              % (gate['mae_abs'],
+                 ', '.join('%s<=%g' % (k, v) for k, v in sorted(SCENE_MAE_ABS.items()))))
     if err:
         check('基线可用', False, err)
         print('--- 场景 %d, 失败 %d, 跳过 %d ---' % (len(files), len(_fails), len(_skips)))
@@ -484,7 +521,8 @@ def _load_scene(path):
     return _rebase_paths(data)
 
 
-def run_update(files, baseline_path=None, ref_dir=None, gate=None, force=False):
+def run_update(files, baseline_path=None, ref_dir=None, gate=None, force=False,
+               append=False):
     """重建参考图 + 基线。任何渲染失败 -> **不写**、rc=1（P1-4）。"""
     gate = gate or _gate()
     bp = baseline_path or BASELINE_PATH
@@ -492,6 +530,17 @@ def run_update(files, baseline_path=None, ref_dir=None, gate=None, force=False):
     if not files:
         print('[基线] 拒绝写入: 场景集为空（先确认 tests/ab_scenes 或 LOOM_AB_SCENES）')
         return 1
+    # append 模式：**先**读既有基线并拦住重名，保证既有场景的参考图一个都不重写。
+    old, _err = _baseline_load(bp)
+    old_rows = (old.get('scenes') if isinstance(old, dict) else None) or {}
+    if append:
+        if old is None:
+            print('[基线] --append 需要可用的既有基线: %s' % bp)
+            return 1
+        clashes = sorted({os.path.basename(p) for p in files} & set(old_rows))
+        if clashes:
+            print('[基线] --append 拒绝覆盖既有场景条目: %s' % ', '.join(clashes))
+            return 1
     rows = {}
     failures = []
     for path in files:
@@ -527,6 +576,8 @@ def run_update(files, baseline_path=None, ref_dir=None, gate=None, force=False):
             except Exception as e:
                 failures.append('%s: UI 渲染失败 %r' % (name, e))
                 continue
+        if name in SCENE_MAE_ABS:
+            row['mae_abs'] = SCENE_MAE_ABS[name]
         rows[name] = row
         print('BASE %-24s MAE=%.6f MAX=%.4f NCC=%.6f' % (name, mgv[0], mgv[1], mgv[2]))
     if failures:
@@ -534,8 +585,11 @@ def run_update(files, baseline_path=None, ref_dir=None, gate=None, force=False):
         for f in failures:
             print('  失败:', f)
         return 1
-    old, _err = _baseline_load(bp)
-    if old is not None and not force:
+    if append:
+        print('[基线] --append: 保留既有 %d 场景，新增 %d 场景'
+              % (len(old_rows), len(rows)))
+        rows = dict(old_rows, **rows)
+    elif old is not None and not force:
         old_n = int(old.get('scene_count') or 0)
         if len(rows) < old_n:
             print('[基线] 拒绝覆盖: 本次 %d 场景 < 已有 %d 场景（防误删锚点；确需如此请加 --force）'
@@ -693,8 +747,9 @@ def main(argv):
     #   · LOOM_POST=0        -> 旧参考图/旧基线（回退证明）；
     #   · --update-baseline 默认重建**旧**那套，加 --next 才重建新那套（旧文件不被覆盖）。
     from loom_post import post_enabled
-    use_next = ('--next' in argv) or \
-               ('--update-baseline' not in argv and post_enabled())
+    append = ('--append' in argv) or ('--append-baseline' in argv)
+    update = ('--update-baseline' in argv) or ('--append-baseline' in argv)
+    use_next = ('--next' in argv) or (not update and post_enabled())
     if '--legacy' in argv:
         use_next = False
     if use_next:
@@ -702,18 +757,17 @@ def main(argv):
         BASELINE_PATH = BASELINE_NEXT
     if '--self-test' in argv:
         return self_test()
-    update = '--update-baseline' in argv
     if not files:
         print('错误: 场景集为空（tests/ab_scenes 无 ab_*.json, 或 LOOM_AB_SCENES 解析为空）')
         return 1
     if update:
+        if append and '--force' in argv:
+            print('错误: --append 不能与 --force 同用（append 只增不删）')
+            return 1
         return run_update(files, BASELINE_PATH, REF_DIR, _gate(),
-                          force=('--force' in argv))
+                          force=('--force' in argv), append=append)
     return run_gate(files, BASELINE_PATH, REF_DIR, _gate(), legacy=(not use_next))
 
 
 if __name__ == '__main__':
     sys.exit(main(sys.argv[1:]))
-
-
-

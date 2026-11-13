@@ -1,0 +1,582 @@
+{
+  "version": 12,
+  "camera": {
+    "target": [
+      0,
+      0,
+      0
+    ],
+    "distance": 10,
+    "yaw": 0.6,
+    "pitch": -0.35
+  },
+  "gravity": -9.8,
+  "materials": [],
+  "objects": [
+    {
+      "id": "sentinel",
+      "type": "plane",
+      "params": {
+        "width": 0.01,
+        "depth": 0.01
+      },
+      "position": [
+        1000,
+        1000,
+        1000
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "color": "#000000",
+      "visible": true
+    }
+  ],
+  "lights": [],
+  "ui": {
+    "canvases": [
+      {
+        "canvas_type": "screen",
+        "width": 480,
+        "height": 320,
+        "z_order": 0,
+        "elements": [
+          {
+            "type": "element",
+            "name": "root",
+            "rect": [
+              0,
+              0,
+              480,
+              320
+            ],
+            "children": [
+              {
+                "type": "panel",
+                "name": "bg",
+                "rect": [
+                  0,
+                  0,
+                  480,
+                  320
+                ],
+                "bg_color": [
+                  18,
+                  22,
+                  31,
+                  255
+                ]
+              },
+              {
+                "type": "panel",
+                "name": "header",
+                "rect": [
+                  0,
+                  0,
+                  480,
+                  44
+                ],
+                "bg_color": [
+                  34,
+                  42,
+                  58,
+                  255
+                ]
+              },
+              {
+                "type": "text",
+                "name": "title",
+                "rect": [
+                  16,
+                  8,
+                  320,
+                  26
+                ],
+                "text": "Loom UI 光栅化探针（纯 UI）",
+                "font_size": 20,
+                "color": [
+                  255,
+                  214,
+                  120
+                ],
+                "align": "left"
+              },
+              {
+                "type": "text",
+                "name": "subtitle",
+                "rect": [
+                  300,
+                  14,
+                  170,
+                  20
+                ],
+                "text": "GL vs VK · 480x320",
+                "font_size": 13,
+                "color": [
+                  150,
+                  180,
+                  220
+                ],
+                "align": "right"
+              },
+              {
+                "type": "panel",
+                "name": "sidebar",
+                "rect": [
+                  0,
+                  44,
+                  140,
+                  240
+                ],
+                "bg_color": [
+                  26,
+                  32,
+                  44,
+                  255
+                ]
+              },
+              {
+                "type": "text",
+                "name": "side_title",
+                "rect": [
+                  10,
+                  50,
+                  120,
+                  20
+                ],
+                "text": "控制面板",
+                "font_size": 14,
+                "color": [
+                  200,
+                  215,
+                  235
+                ],
+                "align": "left"
+              },
+              {
+                "type": "button",
+                "name": "btn0",
+                "rect": [
+                  8,
+                  76,
+                  124,
+                  30
+                ],
+                "text": "开始",
+                "font_size": 15,
+                "normal_color": [
+                  54,
+                  66,
+                  86,
+                  255
+                ],
+                "hover_color": [
+                  70,
+                  86,
+                  112,
+                  255
+                ],
+                "pressed_color": [
+                  44,
+                  54,
+                  70,
+                  255
+                ]
+              },
+              {
+                "type": "button",
+                "name": "btn1",
+                "rect": [
+                  8,
+                  116,
+                  124,
+                  30
+                ],
+                "text": "暂停",
+                "font_size": 15,
+                "normal_color": [
+                  54,
+                  66,
+                  86,
+                  255
+                ],
+                "hover_color": [
+                  70,
+                  86,
+                  112,
+                  255
+                ],
+                "pressed_color": [
+                  44,
+                  54,
+                  70,
+                  255
+                ]
+              },
+              {
+                "type": "button",
+                "name": "btn2",
+                "rect": [
+                  8,
+                  156,
+                  124,
+                  30
+                ],
+                "text": "重置",
+                "font_size": 15,
+                "normal_color": [
+                  54,
+                  66,
+                  86,
+                  255
+                ],
+                "hover_color": [
+                  70,
+                  86,
+                  112,
+                  255
+                ],
+                "pressed_color": [
+                  44,
+                  54,
+                  70,
+                  255
+                ]
+              },
+              {
+                "type": "button",
+                "name": "btn3",
+                "rect": [
+                  8,
+                  196,
+                  124,
+                  30
+                ],
+                "text": "导出",
+                "font_size": 15,
+                "normal_color": [
+                  54,
+                  66,
+                  86,
+                  255
+                ],
+                "hover_color": [
+                  70,
+                  86,
+                  112,
+                  255
+                ],
+                "pressed_color": [
+                  44,
+                  54,
+                  70,
+                  255
+                ]
+              },
+              {
+                "type": "panel",
+                "name": "chart_bg",
+                "rect": [
+                  148,
+                  56,
+                  324,
+                  216
+                ],
+                "bg_color": [
+                  22,
+                  28,
+                  38,
+                  255
+                ]
+              },
+              {
+                "type": "shape",
+                "name": "grid_h0",
+                "rect": [
+                  148,
+                  56,
+                  324,
+                  216
+                ],
+                "shape_type": "line",
+                "points": [
+                  [
+                    0,
+                    20
+                  ],
+                  [
+                    324,
+                    20
+                  ]
+                ],
+                "stroke_color": [
+                  60,
+                  72,
+                  92,
+                  255
+                ],
+                "stroke_width": 1
+              },
+              {
+                "type": "shape",
+                "name": "axis_x",
+                "rect": [
+                  148,
+                  56,
+                  324,
+                  216
+                ],
+                "shape_type": "line",
+                "points": [
+                  [
+                    0,
+                    216
+                  ],
+                  [
+                    324,
+                    216
+                  ]
+                ],
+                "stroke_color": [
+                  120,
+                  135,
+                  160,
+                  255
+                ],
+                "stroke_width": 1
+              },
+              {
+                "type": "shape",
+                "name": "axis_y",
+                "rect": [
+                  148,
+                  56,
+                  324,
+                  216
+                ],
+                "shape_type": "line",
+                "points": [
+                  [
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    216
+                  ]
+                ],
+                "stroke_color": [
+                  120,
+                  135,
+                  160,
+                  255
+                ],
+                "stroke_width": 1
+              },
+              {
+                "type": "shape",
+                "name": "series_a",
+                "rect": [
+                  148,
+                  56,
+                  324,
+                  216
+                ],
+                "shape_type": "polyline",
+                "points": [
+                  [
+                    10,
+                    190
+                  ],
+                  [
+                    60,
+                    150
+                  ],
+                  [
+                    110,
+                    165
+                  ],
+                  [
+                    160,
+                    100
+                  ],
+                  [
+                    210,
+                    120
+                  ],
+                  [
+                    260,
+                    70
+                  ],
+                  [
+                    314,
+                    90
+                  ]
+                ],
+                "stroke_color": [
+                  255,
+                  190,
+                  70,
+                  255
+                ],
+                "stroke_width": 1
+              },
+              {
+                "type": "shape",
+                "name": "m1_0",
+                "rect": [
+                  153,
+                  241,
+                  10,
+                  10
+                ],
+                "shape_type": "circle",
+                "radius": 5.0,
+                "stroke_color": [
+                  255,
+                  200,
+                  80,
+                  255
+                ],
+                "stroke_width": 1
+              },
+              {
+                "type": "shape",
+                "name": "m1_1",
+                "rect": [
+                  203,
+                  201,
+                  10,
+                  10
+                ],
+                "shape_type": "circle",
+                "radius": 5.0,
+                "stroke_color": [
+                  255,
+                  200,
+                  80,
+                  255
+                ],
+                "stroke_width": 1
+              },
+              {
+                "type": "shape",
+                "name": "m1_2",
+                "rect": [
+                  253,
+                  216,
+                  10,
+                  10
+                ],
+                "shape_type": "circle",
+                "radius": 5.0,
+                "stroke_color": [
+                  255,
+                  200,
+                  80,
+                  255
+                ],
+                "stroke_width": 1
+              },
+              {
+                "type": "text",
+                "name": "legend_a",
+                "rect": [
+                  160,
+                  58,
+                  80,
+                  18
+                ],
+                "text": "序列 A",
+                "font_size": 12,
+                "color": [
+                  255,
+                  200,
+                  90
+                ],
+                "align": "left"
+              },
+              {
+                "type": "text",
+                "name": "legend_b",
+                "rect": [
+                  160,
+                  76,
+                  80,
+                  18
+                ],
+                "text": "序列 B",
+                "font_size": 12,
+                "color": [
+                  110,
+                  200,
+                  255
+                ],
+                "align": "left"
+              },
+              {
+                "type": "panel",
+                "name": "footer",
+                "rect": [
+                  0,
+                  284,
+                  480,
+                  36
+                ],
+                "bg_color": [
+                  34,
+                  42,
+                  58,
+                  255
+                ]
+              },
+              {
+                "type": "text",
+                "name": "status",
+                "rect": [
+                  12,
+                  292,
+                  300,
+                  18
+                ],
+                "text": "状态：UI 独占整帧 · 无可见 3D 像素",
+                "font_size": 13,
+                "color": [
+                  190,
+                  205,
+                  225
+                ],
+                "align": "left"
+              },
+              {
+                "type": "text",
+                "name": "fps",
+                "rect": [
+                  380,
+                  292,
+                  90,
+                  18
+                ],
+                "text": "480×320",
+                "font_size": 13,
+                "color": [
+                  150,
+                  180,
+                  220
+                ],
+                "align": "right"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -7,6 +7,8 @@
   · assets/tex/normalmap.png 8x8 法线贴图（+Z 为主，带固定斜纹）
   · assets/tex/checker.png   16x16 双色棋盘
   · assets/tex/ui_tex_rgba.png 8x8 半透明 RGBA（UI 贴图用）
+  · assets/tex/ab_mip_checker_301.png 301x301 非 2 的幂彩色棋盘 + 斜纹 + 渐变
+    （D-06 mip 探针专用：强缩小下 GL 驱动 mip 与 VK shader mip 的差异才会显形）
 
 重跑：py -3.13 tests/ab_scenes/assets/make_assets.py（幂等，逐字节相同）
 """
@@ -55,6 +57,24 @@ def main():
     ui[..., 2] = 40
     ui[..., 3] = np.where(((np.indices((8, 8)).sum(axis=0)) % 2) == 0, 255, 96)
     _save(os.path.join('tex', 'ui_tex_rgba.png'), ui)
+
+    # D-06 mip 探针贴图：301x301（**非 2 的幂**，奇数尺寸会放大 VK 逐级
+    # mip_downsample 的“目标尺寸 = 源/2 向下取整”误差）。
+    # 16px 彩色棋盘提供跨 mip 层级仍存在的结构，7px 斜纹提供高频，
+    # 水平方向线性蓝通道渐变保证高层 mip 不是纯常量。全部规则确定性、无 RNG。
+    n = 301
+    yy, xx = np.mgrid[0:n, 0:n]
+    cell = ((xx // 16) + (yy // 16)) % 2 == 0
+    mip = np.zeros((n, n, 3), dtype=np.uint8)
+    mip[..., 0] = np.where(cell, 235, 30)
+    mip[..., 1] = np.where(cell, 40, 210)
+    mip[..., 2] = np.where(cell, 30, 190)
+    stripe = (((xx + yy) // 7) % 2) == 0
+    mip[..., 0] = np.where(stripe, mip[..., 0],
+                           (mip[..., 0].astype(np.int32) // 2 + 60).astype(np.uint8))
+    mip[..., 2] = (mip[..., 2].astype(np.int32)
+                   + (xx * 255 // (n - 1)) // 2).clip(0, 255).astype(np.uint8)
+    _save(os.path.join('tex', 'ab_mip_checker_301.png'), mip)
 
 
 if __name__ == '__main__':
