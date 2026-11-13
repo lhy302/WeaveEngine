@@ -69,9 +69,9 @@
 
 | 产物 | 字节 | 显示大小 | sha256 | git_head |
 |---|---|---|---|---|
-| `Loom-0.1.0.beta6-compiled.zip` | 145 283 966 | 138.55 MB | `fab9ad3af5ac0dfe724f45fd699eb0501779f7e36d8e3f1f5b6fd40f46a32c43` | `051fff0801bd87156ebd008295ac5408697ac2ee` |
-| `Loom-0.1.0.beta6-source.zip` | 358 724 816 | 342.11 MB | `5be8a63dbabe2fe3332b610408aa33a18de76dc2d8269c59afc3261635024e40` | `051fff0801bd87156ebd008295ac5408697ac2ee` |
-| `LoomHub-0.1.4-Setup.exe` | 27 363 292 | 26.10 MB | `ac75dccfb37b9550e99d2cceb733b26dba4bdc920cddbd535c352101f8b26682` | （Hub 无独立 git_head；版本真源 `LoomHub/版本.json`=0.1.4） |
+| `Loom-0.1.0.beta6-compiled.zip` | 145 284 161 | 138.55 MB | `adbb77ce06c674d0f2faf6d246044395828666aa8fb007be182de577113732ff` | `051fff0801bd87156ebd008295ac5408697ac2ee` |
+| `Loom-0.1.0.beta6-source.zip` | 358 725 019 | 342.11 MB | `87893ecfb083f17de4b5c15380d9451b7110d38a5b783e40001bc3efbdb9a878` | `051fff0801bd87156ebd008295ac5408697ac2ee` |
+| `LoomHub-0.1.4-Setup.exe` | 25 539 782 | 24.36 MB | `960f0e4023dbb19a5d72cef75f5129ec51c0fffca44214669e98a5dcae5a35be` | （Hub 无独立 git_head；版本真源 `LoomHub/版本.json`=0.1.4） |
 
 - 三件同日同 HEAD 产出：编辑器 dist **150.23 MB**、构建器 **onedir 80.08 MB**（`build_game.exe` 26.37 MB）、玩家运行时 dist **143.43 MB**。
 - 构建器 2026-11-13 起由 onefile 改 **onedir**：不再自解压到 `%TEMP%`（安全软件的投放器特征），并给三个 exe 补完整版本资源（`CompanyName=lhy302` / `ProductName=Loom` / `FileDescription` / `FileVersion=0.1.0.6`）。实测该形态改变后本机 360 不再对构建器报毒（单机单样本）。
@@ -84,3 +84,13 @@
 set LOOM_ENGINE_VERSION=0.1.0.beta6
 py -3.13 tools/release_github.py engine
 ```
+
+## 九、安装安全提示（通用，不只某一家安全软件）
+
+在 Program Files 安装时，安全软件会提示「修改配置」与「写入 DLL」，属正常安装行为，请允许。
+
+原因：在关键目录写入疑似系统 DLL 是**几乎所有安全软件**都可能拦的操作，不只某一家。
+
+引擎安装根现在**默认跟随 LoomHub 自身安装位置**推荐：Hub 在 Program Files（管理员安装）→ 推荐
+`C:\Program Files\Loom`；Hub 在用户目录或便携目录 → 推荐 `%LOCALAPPDATA%\Programs\Loom`。
+用户在安装对话框里仍可快捷切换系统目录/用户目录，或手动输入、浏览选择。

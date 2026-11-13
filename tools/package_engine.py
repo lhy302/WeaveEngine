@@ -31,6 +31,14 @@ EXCLUDE_DIRS = {'tests', '保存', 'Projects', '__pycache__', '.pytest_cache',
 EXCLUDE_EXTS = {'.pyc', '.pyo', '.log', '.tmp'}
 EXCLUDE_FILES = {'解释器.json.bak'}
 
+# 2026-11-13 安装安全提示（通用：不是"只针对 360"，而是关键目录写 DLL 的普遍行为）
+SAFETY_NOTICE = (
+    '【安装安全提示】在 Program Files 安装时，安全软件会提示「修改配置」与'
+    '「写入 DLL」，属正常安装行为，请允许。\n'
+    '  原因：在关键目录写入疑似系统 DLL，是**几乎所有安全软件**都可能拦的操作，'
+    '不只某一家。\n')
+
+
 
 def load_version(override=None):
     if override:
@@ -467,6 +475,7 @@ def write_meta_readme(out_dir, version, slim=False, compiled=False,
                   '    Loom.py         <- 主程序\n'
                   '    解释器.json     <- LoomHub 识别元数据\n'
                   ) % (version, pyver, pyver)
+    readme += '\n' + SAFETY_NOTICE
     if slim:
         readme += ('\n【精简包 / 无预置运行时】\n'
                    '本包**没有**预置播放器运行时（Loom/player_runtime/game_player.dist）。\n'
