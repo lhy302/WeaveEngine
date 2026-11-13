@@ -33,6 +33,27 @@ sys.path.insert(0, os.path.join(HUB_DIR, '..', 'Loom'))  # guiloader (设置.jso
 
 from hub_controller import HubController, IHubView
 import hub_install_ui
+import hub_widgets
+
+
+def short_path(p, max_len=52):
+    """把长路径压成「盘符\\…\\末两级」用于**显示**，避免撑大布局。
+
+    2026-11-13 GUI bug 修复：用户目录安装根
+    （C:\\Users\\<user>\\AppData\\Local\\Programs\\Loom，56 字符）比原来的
+    C:\\Program Files\\Loom 长得多，直接贴进 Label 会把左侧「解释器」区
+    （以及整窗）撑宽。这里只改显示，真实路径仍用 controller.install_root。
+    """
+    s = str(p or '')
+    if len(s) <= max_len:
+        return s
+    try:
+        drive, rest = os.path.splitdrive(s)
+        parts = [x for x in rest.replace('/', '\\').split('\\') if x]
+        tail = '\\'.join(parts[-2:]) if len(parts) >= 2 else rest
+        return '%s\\…\\%s' % (drive or '', tail)
+    except Exception:
+        return s
 import hub_github as _gh
 
 APP_TITLE = "LoomHub — 项目管理器"
@@ -60,8 +81,13 @@ class TkHubView(IHubView):
         left = tk.LabelFrame(self.root, text="解释器 (Loom)", padx=6, pady=6)
         left.pack(side="left", fill="both", expand=True, padx=6, pady=6)
         # 安装根 (动态刷新: _refresh_lists 更新文本)
-        self.root_label = tk.Label(left, text="默认安装根: %s" % self.ctrl.install_root,
-                                   anchor="w", fg="#666")
+        # 2026-11-13 GUI bug 修复：安装根长度不可控（用户目录安装比
+        # Program Files 长 30+ 字符），直接贴 Label 会把左侧「解释器」区
+        # 乃至整窗撑宽。改用 ElidedPathLabel：定长 + 中间省略 + 悬停浮窗
+        # 显示完整路径 + 点击复制（真实路径仍在 controller.install_root）。
+        self.root_label = hub_widgets.ElidedPathLabel(left, prefix="默认安装根: ",
+                                                      fg="#666")
+        self.root_label.set_path(self.ctrl.install_root)
         self.root_label.pack(fill="x")
         self._btn_row(left, [("改安装根", self._change_root)])
         # 列表 + 原生滚动条 (标准配对: listbox.yscrollcommand=sb.set, sb.command=listbox.yview)
@@ -420,7 +446,7 @@ class TkHubView(IHubView):
                     '#222' if row_tag == 'current'
                     else ('#b06a00' if row_tag == 'external' else '#999')})
         # 安装根 / 默认解释器 状态 (pygame 视图也实时显示, 保持一致)
-        self.root_label.config(text="默认安装根: %s" % self.ctrl.install_root)
+        self.root_label.set_path(self.ctrl.install_root)
         try:
             self._update_current_label()      # 当前引擎状态行随刷新保持
         except AttributeError:

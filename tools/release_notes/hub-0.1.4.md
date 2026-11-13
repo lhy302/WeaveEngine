@@ -26,7 +26,7 @@
 
 | 产物 | 字节 | 显示大小 | sha256 |
 |---|---|---|---|
-| `LoomHub-0.1.4-Setup.exe` | 25 539 782 | 24.36 MB | `960f0e4023dbb19a5d72cef75f5129ec51c0fffca44214669e98a5dcae5a35be` |
+| `LoomHub-0.1.4-Setup.exe` | 25 546 396 | 24.36 MB | `e84399bb03d0446f55a9abf83b435add5a64609e709a434f27a57540d6899436` |
 
 - 安装包内 `LoomHub.exe` = **6.36 MB**（6 671 167 B），构建期断言 `ProductVersion/FileVersion = 0.1.4` 通过；
   Inno Setup 7 编译成功（`Successful compile (17.781 sec)`）。

@@ -24,6 +24,7 @@ from tkinter import ttk, messagebox
 
 import hub_config as cfg
 import hub_github as gh
+import hub_widgets as hw
 import hub_install as inst
 
 
@@ -48,7 +49,10 @@ def show_zip_preview(parent, controller, zip_path, on_success=None):
 
     dlg = tk.Toplevel(parent)
     dlg.title('安装 Loom 解释器')
-    dlg.geometry('560x470')
+    # 2026-11-13 GUI bug 修复：提示文案现在多了一段（安全提示 + 推荐原因），
+    # 560x470 会把「安装」按钮挤成一条。加高 + 按钮栏**钉底**（先 pack side=bottom）。
+    dlg.geometry('640x620')
+    dlg.minsize(640, 560)
     dlg.resizable(False, False)   # 2026-10-19: 锁定窗口大小
     dlg.transient(parent)
     dlg.grab_set()
@@ -58,6 +62,10 @@ def show_zip_preview(parent, controller, zip_path, on_success=None):
     head.pack(fill='x')
     tk.Label(head, text='准备安装 Loom 引擎', font=('Microsoft YaHei UI', 12, 'bold'),
              bg='#f0f4fa', padx=12, pady=10).pack(anchor='w')
+
+    # 底部按钮栏：**先于 body 钉在底部**，保证内容再长也不会把按钮挤掉
+    btns = tk.Frame(dlg, pady=10)
+    btns.pack(side='bottom', fill='x')
 
     # 信息区
     body = tk.Frame(dlg, padx=20, pady=10)
@@ -98,6 +106,8 @@ def show_zip_preview(parent, controller, zip_path, on_success=None):
         if d:
             loc_var.set(d)
     tk.Button(loc_row, text='浏览...', command=_browse).pack(side='left')
+    # 悬停显示**完整**安装路径（输入框本身只能横向滚动看局部）
+    hw.Tooltip(loc_entry, lambda: loc_var.get())
 
     # 快捷选择（系统目录 / 用户目录）；手输与浏览保持不变。
     quick_row = tk.Frame(body)
@@ -115,11 +125,13 @@ def show_zip_preview(parent, controller, zip_path, on_success=None):
     _kind_label = {'system': '系统目录（Program Files）',
                    'user': '用户目录',
                    'portable': '便携目录（非系统/非用户目录）'}.get(_kind, _kind)
+    # 2026-11-13: 路径**中间省略后**再拼进提示，否则长安装根会多折两行把按钮挤掉。
     tk.Label(body,
              text='提示: 在 Program Files 安装时，安全软件会提示「修改配置」与'
                   '「写入 DLL」，属正常安装行为，请允许。\n'
                   '当前推荐：%s（因 LoomHub 安装于 %s，判定为%s）'
-                  % (_recommended, cfg.hub_install_dir(), _kind_label),
+                  % (hw.elide_middle(_recommended, 56),
+                     hw.elide_middle(cfg.hub_install_dir(), 48), _kind_label),
              fg='#999', font=('Microsoft YaHei UI', 8),
              wraplength=430, justify='left').grid(
         row=len(rows) + 2, column=0, columnspan=2, sticky='w', pady=(6, 0))
@@ -128,9 +140,6 @@ def show_zip_preview(parent, controller, zip_path, on_success=None):
              fg='#999', font=('Microsoft YaHei UI', 8)).grid(
         row=len(rows) + 3, column=0, columnspan=2, sticky='w', pady=(6, 0))
 
-    # 底部按钮
-    btns = tk.Frame(dlg, pady=10)
-    btns.pack(fill='x')
     result = {'ok': False}
 
     def _do_install():
