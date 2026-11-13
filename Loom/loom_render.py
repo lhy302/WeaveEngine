@@ -266,6 +266,9 @@ class RenderMixin:
                     [(self._world_ui_vbo, '3f 2f', 'in_world_pos', 'in_uv')])
                 try:
                     self._world_ui_prog['u_tex'].value = 0
+                    # T3 (2026-11-13): UI 着色器单源后，屏幕 HUD 与 world Canvas
+                    # 共用同一份 ui.vert|ui.frag；u_mode 选路径（HUD 程序默认 0）。
+                    self._world_ui_prog['u_mode'].value = 1
                 except Exception:
                     pass
             except Exception as e:

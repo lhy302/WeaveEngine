@@ -1224,7 +1224,7 @@ class VkRenderer:
             BR = corner(+hw, -hh)
             base = len(verts)
             # 三角形 1: TL, BL, TR; 三角形 2: TR, BL, BR (GL TRIANGLE_STRIP
-            # TL,BL,TR,BR 的等价展开). uv 上下翻转见 _WORLD_UI_WGSL 注释.
+            # TL,BL,TR,BR 的等价展开). uv 上下翻转在本段 uv 常量里做（原 WGSL 已在 T3a 单源化时删除, 见 shaders/ui.vert）.
             for p, uv in ((TL, (0.0, 0.0)), (BL, (0.0, 1.0)),
                           (TR, (1.0, 0.0)), (TR, (1.0, 0.0)),
                           (BL, (0.0, 1.0)), (BR, (1.0, 1.0))):

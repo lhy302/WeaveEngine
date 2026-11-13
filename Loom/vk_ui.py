@@ -33,14 +33,40 @@
     ui.draw_all(ui_manager)                  # 可选: Canvas 元素树
     ui.submit(rp)                            # 在 load_op='load' 的 pass 里提交
 """
+import os
 from collections import OrderedDict
 
 import numpy as np
 import wgpu
 
-# 每顶点 32B: 位置 xy(像素) + uv + 颜色 rgba (与 GL 的 "quad 属性 + u_color" 等价)
-_VERT_BYTES = 32
+# T3 (2026-11-13): UI 着色器单源化 —— Loom/shaders/ui.vert|ui.frag 经 glslang 产出
+# .spv，屏幕 UI 与 world Canvas **两条管线共用同一对模块**（entry_point 一律 'main'）。
+# 顶点统一 36B: 位置 xyz + uv + 颜色 rgba；屏幕 UI 的 z 恒 0、world 的颜色恒白。
+_VERT_BYTES = 36
 _TEXT_CACHE_MAX = 400          # 与 engine._text_cache_max 一致
+_UI_VS = 'ui.vert'
+_UI_FS = 'ui.frag'
+_SPV_CACHE = {}
+
+
+def _spv_module(device, name):
+    """Loom/shaders/<name>.spv -> wgpu shader module（按设备 + 名缓存）。
+
+    与 vk_renderer._spv_module 同契约：缺文件直接报错，不静默回退手写 WGSL
+    （本文件旧的两块手写 WGSL 已删除）。
+    """
+    key = (id(device), name)
+    m = _SPV_CACHE.get(key)
+    if m is not None:
+        return m
+    p = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                     'shaders', name + '.spv')
+    if not os.path.isfile(p):
+        raise RuntimeError('缺少 SPIR-V: %s（先跑 tools/build_shaders.py）' % p)
+    with open(p, 'rb') as fh:
+        m = device.create_shader_module(code=fh.read())
+    _SPV_CACHE[key] = m
+    return m
 
 # ---- R2 契约 (2026-11-06, 2026-11-07 修订) ---------------------------------
 # GL 的 Shape 描边走 engine.draw_screen_lines -> GL_LINES + line_width (光栅化
@@ -64,38 +90,8 @@ _TEXT_CACHE_MAX = 400          # 与 engine._text_cache_max 一致
 STROKE_PIXEL_EQUIVALENT = False
 STROKE_METHOD = 'triangle-band'
 
-_UI_WGSL = """
-struct UIC {
-    screen: vec4f,      // xy = 屏幕像素尺寸 (z/w 备用)
-};
-@group(0) @binding(0) var<uniform> uc: UIC;
-@group(0) @binding(1) var t_ui: texture_2d<f32>;
-@group(0) @binding(2) var s_ui: sampler;
-
-struct VSOut {
-    @builtin(position) pos: vec4f,
-    @location(0) uv: vec2f,
-    @location(1) color: vec4f,
-};
-
-// 像素坐标 (左上原点, y 向下) -> NDC (y 向上, 与 GL 同约定)
-@vertex fn vs(@location(0) p: vec2f,
-              @location(1) uv: vec2f,
-              @location(2) c: vec4f) -> VSOut {
-    var o: VSOut;
-    let n = vec2f(p.x / uc.screen.x * 2.0 - 1.0,
-                  1.0 - p.y / uc.screen.y * 2.0);
-    o.pos = vec4f(n, 0.0, 1.0);
-    o.uv = uv;
-    o.color = c;
-    return o;
-}
-
-@fragment fn fs(i: VSOut) -> @location(0) vec4f {
-    // 与 GL _HUD_FRAG 同式: texture(u_tex, v_uv) * u_color
-    return textureSample(t_ui, s_ui, i.uv) * i.color;
-}
-"""
+# T3 (2026-11-13): 原来的 _UI_WGSL（屏幕 UI 的 vs+fs，31 行）已删除 ——
+# 现在喂 Loom/shaders/ui.vert|ui.frag 编出的 SPIR-V（加载见模块顶部 _spv_module）。
 
 
 def _c4(color):
@@ -431,7 +427,8 @@ class VkUIPipeline:
         self.device = device
         self.format = present_format
         d = device
-        shader = d.create_shader_module(code=_UI_WGSL)
+        vs_mod = _spv_module(d, _UI_VS)     # T3: 单源 ui.vert -> SPIR-V（入口 main）
+        fs_mod = _spv_module(d, _UI_FS)     # T3: 单源 ui.frag -> SPIR-V（入口 main）
         self.bgl = d.create_bind_group_layout(entries=[
             {'binding': 0,
              'visibility': wgpu.ShaderStage.VERTEX | wgpu.ShaderStage.FRAGMENT,
@@ -442,14 +439,15 @@ class VkUIPipeline:
              'sampler': {'type': 'filtering'}}])
         self.pipeline = d.create_render_pipeline(
             layout=d.create_pipeline_layout(bind_group_layouts=[self.bgl]),
-            vertex={'module': shader, 'entry_point': 'vs', 'buffers': [{
+            vertex={'module': vs_mod, 'entry_point': 'main', 'buffers': [{
                 'array_stride': _VERT_BYTES, 'step_mode': 'vertex',
                 'attributes': [
-                    {'shader_location': 0, 'offset': 0, 'format': 'float32x2'},
-                    {'shader_location': 1, 'offset': 8, 'format': 'float32x2'},
-                    {'shader_location': 2, 'offset': 16, 'format': 'float32x4'}]}]},
+                    # 36B 统一布局: pos3 + uv2 + color4（屏幕 UI 的 z 恒 0）
+                    {'shader_location': 0, 'offset': 0, 'format': 'float32x3'},
+                    {'shader_location': 1, 'offset': 12, 'format': 'float32x2'},
+                    {'shader_location': 2, 'offset': 20, 'format': 'float32x4'}]}]},
             primitive={'topology': 'triangle-list', 'cull_mode': 'none'},
-            fragment={'module': shader, 'entry_point': 'fs', 'targets': [{
+            fragment={'module': fs_mod, 'entry_point': 'main', 'targets': [{
                 'format': present_format,
                 'blend': {
                     # ★ alpha 通道也必须 SRC_ALPHA/ONE_MINUS_SRC_ALPHA ——
@@ -464,8 +462,10 @@ class VkUIPipeline:
                     'alpha': {'operation': 'add',
                               'src_factor': 'src-alpha',
                               'dst_factor': 'one-minus-src-alpha'}}}]})
+        # UIC = vec4(屏幕宽高 + 模式) + mat4 VP：std140 共 80B。
+        # 屏幕 UI 只写前 16B（z=0 -> 屏幕路径），world 管线写 20 f32（z=1 + VP）。
         self.uniform_buf = d.create_buffer(
-            size=16, usage=wgpu.BufferUsage.UNIFORM | wgpu.BufferUsage.COPY_DST)
+            size=80, usage=wgpu.BufferUsage.UNIFORM | wgpu.BufferUsage.COPY_DST)
         self.sampler = d.create_sampler(
             mag_filter='linear', min_filter='linear',
             address_mode_u='clamp-to-edge', address_mode_v='clamp-to-edge')
@@ -498,7 +498,7 @@ class VkUIPipeline:
         else:
             g = self.device.create_bind_group(layout=self.bgl, entries=[
                 {'binding': 0, 'resource': {'buffer': self.uniform_buf,
-                                            'offset': 0, 'size': 16}},
+                                            'offset': 0, 'size': 80}},
                 {'binding': 1, 'resource': view},
                 {'binding': 2, 'resource': self.sampler}])
             item = (g, view)
@@ -596,13 +596,19 @@ class VkUIPipeline:
         total = sum(int(v.shape[0]) for _, _, v in ops)
         if total <= 0:
             return []
-        buf = np.empty((total, 8), dtype=np.float32)
+        # ops 里的顶点仍是 8 f32 (xy+uv+rgba)；这里展开成管线要求的 9 f32
+        # (xyz+uv+rgba，屏幕 UI 的 z 恒 0)，数学与旧 32B 布局逐字节一致。
+        buf = np.empty((total, 9), dtype=np.float32)
         pos = 0
         groups = []
         cur = None
         for tex, sc, verts in ops:
             n = int(verts.shape[0])
-            buf[pos:pos + n] = verts
+            dst = buf[pos:pos + n]
+            dst[:, 0:2] = verts[:, 0:2]     # 像素 xy
+            dst[:, 2] = 0.0                 # z（屏幕 UI 不使用）
+            dst[:, 3:5] = verts[:, 2:4]     # uv
+            dst[:, 5:9] = verts[:, 4:8]     # rgba
             gkey = (id(tex) if tex is not None else 0,
                     None if sc is None else tuple(sc))
             if cur is not None and cur[0] == gkey:
@@ -651,33 +657,11 @@ class VkUIPipeline:
 # ★UV 方向: 离屏纹理在 wgpu 里 v=0 = 第 0 行 = 画布顶端 (UI 管线把 y=0 映到
 #   NDC +1). 与 GL 的 v=1=顶端相反, 所以世界 quad 的 uv 在 VK 侧上下翻转
 #   (TL=(0,0), BL=(0,1)), 采样出的图像方向才与 GL 一致。
-_WORLD_UI_WGSL = """
-struct WorldC {
-    vp: mat4x4<f32>,        // 与主 pass 同一行主序字节直传 (WGSL 列主序解释 = 数学行主序)
-};
-@group(0) @binding(0) var<uniform> wc: WorldC;
-@group(0) @binding(1) var t_world: texture_2d<f32>;
-@group(0) @binding(2) var s_world: sampler;
+# T3 (2026-11-13): 原来的 _WORLD_UI_WGSL（world Canvas 的 vs+fs，24 行）已删除 ——
+# 与屏幕 UI 共用 Loom/shaders/ui.vert|ui.frag 的 SPIR-V（靠 UIC.ui_screen.z 选
+# world 路径）。顶点同样展开成 36B（pos3 + uv2 + 白 color4）。
 
-struct VSOut {
-    @builtin(position) pos: vec4f,
-    @location(0) uv: vec2f,
-};
-
-@vertex fn vs(@location(0) p: vec3f, @location(1) uv: vec2f) -> VSOut {
-    var o: VSOut;
-    o.pos = wc.vp * vec4f(p, 1.0);
-    o.uv = uv;
-    return o;
-}
-
-@fragment fn fs(i: VSOut) -> @location(0) vec4f {
-    // 与 GL _WORLD_UI_FRAG 同式: texture(u_tex, v_uv)
-    return textureSample(t_world, s_world, i.uv);
-}
-"""
-
-_WORLD_VERT_BYTES = 20        # pos3f + uv2f
+_WORLD_VERT_BYTES = _VERT_BYTES   # 36B: pos3f + uv2f + color4f（共用 UI 布局）
 
 
 class VkWorldUIPipeline:
@@ -687,10 +671,13 @@ class VkWorldUIPipeline:
         self.device = device
         self.format = present_format
         d = device
-        shader = d.create_shader_module(code=_WORLD_UI_WGSL)
+        vs_mod = _spv_module(d, _UI_VS)     # T3: 与屏幕 UI 同一份 ui.vert
+        fs_mod = _spv_module(d, _UI_FS)     # T3: 与屏幕 UI 同一份 ui.frag
         self.bgl = d.create_bind_group_layout(entries=[
+            # UBO 同时供 VS 读（屏幕/世界两条路径都在顶点阶段），保留 FRAGMENT
+            # 可见性以便与屏幕 UI 管线共用同一份 shader 模块。
             {'binding': 0,
-             'visibility': wgpu.ShaderStage.VERTEX,
+             'visibility': wgpu.ShaderStage.VERTEX | wgpu.ShaderStage.FRAGMENT,
              'buffer': {'type': 'uniform'}},
             {'binding': 1, 'visibility': wgpu.ShaderStage.FRAGMENT,
              'texture': {'sample_type': 'float', 'view_dimension': '2d'}},
@@ -698,17 +685,19 @@ class VkWorldUIPipeline:
              'sampler': {'type': 'filtering'}}])
         self.pipeline = d.create_render_pipeline(
             layout=d.create_pipeline_layout(bind_group_layouts=[self.bgl]),
-            vertex={'module': shader, 'entry_point': 'vs', 'buffers': [{
+            vertex={'module': vs_mod, 'entry_point': 'main', 'buffers': [{
                 'array_stride': _WORLD_VERT_BYTES, 'step_mode': 'vertex',
                 'attributes': [
+                    # 与屏幕 UI 相同的 36B 布局（world 的 color 恒白、屏幕的 z 恒 0）
                     {'shader_location': 0, 'offset': 0, 'format': 'float32x3'},
-                    {'shader_location': 1, 'offset': 12, 'format': 'float32x2'}]}]},
+                    {'shader_location': 1, 'offset': 12, 'format': 'float32x2'},
+                    {'shader_location': 2, 'offset': 20, 'format': 'float32x4'}]}]},
             primitive={'topology': 'triangle-list', 'cull_mode': 'none'},
             # 与 GL 一致: 参与深度测试(可被遮挡), 但不写深度
             depth_stencil={'format': depth_format,
                            'depth_write_enabled': False,
                            'depth_compare': 'less'},
-            fragment={'module': shader, 'entry_point': 'fs', 'targets': [{
+            fragment={'module': fs_mod, 'entry_point': 'main', 'targets': [{
                 'format': present_format,
                 'blend': {
                     # 与 GL world quad 的 ctx.blend_func (SRC_ALPHA /
@@ -719,8 +708,9 @@ class VkWorldUIPipeline:
                     'alpha': {'operation': 'add',
                               'src_factor': 'src-alpha',
                               'dst_factor': 'one-minus-src-alpha'}}}]})
+        # 与屏幕 UI 同一个 UIC 布局（80B）；world 写 [0,0,1,0] + VP
         self.uniform_buf = d.create_buffer(
-            size=64, usage=wgpu.BufferUsage.UNIFORM | wgpu.BufferUsage.COPY_DST)
+            size=80, usage=wgpu.BufferUsage.UNIFORM | wgpu.BufferUsage.COPY_DST)
         self.sampler = d.create_sampler(
             mag_filter='linear', min_filter='linear',
             address_mode_u='clamp-to-edge', address_mode_v='clamp-to-edge')
@@ -730,16 +720,27 @@ class VkWorldUIPipeline:
     def group_for(self, view):
         return self.device.create_bind_group(layout=self.bgl, entries=[
             {'binding': 0, 'resource': {'buffer': self.uniform_buf,
-                                        'offset': 0, 'size': 64}},
+                                        'offset': 0, 'size': 80}},
             {'binding': 1, 'resource': view},
             {'binding': 2, 'resource': self.sampler}])
 
     def set_view_proj(self, vp):
-        arr = np.asarray(vp, dtype=np.float32).reshape(16)
-        self.device.queue.write_buffer(self.uniform_buf, 0, arr.tobytes())
+        # UIC 布局: ui_screen = [0,0,1,0]（z=1 -> world 路径）, ui_vp 在 16B 处。
+        # VP 仍按**行主序**直传（std140 mat4 是列主序，解释出来正是数学行主序），
+        # 与旧 WGSL 版逐字节一致。
+        buf = np.zeros(20, dtype=np.float32)
+        buf[2] = 1.0
+        buf[4:20] = np.asarray(vp, dtype=np.float32).reshape(16)
+        self.device.queue.write_buffer(self.uniform_buf, 0, buf.tobytes())
 
     def set_vertices(self, verts):
-        arr = np.ascontiguousarray(verts, dtype=np.float32)
+        # 输入为世界坐标 5 f32/顶点（pos3 + uv2）；展开成与屏幕 UI 共用的
+        # 9 f32（pos3 + uv2 + 白 rgba）。颜色乘 1.0 不改变采样结果。
+        src = np.asarray(verts, dtype=np.float32).reshape(-1, 5)
+        n = int(src.shape[0])
+        arr = np.empty((n, 9), dtype=np.float32)
+        arr[:, 0:5] = src
+        arr[:, 5:9] = 1.0
         nbytes = int(arr.nbytes)
         if self._vbuf is None or self._vcap < nbytes:
             self._vcap = max(4096, nbytes * 2)

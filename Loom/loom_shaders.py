@@ -16,47 +16,12 @@ engine.py 通过 `from loom_shaders import *` 重新导出这些名字，
 # GL 直接用同一份 GLSL（本文件末尾 _shared_frag_src() 加载），VK 用 glslang 编译出的
 # main.frag.spv。这里不再保留第二份 GLSL 文本，避免两端漂移。
 
-# ================ HUD 正交着色器 (文字纹理 quad) ================
-_HUD_VERT = """#version 330
-in vec2 in_pos;
-in vec2 in_uv;
-out vec2 v_uv;
-uniform vec2 u_origin;
-uniform vec2 u_size;
-void main() {
-    gl_Position = vec4(in_pos * u_size + u_origin, 0.0, 1.0);
-    v_uv = in_uv;
-}"""
-
-_HUD_FRAG = """#version 330
-in vec2 v_uv;
-uniform sampler2D u_tex;
-uniform vec4 u_color;            // M33: 运行时 UI 纯色矩形用 (文字传白=不变)
-out vec4 frag_color;
-void main() {
-    frag_color = texture(u_tex, v_uv) * u_color;
-}"""
-
-# ================ World Space UI 着色器 (2026-10-19 第1档序3阶段4) ================
-# 用途：把离屏渲染的 Canvas 纹理贴到 3D 世界的一块 quad 上。
-# 4 个顶点是世界坐标（CPU 侧按 billboard 或 target 旋转算好），view_proj 投影。
-_WORLD_UI_VERT = """#version 330
-in vec3 in_world_pos;
-in vec2 in_uv;
-out vec2 v_uv;
-uniform mat4 u_view_proj;
-void main() {
-    gl_Position = u_view_proj * vec4(in_world_pos, 1.0);
-    v_uv = in_uv;
-}"""
-
-_WORLD_UI_FRAG = """#version 330
-in vec2 v_uv;
-uniform sampler2D u_tex;
-out vec4 frag_color;
-void main() {
-    frag_color = texture(u_tex, v_uv);
-}"""
+# ================ HUD / World Space UI 着色器（T3 单源，2026-11-13）================
+# 屏幕 HUD（engine.py 的 hud_prog）与 world Canvas（loom_render._world_ui_prog）
+# 现在读**同一份** Loom/shaders/ui.vert / ui.frag —— VK 侧走同一份源编出的 .spv。
+# 两条路径靠 u_mode 区分（world 程序创建时置 1；HUD 程序保持默认 0）。
+# 导出名 _HUD_VERT/_HUD_FRAG/_WORLD_UI_VERT/_WORLD_UI_FRAG 保持不变
+# （engine.py:47 / loom_render.py:260 直接 import），加载代码见本文件末尾。
 
 # ================ 线条着色器 (逐顶点颜色, gizmo/网格/选中框用) ================
 # core profile 线宽仅保证 1px; gizmo 端点用投影小方块 (三角形) 增强可点性
@@ -134,6 +99,12 @@ _SHADOW_VERT = _shared_shader_src('shadow.vert')
 _SHADOW_FRAG = _shared_shader_src('shadow.frag')
 _SKY_VERT = _shared_shader_src('sky.vert')
 _SKY_FRAG = _shared_shader_src('sky.frag')
+
+# T3 (2026-11-13): UI = 单一来源（屏幕 HUD + world Canvas 共用同一对 ui.vert/ui.frag）
+_HUD_VERT = _shared_shader_src('ui.vert')
+_HUD_FRAG = _shared_shader_src('ui.frag')
+_WORLD_UI_VERT = _HUD_VERT
+_WORLD_UI_FRAG = _HUD_FRAG
 
 
 def _shared_frag_src():

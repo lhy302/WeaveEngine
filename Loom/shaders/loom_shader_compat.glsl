@@ -27,6 +27,30 @@
   #define SB_SKY_SAMP 2
   // 阴影 pass 独立 bind group：0=UBO(ShadowU)
   #define SB_SHADOW_U 0
+  // ---------- UI（屏幕 UI + world Canvas 共用一对 shader）----------
+  // VK：一个 std140 UBO：vec4(屏幕像素宽高 + 模式, z>0.5 = world Canvas) + mat4 VP。
+  // 屏幕 UI 管线写 [w,h,0,0]；world 管线写 [0,0,1,0] 并在 16 字节处写 VP。
+  #define SB_UI_UBO 0
+  #define SB_UI_TEX 1
+  #define SB_UI_SAMP 2
+  #define DECL_UI_VERT_UNI layout(std140, binding = SB_UI_UBO) uniform UIC { \
+        vec4 ui_screen; mat4 ui_vp; } ui;
+  #define UI_IS_WORLD (ui.ui_screen.z > 0.5)
+  // 顶点输入统一 36B：pos3 + uv2 + color4（屏幕 UI 的 z 恒 0，world 的 color 恒白）
+  #define DECL_UI_INPUT layout(location = 0) in vec3 ui_pos; \
+                        layout(location = 1) in vec2 ui_uv; \
+                        layout(location = 2) in vec4 ui_color;
+  #define UI_SCREEN_CLIP vec4(ui_pos.x / ui.ui_screen.x * 2.0 - 1.0, \
+                              1.0 - ui_pos.y / ui.ui_screen.y * 2.0, 0.0, 1.0)
+  #define UI_WORLD_CLIP  (ui.ui_vp * vec4(ui_pos, 1.0))
+  #define DECL_UI_VARYINGS layout(location = 0) out vec2 v_uv; \
+                           layout(location = 1) out vec4 v_color;
+  #define UI_EMIT_VARYINGS v_uv = ui_uv; v_color = ui_color;
+  #define DECL_UI_FRAG_UNI   /* VK：UI 参数只在顶点阶段被引用 */
+  #define DECL_UI_FRAG_IN layout(location = 0) in vec2 v_uv; \
+                          layout(location = 1) in vec4 v_color;
+  #define UI_TINT v_color
+
   // ---------- 顶点/片段基础 ----------
   #define LOOM_VERTEX_ID gl_VertexIndex
   #define DECL_FRAG_UV           /* VK：无 varying 输入（用 gl_FragCoord） */
@@ -106,6 +130,28 @@
   #define SB_SKY_CUBE 0
   #define SB_SKY_SAMP 0
   #define SB_SHADOW_U 0
+  // ---------- UI（屏幕 UI + world Canvas 共用一对 shader）----------
+  // GL：两套原 uniform 名全部保留（loom_hud / engine / loom_render 调用点一行未改）；
+  //     u_mode 选择路径：world 程序创建时设 1，HUD 程序默认 0。
+  #define SB_UI_UBO 0
+  #define SB_UI_TEX 0
+  #define SB_UI_SAMP 0
+  #define DECL_UI_VERT_UNI uniform vec2 u_origin; \
+                           uniform vec2 u_size; \
+                           uniform mat4 u_view_proj; \
+                           uniform int u_mode;
+  #define UI_IS_WORLD (u_mode != 0)
+  #define DECL_UI_INPUT in vec2 in_pos; in vec3 in_world_pos; in vec2 in_uv;
+  // 屏幕 UI 沿用 GL 既有算式（u_origin/u_size 由 loom_hud/engine 按 NDC 写入），逐字未改。
+  #define UI_SCREEN_CLIP vec4(in_pos * u_size + u_origin, 0.0, 1.0)
+  #define UI_WORLD_CLIP  (u_view_proj * vec4(in_world_pos, 1.0))
+  #define DECL_UI_VARYINGS out vec2 v_uv;
+  #define UI_EMIT_VARYINGS v_uv = in_uv;
+  #define DECL_UI_FRAG_UNI uniform int u_mode; uniform vec4 u_color;
+  #define DECL_UI_FRAG_IN in vec2 v_uv;
+  // world Canvas 乘 1.0（浮点 x*1.0 == x，逐位不变）；HUD 用 u_color。
+  #define UI_TINT ((u_mode != 0) ? vec4(1.0) : u_color)
+
   #define LOOM_VERTEX_ID gl_VertexID
   #define DECL_FRAG_UV           layout(location = 0) in vec2 v_uv;
   #define LOOM_FRAG_UV           v_uv
