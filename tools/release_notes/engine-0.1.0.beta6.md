@@ -1,4 +1,4 @@
-# Loom 引擎 0.1.0.beta6（内测 · 草稿）
+# Loom 引擎 0.1.0.beta6（内测 / prerelease）
 
 本版是**编译版引擎包**（Nuitka standalone 编辑器 + **onedir 构建器**（`builder\build_game.exe`）+ 编译版播放器运行时），
 可直接安装/解压后由 LoomHub 添加为解释器（`kind=exe`）。实测工具链：Python 3.13.15 + Nuitka 4.3.5 + MSVC cl 14.3。
@@ -78,12 +78,13 @@
 - 冒烟三件分别盖章（`--stamp` 只盖本次真跑过的）：引擎 dist / 构建器 / 运行时 dist 各自 `smoke_passed_at=2026-11-13 20:59:16`；**7/7 全 PASS**，耗时 6.7s（预算 60s）。
   读数：models=126、fps **96–101**、tps **30.12–30.27**；构建器 `--help` exit=0；运行时最小启动 exit=1（无游戏包，属预期）。
 
-## 八、发布命令（**未执行**，等人类裁决后统一跑）
+## 八、发布记录（2026-11-13 已执行）
 
-```bat
-set LOOM_ENGINE_VERSION=0.1.0.beta6
-py -3.13 tools/release_github.py engine
-```
+- tag：`engine-v0.1.0.beta6`（与 `hub-v0.1.4` 同指 `74f8535`），Release 标记为 **prerelease**
+- Release：<https://github.com/lhy302/WeaveEngine/releases/tag/engine-v0.1.0.beta6>
+- 资产：`Loom-0.1.0.beta6-compiled.zip`（145 284 153 B）
+- 发布门：`tools/release_github.py engine` 默认先跑全套 `run_all`（136 个），非零即中止且零远端写操作（本次 EXIT=0）
+- 源码包 `605012b8…`（342.11 MB）未作为 Release 资产上传（源码本身即仓库，与前几版一致）
 
 ## 九、安装安全提示（通用，不只某一家安全软件）
 
