@@ -320,6 +320,14 @@ class RenderMixin:
         old_ext_ctx = getattr(self, '_external_ctx', False)
         old_ext_fb = getattr(self, '_external_fb', None)
         old_w, old_h = self.width, self.height
+        # 2026-11-13 T2-D05: 保存调用前的真实绑定 FBO。world_ui pass 在 post on
+        # 时的目标是 HDR，不是 _screen_fb()（外部模式返回宿主 FBO / 默认屏）；
+        # 旧代码 finally 里 _screen_fb().use() 会把 quad 画到屏幕，随后 tonemap
+        # 覆盖 -> 播放态 world Canvas 不可见。恢复"画之前那个"才与 FramePlan 目标一致。
+        try:
+            _prev_fb = self.ctx.detect_framebuffer()
+        except Exception:
+            _prev_fb = None
         render_ok = True
         try:
             self._external_ctx = True
@@ -341,7 +349,10 @@ class RenderMixin:
             self.width = old_w
             self.height = old_h
             self.ctx.viewport = (0, 0, old_w, old_h)
-            self._screen_fb().use()
+            if _prev_fb is not None:
+                _prev_fb.use()
+            else:
+                self._screen_fb().use()
         if not render_ok:
             return
         # 3D 世界坐标 + 4 角（世界尺度由 world_scale 换算）

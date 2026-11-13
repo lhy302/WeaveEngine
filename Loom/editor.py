@@ -2487,8 +2487,20 @@ class EditorApp(GLEngine):
         # 2026-11-10 阶段 2B1（S3）: 阴影也进 FramePlan（GL 侧是真深度目标；
         # 逐光源/逐面 FBO 仍归 loom_shadow，描述里标 owned_by_provider）。
         self._t_shadow = self._prof_t0()
+        # 2026-11-13 T2-D05: 编辑器路径也要画 world Canvas。播放路径
+        # (loom_render.py:1217) 早已 include_world_canvas=True；编辑器此前漏传，
+        # 导致编辑态看不到 world 空间 UI、播放态看得到，本身不一致。
+        # 判据只看 canvas_type=='world'：ui.canvases 始终含一个默认 screen Canvas
+        # （engine.py:400 / editor._new_scene），不能用"非空"判定，否则 25 个没有
+        # world Canvas 的场景都会多挂一个空 pass。无 world Canvas -> False，
+        # 现有场景的 plan/像素完全不变。
+        _ui = getattr(self, 'ui', None)
+        _has_world_canvas = any(
+            getattr(c, 'canvas_type', 'screen') == 'world'
+            for c in (getattr(_ui, 'canvases', None) or ()))
         plan = frame_plan(include_shadow=bool(self.lights),
                           include_sky=(self.effective_skybox() is not None),
+                          include_world_canvas=_has_world_canvas,
                           include_post=post_enabled())
         self._frame_executor.execute(plan, prepare=self._prepare_main_pass,
                                      after_pass=self._after_pass_prof)

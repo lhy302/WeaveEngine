@@ -1697,6 +1697,16 @@ class VkRenderer:
         # ---- 2026-11-06 R1 world Canvas: 先把元素树离屏渲染到纹理 ----
         # GL 在天空盒之后、HUD 之前画; VK 的等价位置是主 pass 里几何之后
         # (见下面 _draw_world_quads), 这里只做离屏 target 的准备.
+        # 2026-11-13 T2-D05: 世界 UI 管线/BGL 必须跟随 **当前主链目标格式**。
+        # render_world_canvases 在 pass 循环之前建 pipeline + bind group；若此时
+        # _frame_fmt 还是 present_format（rgba8），随后 world_ui pass 把
+        # _frame_fmt 换成 HDR（rgba16float）会重建 pipeline（新 BGL），但旧
+        # bind group 仍绑旧 BGL/旧 uniform buffer -> quad 不可见（post on 时
+        # VK 贡献实测为 0）。这里先按本帧是否有 world Canvas 定格式，再建目标。
+        if ui is not None and any(
+                getattr(c, 'canvas_type', 'screen') == 'world'
+                for c in (getattr(ui, 'canvases', None) or ())):
+            self._frame_fmt = 'rgba16float' if self._post_on else self.format
         world_items = (self.render_world_canvases(ui, w, h, models=models)
                        if ui is not None else [])
         world_all = None
