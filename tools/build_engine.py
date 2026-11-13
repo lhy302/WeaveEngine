@@ -167,8 +167,11 @@ def _write_info(path, info):
 # 运行期数据目录：必须进编辑器 dist（`--bench`/播放模式在 import 阶段就要 ckernels，
 # 裸 dist 缺它 = RuntimeError: loom_kernels.dll 未找到）。2026-11-09 起全部内置，
 # 不再依赖 package_engine_compiled 在发布包里补（那会导致"裸 dist 不能跑 bench"）。
+# 2026-11-13 T3: 着色器改成**运行时读文件**（Loom/shaders/*.glsl *.frag *.vert *.spv），
+# `loom_shaders.py` 在 import 阶段就读，裸 dist 缺 shaders/ = FileNotFoundError。
+# 所以 shaders 必须和其它运行期数据目录一样进 dist。
 DATA_DIRS = ('ckernels', 'core_components', 'core_plugins', 'plugins',
-             'scripts', 'GUI', 'assets')
+             'scripts', 'GUI', 'assets', 'shaders')
 DATA_FILES = ('设置.json', '输入配置.default.json', '解释器.json')
 
 
@@ -225,6 +228,13 @@ def build_editor(mode, cfg, info):
     core = os.path.join(dist, 'core_components')
     if not os.path.isdir(core) or not os.listdir(core):
         _fail('编辑器 dist 缺 core_components/（运行时核心组件 DLL）: %s' % core)
+    # 2026-11-13 T3: 着色器运行时读文件；缺 shaders/ 或没有 .spv = 一启动就崩。
+    # 用「文件数 + 至少一个 .spv」做断言，避免空目录也算通过。
+    shd = os.path.join(dist, 'shaders')
+    if not os.path.isdir(shd) or not os.listdir(shd):
+        _fail('编辑器 dist 缺 shaders/（T3 起着色器运行时读文件，缺了 import 即崩）: %s' % shd)
+    if not any(n.endswith('.spv') for n in os.listdir(shd)):
+        _fail('编辑器 dist 的 shaders/ 里没有 .spv（先跑 tools/build_shaders.py）: %s' % shd)
     _write_info(os.path.join(dist, 'build_info.json'), info)
     _write_info(os.path.join(out, 'build_info.json'), info)
     return {'path': exe, 'size_mb': _dir_mb(dist), 'seconds': round(secs, 1)}
@@ -237,7 +247,9 @@ def _builder_includes():
     找 ckernels/loom_kernels.dll —— 不带就 import 即崩（build_game.exe --help exit 1）。
     """
     inc = []
-    for d in ('ckernels', 'core_components'):
+    # shaders: 2026-11-13 起 build_game 也是 import loom_shaders，onefile 解包目录里
+    # 必须有 shaders/（否则 build_game.exe 一启动就 FileNotFoundError）。
+    for d in ('ckernels', 'core_components', 'shaders'):
         p = os.path.join(LOOM, d)
         if os.path.isdir(p):
             inc.append('--include-data-dir=%s=%s' % (p, d))

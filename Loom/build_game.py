@@ -288,7 +288,9 @@ def _build_runtime():
         print('警告: 未包含 wgpu-native DLL (%r)' % (_e,))
     # 2026-11-09 产物自洽: 原生组件目录随 dist 分发, 裸 dist 也能跑
     # (游戏发布时 build_game 仍会再拷一份到发布根, 幂等)。
-    for _d in ('ckernels', 'core_components'):
+    # shaders: 2026-11-13 T3 起着色器是运行时读文件（shaders/*.spv 等），
+    # 玩家运行时同样必须带上，否则 import loom_shaders 即 FileNotFoundError。
+    for _d in ('ckernels', 'core_components', 'shaders'):
         _p = os.path.join(BIN_DIR, _d)
         if os.path.isdir(_p):
             cmd.append('--include-data-dir=%s=%s' % (_p, _d))
@@ -307,7 +309,8 @@ def _build_runtime():
     exe = os.path.join(out_root, 'game_player.dist', 'MyGame.exe')
     if not os.path.isfile(exe):
         raise SystemExit("打包意外, 未找到: %s" % exe)
-    for _need in ('ckernels\\loom_kernels.dll', 'core_components', '解释器.json'):
+    for _need in ('ckernels\\loom_kernels.dll', 'core_components', '解释器.json',
+                  'shaders'):
         if not os.path.exists(os.path.join(out_root, 'game_player.dist', _need)):
             raise SystemExit("打包产物不自洽, 缺 %s（ckernels/core_components 未随 dist）"
                              % _need)
