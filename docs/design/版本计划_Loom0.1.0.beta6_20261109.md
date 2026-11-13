@@ -801,6 +801,38 @@ depth/raster/load/clear/绘制源/后处理阶段与参数）必须单一来源�
 | `vk_renderer._MAIN_P1_VERT/_FRAG`（P1 逃生舱） | 16 | **豁免单源化**（2026-11-13 裁决）：`--stage p1` 诊断用，GL 无对应阶段、零场景覆盖；**但补一条假设备「p1 管线能建起来」的受跟踪测试作为豁免前提**（现在连这个都没有）→ A1-8 |
 | `vk_ui.py`（UI 顶点 + 片段） | 55 | **A1-4**，未开始 |
 
+### 9.35 UI 单源化完成（T3 收口）+ 修一条会假红的性能门（2026-11-13）
+
+**UI 单源化**：`vk_ui.py` 的两块手写 WGSL（`_UI_WGSL` 31 行 + `_WORLD_UI_WGSL` 24 行，共 **55 行**）清零。新增 `shaders/ui.vert`（19 行）+ `ui.frag`（15 行），**一条 pair 同时服务「屏幕 HUD」与「world Canvas」两条管线**：
+
+| 用途 | GL 对应物（`loom_shaders.py`） | VK |
+|---|---|---|
+| 屏幕 HUD | `_HUD_VERT`/`_HUD_FRAG`（`engine.py:313` 编译；`loom_hud.py` 绘制） | `vk_ui.py` 原 `_UI_WGSL` |
+| world Canvas | `_WORLD_UI_VERT`/`_WORLD_UI_FRAG`（`loom_render.py:258-273` 建，`369-390` 画） | 原 `_WORLD_UI_WGSL` |
+
+→ GL 侧两个 program **都改读同一份源**（`_shared_shader_src('ui.vert'/'ui.frag')`），`loom_shaders.py` 再删 43 行。差异全进 compat：VK 用 `UIC.ui_screen.z>0.5` 分支、顶点统一 36B（pos3+uv2+color4）、`UIC` UBO 80B；GL 用 `u_mode`（world program 创建时置 1）。
+
+**四道门（主审独立复跑）**
+
+| 门 | 结果 |
+|---|---|
+| 1 编译 | EXIT=0，**13 个 .spv**（新增 `ui.vert.spv` 2160 B / `ui.frag.spv` 828 B） |
+| 2 像素 | `test_ab_gl_vk.py` **EXIT=0 / 23 PASS / 0 FAIL**；`ab_ui_scene` 整帧 2.2e-5/6.6e-5/5.3e-5、**[UI] 子项 1.10e-4** 逐值不变 |
+| 3 回归 | 修掉下面那条假红门后 `run_all.py` **EXIT=0**（136 个测试，含新增 `test_vk_p1_stage.py`） |
+| 4 grep | `vk_ui.py` 里 `@vertex`/`@fragment`/`@group`/`textureSample`/`var<uniform>` = **0**；`#ifdef LOOM_VK` 仍只在 compat |
+
+另做了**旧 vs 新直接对拍**（把 HEAD 的旧 WGSL/GLSL 原文内联，同设备/同顶点/同纹理/同混合）：VK screen / VK world / GL HUD / GL world 四项 **MAE=0、MAX=0、diffpx=0**。
+
+**全仓手写 WGSL 现状**：主 pass / post / 天空 / 阴影 pass / mip / UI **全部 0**，只剩 `_MAIN_P1_VERT`+`_MAIN_P1_FRAG` **16 行**（P1 诊断逃生舱，裁决豁免，前提是有 `test_vk_p1_stage.py` 证明管线能建起来，已补）。→ **T3「手写 WGSL 归零」达成（排除已登记的 P1 豁免）**。
+
+**顺带修掉一条会假红的性能门（`test_bucket_pack.py`）**
+
+同一天、同一二进制、**没有任何代码变化**，实测比值 0.75（连续跑测试时，CPU 热）→ **0.83 / 0.84 / 0.79**（冷机睿频），把 `run_all` 判成红。C 路径是内存带宽型、Python 路径是计算型，CPU 睿频/热降频影响不同 → 墙钟比值不耐负载。
+
+改为分层（并写进 `开发流程_冒烟与验证分层.md` §5.3）：**回归层只挡真实回归**（`C 不得慢于 Python`，ratio ≤ 1.00），`≤0.80x` 的目标归还**测量层**（空闲 + n=5）。判据改动留下的前后数字就是 0.75 → 0.83。
+
+**遗留**：23 场景的 FramePlan 未开 `include_world_canvas`（`editor.py:2490-2492`），world Canvas 在真实夹具里没被像素门覆盖 —— **预存在的夹具缺口**，本次用直接对拍补证；补场景属 A2-2 探针工作。
+
 ---
 
 ## 10. 延迟项落盘规则（人类要求，2026-11-09；2026-11-13 移到文末，此前误插在 §9.1 与 §9.2 之间）
