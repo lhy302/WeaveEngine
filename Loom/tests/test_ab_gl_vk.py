@@ -153,6 +153,24 @@ class _NullView:
         pass
 
 
+class _WorldOnlyUI:
+    """VK 主帧只画 world Canvas；screen UI 由 [UI] 子项单独画。
+
+    2026-11-13 T2-D05: world Canvas 是**3D 主帧**的一部分（挂在物体上），
+    GL 编辑器路径已在 ed.render 里画；VK 的 draw_frame 只在传 ui 时才会
+    render_world_canvases。这里只把 world canvases 交给主帧，screen Canvas
+    仍留给 with_ui=True 的 [UI] 子项，避免主图多画 screen UI 破坏既有场景。
+    """
+
+    def __init__(self, canvases):
+        self.canvases = list(canvases)
+        from loom_ui import UIManager
+        self._draw_elem = UIManager._draw_elem   # 与 GL 同一份元素树绘制逻辑
+
+    def draw_all(self, engine, script_host=None):
+        return None
+
+
 def render_gl(data, with_ui=False):
     """GL 侧: 独立上下文 + 离屏 FBO（编辑器同一条渲染路径）。with_ui 时补画 UI 层。"""
     import moderngl
@@ -245,8 +263,27 @@ def render_vk(data, with_ui=False):
     r = vr.VkRenderer(device, fmt)
     vp, cam_pos = drv.render_pose(aspect=W / H)
     kw = {}
+    _ui = getattr(drv, 'ui', None)
+    # world Canvas 属于主帧（GL 在 ed.render 里画）；只把 world canvases
+    # 交给 VK 主帧，screen UI 仍留给 [UI] 子项。无 world Canvas -> 不传，
+    # 既有场景行为完全不变。
+    _wcs = ([c for c in _ui.canvases
+             if getattr(c, 'canvas_type', 'screen') == 'world']
+            if _ui is not None else [])
+    if _wcs:
+        # billboard 必须显式传 cam_basis：VK 的 _camera_billboard_basis 从 VP
+        # 反解 yaw/pitch，与 GL 的 mat4_view_yaw_pitch 行向量在符号/roll 上不保证
+        # 逐位一致（vk_renderer.py:1138-1145 注释自己要求 A/B 工具显式传）。
+        # 这里按 GL 同一函数、同一相机参数构造，避免 world quad 被转成侧面。
+        import matlib as _ml
+        _V = _ml.mat4_view_yaw_pitch(np, drv.camera_pos, drv.yaw, drv.pitch, 0.0)
+        kw['cam_basis'] = (
+            (float(_V[0, 0]), float(_V[0, 1]), float(_V[0, 2])),
+            (float(_V[1, 0]), float(_V[1, 1]), float(_V[1, 2])))
     if with_ui:
-        kw['ui'] = getattr(drv, 'ui', None)
+        kw['ui'] = _ui
+    elif _wcs:
+        kw['ui'] = _WorldOnlyUI(_wcs)
     r.draw_frame(Ctx(), drv.models, drv.lights, vp, cam_pos, interp=None,
                  sky=getattr(drv, 'skybox', None), **kw)
     bpr = (W * 4 + 255) // 256 * 256

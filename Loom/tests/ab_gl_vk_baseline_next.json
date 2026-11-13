@@ -7,13 +7,13 @@
     "ui_mae_abs": 0.005,
     "ui_mae_drift": 0.002
   },
-  "generated_at": "2026-11-13T15:29:56",
+  "generated_at": "2026-11-13T19:31:10",
   "reference_dir": "ab_scenes_ref_next",
   "resolution": [
     480,
     320
   ],
-  "scene_count": 25,
+  "scene_count": 26,
   "scenes": {
     "ab_bloom.json": {
       "mae": 3e-08,
@@ -176,6 +176,18 @@
         "max": 0.243137,
         "ncc": 0.99985222,
         "ref_sha256": "c669a2594ddb4a2dbc90afa16ca71199f75ee1a1b089b12d8b2144417d05697e"
+      }
+    },
+    "ab_world_canvas.json": {
+      "mae": 5.22e-05,
+      "max": 0.423529,
+      "ncc": 0.99956108,
+      "ref_sha256": "fd2aac842bc489e6b7c4d4f77a535606dd5e77b39d79734b4a630f5888a1a8e1",
+      "ui": {
+        "mae": 5.22e-05,
+        "max": 0.423529,
+        "ncc": 0.99956108,
+        "ref_sha256": "fd2aac842bc489e6b7c4d4f77a535606dd5e77b39d79734b4a630f5888a1a8e1"
       }
     }
   },
