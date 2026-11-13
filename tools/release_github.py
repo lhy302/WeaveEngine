@@ -399,6 +399,72 @@ DEFAULT_HIGHLIGHTS = (
     '- **崩溃日志落盘**：`%LOCALAPPDATA%/Loom/logs/`（含 traceback 与 faulthandler 硬崩栈）')
 
 
+# ---------------- 发布说明体检（2026-11-13 事故后新增）----------------
+# 事故：两个 Release 的正文都还是「内测 · 草稿」口径，还写着过期的
+# 「默认 C:\Program Files\Loom」，而这一版已经把默认安装根改成跟随 LoomHub 位置。
+# 资产哈希是对的，但**正文是错的** —— 发布前只核了资产没核正文。
+# 现在把它变成硬门：正文里出现过期词 / 没有本资产的 sha256 或字节数 → 中止
+# （此时还没创建 release、没上传资产，零远端写操作）。
+NOTES_BANNED = (
+    "草稿",            # 发布说明不是草稿
+    "未执行",          # 已经发布了就别写「发布命令未执行」
+    "待人类裁决",      # 已裁决的结论才能进正文
+    "TBD", "TODO", "待定",
+)
+STALE_CLAIMS = (
+    "默认 `C:\\Program Files\\Loom`",   # 0.1.4 起改为跟随 Hub 位置推荐
+)
+
+
+def _sha256(path):
+    import hashlib
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def notes_lint(text, artifact, label=""):
+    """发布说明体检：返回问题列表（空=通过）。
+
+    判据只检「能机器判的」部分，语义仍需人读一遍（见 docs/design/开发流程_发布检查单.md）：
+      1. 不得含过期/未定稿词（NOTES_BANNED）；
+      2. 不得保留已作废的说法（STALE_CLAIMS）；
+      3. 必须写出**本资产的真实 sha256 与字节数**（防止骨架里写的是上一个包的数字）。
+    """
+    problems = []
+    body = text or ""
+    for w in NOTES_BANNED:
+        if w in body:
+            problems.append("含过期/未定稿词「%s」" % w)
+    for w in STALE_CLAIMS:
+        if w in body:
+            problems.append("含已作废的说法「%s」" % w)
+    if artifact and os.path.isfile(artifact):
+        sha = _sha256(artifact)
+        if sha not in body.lower():
+            problems.append("说明里没有本资产 sha256 %s..." % sha[:12])
+        size = os.path.getsize(artifact)
+        cands = (str(size), "%-12d".strip() % size,
+                 ("{:,}".format(size)).replace(",", " "),
+                 "{:,}".format(size))
+        if not any(c in body for c in cands):
+            problems.append("说明里没有本资产字节数 %d" % size)
+    return problems
+
+
+def _notes_gate(body, artifact, label):
+    probs = notes_lint(body, artifact, label)
+    if probs:
+        print("[错误] 发布说明体检不通过（%s）—— 未做任何远端写操作：" % label)
+        for p in probs:
+            print("  · " + p)
+        print("  说明文件：tools/release_notes/%s" % label)
+        raise SystemExit(1)
+    print("[发布] 说明体检通过: %s（sha256/字节数/无过期词）" % label)
+
+
 def load_highlights(kind, version):
     """读 tools/release_notes/engine-<version>.md；缺失则用通用条目。
 
@@ -473,6 +539,7 @@ def publish_engine(token):
                       else _RUNTIME_LINE_SOURCE.format(pyver=_facts['python_version'] or '3.13')),
         python_note=(_PYTHON_NOTE_COMPILED if _compiled else _PYTHON_NOTE_SOURCE),
         highlights=load_highlights('engine', ENGINE_VERSION))
+    _notes_gate(body, ENGINE_ZIP, 'engine-%s.md' % ENGINE_VERSION)
     create_local_tag(tag, title)
     rel = create_release(tag, title, body, token, prerelease=True)
     upload_asset(rel, ENGINE_ZIP, token)
@@ -488,6 +555,7 @@ def publish_hub(token):
     title = 'LoomHub 项目管理器 %s' % HUB_VERSION
     body = HUB_BODY.format(version=HUB_VERSION,
                            highlights=load_highlights('hub', HUB_VERSION))
+    _notes_gate(body, HUB_SETUP, 'hub-%s.md' % HUB_VERSION)
     create_local_tag(tag, title)
     rel = create_release(tag, title, body, token, prerelease=False)
     upload_asset(rel, HUB_SETUP, token)
