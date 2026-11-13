@@ -837,6 +837,96 @@ depth/raster/load/clear/绘制源/后处理阶段与参数）必须单一来源�
 
 ---
 
+### 9.36 T2 探针补齐：纯 UI（D-05）与非 2 的幂 mip（原 D-06 → R-03）（2026-11-13）
+
+**结论**：`docs/design/T2差异清单_beta6.md` 的每一条现在都绑定可复跑探针。按 Q-T2-1/Q-T2-2 裁决，清单从「6 条不共享 + 2 条合理差异」重排为 **4 条不共享（D-01/D-03/D-04/D-05）+ 3 条合理差异（R-01/R-02/R-03）+ 1 条实现细节（I-01，不入清单）**；两条新探针纳入 `test_ab_gl_vk.py` 受跟踪门，场景数 **23 → 25**。
+
+#### 探针 1（D-05）：`ab_ui_only.json` —— 纯 UI，不让 3D 稀释
+
+- **夹具**：480×320 全屏 Canvas；不透明 panel 铺满整帧，上面只有矩形/文字/折线/圆点（无贴图、无字体路径）。无 UI 帧只剩纯色天空，**没有可见 3D 像素**。
+- **为什么能暴露**：GL 的 `GL_LINES` 与 VK 的三角带在斜线/端点覆盖规则上**非逐像素等价**（`vk_ui.py:243-255` 契约）；旧 `ab_ui_scene [UI]` 只有 1.10e-4，因为 UI 只占画面一部分、且没有密集斜线。新场景让 UI 覆盖 100% 像素，差异不再被 3D/平坦区域稀释。
+- **实测**（2026-11-13，GTX 1050 Ti / Vulkan）：[UI] **MAE 0.00272581**、MAX 0.913725、NCC 0.9559571、diffpx 1333/153600（0.87%）；3×3 全差异内部=0、1333/1333 在 GL 边缘 1px 内（边缘覆盖差，不是块状缺陷）；主三向 MAE 0/0/0（无 UI 帧只有背景）。
+- **门限**：沿用既有 `ui_mae_abs=5e-3`，**未改**；余量 0.00227419（门限的 45.5%）。基线 0.00272581。
+
+#### 探针 2（原 D-06 → R-03）：`ab_mip_minify.json` —— NPOT + 强缩小
+
+- **夹具**：`assets/tex/ab_mip_checker_301.png`（301×301，非 2 的幂；16px 彩色棋盘 + 7px 斜纹 + 水平渐变，`make_assets.py` 确定性生成，无 RNG、无绝对路径）；贴在 4×4 的 quad 上、相机距离 16、正对相机 → 屏幕约 **69px**，301/69≈**4.3×** 缩小，三线性采样落在 mip 2↔3 之间。
+- **为什么能暴露**：mip 关（`mipmaps:false`）时两端都只采 level 0，**GL/VK MAE≈4.3e-7（6 位打印 0.000000）**；mip 开时 GL 驱动 `glGenerateMipmap` 与 VK `shaders/mip_downsample.frag` 逐级降采样的差异才显形。mip 开/关：GL 0.00136052、VK 0.00116709（同一贴图/同相机）。
+- **实测**：GL/参考 0、VK/参考 **0.00058264**、GL/VK **0.00058264**、MAX 0.160784、NCC 0.98851881。
+- **门限**：Q-T2-1=A 接受为合理差异 → **场景级** `mae_abs=1e-3`（基线行，只作用于 VK/参考 与 GL/VK），余量 0.00041736（门限的 41.7%）；**全局 2e-4 不动**，GL/参考仍 2e-4，漂移门仍是 `基线+5e-5`（0.00058264 → 0.00063264，比场景上限更紧）。
+- **诚实声明**：实测 0.00058264 **超过**全局 2e-4。没有改全局门，而是按人类裁决在基线行写场景级容差，并在 `test_ab_gl_vk.py` 里用 `SCENE_MAE_ABS` 单点登记；`--append-baseline` 拒绝覆盖既有场景条目。
+
+#### 基线只增不改（机器证据）
+
+- 新增参考图 3 张：`ab_scenes_ref_next/ab_ui_only.png`、`ab_ui_only__ui.png`、`ab_mip_minify.png`；新增基线行 2 条。
+- 既有 `ab_scenes_ref/` 24 个 PNG、`ab_scenes_ref_next/` 既有 24 个 PNG 的 sha256 **逐值不变**；既有 23 条基线行 JSON **逐值不变**（`--append-baseline` 只 merge 新条目）。
+- 旧口径回退证明：`LOOM_POST=0 py -3.13 tests/test_ab_gl_vk.py` → **23 PASS + 2 SKIP（POST_ONLY 白名单）、EXIT=0**。
+
+#### 验收
+
+- `cd Loom; py -3.13 tests/test_ab_gl_vk.py` → 25 场景、0 失败、0 跳过，**EXIT=0**；既有 23 场景三向 MAE 与改前逐值相同。
+- 两条新场景原文：`ab_ui_only [UI] UI MAE(gl/vk)=0.002726 MAX=0.9137 NCC=0.955957 基线 0.002726`；`ab_mip_minify MAE(gl/ref,vk/ref,gl/vk)=0.000000/0.000583/0.000583 MAX=0.1608 NCC=0.988519 基线 0.000583 场景门限 0.001000`。
+- `run_all.py` → **EXIT=0，136 个测试文件全绿**（未新增测试文件；两条探针是场景数据，不是 `test_*.py`）。原文末行：`全部测试完成 ✅`；其中 `test_ab_gl_vk.py` 段原文：`--- 场景 25, 失败 0, 跳过 0 ---`。本轮 `run_all` 含主审的 `Loom/sceneio.py` 构建器瘦身改动，全绿。
+
+#### 实现约束（未改引擎）
+
+VK 在 **0 个可见实例**时会走 `queue.write_buffer` 空写并抛 `ValueError: Invalid data_offset`（`vk_renderer.py:1811`）。本轮不许改引擎，`ab_ui_only` 保留一个位于远平面外的 0.01 单位 sentinel 满足 VK 的非空实例要求；实测无 UI 帧两后端 MAE=0、sentinel 不贡献像素。这是 VK 健壮性缺口，不是 GL/VK 语义差异，未登记进 T2 清单。
+
+**测试夹具状态修正（D-05）**：GL 的 Shape 描边走 `draw_lines`，不像 panel/text 那样在自己的 `ctx.scope` 里关深度；`ed.render()` 后直接 `ui.draw_all` 会继承最后一个 pass 的深度测试，3D 深度非 1 的位置整条线被丢掉（实测 chart 线 0 像素）。本轮在**测试夹具**的 `ui.draw_all` 前补 `ctx.disable(DEPTH_TEST)`（避免把上一个 pass 的深度状态当成 UI 差异；UI 元素自己的 `ctx.scope` 也关深度），既有 `ab_ui_scene [UI]` 输出逐字节不变（MAE=0）。引擎侧「Shape 线依赖调用方深度状态」的健壮性缺口留待主审裁决，本轮不改引擎。
+
+### 9.37 构建器瘦身 + UI 描边差异裁决（2026-11-13）
+
+**背景**：`build_game.exe` 从 onefile 改 onedir 后，dist 从 23.5 MB 涨到 **89.56 MB**（Python 运行时 + 依赖全摊在目录里）。逐项拆解发现主因是**一行 import 的连带**。
+
+**根因（两层）**
+
+1. `Loom/sceneio.py:54` 为取两个纯数据/纯数学符号写了 `from engine import Point3D, wrap_deg` —— 而 `engine.py` 模块级 `import numpy/pygame/moderngl`，于是整张编辑器引擎图被拖进 `build_game` 的静态 import 图；
+2. 即使修掉第 1 条，**Nuitka 仍会静态跟随函数体内的 import**（实测：`def f(): import pygame` 从未被调用，pygame 仍进 dist，对照实验见 `C:\loom_build\probe_fn`），所以 `loom_material`/`loom_texture` 里 `from engine import GameObject` 这种延迟 import 依然有效。
+
+**改法（5 处；`engine.py`/`loom_render.py`/`loom_lighting.py` 零改动）**
+
+| 文件 | 改法 |
+|---|---|
+| `sceneio.py:54` | `from loom_types import Point3D` + `from loom_scene_entities import wrap_deg`（从定义处导入） |
+| `scripts.py:31` | `from engine import Point3D` → `from loom_types import Point3D` |
+| `loom_material.py` / `loom_texture.py` | bump 改写 `loom_appearance.bump()`（不再 `from engine import GameObject`） |
+| `loom_game_object.py` | 删类属性 `_appearance_gen = 0`，改 `_AppearanceGenMeta` 提供**类级 property**（读→`gen()`、写→`set_value(v)`），`GameObject._appearance_gen` 读写语义不变 |
+| **新增** `loom_appearance.py` | 零依赖单调整数：`gen()/bump(n)/set_value(v)` |
+
+**静态自证**：从 `build_game.py` 出发 AST+BFS（含函数体内 import），可达项目模块 **62 → 23**，`engine` **不可达**。
+
+**数字（前 → 后）**
+
+| 指标 | 前 | 后 | 变化 |
+|---|---|---|---|
+| `build_game.exe` | 30.98 MB | **26.37 MB** | **−4.61 MB（−14.9%）** |
+| builder dist | 89.56 MB / 252 文件 | **80.08 MB / 248 文件** | **−9.48 MB（−10.6%）** |
+| culverin / culverin.libs / glfw / msvcr120 | 3.18 / 0.55 / 0.21 / 0.92 MB | **全部消失** | −4.86 MB |
+
+**保留（不是遗漏，是运行期真需要）**：`pygame` 9.10 MB（旧 path 材质解码、UI 场景解析）、`moderngl` 0.16 MB（`ensure_gl`）、`numpy` 26.24 MB（mesh / fastpath）。对应直接边：`audio_backend:99/108`、`loom_cubemap:18/208`、`loom_texture:24/169`、`loom_ui:799/999`。
+
+**验证（全真跑）**
+
+| 项 | 结果 |
+|---|---|
+| `run_all.py` | **EXIT=0，136 个测试全绿**（含本次 5 处改动） |
+| `check_binary_hygiene.py` | **EXIT=0**（CompanyName=lhy302 / ProductName=Loom / FileDescription=Loom 游戏打包器（将项目打包为独立游戏）/ FileVersion=0.1.0.6；形态判定 onedir） |
+| `build_game.exe --help` | **EXIT=0** |
+| **最小出包 × 2**（模拟安装布局 …/engroot/builder/，引擎根在上一级） | 物理场景 **ExitCode=0**、UI 场景 **ExitCode=0**；两次都产出 `MyGame.exe` + `游戏包.lsc`（279 files / 143.4 MB）。**证明清掉 culverin 后物理场景仍能出包**（builder 只构造 RigidbodyComponent，不跑 Jolt） |
+
+**顺带裁决：Q-PAR-1 = A（UI 描边 1px 覆盖差接受为合理差异）**
+
+`ab_ui_only` 把这条一直存在但**没有观测者**的差异测了出来：`[UI] MAE=2.726e-3`，差异像素 **1333/153600 = 0.87%**，**100% 落在高梯度边缘 1px 内、3×3 全差异内部 = 0 个**。根因是 GL 走 `GL_LINES`、VK 用三角带（`vk_ui.py` R2 契约 `STROKE_PIXEL_EQUIVALENT=False`）。登记为 **R-04**；门控沿用**仓库既有** `ui_mae_abs=5e-3`（本轮未改）。若将来两端都改三角带，D-05 与 R-04 同时消失。
+
+**本轮发现的两个既有缺陷（未修，已登记）**
+
+1. **VK 在「0 个可见实例」时会崩** → `ab_ui_only` 只能用远在 (1000,1000,1000) 的哨兵物体绕过（B13）；
+2. **GL 的 Shape 描边依赖调用方深度状态**（`draw_lines` 不像 panel/text 自己在 `ctx.scope` 里关深度）→ 夹具显式 `disable(DEPTH_TEST)` 才画得出来（B14）。
+
+**方法教训（写进流程）**：判断「某依赖会不会进打包产物」**只能看静态可达图**，不能用运行时 `sys.modules` 探针 —— 首轮就因此误判为已瘦身，实际 dist 逐文件未变。
+
+---
+
 ## 10. 延迟项落盘规则（人类要求，2026-11-09；2026-11-13 移到文末，此前误插在 §9.1 与 §9.2 之间）
 
 > **凡本版不做的路线，必须写进 [路线登记_后续版本.md](路线登记_后续版本.md)，不得只留在对话里。**
