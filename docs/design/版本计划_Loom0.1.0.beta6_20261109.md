@@ -718,7 +718,7 @@ depth/raster/load/clear/绘制源/后处理阶段与参数）必须单一来源�
 **9 次原始深度采样 + 显式 `d >= depth - bias` 比较 + 平均**，与 VK `pcf()` 逐字一致；
 点光 cube 阴影（GL 侧同样是 6 张 2D 面 + 同一 pcf_shadow）一并切换，距离归一与比较方向不变。
 
-**实测**：`ab_c_dir_shadow` GL/ref=**2.9e-5**、`ab_point_shadow`=**2.5e-5**、`ab_scene`=**2.6e-5**
+**实测**：`ab_c_dir_shadow` GL/ref=**2.9e-5**、`ab_point_shadow`=**2.5e-5**（⚠ 此值有误，2026-11-13 实测 GL 为 **5.7e-5**，见 §9.33「基线订正」）、`ab_scene`=**2.6e-5**
 （均 ≤2e-4 门限，参考图**不重生成**）；`ab_gl_vk` 23/23 PASS；14 套 488 项 FAIL=0。
 **代价**：阴影边缘有 ≤3e-5 的软化差异（硬件双线性比较 vs 最近邻比较），文档留档。
 **帧时间**：`measure_engine --runs 3` 改前 214.6（213.2–217.1）/ 改后 209.1（209.1–216.8），
@@ -726,6 +726,43 @@ depth/raster/load/clear/绘制源/后处理阶段与参数）必须单一来源�
 **WGSL 行数**：本轮未删除 VK 阴影 WGSL（其手工比较仍在 WGSL 里）；因两端算法现已逐字一致，
 下一步可把 `pcf` 单源化（VK 侧预计可删 ~12 行 WGSL）。
 
+### 9.33 T3a-3 主 pass 片段单源化完成（2026-11-13）
+
+**结论**：主 pass 的片段着色器已并入单源链路 —— `Loom/shaders/main.frag`（264 行，GLSL 450）→ `glslang -V --target-env vulkan1.1 -DLOOM_VK` → `main.frag.spv`（33 156 B）→ `wgpu.create_shader_module`（entry_point=`main`）；GL 侧直接读同一份源码（450→430 展开）。**VK 手写 WGSL 删除 289 行**（`_MAIN_VERT` + `_MAIN_FRAG` + `pcf`/`pcf2`）。
+
+**四道门（本次每一条都是真跑）**
+
+| 门 | 结果 |
+|---|---|
+| 1 编译 | `py -3.13 tools/build_shaders.py` EXIT=0，**6 个 .spv**（main.frag 33156 B / main.vert 4424 B / 4 个 post） |
+| 2 像素 | `test_ab_gl_vk.py` **23/23 PASS**，EXIT=0；22 个场景三向 MAE 与改前**逐值相同** |
+| 3 回归 | 135 文件；修掉 2 处既有缺陷后**全绿**（见下「既有缺陷」） |
+| 4 grep | `vk_renderer.py` 中 `_MAIN_FRAG`/`_MAIN_VERT`/`fn pcf`/`pcf2` = **0**；`#ifdef LOOM_VK` 仍只在 `loom_shader_compat.glsl` |
+
+**唯一像素变化：`ab_point_shadow` 的 VK 侧（变好，不是变差）**
+
+| 项 | 改前 | 改后 |
+|---|---|---|
+| VK/ref | 0.000051 | **0.000046** |
+| GL/VK | 0.000045 | **0.000011** |
+| MAX | 0.0941 | **0.0314** |
+| NCC | 0.999306 | **0.999825** |
+
+原因：旧 VK `pcf` 用 `textureSample` + `bias=0.002`；单源后与 GL 完全一致 —— **`texelFetch` + `bias=0.004`**（都是 9 tap，采样次数不变，无性能代价）。GL 侧一个字节未变。
+
+**顺带修掉的两处既有缺陷（都是 T3c-1 `4a66faa` 引入，与本次单源化无关）**
+
+1. **P0：GL 世界 UI / 线条着色器编译失败**。`4a66faa` 把 `_WORLD_UI_VERT`/`_LINE_VERT` 里的 `u_view_proj` 批量误替换成 `uniform mat4 u.mvp;` —— 带点的名字是**非法 GLSL**，两个程序直接编译失败（`engine.py:761`），世界空间 UI 与 gizmo/网格/选中框在 GL 上**完全画不出来**。`engine.py:793`、`loom_render.py:379` 仍在读 `u_view_proj`，证明正确名字就是它。已改回 4 处（2 声明 + 2 使用），5 个测试（cubemap/texture/lod/eai_real/integration）转绿。
+2. **`test_light_shadow_slots.py` 自 `4a66faa` 起失效**：它读的是已被删除的具名 uniform `u_shadow_slot`（T3c-1 把槽位搬进 std140 Scene UBO），属测试债。已改为校验新通路（见该测试文件内断言）。
+
+**过程教训（写进流程，不只是修完就算）**
+
+§9.30 记录的「135 文件全绿」是 **2026-11-11 01:55** 的状态，而 `4a66faa`（T3c-1）**12:05** 才落地；此后 T3c-2/3/4 每批只跑了 `ab_gl_vk` + 14 套，**再没跑过全量回归**，于是上面那两处红一直挂着，交接文档却写着「全绿」。
+→ **规则（已并入 `docs/design/开发流程_冒烟与验证分层.md`）：任何 `refactor(shader)` 类提交后，四道门必须整套重跑；「上一批全绿」不能当作「本批全绿」的证据。**
+
+**基线订正（原文档数字是错的）**
+
+`ab_point_shadow` 的 GL 基线在 handoff / 本文 §9.32 写的是 `2.5e-5`，**干净 HEAD 实测是 `0.000057`**（连跑两次一致），`final_03` 里写的 `0.000051` 其实是 VK 值。以本次实测为准：**GL 5.7e-5 / VK 4.6e-5**（门限 2e-4）。
 
 ---
 
