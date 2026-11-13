@@ -58,8 +58,8 @@
 
 - source 包：包内引擎 `.py` **97 / HEAD 97**，内容不一致 **0**、包多出 **0**、包缺失 **0**
   （CRLF 归一后逐文件 sha256 对拍；`sceneio.py`/`agent_commands.py`/`loom_post.py`/`loom_assets.py` 四个关键文件同判）。
-- compiled 包：`build_info.git_head=051fff0…` 与 HEAD **相等**（`equal`）、`git_dirty=False`、
-  `smoke_passed_at=2026-11-13 20:07:05 > built_at=2026-11-13 19:36:46`。
+- compiled 包：`build_info.git_head=3946f8f…` 与 HEAD **相等**（`equal`）、`git_dirty=False`、
+  `smoke_passed_at=2026-11-13 20:59:16 > built_at=2026-11-13 20:46:21`。
 - 包内元数据：顶层 `0.1.0.beta6` / 嵌套运行时 `0.1.0.beta6` / 目标 `0.1.0.beta6` 三处一致。
 - 着色器实到（打开 zip 逐条数，不是看脚本注释）：compiled 包 **81** 条 `/shaders/`（3×27：`Loom/shaders/` + 运行时 dist + 构建器 dist 各 27 = 13 `.spv` + 13 源 + `loom_shader_compat.glsl`），source 包 **54** 条；
   包内 13 个 `.spv` 与 HEAD 逐字节相同（39/39 副本全等）。
@@ -69,13 +69,13 @@
 
 | 产物 | 字节 | 显示大小 | sha256 | git_head |
 |---|---|---|---|---|
-| `Loom-0.1.0.beta6-compiled.zip` | 145 284 161 | 138.55 MB | `adbb77ce06c674d0f2faf6d246044395828666aa8fb007be182de577113732ff` | `051fff0801bd87156ebd008295ac5408697ac2ee` |
-| `Loom-0.1.0.beta6-source.zip` | 358 725 019 | 342.11 MB | `87893ecfb083f17de4b5c15380d9451b7110d38a5b783e40001bc3efbdb9a878` | `051fff0801bd87156ebd008295ac5408697ac2ee` |
+| `Loom-0.1.0.beta6-compiled.zip` | 145 284 153 | 138.55 MB | `ed2b35311ecffced05f895113d8ab4cebb06f2db3b47d6f662fc123234b89e77` | `3946f8f36815` |
+| `Loom-0.1.0.beta6-source.zip` | 358 725 022 | 342.11 MB | `605012b8b80e1bf4f3e638ed405938bbc519b6fe22e36b2f6ceb81e569c0a9e6` | `3946f8f36815` |
 | `LoomHub-0.1.4-Setup.exe` | 25 539 782 | 24.36 MB | `960f0e4023dbb19a5d72cef75f5129ec51c0fffca44214669e98a5dcae5a35be` | （Hub 无独立 git_head；版本真源 `LoomHub/版本.json`=0.1.4） |
 
 - 三件同日同 HEAD 产出：编辑器 dist **150.23 MB**、构建器 **onedir 80.08 MB**（`build_game.exe` 26.37 MB）、玩家运行时 dist **143.43 MB**。
 - 构建器 2026-11-13 起由 onefile 改 **onedir**：不再自解压到 `%TEMP%`（安全软件的投放器特征），并给三个 exe 补完整版本资源（`CompanyName=lhy302` / `ProductName=Loom` / `FileDescription` / `FileVersion=0.1.0.6`）。实测该形态改变后本机 360 不再对构建器报毒（单机单样本）。
-- 冒烟三件分别盖章（`--stamp` 只盖本次真跑过的）：引擎 dist / 构建器 / 运行时 dist 各自 `smoke_passed_at=2026-11-13 15:59:20`；**7/7 全 PASS**，耗时 6.5s（预算 60s）。
+- 冒烟三件分别盖章（`--stamp` 只盖本次真跑过的）：引擎 dist / 构建器 / 运行时 dist 各自 `smoke_passed_at=2026-11-13 20:59:16`；**7/7 全 PASS**，耗时 6.7s（预算 60s）。
   读数：models=126、fps **96–101**、tps **30.12–30.27**；构建器 `--help` exit=0；运行时最小启动 exit=1（无游戏包，属预期）。
 
 ## 八、发布命令（**未执行**，等人类裁决后统一跑）
