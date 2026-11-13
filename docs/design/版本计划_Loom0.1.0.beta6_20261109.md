@@ -764,6 +764,43 @@ depth/raster/load/clear/绘制源/后处理阶段与参数）必须单一来源�
 
 `ab_point_shadow` 的 GL 基线在 handoff / 本文 §9.32 写的是 `2.5e-5`，**干净 HEAD 实测是 `0.000057`**（连跑两次一致），`final_03` 里写的 `0.000051` 其实是 VK 值。以本次实测为准：**GL 5.7e-5 / VK 4.6e-5**（门限 2e-4）。
 
+### 9.34 天空 / 阴影 pass / mip 单源化完成（2026-11-13）
+
+**结论**：`vk_renderer.py` 里剩余三块手写 WGSL（`_SHADOW_VERT` 37 行、`_SKY_WGSL` 29 行、`_MIP_WGSL` 14 行，共 **80 行**）已清零，改为 5 个单源文件 → 5 个 SPIR-V：
+
+| 源 | 行数 | GL 对应物 | 处理 |
+|---|---|---|---|
+| `shaders/shadow.vert` | 23 | ✅ `loom_shaders._SHADOW_VERT` | **GL 也改读同一份** |
+| `shaders/shadow.frag` | 25 | ✅ `loom_shaders._SHADOW_FRAG` | 同上；GL 写 `gl_FragDepth`，VK 写 `frag_color.r`（宏） |
+| `shaders/sky.vert` | 16 | ✅ `loom_shaders._SKY_VERT` | GL 用 quad VBO 6 顶点；VK 无顶点缓冲全屏三角 3 顶点（宏） |
+| `shaders/sky.frag` | 23 | ✅ `loom_shaders._SKY_FRAG` | 反投影公式逐字同一 |
+| `shaders/mip_downsample.frag` | 17 | ❌ **GL 没有** | GL 是驱动 `glGenerateMipmap`（`loom_texture.py:182` / `loom_cubemap.py:203`），无 shader 阶段 → **不假装统一**，登记为 T2 差异 **D-06** |
+
+`loom_shaders.py` 从 370 行降到 **173 行**（第二份 GLSL 文本全部删除，改为 `_shared_shader_src()` 加载同一份源）。SPIR-V 总数 **11 个**（之前 6 + 新增 5）。
+
+**四道门（主审独立复跑，不是转述实现者）**
+
+| 门 | 结果 |
+|---|---|
+| 1 编译 | `py -3.13 tools/build_shaders.py` **EXIT=0**，11 个 .spv（shadow.vert 2308B / shadow.frag 1556B / sky.vert 1220B / sky.frag 2184B / mip_downsample.frag 1084B） |
+| 2 像素 | `test_ab_gl_vk.py` **EXIT=0**，23 PASS / 0 FAIL |
+| 3 回归 | `run_all.py` **EXIT=0**，「全部测试完成 ✅」（135 文件） |
+| 4 grep | `_SKY_WGSL` / `_SHADOW_VERT` / `_MIP_WGSL` 在 `vk_renderer.py` = **0**；`#ifdef LOOM_VK` 仍只在 compat |
+
+**像素零变化**（逐值对比，改前 == 改后）：`ab_sky` 1.2e-5/1.2e-5/0、`ab_tex` 0/0/0、`ab_c_dir_shadow` 2.9e-5/5.1e-5/2.9e-5、`ab_point_shadow` 5.7e-5/4.6e-5/1.1e-5、`ab_scene` 2.6e-5/4.6e-5/2.8e-5；其余 18 场景三向 MAE 同样不变，UI 子项 1.10e-4 不变。
+
+**为什么能零变化（两处看似改了算法的地方）**
+
+1. 阴影深度：两端都改成 `SHADOW_STAGE_DEPTH = gl_FragCoord.z` —— GL 的 `gl_FragCoord.z` 本来就是窗口深度，VK 的本来就是 NDC z（wgpu 的 NDC z 即 [0,1]），**同一个表达式在两个 API 里各自是对的**，比分别写两套公式更稳。
+2. 天空角度：VK 从「`gl_FragCoord` + `SkyC.size` 换算」改成「顶点插值 `v_ndc`」，与旧公式同一函数（`SkyC.size` 字段暂留未删）。
+
+**当前全仓剩余手写 WGSL：71 行**
+
+| 位置 | 行数 | 状态 |
+|---|---|---|
+| `vk_renderer._MAIN_P1_VERT/_FRAG`（P1 逃生舱） | 16 | 无 GL 对应、**无像素门覆盖**、`--stage p1` 才可达 → 单列 **A1-8** 处理 |
+| `vk_ui.py`（UI 顶点 + 片段） | 55 | **A1-4**，未开始 |
+
 ---
 
 ## 10. 延迟项落盘规则（人类要求，2026-11-09；2026-11-13 移到文末，此前误插在 §9.1 与 §9.2 之间）
