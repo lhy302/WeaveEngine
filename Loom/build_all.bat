@@ -1,4 +1,13 @@
 @echo off
+REM ##################################################################
+REM ## 已退役 (2026-11-13 核对): 本脚本调用的 5 个探针脚本
+REM ##   tests\_tmp\refresh_registry_sha.py / gen_official_manifest.py /
+REM ##   editor_core_check.py / compiled_verify.py / mt_profile_check.py
+REM ## 既不在磁盘上、也从未纳入版本控制 (tests/_tmp/* 被 Loom/.gitignore 忽略),
+REM ## 因此本脚本在第一步就会失败。保留仅作历史留痕, 不要当作可运行的门。
+REM ## 现行内核构建/回归: Loom/ckernels/build_ckernels.bat + Loom/tests/test_bucket_pack.py
+REM ## 见 docs/handoff/beta6未完项清单_20261111.md D5
+REM ##################################################################
 REM ====================================================================
 REM build_all.bat - Loom DLL 化战役 M1 统一构建入口 (2026-09-08)
 REM
