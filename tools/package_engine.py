@@ -453,7 +453,7 @@ def write_meta_readme(out_dir, version, slim=False, compiled=False,
                   '目录结构:\n'
                   '  Loom.bat              <- 双击启动（转 Loom\\Loom.exe）\n'
                   '  Loom\\Loom.exe         <- 编辑器主程序\n'
-                  '  Loom\\build_game.exe   <- 游戏构建器\n'
+                  '  Loom\\builder\\      <- 游戏构建器（onedir: builder\\build_game.exe）\n'
                   '  Loom\\player_runtime\\  <- 预置玩家运行时\n'
                   '  Loom\\解释器.json      <- LoomHub 识别元数据（python_version=%s）\n'
                   ) % (version, pyver)

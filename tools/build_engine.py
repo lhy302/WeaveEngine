@@ -12,6 +12,15 @@ r"""build_engine.py — 引擎三件产物构建器（两档：dev 带控制台 
   dev     : C:\loom_build\engine_dev / builder_dev / runtime_dev
   release : C:\loom_build\engine     / builder      / Loom\player_runtime
 
+2026-11-13 打包形态整改（360 只报 build_game.exe 的裁决）：
+  · 构建器 onefile -> onedir（--mode=standalone）：产物是
+    <out>/build_game.dist/build_game.exe，不再自解压到 %TEMP%（投放器特征）。
+  · 三个 exe 全部补 Windows 版本资源（--company-name/--product-name/
+    --file-version/--product-version/--file-description/--copyright）；
+    版本号取自 Loom/解释器.json 的 version，不硬编码。
+  · 运行时是经 Loom/build_game.py --build-runtime 间接调 Nuitka 的，旗标走
+    环境变量 LOOM_BUILD_VER_FLAGS 传下去（build_game.py 只做参数拼接）。
+
 用法（必须用 3.13）：
   py -3.13 tools/build_engine.py --mode dev
   py -3.13 tools/build_engine.py --mode release
@@ -21,6 +30,7 @@ r"""build_engine.py — 引擎三件产物构建器（两档：dev 带控制台 
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -144,6 +154,66 @@ def _source_engine_version():
         return None
 
 
+# 2026-11-13 版本资源（360 误报整改第 2 条）: 三个 exe 必须带非空 CompanyName/
+# ProductName/FileDescription/FileVersion，否则安全软件与资源管理器都只能看到
+# 一个"无名无版本"的未知二进制。Nuitka 4.3.5 已确认支持下列旗标。
+VER_COMPANY = 'lhy302'
+VER_PRODUCT = 'Loom'
+VER_DESCRIPTIONS = {
+    'editor': 'Loom 引擎编辑器',
+    'builder': 'Loom 游戏打包器（将项目打包为独立游戏）',
+    'runtime': 'Loom 游戏运行时',
+}
+COPYRIGHT_FALLBACK = 'MIT License, (c) lhy302'
+
+
+def _copyright_text():
+    """版权串 = LICENSE 首行；首行没有版权主体时用兜底。
+
+    LICENSE 首行只有 "MIT License"（主体在第三行），单独写进版本资源会丢掉
+    "谁的版权"，所以首行不含 copyright/(c) 时退回 COPYRIGHT_FALLBACK。
+    """
+    try:
+        with open(os.path.join(ROOT, 'LICENSE'), 'r', encoding='utf-8') as f:
+            first = f.readline().strip()
+    except Exception:
+        first = ''
+    if first and ('copyright' in first.lower() or '(c)' in first.lower()):
+        return first
+    return COPYRIGHT_FALLBACK
+
+
+def _numeric_version(raw):
+    """"0.1.0.beta6" -> "0.1.0.6"（Nuitka 的 --file-version 只收最多 4 段纯数字）。
+
+    每一段取其中的数字（"beta6" -> 6：前导数字优先，否则取末尾数字），不足
+    4 段补 0；版本号仍由 Loom/解释器.json 单一事实源决定，不硬编码 beta 号。
+    """
+    parts = []
+    for seg in str(raw or '').split('.'):
+        seg = seg.strip()
+        m = re.match(r'(\d+)', seg) or re.search(r'(\d+)$', seg)
+        parts.append(m.group(1) if m else '0')
+    while len(parts) < 4:
+        parts.append('0')
+    return '.'.join(parts[:4])
+
+
+def _ver_flags(kind, version):
+    """返回 Nuitka 版本资源旗标列表（kind 决定 FileDescription）。"""
+    if kind not in VER_DESCRIPTIONS:
+        _fail('未知产物类型 %r（未定义版本资源描述）' % (kind,))
+    if not version:
+        _fail('读不到 Loom/解释器.json 的 version，无法写版本资源')
+    num = _numeric_version(version)
+    return ['--company-name=%s' % VER_COMPANY,
+            '--product-name=%s' % VER_PRODUCT,
+            '--file-version=%s' % num,
+            '--product-version=%s' % num,
+            '--file-description=%s' % VER_DESCRIPTIONS[kind],
+            '--copyright=%s' % _copyright_text()]
+
+
 def _assert_meta(dist, label):
     """产物必须带 解释器.json 且 version = 源码版本（sceneio 版本闸的单一事实源）。"""
     path = os.path.join(dist, '解释器.json')
@@ -209,7 +279,8 @@ def build_editor(mode, cfg, info):
     cmd = [sys.executable, '-m', 'nuitka', '--mode=standalone', '--msvc=latest',
            '--assume-yes-for-downloads', '--enable-plugin=pyside6',
            '--windows-console-mode=%s' % cfg['console'],
-           '--nofollow-import-to=cupy'] + _data_includes() + [
+           '--nofollow-import-to=cupy'] + _data_includes() + \
+          _ver_flags('editor', info.get('version')) + [
            '--output-dir=%s' % out, '--output-filename=Loom.exe',
            os.path.join(LOOM, 'build_entry.py')]
     secs = _run(cmd, cwd=LOOM)
@@ -241,13 +312,14 @@ def build_editor(mode, cfg, info):
 
 
 def _builder_includes():
-    """构建器 onefile 也要带原生组件与版本元数据。
+    """构建器（onedir）必须自带原生组件与版本元数据。
 
-    2026-11-11 冒烟抓到: onefile 解包到 %TEMP%，fastpath 在 dirname(sys.executable)
-    找 ckernels/loom_kernels.dll —— 不带就 import 即崩（build_game.exe --help exit 1）。
+    2026-11-11 冒烟抓到: fastpath 在程序目录找 ckernels/loom_kernels.dll ——
+    不带就 import 即崩（build_game.exe --help exit 1）。2026-11-13 从 onefile 改
+    onedir 后语义不变：原生目录仍要随 dist 分发（Nuitka 会跳过 *.dll，构建后补拷）。
     """
     inc = []
-    # shaders: 2026-11-13 起 build_game 也是 import loom_shaders，onefile 解包目录里
+    # shaders: 2026-11-13 起 build_game 也是 import loom_shaders，程序目录里
     # 必须有 shaders/（否则 build_game.exe 一启动就 FileNotFoundError）。
     for d in ('ckernels', 'core_components', 'shaders'):
         p = os.path.join(LOOM, d)
@@ -259,25 +331,60 @@ def _builder_includes():
     return inc
 
 
+BUILDER_DATA_DIRS = ('ckernels', 'core_components', 'shaders')
+
+
+def _sync_builder_data(dist):
+    """构建器 dist 自带原生组件目录（Nuitka 4.x 的 --include-data-dir 跳过 *.dll，
+    不补拷 = 缺 ckernels/loom_kernels.dll，fastpath 硬 raise）。"""
+    for d in BUILDER_DATA_DIRS:
+        src = os.path.join(LOOM, d)
+        if os.path.isdir(src):
+            shutil.copytree(src, os.path.join(dist, d), dirs_exist_ok=True)
+
+
 def build_builder(mode, cfg, info):
+    """构建器: 2026-11-13 起 onedir（--mode=standalone）。
+
+    onefile 会自解压到 %TEMP% 再执行，是安全软件眼里的"投放器"特征（360 只报
+    这一个 exe 的根因之一），所以改成 <out>/build_game.dist/build_game.exe。
+    """
     out = cfg['builder']
-    exe = os.path.join(out, 'build_game.exe')
-    if os.path.isfile(exe):
-        prev = exe + '.__prev'
+    dist = os.path.join(out, 'build_game.dist')
+    exe = os.path.join(dist, 'build_game.exe')
+    _stash_prev(dist)
+    # 旧 onefile 单文件产物挪开（不删，便于回滚；也不能和新 dist 混在同一目录）
+    stale = os.path.join(out, 'build_game.exe')
+    if os.path.isfile(stale):
+        prev = stale + '.__prev'
         if os.path.isfile(prev):
             os.remove(prev)
-        os.rename(exe, prev)
-    cmd = [sys.executable, '-m', 'nuitka', '--mode=onefile', '--msvc=latest',
+        os.rename(stale, prev)
+        print('[build_engine] 旧 onefile 构建器已挪到 %s' % prev)
+    cmd = [sys.executable, '-m', 'nuitka', '--mode=standalone', '--msvc=latest',
            '--assume-yes-for-downloads',
-           '--windows-console-mode=%s' % cfg['console']] + _builder_includes() + [
+           '--windows-console-mode=%s' % cfg['console']] + _builder_includes() + \
+          _ver_flags('builder', info.get('version')) + [
            '--output-dir=%s' % out, '--output-filename=build_game.exe',
            os.path.join(LOOM, 'build_game.py')]
     secs = _run(cmd, cwd=LOOM)
+    _sync_builder_data(dist)
+    _assert_meta(dist, '构建器 dist')
     if not os.path.isfile(exe):
         _fail('构建器产物缺失: %s' % exe)
+    kern = os.path.join(dist, 'ckernels', 'loom_kernels.dll')
+    if not os.path.isfile(kern):
+        _fail('构建器 dist 缺 ckernels/loom_kernels.dll（fastpath 硬加载，'
+              '--help 会 RuntimeError）: %s' % kern)
+    shd = os.path.join(dist, 'shaders')
+    if not os.path.isdir(shd) or not any(n.endswith('.spv') for n in os.listdir(shd)):
+        _fail('构建器 dist 的 shaders/ 里没有 .spv（先跑 tools/build_shaders.py）: %s'
+              % shd)
+    _write_info(os.path.join(dist, 'build_info.json'), info)
     _write_info(os.path.join(out, 'build_info.json'), info)
-    return {'path': exe, 'size_mb': round(os.path.getsize(exe) / 1048576.0, 2),
-            'seconds': round(secs, 1)}
+    dist_mb = _dir_mb(dist)
+    return {'path': exe, 'dist': dist, 'dist_size_mb': dist_mb,
+            'size_mb': dist_mb, 'seconds': round(secs, 1)}
 
 
 def build_runtime(mode, cfg, info):
@@ -287,6 +394,9 @@ def build_runtime(mode, cfg, info):
     env = dict(os.environ)
     env['LOOM_BUILD_CONSOLE_MODE'] = cfg['console']
     env['LOOM_BUILD_RUNTIME_DIR'] = out
+    # 运行时由 build_game.py 间接调 Nuitka：版本资源旗标用换行分隔的环境变量传下去
+    # （build_game.py 只把这些行拼接进自己的 Nuitka 命令行，打包逻辑零改动）。
+    env['LOOM_BUILD_VER_FLAGS'] = '\n'.join(_ver_flags('runtime', info.get('version')))
     cmd = [sys.executable, os.path.join(LOOM, 'build_game.py'), '--build-runtime']
     secs = _run(cmd, cwd=LOOM, env=env)
     _assert_meta(dist, '运行时 dist')
@@ -335,8 +445,10 @@ def main():
         _enter_vcvars()
 
     _git_head, _git_dirty = _git_info()
+    _version = _source_engine_version()
     info = {
         'mode': args.mode,
+        'version': _version,
         'console_mode': cfg['console'],
         'packageable': cfg['packageable'],
         'python': sys.version.split()[0],
@@ -348,8 +460,8 @@ def main():
         # smoke_passed_at 存在且晚于 built_at（编译→冒烟→打包→对拍）。
         'smoke_passed_at': None,
     }
-    print('[build_engine] git_head=%s git_dirty=%s'
-          % (_git_head or '<不可用>', _git_dirty))
+    print('[build_engine] git_head=%s git_dirty=%s version=%s'
+          % (_git_head or '<不可用>', _git_dirty, _version or '<不可用>'))
     results = {}
     t_all = time.time()
     if 'editor' in what:
@@ -363,12 +475,15 @@ def main():
     print('[build_engine] 完成: mode=%s console=%s 用时 %.0fs'
           % (args.mode, cfg['console'], time.time() - t_all))
     for k, v in results.items():
-        print('  %-8s %8.1f MB  %6.0fs  %s' % (k, v['size_mb'], v['seconds'], v['path']))
+        extra = ('  dist=%s' % v['dist']) if v.get('dist') else ''
+        print('  %-8s %8.1f MB  %6.0fs  %s%s'
+              % (k, v['size_mb'], v['seconds'], v['path'], extra))
     if args.mode == 'release':
         print('[build_engine] 现在可打包: py -3.13 tools/package_engine_compiled.py '
               '--version <版本> --editor-dist %s --builder-exe %s'
               % (os.path.join(cfg['editor'], 'build_entry.dist'),
-                 os.path.join(cfg['builder'], 'build_game.exe')))
+                 os.path.join(cfg['builder'], 'build_game.dist',
+                              'build_game.exe')))
     print('=' * 64)
 
 

@@ -69,13 +69,23 @@ def stamp_build_info(targets):
 
 
 def find_builder(engine_dir, explicit=None):
-    """构建器 exe：显式指定优先；否则在 dist 同目录/上级找 build_game.exe。"""
+    """构建器 exe：显式指定优先；否则在 dist 同目录/上级找。
+
+    支持三种形态：
+      · <cand>/build_game.exe                 （旧 onefile，已废弃，仅为兼容旧产物）
+      · <cand>/build_game.dist/build_game.exe （Nuitka onedir 构建输出）
+      · <cand>/builder/build_game.exe         （发布包内平铺的 onedir 构建器）
+    漏掉 onedir 这两条，冒烟会误报"未找到构建器"而跳过 [6/7]（=漏测）。
+    """
     if explicit:
         return explicit if os.path.isfile(explicit) else None
     for cand in (engine_dir, os.path.dirname(os.path.abspath(engine_dir))):
-        p = os.path.join(cand, 'build_game.exe')
-        if os.path.isfile(p):
-            return p
+        for rel in (('build_game.exe',),
+                    ('build_game.dist', 'build_game.exe'),
+                    ('builder', 'build_game.exe')):
+            p = os.path.join(cand, *rel)
+            if os.path.isfile(p):
+                return p
     return None
 
 
@@ -178,7 +188,9 @@ def main(argv=None):
     ap.add_argument('--stamp', action='store_true',
                     help='给"本次真正被测过且通过"的产物盖 smoke_passed_at'
                          '（引擎/构建器/运行时分别实测才分别盖）')
-    ap.add_argument('--builder-exe', help='构建器 exe（默认在 dist 同目录/上级找 build_game.exe）')
+    ap.add_argument('--builder-exe',
+                    help='构建器 exe（默认在 dist 同目录/上级找 build_game.exe 或 '
+                         'build_game.dist/build_game.exe）')
     ap.add_argument('--runtime-dist', help='运行时 dist（默认找 player_runtime/game_player.dist）')
     a = ap.parse_args(argv)
 

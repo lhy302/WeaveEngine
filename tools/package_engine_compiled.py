@@ -4,21 +4,29 @@ r"""打「编译版」引擎包（2026-11-08 新增）。
 与 package_engine.py 的区别：**不含嵌入式 Python、不含 .py 源码**，主程序是 Nuitka 编出的
 Loom.exe（编辑器）+ build_game.exe（游戏构建器）。运行时通过 Hub 的 main_exe 字段识别。
 
-包结构：
+包结构（2026-11-13 起构建器改为 onedir）：
     Loom-<version>.zip
       Loom/
         Loom.exe            <- 编辑器（Nuitka standalone 产物，同目录带依赖）
-        build_game.exe      <- 构建器（Nuitka onefile）
+        builder/            <- 构建器（Nuitka onedir，build_game.dist 的**内容**平铺）
+          build_game.exe
+          *.dll / ckernels/ / core_components/ / shaders/ ...
         player_runtime/game_player.dist/**   <- 预置玩家运行时
         scripts/ GUI/ Projects/ assets/     <- 运行时数据（可编辑，非编译）
         解释器.json / 输入配置.default.json / 设置.json
       Loom.bat
       README.txt
 
+为什么构建器是目录：onefile 会自解压到 %TEMP% 再执行，是安全软件（360）眼里的
+"投放器"特征；onedir 不再落 %TEMP%，也不会被误报（2026-11-13 裁决）。
+
 用法:
-    python tools/package_engine_compiled.py --version 0.1.0.beta4 \
+    python tools/package_engine_compiled.py --version 0.1.0.beta6 \
         --editor-dist C:\loom_build\engine\build_entry.dist \
-        --builder-exe C:\loom_build\builder\build_game.exe
+        --builder-exe C:\loom_build\builder\build_game.dist\build_game.exe
+
+（--builder-exe 仍传 exe 路径；打包时把它的**整个父目录内容**平铺到包内
+ Loom/builder/ —— 不出现 builder/build_game.dist/ 双层。）
 """
 import json
 import os
@@ -62,7 +70,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--version', help='覆盖版本号（默认读 Loom/解释器.json）')
     ap.add_argument('--editor-dist', required=True, help='Nuitka 编辑器 dist 目录（内含 Loom.exe）')
-    ap.add_argument('--builder-exe', required=True, help='Nuitka onefile 构建器 exe')
+    ap.add_argument('--builder-exe', required=True,
+                    help='Nuitka onedir 构建器 exe（...\\build_game.dist\\build_game.exe；'
+                         '打包时复制其整个父目录到 Loom/builder/）')
     ap.add_argument('--kind', choices=('compiled', 'source'), default='compiled',
                     help='产物类型（默认 compiled）: Loom-<ver>-compiled.zip，'
                          '与源码包分开避免互相覆盖')
@@ -79,6 +89,18 @@ def main():
         _fail('--editor-dist 里没有 Loom.exe: %s' % args.editor_dist)
     if not os.path.isfile(args.builder_exe):
         _fail('--builder-exe 不存在: %s' % args.builder_exe)
+    # 2026-11-13: 构建器必须是 onedir —— exe 的父目录就是 <stem>.dist。
+    # 传入旧 onefile 的 <out>/build_game.exe 时，父目录是输出根（里面还有
+    # .__prev / 中间产物），整目录拷进包会带进垃圾，这里直接拒绝。
+    _b_parent = os.path.dirname(os.path.abspath(args.builder_exe))
+    _b_stem = os.path.splitext(os.path.basename(args.builder_exe))[0]
+    if os.path.basename(_b_parent).lower() != (_b_stem + '.dist').lower():
+        _fail('构建器不是 onedir 形态（父目录必须叫 %s.dist）: %s\n'
+              '  打包器会整目录复制 --builder-exe 的父目录到包内 Loom/builder/，\n'
+              '  传旧 onefile 的 <out>/build_game.exe 会把输出根（含 .__prev 与\n'
+              '  中间产物）一起带进包。请先跑:\n'
+              '    py -3.13 tools/build_engine.py --mode release --what builder'
+              % (_b_stem, args.builder_exe))
 
     def _show_bi(dist, label):
         """展示 build_info 的来源证据；dirty 工作树要醒目警告（R6-03 扩展）。"""
@@ -163,8 +185,21 @@ def main():
         else:
             shutil.copy2(s, d)
 
-    print('[编译包] 复制构建器 ...')
-    shutil.copy2(args.builder_exe, os.path.join(out_loom, 'build_game.exe'))
+    # 2026-11-13: 构建器是 onedir —— 把父目录（build_game.dist）的**内容**平铺到
+    # Loom/builder/，绝不把单个 exe 拷成 Loom/build_game.exe（那是 onefile 形态，
+    # 也是 360 误报的根因），也不留 builder/build_game.dist/ 双层。
+    print('[编译包] 复制构建器 onedir 内容 -> Loom/builder/ (%s) ...' % _b_parent)
+    _builder_dst = os.path.join(out_loom, 'builder')
+    if os.path.isdir(_builder_dst):
+        shutil.rmtree(_builder_dst)
+    os.makedirs(_builder_dst, exist_ok=True)
+    for _b_name in os.listdir(_b_parent):
+        _b_src = os.path.join(_b_parent, _b_name)
+        _b_dst = os.path.join(_builder_dst, _b_name)
+        if os.path.isdir(_b_src):
+            shutil.copytree(_b_src, _b_dst, dirs_exist_ok=True)
+        else:
+            shutil.copy2(_b_src, _b_dst)
 
     if runtime:
         print('[编译包] 预置播放器运行时: %.1f MB' % (_dir_size(runtime) / 1048576.0))
@@ -204,7 +239,8 @@ def main():
         'build_mode': 'compiled',
         'python_version': '%d.%d.%d' % sys.version_info[:3],
         'note': 'Nuitka 编译版引擎（无嵌入式 Python、无 .py 源码）；'
-                '游戏构建器 = 同目录 build_game.exe；配置写用户目录 %LOCALAPPDATA%/Loom',
+                '游戏构建器 = builder/build_game.exe；'
+                '配置写用户目录 %LOCALAPPDATA%/Loom',
     }
     bad = PE._hub_config().validate_meta(meta, version) if PE._hub_config() else None
     if bad:

@@ -161,6 +161,13 @@ def _bin_dir():
       · "缺少玩家运行时 (需要含 MyGame.exe 的 game_player.dist)"
     所以优先用**程序目录**(sys.argv[0] 的目录)，只有它没有数据目录时才回退 `__file__`。
     源码运行 (`python build_game.py`) 时 argv[0] 就是本文件 → 两者相同，行为不变。
+
+    2026-11-13 onedir 布局: 编译版构建器不再和引擎根同级，而是在 `Loom/builder/`
+    （build_game.dist 的**内容**平铺进去），exe 的 containing_dir 因此是 builder/，
+    而 scripts/、player_runtime/、解释器.json 都在上一级 Loom/。所以三个候选目录
+    各自**逐级上溯**（最多 4 层），取第一个同时含 解释器.json 且带 player_runtime/
+    或 scripts/ 的目录；一个都找不到时保持旧行为（返回 here）并打印可见警告 ——
+    路径错位必须能第一现场看见，不许静默回退。
     """
     exe_dir = os.path.dirname(os.path.abspath(sys.argv[0] or '')) if sys.argv else ''
     here = os.path.dirname(os.path.abspath(__file__))
@@ -173,6 +180,26 @@ def _bin_dir():
         if cand and (os.path.isdir(os.path.join(cand, 'player_runtime'))
                      or os.path.isdir(os.path.join(cand, 'scripts'))):
             return cand
+    # onedir / 打包布局: 从候选目录自身开始逐级上溯（自身 + 最多 4 层父目录）
+    tried = []
+    for cand in (cdir, exe_dir, here):
+        if not cand:
+            continue
+        cur = os.path.abspath(cand)
+        for _ in range(5):
+            if cur not in tried:
+                tried.append(cur)
+                if (os.path.isfile(os.path.join(cur, '解释器.json'))
+                        and (os.path.isdir(os.path.join(cur, 'player_runtime'))
+                             or os.path.isdir(os.path.join(cur, 'scripts')))):
+                    return cur
+            parent = os.path.dirname(cur)
+            if parent == cur:
+                break
+            cur = parent
+    print('[build_game] 警告: 找不到引擎数据根（要求同时含 解释器.json 与 '
+          'player_runtime/ 或 scripts/），回退到程序目录: %s' % here)
+    print('[build_game]   已尝试的目录（含上溯）: %s' % '; '.join(tried))
     return here
 
 
@@ -294,6 +321,13 @@ def _build_runtime():
         _p = os.path.join(BIN_DIR, _d)
         if os.path.isdir(_p):
             cmd.append('--include-data-dir=%s=%s' % (_p, _d))
+    # 2026-11-13 打包形态整改: 版本资源旗标（--company-name/--product-name/
+    # --file-version/--product-version/--file-description/--copyright）由
+    # tools/build_engine.py 经环境变量 LOOM_BUILD_VER_FLAGS（换行分隔）下发。
+    # 这里**只拼参数**，打包逻辑一行不动；变量缺省时行为与旧版完全一致。
+    for _vf in os.environ.get('LOOM_BUILD_VER_FLAGS', '').splitlines():
+        if _vf.strip():
+            cmd.append(_vf.strip())
     print("打包玩家运行时:", ' '.join(cmd))
     subprocess.check_call(cmd)
     # Nuitka 4.x --include-data-dir 会跳过 *.dll, 构建后补拷原生目录, 保证裸 dist 自洽
