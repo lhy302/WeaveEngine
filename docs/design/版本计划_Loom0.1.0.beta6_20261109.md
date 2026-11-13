@@ -984,6 +984,23 @@ VK 在 **0 个可见实例**时会走 `queue.write_buffer` 空写并抛 `ValueEr
 
 **验收**：26 场景 / 失败 0 / EXIT=0；`run_all` **136 全绿**；新场景无场景级容差（全局 2e-4 未动）。
 
+### 9.40 发布（2026-11-13）
+
+**tag（均指向 `74f8535`）**：`engine-v0.1.0.beta6`、`hub-v0.1.4`
+
+| Release | 标记 | 资产 | 字节 |
+|---|---|---|---|
+| <https://github.com/lhy302/WeaveEngine/releases/tag/engine-v0.1.0.beta6> | prerelease | `Loom-0.1.0.beta6-compiled.zip` | 145,284,153（sha256 `ed2b3531…`） |
+| <https://github.com/lhy302/WeaveEngine/releases/tag/hub-v0.1.4> | 正式 | `LoomHub-0.1.4-Setup.exe` | 25,546,396（sha256 `e84399bb…`） |
+
+**发布前状态**：源码包 `605012b8…`（342.11 MB）未作为 Release 资产上传（源码本身即仓库，与前几版一致）。
+
+**发布门（工具内置，真跑）**：`tools/release_github.py` 默认先跑全套 `run_all`（136 个），非零即中止且零远端写操作；两次发布均 `EXIT=0`。
+
+**源码同步**：`main` 已推到 `74f8535`（`fa7de9a..74f8535`）。
+
+**发布说明**：`tools/release_notes/engine-0.1.0.beta6.md`（25 场景像素门 / 97:97 对拍 / 真实哈希 / 构建器 onedir 瘦身 / world Canvas 修复）与 `hub-0.1.4.md`（安装根跟随 Hub 位置推荐 / 自选 / 通用安全提示 / 长路径中间省略控件）。
+
 ---
 
 ## 10. 延迟项落盘规则（人类要求，2026-11-09；2026-11-13 移到文末，此前误插在 §9.1 与 §9.2 之间）
