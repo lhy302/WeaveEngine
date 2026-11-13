@@ -136,7 +136,7 @@ Hub 提权执行未校验包、启动检查未接线。
 
 ```powershell
 # 全量回归（121 个测试文件）
-cd "D:\my-project - 副本\Loom(py源代码-工作区)\Loom"; python tests/run_all.py
+$env:LOOM_NO_DIALOG='1'; cd "D:\my-project - 副本\Loom(py源代码-工作区)\Loom"; py -3.13 tests/run_all.py
 
 # 场景基准（结果写 %LOCALAPPDATA%\Loom\bench\bench_result.txt）
 python Loom.py --bench Projects\压测500混合.json 300
