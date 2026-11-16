@@ -80,9 +80,9 @@
 
 ## 八、发布记录（2026-11-13 已执行）
 
-- tag：`engine-v0.1.0.beta6`（**2026-11-16 补丁后重新指向 `2e469a6`**；Hub 的 `hub-v0.1.4` 仍指 `74f8535`，本补丁未动 Hub），Release 标记为 **prerelease**
+- tag：`engine-v0.1.0.beta6` **2026-11-16 补丁后重新指向 `f2bba69`**（包内 `git_head=2e469a6` 是它的父提交 —— 两者之间只有 docs 提交、不触 `Loom/`，故「包 = 代码」仍成立）；Hub 的 `hub-v0.1.4` 仍指 `74f8535`，本补丁未动 Hub。Release 标记为 **prerelease**
 - Release：<https://github.com/lhy302/WeaveEngine/releases/tag/engine-v0.1.0.beta6>
-- 资产：`Loom-0.1.0.beta6-compiled.zip`（145 284 153 B）
+- 资产：`Loom-0.1.0.beta6-compiled.zip`（**2026-11-16 补丁版替换为 145 288 824 B / `d77d6f4b…`**，旧资产已删除；上传后 API 复核 `draft=False / prerelease=True / size=145288824`）
 - 发布门：`tools/release_github.py engine` 默认先跑全套 `run_all`（**139 个**：137 + 本次补丁新增 2 个），非零即中止且零远端写操作（本次 EXIT=0）
 - 源码包 `605012b8…`（342.11 MB）未作为 Release 资产上传（源码本身即仓库，与前几版一致）
 
