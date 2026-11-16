@@ -140,6 +140,17 @@ def light_vps(aabb_rows, lights, vis_idx=None):
     if aabb_rows is not None:
         rows = np.ascontiguousarray(aabb_rows, dtype=np.float64)
         n = int(rows.shape[0])
+    # 2026-11-16 B13 修复（两条，都属"已知可降级条件"，按本模块契约返 None 交调用方走
+    # Python 路径；旧实现把它们送进 C 入口拿 LOOM_ERR_PARAM(-2) 再被上层 raise 成
+    # "官方件契约违约"，用户侧表现 = 编辑器删光所有物体后 GL 渲染帧直接崩）：
+    #   ① 空 AABB 行表（models=[]）：C 侧 loom_pipeline.c:125 对 n<=0 硬返 -2，而同一个
+    #      空表在 scene_bounds():177-178 是 return None —— 同一条件两套语义，此处统一为 None。
+    #   ② vis_idx 显式为空（物体全部隐藏）：C 侧会忽略可见性过滤、改用**全量行表**算阴影
+    #      包围盒（与 _compute_light_vps 的 docstring"阴影只取可见物体"矛盾），也交 Python 路径。
+    if n <= 0:
+        return None
+    if vis_idx is not None and len(vis_idx) == 0:
+        return None
     arr = _fill_lights(lights)
     out = np.zeros((len(lights), 6, 4, 4), dtype=np.float64)
     kinds = np.zeros((len(lights),), dtype=np.int32)

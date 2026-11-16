@@ -393,6 +393,28 @@ check("C5 聚光灯 s2 面图绑到自己的 (7..12)", face_units(eng_c, made_c[
       == list(range(7, 13)), face_units(eng_c, made_c['s2']))
 
 print("=" * 60)
+
+# ---------------------------------------------------------------------------
+# B11 回归 (2026-11-16): 阴影偏移常量必须**单点**（此前 GL/VK 各写一份 0.004，另有两处
+# 形参默认值写成 0.002 —— 一旦有人吃默认值，两端点光阴影偏移立刻不一致）。
+# ---------------------------------------------------------------------------
+import inspect                                   # noqa: E402
+
+check("B11-1 常量值未被改动 (POINT_BIAS=0.004 / DIR_BIAS=0.002)",
+      SU.POINT_BIAS == 0.004 and SU.DIR_BIAS == 0.002,
+      (SU.POINT_BIAS, SU.DIR_BIAS))
+_p = inspect.signature(SU.pack).parameters
+_a = inspect.signature(SU.pack_arrays).parameters
+check("B11-2 pack() 的 point_bias 默认值 = 单点常量",
+      _p['point_bias'].default == SU.POINT_BIAS, _p['point_bias'].default)
+check("B11-3 pack_arrays() 的 point_bias 默认值 = 单点常量",
+      _a['point_bias'].default == SU.POINT_BIAS, _a['point_bias'].default)
+check("B11-4 pack()/pack_arrays() 的 dir_bias 默认值 = 单点常量",
+      _p['dir_bias'].default == SU.DIR_BIAS
+      and _a['dir_bias'].default == SU.DIR_BIAS,
+      (_p['dir_bias'].default, _a['dir_bias'].default))
+
+print("=" * 60)
 if _fails:
     print("失败 %d 项: %s" % (len(_fails), _fails))
 else:

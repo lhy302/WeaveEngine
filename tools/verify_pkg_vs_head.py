@@ -94,7 +94,13 @@ def engine_equivalent(base, head):
     if rc != 0:
         return False, 'git_head 不是 HEAD 的祖先'
     diff = _git(['diff', '--name-only', base, head, '--', 'Loom/']) or ''
-    files = [x for x in diff.splitlines() if x.strip()]
+    # 2026-11-16 N-04 修复: 过滤口径必须与 head_engine_py() 一致 —— 包内本来就不含
+    # Loom/tests/ 与 Loom/player_runtime/，但旧实现把它们算进 "Loom/ 有改动"，
+    # 于是 tag 之后只要改/加过任何测试文件，对拍就红（2026-11-16 新增
+    # test_shader_spirv_matrix.py 即触发），喊多了就没人看。
+    files = [x for x in diff.splitlines() if x.strip()
+             and not x.startswith('Loom/tests/')
+             and not x.startswith('Loom/player_runtime/')]
     if files:
         return False, ('Loom/ 有 %d 处改动: %s'
                        % (len(files), ', '.join(files[:5])))

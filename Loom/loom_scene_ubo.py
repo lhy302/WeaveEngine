@@ -34,8 +34,20 @@ def light_base(i):
     return HEAD + i * LIGHT_F32
 
 
-def pack(vp, lights, camera_pos, pbr_enabled, point_far=30.0,
-         point_res=512.0, dir_res=1024.0, dir_bias=0.002, point_bias=0.002,
+# 2026-11-16 B11 修复: 阴影偏移/分辨率常量**单点化**。
+# 此前：GL(loom_lighting.py:205) 与 VK(vk_renderer.py:1630) 各写一份 0.004，另有两处
+# 形参默认值写成 0.002 —— 一旦有人吃默认值，两端点光阴影偏移立刻不一致（0.002 会
+# 大面积自阴影 acne，见单源片段 9-tap PCF 的注释）。现在两端都从这里取值。
+POINT_BIAS = 0.004      # 点光/聚光阴影偏移（9 tap PCF）
+DIR_BIAS = 0.002        # 平行光阴影偏移
+POINT_FAR = 30.0        # 点光阴影远平面（与 GL u_light_far 同义）
+POINT_RES = 512.0       # 点光阴影贴图分辨率
+DIR_RES = 1024.0        # 平行光阴影贴图分辨率
+
+
+def pack(vp, lights, camera_pos, pbr_enabled, point_far=POINT_FAR,
+         point_res=POINT_RES, dir_res=DIR_RES, dir_bias=DIR_BIAS,
+         point_bias=POINT_BIAS,
          dir_slots=None, light_vps=None, point_shadow_guid=None):
     """按本表打包 -> float32 数组（长度 FLOATS）。调用方只提供语义值。"""
     import math
@@ -125,8 +137,8 @@ def assert_layout():
 
 def pack_arrays(vp, camera_pos, pbr_enabled, n, dirs, poss, cols, ints, kinds,
                 ranges, spot_inner, spot_outer, modes, shapes, orthos, slots,
-                dir_res=1024.0, point_res=512.0, dir_bias=0.002,
-                point_bias=0.002, point_far=30.0):
+                dir_res=DIR_RES, point_res=POINT_RES, dir_bias=DIR_BIAS,
+                point_bias=POINT_BIAS, point_far=POINT_FAR):
     """从 GL 侧已算好的数组打包（同一张表；与 pack() 布局逐字节一致）。"""
     buf = np.zeros(FLOATS, dtype=np.float32)
     buf[OFF_MVP:OFF_MVP + 16] = np.asarray(vp, dtype=np.float32).reshape(16)

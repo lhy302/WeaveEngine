@@ -202,7 +202,8 @@ class LightingMixin:
             b['orthos'], b['slots'],
             dir_res=float(self._shadow_res),
             point_res=float(self._shadow_point_res),
-            dir_bias=0.002, point_bias=0.004,
+            # 2026-11-16 B11: 偏移量取自 loom_scene_ubo 单点常量（不再写字面量）
+            dir_bias=_SU.DIR_BIAS, point_bias=_SU.POINT_BIAS,
             point_far=float(self._shadow_point_far)).tobytes()
         if getattr(self, '_scene_ubo', None) is None:
             self._scene_ubo = self.ctx.buffer(reserve=_SU.BYTES)

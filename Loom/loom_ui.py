@@ -110,6 +110,11 @@ def _fire_binding(elem, event, *args):
         return False
 
 
+# 2026-11-16 B14: Shape 绘制失败上报去重（每进程各只报一次）。
+_SHAPE_FILL_ERR_REPORTED = False
+_SHAPE_STROKE_ERR_REPORTED = False
+
+
 class UIElement:
     """UI 元素基类.
 
@@ -882,8 +887,11 @@ class Shape(UIElement):
         if self.fill_color and len(pts_px) >= 3:
             try:
                 engine.draw_screen_polygon(pts_px, self.fill_color)
-            except Exception:
-                pass
+            except Exception as e:      # 2026-11-16 B14: 失败必须可见（原为 except: pass）
+                global _SHAPE_FILL_ERR_REPORTED
+                if not _SHAPE_FILL_ERR_REPORTED:
+                    _SHAPE_FILL_ERR_REPORTED = True
+                    print('[ui] Shape 填充失败(本进程只报一次): %r' % (e,))
         # 描边
         if self.stroke_color and len(pts_px) >= 2:
             close = (self.shape_type == 'polygon' or
@@ -893,8 +901,11 @@ class Shape(UIElement):
                 engine.draw_screen_lines(pts_px, self.stroke_color,
                                          width=self.stroke_width,
                                          close=close)
-            except Exception:
-                pass
+            except Exception as e:      # 2026-11-16 B14: 失败必须可见（原为 except: pass）
+                global _SHAPE_STROKE_ERR_REPORTED
+                if not _SHAPE_STROKE_ERR_REPORTED:
+                    _SHAPE_STROKE_ERR_REPORTED = True
+                    print('[ui] Shape 描边失败(本进程只报一次): %r' % (e,))
 
 
 class Panel(UIElement):

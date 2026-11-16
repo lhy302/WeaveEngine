@@ -59,6 +59,11 @@ from loom_input import UNLOCK_ACTION   # noqa: E402  引擎独占解锁动作名
 # N3: 解锁键轮询"跑不起来"的告警闸门 —— 每 (引擎类, 缺失原因) 每进程只打一行
 _UNLOCK_POLL_WARNED = set()
 
+# 2026-11-16 B14: 屏幕空间 UI 绘制失败的上报去重标志（每进程各只报一次，避免逐帧刷屏）。
+# 这两个名字由 draw_screen_lines / draw_screen_polygon 内的 global 语句写入。
+_UI_LINE_ERR_REPORTED = False
+_UI_POLY_ERR_REPORTED = False
+
 
 def _unlock_poll_warn(obj, missing):
     """解锁键轮询无法执行时的一次性告警（模块级: 不依赖 self 的方法存在）。
@@ -823,12 +828,24 @@ class GLEngine(ShadowMixin, FrameComponentMixin, PhysicsMixin, InputMixin, HudMi
                 nx, ny = self._px_to_ndc(px, py)
                 verts.append((nx, ny, 0.0))
                 colors.append(c)
-        try:
-            self.draw_lines(verts, colors, mode=moderngl.LINES,
-                            view_proj=np.eye(4, dtype='f4'),
-                            line_width=max(1.0, float(width)))
-        except Exception:
-            pass
+        # 2026-11-16 B14 修复: 本函数 docstring 承诺「不深度测试」，旧实现**根本没关深度** ——
+        # UI 在 main/sky 之后画，深度测试仍开着 -> 3D 深度非 1 的像素上整条描边被丢弃
+        # (实测 480x320 场景条线 0 像素)，且异常被 `except: pass` 静默吞掉。
+        # 修法: ctx.scope 内临时关深度(退出自动恢复)，失败改为**可见**上报。
+        # 只动深度：混合/剔除语义不属本缺陷范围（改它们会移动像素基线，另立账）。
+        _prev_sc = self.ctx.scissor
+        with self.ctx.scope(framebuffer=self._screen_fb()):
+            self.ctx.disable(moderngl.DEPTH_TEST)
+            self.ctx.scissor = _prev_sc if _prev_sc is not None else None
+            try:
+                self.draw_lines(verts, colors, mode=moderngl.LINES,
+                                view_proj=np.eye(4, dtype='f4'),
+                                line_width=max(1.0, float(width)))
+            except Exception as e:      # 失败必须可见（项目硬纪律），每进程只报一次
+                global _UI_LINE_ERR_REPORTED
+                if not _UI_LINE_ERR_REPORTED:
+                    _UI_LINE_ERR_REPORTED = True
+                    print('[ui] 屏幕描边绘制失败(本进程只报一次): %r' % (e,))
 
     def draw_screen_polygon(self, pts_2d, color):
         """屏幕空间三角形扇填充（UI 层用，不深度测试）。
@@ -847,11 +864,19 @@ class GLEngine(ShadowMixin, FrameComponentMixin, PhysicsMixin, InputMixin, HudMi
                 nx, ny = self._px_to_ndc(px, py)
                 verts.append((nx, ny, 0.0))
                 colors.append(c)
-        try:
-            self.draw_lines(verts, colors, mode=moderngl.TRIANGLES,
-                            view_proj=np.eye(4, dtype='f4'))
-        except Exception:
-            pass
+        # 2026-11-16 B14 修复: 同 draw_screen_lines —— docstring 写「不深度测试」但旧实现没关。
+        _prev_sc = self.ctx.scissor
+        with self.ctx.scope(framebuffer=self._screen_fb()):
+            self.ctx.disable(moderngl.DEPTH_TEST)
+            self.ctx.scissor = _prev_sc if _prev_sc is not None else None
+            try:
+                self.draw_lines(verts, colors, mode=moderngl.TRIANGLES,
+                                view_proj=np.eye(4, dtype='f4'))
+            except Exception as e:      # 失败必须可见（项目硬纪律），每进程只报一次
+                global _UI_POLY_ERR_REPORTED
+                if not _UI_POLY_ERR_REPORTED:
+                    _UI_POLY_ERR_REPORTED = True
+                    print('[ui] 屏幕多边形填充失败(本进程只报一次): %r' % (e,))
 
 
 

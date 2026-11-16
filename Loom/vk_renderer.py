@@ -1525,6 +1525,13 @@ class VkRenderer:
         up = (light.up_vector().x, light.up_vector().y, light.up_vector().z)
         view = mat4_view_forward(np, eye, D, up)
         n = len(vis)
+        if n == 0:
+            # 2026-11-16 B13 修复: 零可见实例时**没有包围盒可拟合** -> 本帧该灯判为
+            # "无阴影 VP"(调用方 _pack_light_vps 跳过它 -> params.w=-1 -> 着色器不采样阴影)。
+            # 旧实现对 (0,4) 空数组继续求 min/max, 必抛
+            # ValueError: zero-size array to reduction operation minimum
+            # (实测: 把场景物体全部隐藏的合法状态下 VK 渲染必崩)。
+            return None
         corners = np.empty((n * 8, 4), dtype=np.float32)
         for k, m in enumerate(vis):
             cs = self._mesh_corners(m.mesh)
@@ -1618,10 +1625,10 @@ class VkRenderer:
         _dir_slots = getattr(self, "_dir_shadow_slots", {})
         buf = _sub.pack(vp, lights, camera_pos, bool(self.pbr_enabled),
                         point_far=_POINT_FAR, point_res=float(_POINT_SHADOW_RES),
-                        # 与 GL 同值（loom_lighting.scene_ubo 的 point_bias=0.004）：
-                        # 单源片段对点光是 9 tap PCF，0.002 会大面积自阴影 acne。
-                        point_bias=0.004,
-                        dir_res=float(_SHADOW_RES), dir_bias=0.002,
+                        # 2026-11-16 B11: 与 GL 同源，一律取 loom_scene_ubo 常量
+                        # （单源片段对点光是 9 tap PCF，0.002 会大面积自阴影 acne）。
+                        point_bias=_sub.POINT_BIAS,
+                        dir_res=float(_SHADOW_RES), dir_bias=_sub.DIR_BIAS,
                         dir_slots=_dir_slots,
                         light_vps=getattr(self, '_light_vps', {}),
                         point_shadow_guid=getattr(self, '_point_shadow_guid', None))
@@ -1659,7 +1666,10 @@ class VkRenderer:
                 _slot = float(_dir_slots.get(l.guid, -1))
             else:
                 _slot = 0.0 if _has_ps > 0.5 else -1.0
-            buf[b + 32:b + 36] = (0.002, float(_SHADOW_RES), float(_POINT_FAR), _slot)
+            # 2026-11-16 B11: 逐灯 params.x 目前**着色器不读**（真值走 misc2.x/y 全局量），
+            # 但保留写入以维持布局自洽；值改取单点常量，避免再出现第三份字面量。
+            buf[b + 32:b + 36] = (_sub.DIR_BIAS, float(_SHADOW_RES),
+                                  float(_POINT_FAR), _slot)
             inner = math.cos(math.radians(float(getattr(l, "spot_inner_angle", 30.0))))
             outer = math.cos(math.radians(float(getattr(l, "spot_outer_angle", 60.0))))
             buf[b + 36:b + 40] = (inner, outer, float(getattr(l, "range", 10.0)), _has_ps)
@@ -1818,14 +1828,18 @@ class VkRenderer:
         else:
             _inst_pack = inst[_order]
             _sha_pack = inst_sha[_order]
-        d.queue.write_buffer(self._inst_buf, 0, _inst_pack.tobytes())
-        d.queue.write_buffer(self._inst_sha_buf, 0, _sha_pack.tobytes())
-        # 2026-11-07 第 2 张平行光阴影: 实例矩阵 = world @ 槽 1 光 VP, 独立缓冲
-        # (同一 encoder 里两趟阴影 pass 各读各的, 不会互相覆盖)。
-        if lvp2 is not None:
-            _sha2 = (worlds @ lvp2).reshape(n_vis, 16)
-            d.queue.write_buffer(self._inst_sha_buf2, 0,
-                                 (_sha2 if _ident else _sha2[_order]).tobytes())
+        # 2026-11-16 B13 修复: n_vis==0 时 _inst_pack 是 0 行 -> tobytes()==b''，
+        # wgpu 拒绝空数据 write_buffer(ValueError: Invalid data_offset)，旧实现必崩。
+        # 零实例本来就没有东西要画，跳过写缓冲即可（缓冲容量由 _ensure_instances 保证 ≥1 场景容量）。
+        if n_vis > 0:
+            d.queue.write_buffer(self._inst_buf, 0, _inst_pack.tobytes())
+            d.queue.write_buffer(self._inst_sha_buf, 0, _sha_pack.tobytes())
+            # 2026-11-07 第 2 张平行光阴影: 实例矩阵 = world @ 槽 1 光 VP, 独立缓冲
+            # (同一 encoder 里两趟阴影 pass 各读各的, 不会互相覆盖)。
+            if lvp2 is not None:
+                _sha2 = (worlds @ lvp2).reshape(n_vis, 16)
+                d.queue.write_buffer(self._inst_sha_buf2, 0,
+                                     (_sha2 if _ident else _sha2[_order]).tobytes())
 
         # ---- 深度目标（各 pass 按描述绑定）----
         if self._depth is None or self._depth[0] != (w, h):
