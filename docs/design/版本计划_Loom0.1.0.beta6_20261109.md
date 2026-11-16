@@ -1031,6 +1031,26 @@ VK 在 **0 个可见实例**时会走 `queue.write_buffer` 空写并抛 `ValueEr
 
 **纪律留痕**：`verify_pkg_vs_head.py` 的判据是「HEAD 在 `Loom/` 下零 diff」——本次新增 `Loom/tests/test_shader_spirv_matrix.py` 后，这条判据必然不满足。这是**有意为之**：宁可让对拍工具报红，也不把「新增一个受跟踪测试」写成不影响对拍。下次出包走完整门序即可。
 
+### 9.42 补丁版：修三个真缺陷并替换 Release 资产（2026-11-16）
+
+**背景**：缺陷账本（`docs/handoff/beta6_缺陷账本_20261116.md`，经独立子代理审核推翻 2 条后修正）把 beta6 的欠账核清，其中 **B13（零可见实例必崩）、B14（UI 描边被深度吃掉且静默）、B11（阴影偏移常量散落 4 处）** 是真缺陷/契约违约，本版一次修完并**重出包替换 11-13 的首版资产**。
+
+| 项 | 修法 | 回归测试 |
+|---|---|---|
+| B13-VK（2 处） | `_dir_light_vp` 空包围盒不再求 min/max；`draw_frame` 零实例跳过写实例缓冲 | `tests/test_zero_instance_render.py` |
+| B13-GL + N-01/02/03 | `pipeline_glue.light_vps` 空行表/空可见集返 `None`（兑现 `loom_lighting:795` 降级契约，与 `scene_bounds` 同口径） | 同上 |
+| B14 / N-08 | 屏幕空间助手 `ctx.scope` 内关深度 + 失败可见（原三层 `except: pass`） | `tests/test_ui_shape_depth_state.py` |
+| B11 | 阴影偏移/分辨率收敛到 `loom_scene_ubo` 单点常量 | `test_light_shadow_slots.py` 追加 4 条 |
+| N-04 | 对拍 diff 过滤排除 `Loom/tests/`、`player_runtime/` | 对拍 EXIT=0 |
+
+**未修（有意）**：B5（读 `RasterState`）、B4（阴影编码统一）、B12（pad 写 -1）—— 属已登记重构（B7-15 / B7-14）或当前不构成缺陷，留给 beta7。
+
+**门（真跑）**：编译 EXIT=0（150.2 / 80.1 / 143.4 MB，`git_head=2e469a6` `dirty=False`）→ 冒烟 7/7 三件盖章 → 打包（compiled 145 288 824 B `d77d6f4b…` / source 358 736 794 B `285cf205…`）→ 对拍 EXIT=0（source 97/97）→ **像素门 26 场景 0 失败且全部 MAE 与修前逐值一致（零基线漂移）** → 回归 **139 个测试 0 失败** → 二进制卫生 3/3。
+
+**关键纪律**：两条新回归测试都做了**「修前必红」自证**（`git checkout` 撤掉修复 → 跑 → 失败 → `git apply` 还原 → 通过）。不做这一步，"新测试通过"可能只是因为它什么都没测。
+
+**发布**：tag `engine-v0.1.0.beta6` 重新指向 `2e469a6`（prerelease 资产替换；Hub 0.1.4 未重打）；发布说明新增 §十 记录补丁内容与门序，见 `tools/release_notes/engine-0.1.0.beta6.md`。
+
 ---
 
 ## 10. 延迟项落盘规则（人类要求，2026-11-09；2026-11-13 移到文末，此前误插在 §9.1 与 §9.2 之间）
