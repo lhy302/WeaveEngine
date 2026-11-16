@@ -59,13 +59,13 @@
 
 ## 一、启动与三种模式
 
-三种入口（都在 `Loom` 目录下执行 `py -3.12 <脚本>`）：
+三种入口（都在 `Loom` 目录下执行 `py -3.13 <脚本>`）：
 
 | 模式 | 命令 | 说明 |
 |------|------|------|
-| **编辑器** | `py -3.12 Loom.py` | 默认 Qt 编辑器，做游戏 |
-| **播放器** | `py -3.12 Loom.py --run 场景.json` | 直接跑一个场景（无编辑 UI） |
-| **打开项目** | `py -3.12 Loom.py --open 场景.json` | 编辑器打开指定场景 |
+| **编辑器** | `py -3.13 Loom.py` | 默认 Qt 编辑器，做游戏 |
+| **播放器** | `py -3.13 Loom.py --run 场景.json` | 直接跑一个场景（无编辑 UI） |
+| **打开项目** | `py -3.13 Loom.py --open 场景.json` | 编辑器打开指定场景 |
 
 其他参数：
 - `--benchmark [三角形数] [迭代数]` —— 数学管线基准（不弹窗）
@@ -360,10 +360,10 @@ e.camera_target / camera_yaw / camera_distance   # 轨道相机
 
 **B. 命令行（CI 可用）**：
 ```powershell
-py -3.12 build_game.py --name 跳台试炼 --company "DSH实验室" `
+py -3.13 build_game.py --name 跳台试炼 --company "DSH实验室" `
     --scene 场景.json --game-scripts scripts --output 发布夹
 ```
-首次或引擎更新：`py -3.12 build_game.py --build-runtime`（Nuitka 打玩家运行时）
+首次或引擎更新：`py -3.13 build_game.py --build-runtime`（Nuitka 打玩家运行时）
 
 安全模式：`--protection secure|open`（默认 secure = 加密+哈希互验防作弊；open = 明文放行 MOD，需加 `--no-encrypt-content`）
 
@@ -391,7 +391,7 @@ load 游戏包.lsc (缺包报错 = _Data 缺失)
 
 ## 十一、LoomHub 项目管理器
 
-入口：`py -3.12 LoomHub.py`（在 LoomHub 目录）
+入口：`py -3.13 LoomHub.py`（在 LoomHub 目录）
 
 功能：
 - 项目管理（列表 / 新建 / 导入 / 设默认）
@@ -418,7 +418,7 @@ LLM 客户端 ──MCP stdio──▶ loom_mcp.py ──HTTP 127.0.0.1──▶
   "mcpServers": {
     "loom": {
       "command": "py",
-      "args": ["-3.12", "D:\\my-project\\Loom(py源代码-工作区)\\Loom\\loom_mcp.py"]
+      "args": ["-3.13", "D:\\my-project\\Loom(py源代码-工作区)\\Loom\\loom_mcp.py"]
     }
   }
 }
@@ -446,10 +446,10 @@ LLM 客户端 ──MCP stdio──▶ loom_mcp.py ──HTTP 127.0.0.1──▶
 ## 十三、全功能测试清单（实机逐项打勾）
 
 ### A. 启动与环境
-- [ ] A1 `py -3.12 Loom.py` 能启动编辑器（Qt 窗口出现）
+- [ ] A1 `py -3.13 Loom.py` 能启动编辑器（Qt 窗口出现）
 - [ ] A2 工具栏 [→播放]/[■停止] 正常
 - [ ] A3 F9 暂停 / F10 步进 正常
-- [ ] A4 `py -3.12 Loom.py --run 保存/场景.json` 播放器模式
+- [ ] A4 `py -3.13 Loom.py --run 保存/场景.json` 播放器模式
 
 ### B. 场景搭建
 - [ ] B1 [立方体]/[球体]/[平面] 各加一个
@@ -513,7 +513,7 @@ LLM 客户端 ──MCP stdio──▶ loom_mcp.py ──HTTP 127.0.0.1──▶
 - [ ] J6 `--protection open` 模式
 
 ### K. LoomHub
-- [ ] K1 `py -3.12 LoomHub.py` 打开项目管理器
+- [ ] K1 `py -3.13 LoomHub.py` 打开项目管理器
 - [ ] K2 新建/导入项目，启动引擎
 
 ### L. MCP（可选，AI 自动化）

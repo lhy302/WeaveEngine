@@ -16,7 +16,7 @@ r"""probe_bucket_reorder.py — 桶实例偏移复现 (scan_04 P1 回归) A/B �
 判据: 修复后 MAE 应回到 A/B 常态 (~1e-4 量级), 修复前应显著劣化;
       另按区域统计 "缺失的第 3 个 cube" 像素, 修复前应有明显缺失, 修复后没有。
 
-用法: py -3.12 tests\_tmp\probe_bucket_reorder.py
+用法: py -3.13 tests\_tmp\probe_bucket_reorder.py
 """
 import os
 import sys

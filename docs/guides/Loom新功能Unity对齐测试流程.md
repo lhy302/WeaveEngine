@@ -70,7 +70,7 @@ D:\my-project\_align_tests\
 
 ### Step 0：启动修改后的 Loom + 连接 MCP
 1. 关闭任何旧的 Loom 进程（避免旧端口文件残留）
-2. 启动：`py -3.12 Loom.py --open 保存/场景.json --agent`（或空场景）
+2. 启动：`py -3.13 Loom.py --open 保存/场景.json --agent`（或空场景）
 3. 等 `.agent_port.json` 出现且 `pid` 对应本次进程
 4. 通过 MCP 客户端确认连通：`tools/list` 返回 24 个工具
 

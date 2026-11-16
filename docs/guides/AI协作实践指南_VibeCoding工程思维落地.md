@@ -97,7 +97,7 @@ AI 负责、人类不审查的：
 ### 4.1 测试是脚本式（铁律）
 
 ```
-py -3.12 tests/xxx.py        # exit=0 为过；末尾 sys.exit(0/1)
+py -3.13 tests/xxx.py        # exit=0 为过；末尾 sys.exit(0/1)
 ```
 **禁止 pytest**（会 INTERNALERROR）。新测试照 `tests/test_lod.py` 模板。
 
@@ -188,7 +188,7 @@ py -3.12 tests/xxx.py        # exit=0 为过；末尾 sys.exit(0/1)
 
 ## 八、红线清单（违反即返工）
 
-1. 禁止 pytest；用 `py -3.12 tests/xxx.py`
+1. 禁止 pytest；用 `py -3.13 tests/xxx.py`
 2. 禁止用大段 edit 删方法群（用临时脚本 + 从后往前删）
 3. 提交前必须 `git checkout --` 还原运行时文件（`editor_state.json` 等）
 4. 纯搬家禁止改逻辑；性能改动禁止改数值口径

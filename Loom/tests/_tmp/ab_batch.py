@@ -4,7 +4,7 @@ r"""ab_batch.py — 全量 A/B 场景 MAE 批量回归 (2026-11-06).
 对 tests\_tmp\ab_*.json 每个场景跑 GL / VK 离屏渲染并给 MAE/MAX/NCC,
 用于确认"相机对齐改动"没有劣化任何既有 A/B 场景 (门槛 MAE <= 0.0002).
 
-用法: py -3.12 tests\_tmp\ab_batch.py [glob]
+用法: py -3.13 tests\_tmp\ab_batch.py [glob]
 """
 import glob
 import os

@@ -6,7 +6,7 @@ vk_player.py — Vulkan 后端播放器 (wgpu-py + GLFW, 2026-08-29 入口化)
   run_vk(scene, ...) 可由文员入口/LoomHub/发布链 (game_player) 复用;
   --mini/--keep/--no-shadow/--frames/--stage 为探针能力 (保留).
 
-用法: py -3.12 Loom\vk_player.py <场景.json> [--frames N] [--keep] [--mini]
+用法: py -3.13 Loom\vk_player.py <场景.json> [--frames N] [--keep] [--mini]
 """
 import os
 import sys

@@ -776,7 +776,7 @@ depth/raster/load/clear/绘制源/后处理阶段与参数）必须单一来源�
 | `shaders/sky.frag` | 23 | ✅ `loom_shaders._SKY_FRAG` | 反投影公式逐字同一 |
 | `shaders/mip_downsample.frag` | 17 | ❌ **GL 没有** | GL 是驱动 `glGenerateMipmap`（`loom_texture.py:182` / `loom_cubemap.py:203`），无 shader 阶段 → **不假装统一**，登记为 T2 差异 **D-06** |
 
-`loom_shaders.py` 从 370 行降到 **173 行**（第二份 GLSL 文本全部删除，改为 `_shared_shader_src()` 加载同一份源）。SPIR-V 总数 **11 个**（之前 6 + 新增 5）。
+`loom_shaders.py` 从 **413 行**降到 **174 行**（第二份 GLSL 文本全部删除，改为 `_shared_shader_src()` 加载同一份源）。SPIR-V 总数 **11 个**（之前 6 + 新增 5）。
 
 **四道门（主审独立复跑，不是转述实现者）**
 
@@ -794,7 +794,7 @@ depth/raster/load/clear/绘制源/后处理阶段与参数）必须单一来源�
 1. 阴影深度：两端都改成 `SHADOW_STAGE_DEPTH = gl_FragCoord.z` —— GL 的 `gl_FragCoord.z` 本来就是窗口深度，VK 的本来就是 NDC z（wgpu 的 NDC z 即 [0,1]），**同一个表达式在两个 API 里各自是对的**，比分别写两套公式更稳。
 2. 天空角度：VK 从「`gl_FragCoord` + `SkyC.size` 换算」改成「顶点插值 `v_ndc`」，与旧公式同一函数（`SkyC.size` 字段暂留未删）。
 
-**当前全仓剩余手写 WGSL：71 行**
+**当前 `Loom/` 产品树剩余手写 WGSL：71 行**（`archive/bench/_bench_stable` 有历史快照，不计入）
 
 | 位置 | 行数 | 状态 |
 |---|---|---|
@@ -803,14 +803,14 @@ depth/raster/load/clear/绘制源/后处理阶段与参数）必须单一来源�
 
 ### 9.35 UI 单源化完成（T3 收口）+ 修一条会假红的性能门（2026-11-13）
 
-**UI 单源化**：`vk_ui.py` 的两块手写 WGSL（`_UI_WGSL` 31 行 + `_WORLD_UI_WGSL` 24 行，共 **55 行**）清零。新增 `shaders/ui.vert`（19 行）+ `ui.frag`（15 行），**一条 pair 同时服务「屏幕 HUD」与「world Canvas」两条管线**：
+**UI 单源化**：`vk_ui.py` 的两块手写 WGSL（`_UI_WGSL` 31 行 + `_WORLD_UI_WGSL` 24 行，共 **55 行**）清零。新增 `shaders/ui.vert`（19 行，17 非空）+ `ui.frag`（18 行，16 非空），**一条 pair 同时服务「屏幕 HUD」与「world Canvas」两条管线**：
 
 | 用途 | GL 对应物（`loom_shaders.py`） | VK |
 |---|---|---|
 | 屏幕 HUD | `_HUD_VERT`/`_HUD_FRAG`（`engine.py:313` 编译；`loom_hud.py` 绘制） | `vk_ui.py` 原 `_UI_WGSL` |
 | world Canvas | `_WORLD_UI_VERT`/`_WORLD_UI_FRAG`（`loom_render.py:258-273` 建，`369-390` 画） | 原 `_WORLD_UI_WGSL` |
 
-→ GL 侧两个 program **都改读同一份源**（`_shared_shader_src('ui.vert'/'ui.frag')`），`loom_shaders.py` 再删 43 行。差异全进 compat：VK 用 `UIC.ui_screen.z>0.5` 分支、顶点统一 36B（pos3+uv2+color4）、`UIC` UBO 80B；GL 用 `u_mode`（world program 创建时置 1）。
+→ GL 侧两个 program **都改读同一份源**（`_shared_shader_src('ui.vert'/'ui.frag')`），`loom_shaders.py` **+12 / −41**（净 −29 行，144 → 117）。差异全进 compat：VK 用 `UIC.ui_screen.z>0.5` 分支、顶点统一 36B（pos3+uv2+color4）、`UIC` UBO 80B；GL 用 `u_mode`（world program 创建时置 1）。
 
 **四道门（主审独立复跑）**
 
@@ -823,7 +823,7 @@ depth/raster/load/clear/绘制源/后处理阶段与参数）必须单一来源�
 
 另做了**旧 vs 新直接对拍**（把 HEAD 的旧 WGSL/GLSL 原文内联，同设备/同顶点/同纹理/同混合）：VK screen / VK world / GL HUD / GL world 四项 **MAE=0、MAX=0、diffpx=0**。
 
-**全仓手写 WGSL 现状**：主 pass / post / 天空 / 阴影 pass / mip / UI **全部 0**，只剩 `_MAIN_P1_VERT`+`_MAIN_P1_FRAG` **16 行**（P1 诊断逃生舱，裁决豁免，前提是有 `test_vk_p1_stage.py` 证明管线能建起来，已补）。→ **T3「手写 WGSL 归零」达成（排除已登记的 P1 豁免）**。
+**全仓手写 WGSL 现状**：主 pass / post / 天空 / 阴影 pass / mip / UI **全部 0**，只剩 `_MAIN_P1_VERT`+`_MAIN_P1_FRAG` **14 个非空 WGSL 行**（连同两处赋值与三引号共 18 行代码；P1 诊断逃生舱，裁决豁免，前提是有 `test_vk_p1_stage.py` 证明管线能建起来，已补）。→ **T3「手写 WGSL 归零」达成（排除已登记的 P1 豁免）**。
 
 **顺带修掉一条会假红的性能门（`test_bucket_pack.py`）**
 
@@ -1001,11 +1001,41 @@ VK 在 **0 个可见实例**时会走 `queue.write_buffer` 空写并抛 `ValueEr
 
 **发布说明**：`tools/release_notes/engine-0.1.0.beta6.md`（25 场景像素门 / 97:97 对拍 / 真实哈希 / 构建器 onedir 瘦身 / world Canvas 修复）与 `hub-0.1.4.md`（安装根跟随 Hub 位置推荐 / 自选 / 通用安全提示 / 长路径中间省略控件）。
 
+### 9.41 发布后尾巴清理（2026-11-16）
+
+**背景**：beta6 已于 2026-11-13 发布（§9.40）。收尾倒查（`docs/audit/final4_01_收尾倒查_20261113.md`）登记的 **D4** 与 **P1-6 / P2** 一批「措辞·数字·工具」尾巴当时未处理完。本节是把它们处理干净的结果——**只清能被机器证据钉住的**，不把未验证项写成已验证（倒查 §5「无法验证」各项维持原样）。
+
+| 项 | 处置 | 证据 |
+|---|---|---|
+| **D4-a** `tools/shadow_pcf_spike.py` | **删除**（结论已由像素门覆盖） | `git rm`；历史留在 git |
+| **D4-b** `tools/shader_spike.py` | **升格为受跟踪测试** `Loom/tests/test_shader_spirv_matrix.py` | 6 例：5 正例（shadow2d / shadowcube / cube / 实例属性 / 多采样器）必须建起管线；第 6 例是**有牙自证**——比较采样器换成 filtering sampler **必须被 naga 拒**，实测被拒（`ResourceBinding … is not available`）。glslang 走 `tools/build_shaders._find_glslang` 同一把尺子（16.6.0 + sha256）；缺 glslang → FAIL（不静默跳过）；无 GPU → FAIL，除非显式 `LOOM_ALLOW_NO_GPU=1` |
+| **P1-6** `test_bucket_pack.py` 注释自相矛盾 | 改为分层说明（回归层 `ratio<=1.00`；「≤0.80x」属测量层） | 注释与 `:352` 的 check 一致 |
+| **P2-1** `loom_shaders.py` 370→173 | 实测 **413 → 174**（`git show 9fb39b3^` / `9fb39b3`）；后续 174→144→**117**（HEAD） | 两次 `Measure-Object -Line` |
+| **P2-2/3** `ui.frag` 15 行 /「P1 16 行」 | `ui.frag` = **18 行（16 非空）**；P1 = **14 个非空 WGSL 行**（连同赋值与三引号共 18 行代码） | 逐文件行数实测 |
+| **P2-4** 「全仓手写 WGSL=0」 | 限定为 **`Loom/` 产品树**（`archive/bench/_bench_stable` 有历史快照） | 三处措辞已改 |
+| **P2-5** T2 清单行号/类别 | `_clear_main_fbo` 在 **`loom_render.py:410`**；清屏色用例是反例矩阵**第 3 类**（`test_frame_plan_vk.py:72`） | 源码与测试实测 |
+| **P2-7** 路线登记缺 B7-14…18 | 补 **B7-14**（阴影编码统一）/ **B7-15**（`VkWorldUIPipeline` 读 RasterState）；B7-16/17/18 **从未存在**（`git log -S` 全历史为空），本文件「B7-01~B7-18」改为 **B7-01~B7-15** | `路线登记_后续版本.md` §1 |
+| **P2-8** 产品内 `py -3.12` | 产品树 + 受跟踪测试用法行 + `tools/` + **`tools/dsh-plugin-loom` 真用 `-3.12` 跑测试的功能缺陷** + `docs/guides/` 六份操作性指南 → 统一 **3.13**；历史记录/发行副本/快照不动 | 全仓 grep 复查：操作性残留 0 |
+| **P2-9** §9.35「再删 43 行」 | 实测 **+12 / −41**（净 −29，144 → 117） | `git show --stat d3e7540` |
+| **P2-10** B9 与 N-08 并存易误读 | 未完项清单 B9 补交叉说明（40x 已闭合 / 1.25ms 差额仍未闭合） | 两处文档对齐 |
+
+**四道门重跑（本次提交，真实输出）**：
+
+| 门 | 命令 | 结果 |
+|---|---|---|
+| 新增测试 | `py -3.13 tests\test_shader_spirv_matrix.py` | **EXIT=0**，正向 **5/5**、反向 **1/1** |
+| 回归 | `Loom` 下 `py -3.13 tests\run_all.py` | **EXIT=0**，**137 个测试文件**（原 136 + 新增 1），大写 `FAIL` 行 **0**、`HAS FAILURES` **0**、`ALL PASS` **125** 行 |
+| 像素门 | `run_all` 内含 `test_ab_gl_vk` | **26 场景 / 0 失败 / 0 跳过**（含 `ab_world_canvas`、`ab_ui_only`、`ab_mip_minify`） |
+| 构建 | `py -3.13 tools/build_shaders.py` | **EXIT=0**，**13 个 .spv**（字节数与发布时逐项一致） |
+| 包=代码对拍 | 本次**不适用** | 已发布资产对应 `74f8535`；本次只改文档/测试/文案，未重打包。`verify_pkg_vs_head` 现在会按设计报「HEAD 已前进 + `Loom/` 有 diff」，**不代表资产失效**；下次出包前必须重新编译打包，不能拿旧包对拍 |
+
+**纪律留痕**：`verify_pkg_vs_head.py` 的判据是「HEAD 在 `Loom/` 下零 diff」——本次新增 `Loom/tests/test_shader_spirv_matrix.py` 后，这条判据必然不满足。这是**有意为之**：宁可让对拍工具报红，也不把「新增一个受跟踪测试」写成不影响对拍。下次出包走完整门序即可。
+
 ---
 
 ## 10. 延迟项落盘规则（人类要求，2026-11-09；2026-11-13 移到文末，此前误插在 §9.1 与 §9.2 之间）
 
 > **凡本版不做的路线，必须写进 [路线登记_后续版本.md](路线登记_后续版本.md)，不得只留在对话里。**
-> 该文件含：预定 beta7 项（B7-01~B7-18）、滚动待办（N-01~N-14）、**beta6 末期检查点**、已取消项留痕（X-01~X-07，X-03 已于 2026-11-11 作废）。
+> 该文件含：预定 beta7 项（B7-01~B7-15，编号不连续：B7-13 已上调为 beta6 必做并完成）、滚动待办（N-01~N-14）、**beta6 末期检查点**、已取消项留痕（X-01~X-07，X-03 已于 2026-11-11 作废）。
 > beta6 收尾前必须执行一次检查点：逐项判断是否已被顺手解决、是否有 1-2 项可提前做、VS2026 是否升级，并把结论回写。
 

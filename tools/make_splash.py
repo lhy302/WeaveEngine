@@ -13,7 +13,7 @@ import sys
 try:
     from PIL import Image, ImageDraw, ImageFont
 except ImportError:
-    print('[错误] 需要 Pillow: py -3.12 -m pip install pillow')
+    print('[错误] 需要 Pillow: py -3.13 -m pip install pillow')
     sys.exit(1)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

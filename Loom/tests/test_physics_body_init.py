@@ -14,7 +14,7 @@
      (含 n==0 也不再静默 rc=0)
 
 culverin 缺失 -> SKIP exit 0 (与 test_physics_bridge 同策略).
-用法: py -3.12 tests\test_physics_body_init.py
+用法: py -3.13 tests\test_physics_body_init.py
 """
 
 # 2026-11-06 P-02 修复: Windows 控制台默认 GBK, 中文/符号 print 会抛

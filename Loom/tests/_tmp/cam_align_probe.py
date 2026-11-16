@@ -7,7 +7,7 @@ apply_orbit_camera + matlib 组 VP, 即 runtime.PlayerApp 与 loom_render.render
 用的那几行), 另一侧走 **Vk 中间层** (scene_driver.SceneDriver.load_from_data +
 render_pose). 断言两侧 VP 逐元素 |差| <= 1e-6.
 
-用法: py -3.12 tests\_tmp\cam_align_probe.py
+用法: py -3.13 tests\_tmp\cam_align_probe.py
 """
 import copy
 import math

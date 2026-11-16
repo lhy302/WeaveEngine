@@ -54,7 +54,7 @@ function apply(ctx) {
     defineTool({
       name: "loom_test_file",
       description:
-        "在 Loom 目录下执行 py -3.12 tests/<file_name>,返回退出码与输出的最后 40 行。",
+        "在 Loom 目录下执行 py -3.13 tests/<file_name>,返回退出码与输出的最后 40 行。",
       parameters: {
         file_name: {
           type: "string",
@@ -77,7 +77,7 @@ function apply(ctx) {
         return new Promise((resolve) => {
           execFile(
             "py",
-            ["-3.12", `tests/${file_name}`],
+            ["-3.13", `tests/${file_name}`],
             {
               cwd: LOOM_DIR,
               timeout: 300000,

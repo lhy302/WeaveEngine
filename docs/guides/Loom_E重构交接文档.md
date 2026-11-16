@@ -122,7 +122,7 @@ loom_shaders / loom_types / loom_color / loom_input(常量) / loom_material / lo
 
 ### 关键注意事项
 
-1. **测试是脚本式**（sys.exit(0) 判成败），**不是 pytest**！用 py -3.12 tests/xxx.py 直接跑，看 exit=0。用 pytest 会 INTERNALERROR。
+1. **测试是脚本式**（sys.exit(0) 判成败），**不是 pytest**！用 py -3.13 tests/xxx.py 直接跑，看 exit=0。用 pytest 会 INTERNALERROR。
 2. **中文路径**：PowerShell 里路径正常；但 py 脚本内路径用原始字符串 r"..."。
 3. **临时脚本**：写到 _align_tests/tools/_tmp_xxx.py，用完删除（别提交）。
 4. **不要改逻辑**：抽取是纯搬家，逐行照抄，语义逐位不变。
@@ -171,7 +171,7 @@ loom_shaders / loom_types / loom_color / loom_input(常量) / loom_material / lo
 
 ### 测试执行（脚本式）
 cd "D:/my-project/Loom(py源代码-工作区)/Loom"
-foreach ($t in @("test_engine_safety.py","test_camera.py","test_sceneio.py","test_undo.py","test_scripts.py","test_lighting.py","test_physics.py","test_hierarchy.py","test_animation.py")) { py -3.12 "tests/$t" *> $null; "$t exit=$LASTEXITCODE" }
+foreach ($t in @("test_engine_safety.py","test_camera.py","test_sceneio.py","test_undo.py","test_scripts.py","test_lighting.py","test_physics.py","test_hierarchy.py","test_animation.py")) { py -3.13 "tests/$t" *> $null; "$t exit=$LASTEXITCODE" }
 
 ### 门禁（Graphenium / AOCI，可选）
 - MCP graphenium：graph_stats / blast_radius（评估改动影响面）
@@ -201,7 +201,7 @@ foreach ($t in @("test_engine_safety.py","test_camera.py","test_sceneio.py","tes
 cd "D:/my-project/Loom(py源代码-工作区)/Loom"
 Select-String -Path "engine.py" -Pattern "^    def " | ForEach-Object { $_.LineNumber.ToString().PadLeft(5) + ": " + $_.Line.Trim() }
 Select-String -Path "engine.py" -Pattern "^class GLEngine"
-py -3.12 -c "import ast; ast.parse(open('engine.py',encoding='utf-8').read()); import engine; print([c.__name__ for c in engine.GLEngine.__mro__][:8])"
+py -3.13 -c "import ast; ast.parse(open('engine.py',encoding='utf-8').read()); import engine; print([c.__name__ for c in engine.GLEngine.__mro__][:8])"
 
 ---
 

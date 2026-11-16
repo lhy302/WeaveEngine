@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-"""B1 物理换库 — Culverin (Jolt) 桥数值用例 (需 culverin, 系统 py3.12 已装).
+"""B1 物理换库 — Culverin (Jolt) 桥数值用例 (需 culverin, 系统 py3.13 已装).
 
 设计 §5 自动行 (桥路径) + P1 必修项锁定:
   1. 球落地面停点 (|Δ|<0.03)            2. 速度落定 |v|<0.01
@@ -16,7 +16,7 @@
   12. 修复_b① 无碰撞体动态体自由积分 (重力与碰撞体解耦, legacy/Unity 契约)
 
 culverin 缺失 -> 本文件 print SKIP 并 exit 0 (套件继续).
-用法: py -3.12 tests\\test_physics_bridge.py
+用法: py -3.13 tests\\test_physics_bridge.py
 """
 
 # 2026-11-06 P-02 修复: Windows 控制台默认 GBK, 末尾 print 的 ✅/❌/≤ 等字符会抛

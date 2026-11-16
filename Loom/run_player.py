@@ -21,7 +21,7 @@ run_player.py — 播放器渲染 API 选择入口 (2026-08-29 P5)
 
 配置分层见 docs/design/用户配置目录契约_20261108.md：模板层只读、用户层只存 delta。
 
-用法: py -3.12 run_player.py <场景.json> [--backend vulkan|opengl|auto]
+用法: py -3.13 run_player.py <场景.json> [--backend vulkan|opengl|auto]
 发布版 (game_player.py) 走同一选择逻辑, 玩家可在启动参数里覆盖
 (一般为厂商发布时配置; 运行时切换设置项见编辑器设置面板).
 """
@@ -464,7 +464,7 @@ def main():
         if a == '--backend' and i + 1 < len(args):
             backend = args[i + 1]
     if not scene:
-        print("用法: py -3.12 run_player.py <场景.json> [--backend vulkan|opengl|auto]")
+        print("用法: py -3.13 run_player.py <场景.json> [--backend vulkan|opengl|auto]")
         sys.exit(2)
     run_backend(resolve_backend(backend), scene, explicit=(backend is not None))
 

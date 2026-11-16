@@ -19,7 +19,7 @@ test_eai_real.py — EAI 全命令自动化测试 (真 EditorApp, 2026-08-27)
   · 连贯操作 (右键滑动视角/拖拽 gizmo/拖拽数值块) —— 按用户拍板的"连贯操作
     双链原则", 那是 GUI 老链路专用, 命令层不模拟, 由人工实测;
   · 每条命令背后的 GUI 单步验证 (按钮点了界面变没变) —— GUI 面向人, 人工实测。
-运行: py -3.12 tests\test_eai_real.py
+运行: py -3.13 tests\test_eai_real.py
 """
 
 # 2026-11-06 P-02 修复: Windows 控制台默认 GBK, 末尾 print 的 ✅/❌/≤ 等字符会抛

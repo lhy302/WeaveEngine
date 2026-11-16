@@ -40,7 +40,7 @@ Loom 引擎内置了基于 **Anthropic Model Context Protocol (MCP)** 标准协�
     "loom-engine": {
       "command": "py",
       "args": [
-        "-3.12",
+        "-3.13",
         "D:\\my-project\\Loom(py源代码-工作区)\\Loom\\loom_mcp.py"
       ]
     }
@@ -54,7 +54,7 @@ Loom 引擎内置了基于 **Anthropic Model Context Protocol (MCP)** 标准协�
 {
   "mcpServers": {
     "loom": {
-      "command": "py -3.12 loom_mcp.py",
+      "command": "py -3.13 loom_mcp.py",
       "cwd": "D:\\my-project\\Loom(py源代码-工作区)\\Loom"
     }
   }
@@ -141,7 +141,7 @@ Loom 引擎内置了基于 **Anthropic Model Context Protocol (MCP)** 标准协�
 
 ```powershell
 cd 'Loom(py源代码-工作区)\Loom'
-py -3.12 tests\_tmp\test_mcp_server.py
+py -3.13 tests\_tmp\test_mcp_server.py
 ```
 
 ### 实测结果（100% PASS）：

@@ -14,7 +14,7 @@ r"""ab_active_gl_vk.py — 带 active_camera 的场景 GL/VK 逐像素 A/B (2026
 GL 侧: EditorApp(ctx=standalone) + 空视图 + scene_from_dict + PlayerApp 同款相机分支
 Vk 侧: SceneDriver.load_from_data (内含同款 active_camera 分支) + VkRenderer 离屏
 
-用法: py -3.12 tests\_tmp\ab_active_gl_vk.py [scene.json ...]
+用法: py -3.13 tests\_tmp\ab_active_gl_vk.py [scene.json ...]
 """
 import copy
 import os

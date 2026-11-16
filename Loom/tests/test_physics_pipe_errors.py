@@ -8,7 +8,7 @@
   3. 桥异常后本场一次性 disabled: 不逐帧重建 + 日志节流 (每场 1 条)
   4. 线程未确认退出时 _destroy_phys_bridge 拒绝销毁桥并抛给上层
 
-用法: py -3.12 tests\test_physics_pipe_errors.py
+用法: py -3.13 tests\test_physics_pipe_errors.py
 """
 
 # 2026-11-06 P-02 修复: Windows 控制台默认 GBK, 中文/符号 print 会抛

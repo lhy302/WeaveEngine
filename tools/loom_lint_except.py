@@ -53,12 +53,12 @@ E1–E12 = 已处理；E13 = 显式忽略；都没有 = 静默吞错。
 ================================================================================
 用法
 ================================================================================
-  py -3.12 tools/loom_lint_except.py                # 检查当前目录
-  py -3.12 tools/loom_lint_except.py Loom/          # 检查指定目录
-  py -3.12 tools/loom_lint_except.py --json         # JSON 输出（CI 用）
-  py -3.12 tools/loom_lint_except.py --summary      # 只显示统计
-  py -3.12 tools/loom_lint_except.py --strict-return # return None 也算 ERROR
-  py -3.12 tools/loom_lint_except.py --no-broad     # 关闭宽异常检查
+  py -3.13 tools/loom_lint_except.py                # 检查当前目录
+  py -3.13 tools/loom_lint_except.py Loom/          # 检查指定目录
+  py -3.13 tools/loom_lint_except.py --json         # JSON 输出（CI 用）
+  py -3.13 tools/loom_lint_except.py --summary      # 只显示统计
+  py -3.13 tools/loom_lint_except.py --strict-return # return None 也算 ERROR
+  py -3.13 tools/loom_lint_except.py --no-broad     # 关闭宽异常检查
 
 退出码：0 = 全部通过；1 = 有 ERROR；2 = 有 WARN 且 --warn-as-error
 """

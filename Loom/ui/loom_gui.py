@@ -13,7 +13,7 @@ QLineEdit / QDoubleSpinBox 等原生面板. QLineEdit 中文输入法原生可�
   LoomGUI (本文件)                <- 原生面板 + 事件映射 + 渲染驱动
   GLViewport (本文件)                    <- QOpenGLWidget 承载 moderngl
 
-启动: py -3.12 Loom.py --ui qt [--open 场景.json]
+启动: py -3.13 Loom.py --ui qt [--open 场景.json]
 2026-08-28: 更名回 LoomGUI —— 本文件即 Loom 编辑器核心 GUI (旧 pygame 即时
 模式视图 ui/LoomGUI.py 已删除, 功能 1:1 对照历史)。
 
