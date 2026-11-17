@@ -8,18 +8,23 @@ beta7 批 0（B7-24）要定一份两端都必须实现的 IEngineAPI。在契�
 公开方法）当场变红；任何修复（补上缺失方法）也必须同步从基线里删掉，否则红 —— 防止基线腐烂成
 「一张过期的表」。
 
-口径（v1，2026-11-17，与 beta6 审计同口径，可复算）
--------------------------------------------------
-- 成员 = 类体内 def（含 @property / @staticmethod / @classmethod）；
+口径（v2，2026-11-17 按 Q-B7-24-2 裁决升级）
+--------------------------------------------
+- 成员 = 类体内 def（含 @property / @staticmethod / @classmethod）+ 公开类属性（赋值语句）；
 - 名字不以单/双下划线开头（_private / __dunder__ 全部排除）；
 - 递归收集基类（GL 侧 8 个 mixin 都算进来），同名按 MRO 最近者为准；
-- 普通类属性不计入（render_api_current / mouse_locked 等 4 个 GL 属性不在矩阵内）；
-- 只看「存在性」，不看签名、不看语义（语义一致是 B7-22 与 P1~P5 门的事）。
+- 只看「存在性」，不看签名、不看语义（签名见 docs/design/契约_IEngineAPI_20261117.md，
+  语义一致是 B7-22 与 P1~P5 门的事）。
 
-现状基线（2026-11-17 实测）
---------------------------
-- GL 公开方法 105，VK 38，共同 28，GL 独有 77，VK 独有 10。
-- 87 条的逐条分类与处置见 docs/audit/impl_B7-24_API矩阵_20261117.md。
+口径变更留痕
+------------
+- v1（2026-11-17 首版）：不含普通类属性 → GL 105 / VK 38 / 共同 28 / GL 独有 77 / VK 独有 10。
+  这是 beta6 审计口径，首版矩阵与 docs/audit/impl_B7-24_API矩阵_20261117.md 用的是它。
+- v2（2026-11-17 人类裁决 Q-B7-24-2「属性面要进契约」后）：含普通类属性
+  → GL 109 / VK 39 / 共同 29 / GL 独有 80 / VK 独有 10。
+  新增的 3 条 GL 独有 = 3 个鼠标状态属性（mouse_locked / mouse_lock_allowed /
+  mouse_unlock_requested），它们正是「脚本读状态在 VK 下 AttributeError」的实例。
+- 两个口径的数字不可混用；本门自 v2 起以 109/39 为基线。
 
 用法
 ----
@@ -124,6 +129,18 @@ class _Index:
                 out[stmt.name] = (kind,
                                   os.path.relpath(key[0], REPO).replace(os.sep, '/'),
                                   stmt.lineno, node.name, first)
+            elif isinstance(stmt, (ast.Assign, ast.AnnAssign)):
+                targets = stmt.targets if isinstance(stmt, ast.Assign) else [stmt.target]
+                val = stmt.value
+                for tgt in targets:
+                    if isinstance(tgt, ast.Name):
+                        try:
+                            vs = ast.unparse(val)[:60] if val is not None else ''
+                        except Exception:
+                            vs = ''
+                        out[tgt.id] = ('attr',
+                                       os.path.relpath(key[0], REPO).replace(os.sep, '/'),
+                                       stmt.lineno, node.name, '%s = %s' % (tgt.id, vs))
         return out
 
 
@@ -145,6 +162,9 @@ def api_matrix():
 # 每一项 = 今天「一端有、另一端没有」的公开方法。修完一条就从这里删掉一条，并写进 IEngineAPI 契约；
 # 新增一条 = 门红。
 EXPECTED_GL_ONLY = frozenset({
+    'mouse_lock_allowed',
+    'mouse_locked',
+    'mouse_unlock_requested',
     'add_camera', 'add_light', 'add_material', 'add_model',
     'apply_game_bindings', 'apply_orbit_camera', 'attach_model', 'blit_texture',
     'clear_scene', 'collect_subtree', 'collider_bounds', 'compute_render_matrices',
@@ -174,8 +194,8 @@ EXPECTED_VK_ONLY = frozenset({
 })
 
 # 计数断言（防「两端同时改名」这种集合差异看不出来的漂移）
-EXPECTED_GL_TOTAL = 105
-EXPECTED_VK_TOTAL = 38
+EXPECTED_GL_TOTAL = 109
+EXPECTED_VK_TOTAL = 39
 
 
 def _call_groups():
@@ -232,15 +252,15 @@ def main():
             print()
             print('## ' + title)
             print()
-            print('| 方法 | 定义点 | 调用分布 | 说明 |')
-            print('|---|---|---|---|')
+            print('| 方法 | 类型 | 定义点 | 调用分布 | 说明 |')
+            print('|---|---|---|---|---|')
             for n in names:
                 kind, f, line, cls, doc = table[n]
                 c = calls.get(n) or Counter()
                 dist = ' '.join('%s=%d' % (k, c[k]) for k in
                                 ('engine', 'editor', 'player_pack', 'examples', 'tests', 'tools') if c[k])
-                print('| %s | %s:%d (%s) | %s | %s |'
-                      % (n, f, line, cls, dist or '—', doc.replace('|', '/')[:60]))
+                print('| %s | %s | %s:%d (%s) | %s | %s |'
+                      % (n, kind, f, line, cls, dist or '—', doc.replace('|', '/')[:60]))
         return 0
 
     ok = True
