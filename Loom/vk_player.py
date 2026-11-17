@@ -109,6 +109,36 @@ def _chain_callback(setter, win, our_cb, tag=''):
     return prev
 
 
+def host_key_forward(driver, ui_bridge, pg_key, down, mods=0):
+    """GLFW 键事件 -> driver 的**唯一**喂键入口（P0-3 步 2 的收敛点）。
+
+    与 GL 的 loom_glfw_window._on_key_cb 同序：
+      · 按下沿先喂 UI 焦点元素，被消费则到此为止（输入框里按 W 不该同时驱动角色）；
+      · 其余全部交给 EngineCore.handle_key_event（唯一入口：F11/F9/F10 -> UI ->
+        on_key_event 钩子 -> key_state(键码) -> 派生 script_keys）。
+
+    修前现场：这里直接 driver.key_state[**键名**] = down —— 于是 VK 播放器上
+    F9/F10/F11 全不生效（内核根本没被调用）、UI 顺序与 GL 不一致、key_state 里
+    混进字符串键名（键码空间被污染）。那是键码化之前的 VK 私有语义。
+
+    返回 True = 已被 UI 消费（内核不再处理）。
+    """
+    if down and ui_bridge is not None:
+        try:
+            if ui_bridge.on_key(pg_key, mods):
+                return True
+        except Exception:
+            pass
+    try:
+        # 本宿主已经自己喂过 UI -> 让内核跳过它自己的 UI 派发（否则同键派发两次）。
+        driver._ui_dispatch_external = True
+    except Exception:
+        pass
+    from types import SimpleNamespace
+    return bool(driver.handle_key_event(SimpleNamespace(
+        type='KEYDOWN' if down else 'KEYUP', key=pg_key, mod=mods, unicode='')))
+
+
 def _wheel_taken_by_scrollview(ui, pos):
     """本帧滚轮是否真被 UI 的 ScrollView 吃掉 (滚轮专属判据, scan_05 P-09).
 
@@ -476,13 +506,11 @@ def run_vk(scene=None, frames_n=None, keep=False, mini=False, no_shadow=False,
         try:
             import glfw
             from loom_glfw_window import _GLFW_TO_PG
-            from loom_input import _KEYMAP
             win = _resolve_glfw_window(glfw)
             if win is None:
                 _input_retry.failed(_handle_error[0] or "GLFW 窗口句柄不可用")
                 _handle_error[0] = None
                 return
-            _pg2name = {pg: name for name, pg in _KEYMAP.items()}
 
             def _on_key(w, key, scancode, action, mods):
                 if action == glfw.REPEAT:
@@ -490,14 +518,11 @@ def run_vk(scene=None, frames_n=None, keep=False, mini=False, no_shadow=False,
                 pg = _GLFW_TO_PG.get(key)
                 if pg is None:
                     return
-                # 2026-11-06 R3 (与 GL loom_glfw_window._on_key_cb 同序):
-                # 按下沿先给 UI 焦点元素; 消费则不写 key_state (输入框里按 W
-                # 不应同时驱动角色)。松开沿照旧更新 key_state。
-                if action == glfw.PRESS and ui_bridge.on_key(pg, mods):
-                    return
-                name = _pg2name.get(pg)
-                if name is not None:
-                    driver.key_state[name] = (action != glfw.RELEASE)
+                # 2026-11-18（P0-3 步 2）：宿主只负责「把 GLFW 事件翻成 ev 递进去」，
+                # 顺序编排全在 EngineCore.handle_key_event（与编辑器 / GL 播放器同一入口）。
+                # 旧实现自己写 driver.key_state[**键名**]，是键码化之前的 VK 私有语义，
+                # 正是「两端键空间不一致」的根源（独立审查 P0-3）。
+                host_key_forward(driver, ui_bridge, pg, action != glfw.RELEASE, mods)
 
             # 2026-11-07 P-07: 链式转发 —— 先跑 rendercanvas 已注册的回调
             # (它的事件栈 submit_event/get_events 靠这 5 个回调), 再处理自己的。

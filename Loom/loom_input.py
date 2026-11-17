@@ -268,7 +268,19 @@ class InputMixin:
         if not getattr(self, '_external_ctx', False):
             return
         _kp = self._key_pressed()
-        self.script_keys = {name: bool(_kp[k]) for name, k in _KEYMAP.items()}
+        # 2026-11-18（P0-3 步 2）：宿主给的快照写进 **key_state（键码）**，再由唯一派生
+        # 实现生成 script_keys —— 不再整表重建 script_keys（旧实现每帧换一个新 dict：
+        # 宿主/测试持有的旧引用立刻失联，实测编辑器 WASD 全失效）。
+        ks = self.__dict__.get('key_state')
+        if not isinstance(ks, dict):
+            ks = self.key_state = {}
+        for _name, _code in _KEYMAP.items():
+            ks[_code] = bool(_kp[_code])
+        # 外部快照是权威：直写过渡项作废（语义同旧实现，但不再换 dict 对象）。
+        self.__dict__['_sk_direct'] = set()
+        _sync = getattr(self, '_sync_script_keys_from_state', None)
+        if callable(_sync):
+            _sync()
 
     def get_action(self, name):
         """输入动作查询 (Unity 动作层): 动作名 -> 绑定的任意键按下即 True.

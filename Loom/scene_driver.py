@@ -1265,20 +1265,30 @@ class SceneDriver(EngineCore):
         派生走 EngineCore._sync_script_keys_from_state（只增不覆盖 + 原地改），
         因此持有旧引用的宿主/测试仍能看到更新（这是上次失败的关键点）。
 
-        步 1 刻意**不动** GL 的 `script_keys`（它是普通实例属性，由 GLFW 事件泵写）——
-        只有本类（VK）用这个派生属性。步 2 再把两端收敛成同一份。
+        2026-11-18（P0-3 **步 2**）：两端收敛成同一份 —— 派生规则唯一实现仍是
+        EngineCore._sync_script_keys_from_state，落点由 EngineCore._script_keys_dict 决定：
+        GL 落在它自己的 script_keys 属性（GLFW 泵写的那份），VK 落在 _script_keys。
+        本 property 只是 VK 的「读时派生」入口（GL 不需要，它每帧由泵写满）。
         """
         return self._sync_script_keys_from_state()
 
     @script_keys.setter
     def script_keys(self, value):
-        """允许写入（老宿主/测试会直接赋值）。**原地替换内容**，不换 dict 对象。"""
-        t = self.__dict__.get('_script_keys')
-        if not isinstance(t, dict):
-            t = self.__dict__['_script_keys'] = {}
+        """允许写入（老宿主/测试会直接赋值）。**原地替换内容**，不换 dict 对象。
+
+        2026-11-18（P0-3 **步 2**）：直写进来的键名记进 _sk_direct（「键名直写过渡项」）。
+        派生只覆盖**没有直写标记**的键名，所以直写值不会被预铺的 key_state 立刻抹掉 ——
+        修前现场：d.script_keys = {"w": True} 之后 is_key("w") 恒 False（与 GL 不一致，
+        脚本里「宿主给我一份按键快照」这条路在 VK 上是死的）。真实键码事件一到，
+        该键名的直写标记立即失效（见 EngineCore._write_script_key）。
+        """
+        t = self._script_keys_dict()
         t.clear()
         if isinstance(value, dict):
             t.update(value)
+            self.__dict__['_sk_direct'] = set(value.keys())
+        else:
+            self.__dict__['_sk_direct'] = set()
 
     def _warn_once(self, key, msg):
         """一次性告警（每进程每个 key 只打一条，绝不每帧刷屏）。"""

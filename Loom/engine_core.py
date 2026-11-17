@@ -180,7 +180,10 @@ class EngineCore(TransformMixin, PhysicsMixin, InputMixin, CameraMixin,
                 return True
 
         # ③ UI 输入框优先接收（焦点元素消费则跳过后续）
-        if is_press:
+        # 2026-11-18（P0-3 步 2）：宿主若**已经自己**把键喂过 UI（vk_player 的
+        # ui_bridge.on_key 在调本方法之前先喂一次），就置 _ui_dispatch_external=True，
+        # 内核跳过这一步 —— 否则同一次按键被 UI 处理两遍（输入框打一个字出两个字）。
+        if is_press and not getattr(self, '_ui_dispatch_external', False):
             ui = getattr(self, 'ui', None)
             if ui is not None:
                 try:
@@ -306,6 +309,10 @@ class EngineCore(TransformMixin, PhysicsMixin, InputMixin, CameraMixin,
                     'CAMERA_UP', 'CAMERA_DOWN', 'LOOK_LEFT', 'LOOK_RIGHT',
                     'LOOK_UP', 'LOOK_DOWN')
 
+    # 2026-11-18（P0-3 步 2）：宿主自己喂过 UI 时置 True，内核 handle_key_event 第③步
+    # 就跳过自己的 UI 派发（避免同一按键被 UI 处理两遍）。默认 False = 内核自己派发。
+    _ui_dispatch_external = False
+
     def _init_input_state(self):
         """建立后端无关的输入状态：`_key`（动作名→键码）+ `key_state`（相机键快照）。
         **两端都必须调**（GL 原来在 engine.py:380-386 内联做，VK 侧原来没有）。
@@ -337,12 +344,32 @@ class EngineCore(TransformMixin, PhysicsMixin, InputMixin, CameraMixin,
     #   · 重新绑定 dict → 宿主/测试持有旧引用，写入落到旧字典（实测解锁键轮询全失灵）。
     # 所以这里只做「已知键码/键名 -> 覆盖对应项」，绝不删除、绝不换对象。
     #
-    # 本方法只被 **VK 侧**调用（GL 的 script_keys 由事件泵自己写，不经过这里）。
+    # 2026-11-18（P0-3 **步 2**）：两端都落到这里 —— GL 的 GLFW 泵与 VK 的帧首共用
+    # 同一份派生规则（唯一派生实现），_script_keys_dict 负责找到各自的落点。
+    def _script_keys_dict(self):
+        """拿 script_keys 背后的**稳定 dict**（绝不重新绑定对象）。
+
+        两个后端各有一个落点：
+          · GL : script_keys 是普通实例属性（engine.py:417 建立、GLFW 事件泵整表写）；
+          · VK : script_keys 是 property（读时派生），真身是 _script_keys。
+        先查实例字典里的普通属性（**不走 property**，否则派生会递归），再退回 _script_keys。
+        """
+        d = self.__dict__.get('script_keys')
+        if isinstance(d, dict):
+            return d
+        d = self.__dict__.get('_script_keys')
+        if not isinstance(d, dict):
+            d = self.__dict__['_script_keys'] = {}
+        return d
+
     def _write_script_key(self, code, down):
-        """把单个键码的按下/松开写进 `script_keys`（键名->bool）。
+        """把单个键码的按下/松开写进 script_keys（键名->bool）。
 
         找不到对应键名（不在 _KEYMAP 里的键）就跳过 —— 那些键没有「名字」语义，
         只保留在 key_state（键码）里，供将来 key_pressed 类查询用。
+
+        2026-11-18（P0-3 步 2）：真实键码事件一到，该键名的「直写过渡项」标记立刻失效
+        （否则宿主直写的老快照会永远压住物理真相：实测「松开后再按回锁」就是这么坏的）。
         """
         try:
             from loom_input import _KEYMAP
@@ -356,32 +383,42 @@ class EngineCore(TransformMixin, PhysicsMixin, InputMixin, CameraMixin,
                     break
         if name is None:
             return
-        try:
-            sk = self.script_keys
-        except Exception:
-            sk = self.__dict__.get('_script_keys')
-        if not isinstance(sk, dict):
-            return
+        sk = self._script_keys_dict()
+        direct = self.__dict__.get('_sk_direct')
+        if isinstance(direct, set):
+            direct.discard(name)
         sk[name] = bool(down)
 
     def _sync_script_keys_from_state(self):
-        """把 key_state 并入 script_keys（返回那个稳定 dict 对象）。"""
+        """把 key_state 并入 script_keys（返回那个稳定 dict 对象）。
+
+        步 2 的不变量（门 test_input_chain_parity 逐步校验）：
+
+            script_keys ≡ 「key_state 派生结果」∪「键名直写过渡项」
+
+        · 派生结果：key_state 里有的键码，其键名必须同值（key_state 是唯一物理真相）；
+        · 直写过渡项：宿主直接 engine.script_keys = {...} 写进来的键名（setter 记进
+          _sk_direct）。它们**只在该键没有键码级信息时生效**，且真实键码事件一到就失效
+          （见 _write_script_key）—— 老宿主/测试夹具的直写因此仍通到脚本，
+          但绝不会盖住物理状态。
+        """
         try:
             from loom_input import _KEYMAP
         except Exception:
-            return self.__dict__.setdefault('_script_keys', {})
+            return self._script_keys_dict()
         ks = self.__dict__.get('key_state') or {}
-        target = self.__dict__.get('_script_keys')
-        if not isinstance(target, dict):
-            target = self.__dict__['_script_keys'] = {}
+        target = self._script_keys_dict()
+        direct = self.__dict__.get('_sk_direct')
+        if not isinstance(direct, set):
+            direct = set()
         for name, code in _KEYMAP.items():
-            if code in ks:
+            if code in ks and name not in direct:
                 target[name] = bool(ks[code])
         # 过渡兼容：老代码/测试仍会往 key_state 里写**键名**（VK 旧语义）。
         # **仅在该键没有键码级信息时生效** —— 有键码就以键码为准（否则一条陈旧的
-        # 键名条目会永远覆盖真实状态：实测「松开后再按回锁」失效就是这个 `or` 造成的）。
+        # 键名条目会永远覆盖真实状态：实测「松开后再按回锁」失效就是这个 or 造成的）。
         for name in _KEYMAP:
-            if name in ks and _KEYMAP[name] not in ks:
+            if name in ks and _KEYMAP[name] not in ks and name not in direct:
                 target[name] = bool(ks[name])
         return target
 

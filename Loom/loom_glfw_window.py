@@ -307,16 +307,28 @@ class GlfwWindowMixin:
         self.mouse_wheel = 0
 
         # 脚本按键快照（每帧轮询物理键盘状态，与 pygame.key.get_pressed 同语义）
+        # 2026-11-18（P0-3 步 2）：本泵是 GL 侧的**合法写者** —— 它是唯一掌握物理键
+        # 真相的地方（窗口失焦时 GLFW 不发 KEYUP，只有轮询才知道键真的松开了）。
+        # 所以 script_keys = _kp 的整表赋值**保持不变**（GL 行为零改动），但同一帧把
+        # 同一份值写进 key_state（键码空间）：两套键空间永远同值，否则「宿主写键 ->
+        # 脚本 is_key」这条链在两端会走出两个结果（P0-3 步 2 前的现场）。
         _kp = {}
+        _ks = self.__dict__.get('key_state')
+        if not isinstance(_ks, dict):
+            _ks = self.key_state = {}
         for name, pg_key in self._key_map_items():
             gl_key = _PG_TO_GLFW.get(pg_key)
             if gl_key is None:
                 _kp[name] = False
+                _ks[pg_key] = False
                 continue
             try:
-                _kp[name] = (glfw.get_key(self._glfw_win, gl_key) == glfw.PRESS)
+                _down = (glfw.get_key(self._glfw_win, gl_key) == glfw.PRESS)
             except Exception:
-                _kp[name] = False
+                _down = False
+            _kp[name] = _down
+            _ks[pg_key] = _down
+        self.key_state = _ks
         self.script_keys = _kp
 
         # pending -> 引擎字段
