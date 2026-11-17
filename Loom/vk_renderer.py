@@ -1579,16 +1579,28 @@ class VkRenderer:
         _n_dir = 0          # 真正算出 VP 的平行光投影灯数
         _n_pt = 0           # 要求投影的点/聚光灯数
         for l in lights[:8]:
-            if l.kind == 'directional' and l.shadow:
+            # B7-21 修复 (2026-11-17): beam 平行光**即使 shadow=False 也必须算 VP**。
+            #   原因: 光束截面遮罩走 u.lights[i].ortho (shaders/main.frag:198-210)。
+            #   没有 VP 时 ortho 全零 -> SHADOW_UV 除 w 得 NaN -> in_shape=0 -> sh=0
+            #   -> 该灯 radiance 归零 = **整盏灯失效**（实测: 同一 beam 场景 GL mean
+            #   0.4545 / VK 0.3381, MAE 0.1165; 把 shadow 改成 true 后两端 MAE=0
+            #   逐字节相同 —— 说明差异只来自这一处 VP 缺失）。
+            #   GL 侧条件本来就是 `light.shadow or light.mode == 'beam'`
+            #   (loom_lighting.py:163)，这里补齐同一条件。
+            #   阴影预算不受影响: _n_dir 与 _dir_shadow_slots 仍只统计/分配
+            #   **真投影灯**（下面 if l.shadow 里），多算的只是 VP，不占贴图槽、
+            #   不触发「超出部分无阴影」警告。
+            if l.kind == 'directional' and (l.shadow or l.mode == 'beam'):
                 vp = self._dir_light_vp(l, worlds, vis)
                 if vp is not None:
                     self._light_vps[l.guid] = vp
-                    _n_dir += 1
-                    # 2026-11-07: 前 2 盏投影平行光各占一张 1024² 贴图槽位
-                    # (0/1); 第 3 盏及以后不分配 -> params.w=-1, 该灯无阴影
-                    # (不再拿别人的贴图做 PCF)。VP 仍保留 (beam 截面要用 ortho)。
-                    if len(self._dir_shadow_slots) < _SHADOW_SLOTS:
-                        self._dir_shadow_slots[l.guid] = len(self._dir_shadow_slots)
+                    if l.shadow:
+                        _n_dir += 1
+                        # 2026-11-07: 前 2 盏投影平行光各占一张 1024² 贴图槽位
+                        # (0/1); 第 3 盏及以后不分配 -> params.w=-1, 该灯无阴影
+                        # (不再拿别人的贴图做 PCF)。VP 仍保留 (beam 截面要用 ortho)。
+                        if len(self._dir_shadow_slots) < _SHADOW_SLOTS:
+                            self._dir_shadow_slots[l.guid] = len(self._dir_shadow_slots)
             elif l.kind in ('point', 'spot') and l.shadow:
                 _n_pt += 1
                 # 2026-11-06 点光 6 面 VP (与 GL _point_light_vp 同式);
