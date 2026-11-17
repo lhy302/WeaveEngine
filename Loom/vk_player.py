@@ -320,6 +320,10 @@ def run_vk(scene=None, frames_n=None, keep=False, mini=False, no_shadow=False,
             raise FileNotFoundError("场景不存在: %s" % scene)
         data = sceneio.load_scene_data(scene)
     driver = SceneDriver()
+    # 2026-11-17（独立审查 P0-1）：SceneDriver 从不设 is_playing，导致内核版
+    # toggle_logic_paused 第一行就 return False（F9 暂停在 VK 上是死代码）。
+    # 播放器一进来就是「正在播放」语义，与 GL 的 PlayerApp 同。
+    driver.is_playing = True
     # 2026-11-09 (Q6=A): 与 GL 播放器一致 —— 场景目录作为 base_dir，
     # skybox 六面图的相对路径按它解析（否则换目录启动就只剩默认蓝）。
     _base_dir = os.path.dirname(os.path.abspath(scene)) if scene else None

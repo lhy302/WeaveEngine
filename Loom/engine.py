@@ -208,13 +208,8 @@ class GLEngine(EngineCore, ShadowMixin, HudMixin, RenderMixin, ModelGpuMixin, Li
     # (多引擎实例互不误伤; 各失效点改调 self._bump_struct()).
     # _ANCESTRY_CACHE 已随 M28 碰撞段迁入 loom_physics.PhysicsMixin。
 
-    def _bump_struct(self):
-        """组3: 结构变更计数器 (SoA 平面快照 + ancestry 缓存共用失效源).
-        实例属性守卫: 测试桩 (__new__ 不跑 __init__) 无 _struct_gen 时惰性建."""
-        try:
-            self._struct_gen += 1
-        except AttributeError:
-            self._struct_gen = 1
+    # 2026-11-17 (S2-2): _bump_struct 已搬进 EngineCore —— SceneDriver 继承内核后也必须有它
+    # （否则共享的 set_parent / remove_camera 一调就 AttributeError，独立审查已实测）。
 
     # 组3: 活实例弱引用表 (GameObject.parent 旁路置脏用; __init__ 注册,
     # 弱引用自动回收死实例)

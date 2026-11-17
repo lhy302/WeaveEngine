@@ -75,6 +75,8 @@
 
 | **Q-B7-29-1** | **Hub 侧两件事**：① `test_hub_update.py` **打印 FAIL 却退出码 0**（`run_all` 从未抓到，HEAD 上即如此，已 `git stash` 验证）；② `is_program_files('C:\Program Files\LoomHub')` 返回 **False**（应为 True）→ 装到 Program Files 时**不加 `/ALLUSERS`、不触发 UAC** | **主审建议**：两项都归 **Hub 0.1.5**（本次不修，属 Hub 侧）；①的机制**未核**（有 `sys.exit(1)` + fail-gate 却退 0，不猜） | 影响 Hub 安装权限语义与回归可信度 | **待答** |
 
+| **Q-B7-30-1** | **独立审查判定「未达标」**（2026-11-17，未参与实现的子代理）：三道门全绿但判据被证伪 —— F9/F10/F11/Tab 在 VK 上无效、`key_state` 两套键空间、`vk_player` 未接 `handle_key_event`、14 条 API 在 VK 仍 AttributeError | **主审建议**：本轮已修 P0-5/P0-6/P0-4/c4/`is_playing`（一整类 AttributeError 已消灭）；**P0-2/P0-3（键空间重构 + vk_player 接入）单独立项**，估 2-3 人天；其余 a1~a14 估 3-5 人天 | 决定「两后端合并」能否在 beta7 收口 | **待答** |
+
 > 证据与逐条表：`docs/audit/impl_B7-24_API矩阵_20261117.md`（§3 全 77 条 / §4 VK 独有 10 条 / §6 这四个问题）。
 
 ## B. 已关闭（不再需要回答，留痕备查）

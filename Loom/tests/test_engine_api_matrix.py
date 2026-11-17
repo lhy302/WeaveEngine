@@ -36,9 +36,12 @@ beta7 批 0（B7-24）要定一份两端都必须实现的 IEngineAPI。在契�
   toggle_logic_paused 也进内核（数据面进内核，GPU 上传走 _backend_upload_model 钩子）
   → VK 93 → **98**，GL 独有 29 → **24**，共同 83 → **88**。
   差异从 79 条缩到 40 条，**这是「一个引擎」的直接证据**，不是「逐条补 VK」。
-  新增的 3 条 GL 独有 = 3 个鼠标状态属性（mouse_locked / mouse_lock_allowed /
-  mouse_unlock_requested），它们正是「脚本读状态在 VK 下 AttributeError」的实例。
-- 两个口径的数字不可混用；本门自 v2 起以 109/39 为基线。
+  新增的 3 条 = 3 个鼠标状态属性（mouse_locked / mouse_lock_allowed /
+  mouse_unlock_requested）。**注意（2026-11-17 独立审查 P2-11 纠错）**：它们在
+  loom_input.py:225-228 定义，经 EngineCore 继承后是**共同成员**，不是 GL 独有 ——
+  本条原描述写错了，实测 api_matrix() 里两端都为 True。
+- 两个口径的数字不可混用。当前基线见下方 EXPECTED_*_TOTAL 常量（会随每次收敛更新），
+  不要在本 docstring 里写死数字（原写「以 109/39 为基线」已过期，独立审查 P2-12）。
 
 用法
 ----

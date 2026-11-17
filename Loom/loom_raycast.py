@@ -161,14 +161,22 @@ class RaycastMixin:
                 fw = self.compute_world_matrices(models)
             aabbs = self._model_aabbs_par(models, fw)
         except Exception:
-            # 保底：逐模型现算
+            # 保底：逐模型现算 AABB。
+            # 2026-11-17 修复（独立审查抓到）：旧实现 `from physics_bridge import collider_bounds`
+            # 拿到的是 ('box', (mn, mx)) 两元组，却被当成 (mn, mx) 直接解包 → mn='box'
+            # → 下面 mn.x 抛 "str object has no attribute x"。且该分支在**没有
+            # _model_aabbs_par 的宿主（VK）上必然进入 → VK 的 raycast 100% 失效。
+            # 改用后端无关的 loom_collision.aabb_of（两端同一份）。
+            import loom_collision as _lc
+            _cache = getattr(self, '_bb_cache', None)
+            if _cache is None:
+                _cache = {}
             aabbs = [None] * len(models)
             for i, m in enumerate(models):
                 try:
-                    from physics_bridge import collider_bounds
-                    ab = collider_bounds(m)
-                    if ab is not None:
-                        aabbs[i] = ab
+                    M = self.model_world_matrix(m)
+                    _mn, _mx = _lc.aabb_of(m, M, _cache)
+                    aabbs[i] = (Point3D(*_mn), Point3D(*_mx))
                 except Exception:
                     pass
 

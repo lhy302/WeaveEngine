@@ -462,6 +462,12 @@ class SceneDriver(EngineCore):
     """
 
     def __init__(self, data=None):
+        # 2026-11-17 (S2-2): 先建**后端无关**的内核状态（models/materials/lights/cameras/
+        # current_model_index/_struct_gen/_soa_snap/_stage_*/_tps_events/_logic_*/is_playing/
+        # events/key_state）。原先这些字段只在 GLEngine.__init__ 里建，于是继承来的共享方法
+        # 在 VK 上一调就 AttributeError（独立审查实测：set_parent / select_next_model /
+        # raycast / _prof_add 等）。下面本类自己的赋值会覆盖同名项，行为不变。
+        EngineCore.__init__(self)
         self.models = []
         self.materials = []      # 2026-11-06 对齐 GL: 材质资产库 (PBR/共享材质)
         self.lights = []
@@ -918,9 +924,15 @@ class SceneDriver(EngineCore):
         return _lc.dispatch(self.models, pairs)
 
     def set_logic_paused(self, paused):
-        """2026-11-07: 统一暂停接口 (VK 播放器)."""
+        """2026-11-07: 统一暂停接口 (VK 播放器).
+
+        2026-11-17（独立审查 P0-4）：**返回值统一为 bool**，与内核版一致 ——
+        原来返回 None，而 GLEngine 走的是内核版（返回 bool），同一份脚本两端拿到的
+        东西不同。字段也同时写 `_logic_paused`（内核读这个名字）与 `logic_paused`
+        （本类 advance_logic 读这个名字），避免「双名兜底」掩盖差异。
+        """
         self.logic_paused = bool(paused)
-        # 2026-11-09 暂停重锚（同 GL: engine.toggle_logic_paused 暂停时时钟 reset）
+        self._logic_paused = self.logic_paused
         if self.logic_paused:
             self._pause_reanchored = True
             clk = getattr(self, '_clock', None)
@@ -931,6 +943,7 @@ class SceneDriver(EngineCore):
                     print('[驱动] 暂停重锚失败 (%r)' % (e,))
         else:
             self._pause_reanchored = False
+        return self.logic_paused
 
     def request_game_exit(self):
         """2026-11-07: 统一退出接口 (VK 播放器 -> 关窗退出)."""
