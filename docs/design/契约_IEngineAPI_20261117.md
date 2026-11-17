@@ -12,8 +12,12 @@
 
 ## 0 契约的边界（三句话）
 
-1. **契约面 = A 40 + B 15 = 55 条**。两端都必须有、同名、同签名、同可观察语义。
-2. **仅 GL 面 = C 20 条**。VK 侧调用必须**显式抛** `NotSupportedOnBackend`（Q-B7-24-3 裁决 a）——**允许差异，不允许差异是隐形的**。
+1. **契约面 = A 40 + B 15 + 宿主事件入口 3 = 58 条**。两端都必须有、同名、同签名、同可观察语义。
+   > **2026-11-17 修正（人类裁决：不受后端影响 / JVM 模型）**：`on_key_event` / `on_text_input` / `on_quit_request`
+   > 原被我判为「仅 GL」（C 类），**这是误判** —— 它们是**宿主/用户的事件入口**，不该因后端不同而存在性不同。
+   > 已移出 C 类、并入核心契约（见 §6.2），实现由 S1「事件面统一」承担。详见
+   > [设计_单一引擎门面_后端下沉_20261117.md](设计_单一引擎门面_后端下沉_20261117.md)。
+2. **仅 GL 面 = C 17 条**（原 20 条 − 3 条宿主事件入口）。VK 侧调用必须**显式抛** `NotSupportedOnBackend`（Q-B7-24-3 裁决 a）——**允许差异，不允许差异是隐形的**。
 3. **非契约面 = D 12 条**。public 但语义私有，转 `_xxx`；契约不承诺，脚本不得使用。
 
 现状（口径 v2，2026-11-17 实测）：GL 公开成员 **109**，VK **39**，共同 **29**，GL 独有 **80**，VK 独有 **10**。
@@ -256,9 +260,24 @@ class NotSupportedOnBackend(RuntimeError):
 | `should_fallback_remote` | 见签名 | 连续上屏失败 → 建议离屏回读 | VK 侧另有回退链 | Loom/loom_render.py:1291 |
 | `profile_snapshot` | 见签名 | 插桩快照 | 诊断走 `engine_metrics` EAI 命令 | Loom/loom_profiler.py:69 |
 | `get_frame_jitter` | 见签名 | 帧长统计 | 同上 | Loom/loom_hud.py:329 |
-| `on_key_event` / `on_text_input` / `on_quit_request` | 见签名 | GLFW 窗口回调入口 | VK 由播放器喂（`feed_mouse_rel` 等） | Loom/loom_glfw_window.py:427/430/433 |
+| ~~`on_key_event` / `on_text_input` / `on_quit_request`~~ | — | — | — | **已移出 C 类 → §6.2（宿主事件入口，属核心契约）** |
 | `step_logic_once` | 见签名 | 编辑器 F10 单步 | 编辑器专属（编辑器只有 GL） | Loom/engine.py:1602 |
 | `sync_script_keys` | 见签名 | 嵌入式（Qt 宿主）刷脚本键 | 编辑器专属 | Loom/loom_input.py:262 |
+
+### 6.2 宿主事件入口（**不属于 C 类**，核心契约，3 条）
+
+> 人类裁决（2026-11-17）：「用户不管用的是VK后端还是GL后端都用的是完全一样的事件API，底层的区别由引擎进行屏蔽。」
+> 因此这三个**必须两端同名同签名同语义**。「谁把事件喂进来」是宿主的事（编辑器 GLFW/Qt、播放器、打包游戏），
+> 不是用户 API 的差异。
+
+| 入口 | 契约签名 | 语义 | 现状 | 落地步 |
+|---|---|---|---|---|
+| `on_key_event` | `on_key_event(self, ev) -> bool` | 键盘事件入口；`ev` = `{type: KEYDOWN/KEYUP, key, mod, unicode}`；返回 True = 已消费（不再进 `key_state`） | GL 有（GLFW 回调调用）；**VK 无** | **S1** |
+| `on_text_input` | `on_text_input(self, ev) -> bool` | 文本输入入口（IME/字符提交）；返回 True = 已消费 | GL 有；**VK 无** | **S1** |
+| `on_quit_request` | `on_quit_request(self) -> bool` | 关窗请求；返回 True = 允许退出（False = 拒绝/已处理） | GL 有；**VK 无** | **S1** |
+
+> 同一批还要统一（S1）：鼠标增量入口（GL 内部 `_update_mouse_rel` / VK `feed_mouse_rel` + `consume_mouse_input`）、
+> 鼠标锁定三件套（`set_mouse_locked` / `toggle_mouse_locked` / `set_ui_capture_mouse` 已在共享 28 条内）。
 
 ### 6.1 反向的「仅 VK」（2 条，**不需要** GL 抛）
 
