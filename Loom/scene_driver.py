@@ -591,10 +591,23 @@ class SceneDriver:
         except Exception:
             self._interp_mode = 'interpolate'
         # 分离批1+2: 双 accumulator 时钟 + 插值状态 (与 engine 同实现同语义)
-        from core_clock import FixedStepClock, split_enabled
+        # B7-18 修复 (2026-11-17): 原为 `split_enabled()` + `FixedStepClock()` **无参**——
+        #   开关那半碰巧读了设置(split_enabled(None) 内部会 load_settings), 但**时钟那半永远取
+        #   构造默认 30Hz**, 完全不读 logic_fps / phys_substep_dt / physics_fps。
+        #   实测后果: 设置 60Hz → GL 60.0Hz / VK **30.0Hz**; 20Hz/45Hz 同样被吞;
+        #   物理子步长恒 1/60 不跟设置 → 同一场景两端**逻辑步长与物理子步数都不同**(行为不同,
+        #   不只是性能不同)。打包游戏默认后端是 vulkan(game_player.py), 所以打包产物也中招。
+        #   改法: 与 engine.py:469-480 逐条一致 —— 读同一份设置, 走同一个构造函数。
+        #   门: tests/test_clock_settings_propagation.py (同一设置 → 两端时钟参数逐项相等)。
+        from core_clock import clock_from_settings, split_enabled
         from interp_state import InterpState
-        self._split_enable = split_enabled()      # 设置面 logic_fps<=0 判定
-        self._clock = FixedStepClock() if self._split_enable else None
+        try:
+            import guiloader as _gl_s
+            _s_clock = _gl_s.load_settings('loom')
+        except Exception:
+            _s_clock = {}
+        self._split_enable = split_enabled(_s_clock)   # 设置面 logic_fps<=0 判定
+        self._clock = clock_from_settings(_s_clock) if self._split_enable else None
         if self._clock is not None:
             self._clock.on_logic_step.append(self._logic_frame)
             # 批5: 物理不挂 on_physics_step (已删) — 子步在 _logic_frame 内循环
