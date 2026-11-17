@@ -994,6 +994,9 @@ class SceneDriver(EngineCore):
         """分离批1 渲染帧入口: 时钟推进 (排 0~N 逻辑步 + 0~M 物理步).
         logic_fps<=0 → 旧绑死: 直接以 render_dt 跑一遍三段
         (★B7b 2026-10-16: 删 LOOM_NO_SPLIT 逃生门; 绑死模式仅由设置触发)."""
+        # 2026-11-18（P0-3 步 1）：帧首把 key_state（键码）派生成 script_keys（键名）。
+        # 与 GL 的事件泵/帧头刷新同语义；只增不覆盖 + 原地改，不会打断其它写者。
+        self._sync_script_keys_from_state()
         # 2026-11-06 输入/相机帧首 (与 GL 同序: 鼠标结算 -> 挂父相机重应用 ->
         # 开发者视角鼠标 -> 逻辑步 (脚本)) —— 脚本后写仍覆盖, 契约不变。
         # 2026-11-07 通关暂停: 逻辑帧冻结 (脚本/物理/动画都不走), 渲染继续
@@ -1249,20 +1252,33 @@ class SceneDriver(EngineCore):
         """poll_unlock 的驱动内别名（保留旧调用名，语义完全一致）。"""
         return self.poll_unlock()
 
-    # ---- GL 同名按键快照别名 + 一次性告警（D6=A 委托的前置条件） ----
+    # ---- GL 同名按键快照别名（D6=A 委托的前置条件） ----
     @property
     def script_keys(self):
         """GL 侧同名按键快照（InputMixin 用 `script_keys`，驱动用 `key_state`）。
 
-        2026-11-08 批2 返修（独立验收 B 条）: `engine.GLEngine._poll_mouse_unlock_key`
-        的前置检查要求 `script_keys` 是 dict；缺这个别名时委托**会悄悄失败**并退回
-        驱动内的语义拷贝 —— 正是 D6=A 要消灭的"两套语义"。这里把它暴露成
-        **同一个 dict**（读写同源，不做拷贝，`key_state` 仍是唯一存储）。
+        2026-11-08 批2（独立验收 B 条）：`engine.GLEngine._poll_mouse_unlock_key` 的前置检查
+        要求 `script_keys` 是 dict；缺这个别名时委托会悄悄失败并退回驱动内的语义拷贝。
+
+        2026-11-18（P0-3 **步 1**）：`key_state` 现在是「键码 -> bool」的完整物理键快照，
+        所以本属性**读时派生**：把键码翻成键名（`is_key`/`get_action` 的读法）。
+        派生走 EngineCore._sync_script_keys_from_state（只增不覆盖 + 原地改），
+        因此持有旧引用的宿主/测试仍能看到更新（这是上次失败的关键点）。
+
+        步 1 刻意**不动** GL 的 `script_keys`（它是普通实例属性，由 GLFW 事件泵写）——
+        只有本类（VK）用这个派生属性。步 2 再把两端收敛成同一份。
         """
-        ks = self.__dict__.get('key_state')
-        if ks is None:                      # 未初始化（极端构造顺序）-> 建一个
-            ks = self.__dict__['key_state'] = {}
-        return ks
+        return self._sync_script_keys_from_state()
+
+    @script_keys.setter
+    def script_keys(self, value):
+        """允许写入（老宿主/测试会直接赋值）。**原地替换内容**，不换 dict 对象。"""
+        t = self.__dict__.get('_script_keys')
+        if not isinstance(t, dict):
+            t = self.__dict__['_script_keys'] = {}
+        t.clear()
+        if isinstance(value, dict):
+            t.update(value)
 
     def _warn_once(self, key, msg):
         """一次性告警（每进程每个 key 只打一条，绝不每帧刷屏）。"""
@@ -1517,18 +1533,9 @@ class SceneDriver(EngineCore):
         if physb is None:
             return False
         return physb.collider_hit(a, b)
-
-    # ---- 输入 (安全默认: 无键=不动; 后端口喂数据写 key_state / 改 actions) ----
-    def is_key(self, name):
-        """按键状态查询 — 同 engine.is_key; 默认全 False (无输入=不动)."""
-        return bool(self.key_state.get(name, False))
-
-    def get_action(self, name):
-        """输入动作层查询 — 同 engine.get_action; 默认 False."""
-        for k in self.actions.get(name, (name,)):
-            if self.key_state.get(k, False):
-                return True
-        return False
+    # 2026-11-18（P0-3 步 1）：VK 版 is_key/get_action 已删除 —— 它们按**键名**查
+    # key_state，而 key_state 现在是键码->bool，查不到。改继承 InputMixin 的实现
+    # （读 script_keys = 键名->bool，由 _write_script_key / 派生维护），与 GL 同一份。
 
     # ---- 鼠标 (与 loom_input.InputMixin 同语义: 锁定状态机 + 指针增量) ----
     def set_mouse_lock_allowed(self, allowed):

@@ -198,16 +198,24 @@ class EngineCore(TransformMixin, PhysicsMixin, InputMixin, CameraMixin,
 
         # ⑤ key_state 更新 / Tab 选中下一个
         ks = getattr(self, 'key_state', None)
+        if ks is None:
+            ks = self.key_state = {}
+        # 2026-11-18（P0-3 步 1）：**总是**记录键码，不再要求键已在 ks 里。
+        # 旧实现只更新 key_state 已有的键（= 10 个相机键），于是 W/A/S/D 这类脚本键
+        # 从来没进过快照。现在 key_state 是「键码 -> bool」的完整物理键快照。
         if is_press:
             if k == getattr(self, '_key', {}).get('SELECT_NEXT_MODEL'):
                 try:
                     self.select_next_model()
                 except Exception:
                     pass
-            elif ks is not None and k in ks:
-                ks[k] = True
-        elif ks is not None and k in ks:
+            ks[k] = True
+        else:
             ks[k] = False
+        # 2026-11-18（P0-3 步 1）：统一入口同时更新派生视图 `script_keys`（键名->bool）。
+        # 这样「同一个事件 → 同一个可观察结果」不再依赖宿主另外刷一次；GL 的 GLFW
+        # 事件泵稍后会用物理键快照覆盖同名项（值相同，不冲突）。
+        self._write_script_key(k, is_press)
         return False
 
     def handle_text_input(self, ev):
@@ -318,6 +326,64 @@ class EngineCore(TransformMixin, PhysicsMixin, InputMixin, CameraMixin,
             k = self._key.get(name)
             if k is not None:
                 ks.setdefault(k, False)
+
+    # ============ P0-3 步 1：script_keys 派生（只增不覆盖 + 原地改） ============
+    # 键空间：key_state = 键码 -> bool（物理键快照，handle_key_event 写）；
+    #         script_keys = 键名 -> bool（is_key/get_action 读）。
+    #
+    # 为什么「只增不覆盖 + 原地改」（2026-11-18 失败留痕的教训）：
+    #   · script_keys 有多个写者（GL 的 GLFW 事件泵、editor 帧头、外部 ctx、测试夹具）→
+    #     整表重算会把它们的写入**清空**（实测编辑器 WASD 全失效）；
+    #   · 重新绑定 dict → 宿主/测试持有旧引用，写入落到旧字典（实测解锁键轮询全失灵）。
+    # 所以这里只做「已知键码/键名 -> 覆盖对应项」，绝不删除、绝不换对象。
+    #
+    # 本方法只被 **VK 侧**调用（GL 的 script_keys 由事件泵自己写，不经过这里）。
+    def _write_script_key(self, code, down):
+        """把单个键码的按下/松开写进 `script_keys`（键名->bool）。
+
+        找不到对应键名（不在 _KEYMAP 里的键）就跳过 —— 那些键没有「名字」语义，
+        只保留在 key_state（键码）里，供将来 key_pressed 类查询用。
+        """
+        try:
+            from loom_input import _KEYMAP
+        except Exception:
+            return
+        name = _KEYMAP.get(code) if hasattr(_KEYMAP, 'get') else None
+        if name is None:
+            for _n, _c in _KEYMAP.items():
+                if _c == code:
+                    name = _n
+                    break
+        if name is None:
+            return
+        try:
+            sk = self.script_keys
+        except Exception:
+            sk = self.__dict__.get('_script_keys')
+        if not isinstance(sk, dict):
+            return
+        sk[name] = bool(down)
+
+    def _sync_script_keys_from_state(self):
+        """把 key_state 并入 script_keys（返回那个稳定 dict 对象）。"""
+        try:
+            from loom_input import _KEYMAP
+        except Exception:
+            return self.__dict__.setdefault('_script_keys', {})
+        ks = self.__dict__.get('key_state') or {}
+        target = self.__dict__.get('_script_keys')
+        if not isinstance(target, dict):
+            target = self.__dict__['_script_keys'] = {}
+        for name, code in _KEYMAP.items():
+            if code in ks:
+                target[name] = bool(ks[code])
+        # 过渡兼容：老代码/测试仍会往 key_state 里写**键名**（VK 旧语义）。
+        # **仅在该键没有键码级信息时生效** —— 有键码就以键码为准（否则一条陈旧的
+        # 键名条目会永远覆盖真实状态：实测「松开后再按回锁」失效就是这个 `or` 造成的）。
+        for name in _KEYMAP:
+            if name in ks and _KEYMAP[name] not in ks:
+                target[name] = bool(ks[name])
+        return target
 
     # ---- 可覆写钩子（默认行为在 handle_* 里；编辑器/宿主覆写这三个） ----
     def on_key_event(self, ev):

@@ -210,10 +210,17 @@ def t_unlock_delegation():
     import engine as E
 
     d = _driver()
-    check('script_keys 与 key_state 是同一个 dict (引擎前置)',
-          d.script_keys is d.key_state, (id(d.script_keys), id(d.key_state)))
+    # 2026-11-18（P0-3 步 1）：旧断言要求 script_keys **就是** key_state（同一个 dict）——
+    # 那是「VK 只有一个按名字写的 dict」时期的实现细节，也正是两端键空间不一致的根源
+    # （独立审查 P0-3）。现在两端统一为：key_state = 键码->bool（物理键快照），
+    # script_keys = 键名->bool（is_key/get_action 读它）。断言改为验**语义**而非对象身份。
+    check('script_keys 是 dict（引擎前置要求）', isinstance(d.script_keys, dict),
+          type(d.script_keys))
+    check('key_state 是 dict（键码->bool）', isinstance(d.key_state, dict),
+          type(d.key_state))
     d.key_state['Tab'] = True
-    check('写 key_state 后 script_keys 立即可见（同源）', d.script_keys.get('Tab') is True)
+    check('写 key_state(Tab) 后 script_keys 立即可见（派生生效）',
+          d.script_keys.get('Tab') is True, d.script_keys.get('Tab'))
     check('_poll_unlock_local 语义拷贝已删除 (D6=A: 只允许一套实现)',
           not hasattr(d, '_poll_unlock_local'), dir(d)[:0])
     check('提供 _warn_unlock_poll_unavailable（vk_player 解析器前置）',
