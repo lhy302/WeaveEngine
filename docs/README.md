@@ -115,6 +115,7 @@
 | [audit/impl_B7-24_API矩阵_20261117.md](audit/impl_B7-24_API矩阵_20261117.md) | **B7-24 批 0 第一步**：两端公开 API 矩阵（GL 105 / VK 38 / GL 独有 77 / VK 独有 10）+ 77 条四类分类草案 + 门（`Loom/tests/test_engine_api_matrix.py`）+ 4 条待裁决 |
 | [audit/fix_B7-18_时钟传播_20261117.md](audit/fix_B7-18_时钟传播_20261117.md) | **B7-18 修复记录**：修前必红实测（GL 60.0Hz / VK 30.0Hz）+ 根因（无参构造）+ 修后绿 + 基线未动证据 |
 | [audit/fix_B7-21_beam灯VK失效_20261117.md](audit/fix_B7-21_beam灯VK失效_20261117.md) | **B7-21 修复记录**：机理逐层推导 + 修前 MAE 0.1165 / 修后 0.000000 + 门有牙证据（回退后 3 红）+ 反向保护（M3-N5） |
+| [audit/scan_B7-26_逻辑帧段序_20261117.md](audit/scan_B7-26_逻辑帧段序_20261117.md) | **B7-26 取证**：插桩实测两端段序（GL 8 段 / VK 缺 audio·prep·dispatch）+ 能力面全缺 + 两条配对来源路线对比（等裁决） |
 | 口径 v2 更新（属性面入契约后：GL 109 / VK 39 / GL 独有 80 / VK 独有 10）与四类正式划分见 [design/契约_IEngineAPI_20261117.md](design/契约_IEngineAPI_20261117.md)；本文件正文是 v1 快照，保留不改 |
 
 > beta6 及以前的所有审计记录已在 [archive/](archive/_README.md)。
