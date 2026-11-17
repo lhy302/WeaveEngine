@@ -74,21 +74,33 @@ def sha256(path):
 
 
 EX_SCENE = os.path.join(ROOT, "examples", "PacMan2D.json")
-AUDIT_SNAP = os.path.join(ROOT, "docs", "audit", "pacman2d_scene.json")
+
+# 2026-11-17: 文档整理把这份审计快照从 docs/audit/ 归档到 docs/archive/v0.1.0-beta3/
+# （docs/audit/ 只放当前版本，版本发包后整体移入 archive/v<版本>/）。
+# 本测试的意图是「场景真值快照仍随仓库存在，可与 examples/ 逐字节对拍」，
+# 与它放在哪个目录无关 —— 因此按候选顺序查找，两个位置都认；
+# 两处都找不到才算 FAIL（防止将来再归档时静默失去对照）。
+_AUDIT_SNAP_CANDIDATES = [
+    os.path.join(ROOT, "docs", "archive", "v0.1.0-beta3", "pacman2d_scene.json"),
+    os.path.join(ROOT, "docs", "audit", "pacman2d_scene.json"),
+]
+AUDIT_SNAP = next((p for p in _AUDIT_SNAP_CANDIDATES if os.path.isfile(p)),
+                  _AUDIT_SNAP_CANDIDATES[0])
+AUDIT_SNAP_REL = os.path.relpath(AUDIT_SNAP, ROOT).replace(os.sep, "/")
 
 print("=== 一. 场景入库与快照对照 (P-06-08 / D13=A) ===")
 check("1-1 examples/PacMan2D.json 已入库", os.path.isfile(EX_SCENE), EX_SCENE)
 have_ex = os.path.isfile(EX_SCENE)
 have_snap = os.path.isfile(AUDIT_SNAP)
-check("1-2 审计快照 docs/audit/pacman2d_scene.json 仍在", have_snap, AUDIT_SNAP)
+check("1-2 审计快照 %s 仍在" % AUDIT_SNAP_REL, have_snap, AUDIT_SNAP)
 
 if have_ex and have_snap:
     h_ex = sha256(EX_SCENE)
     h_snap = sha256(AUDIT_SNAP)
     size_ex = os.path.getsize(EX_SCENE)
     print("  examples/PacMan2D.json            %d B  SHA256=%s" % (size_ex, h_ex))
-    print("  docs/audit/pacman2d_scene.json    %d B  SHA256=%s"
-          % (os.path.getsize(AUDIT_SNAP), h_snap))
+    print("  %-32s %d B  SHA256=%s"
+          % (AUDIT_SNAP_REL, os.path.getsize(AUDIT_SNAP), h_snap))
     print("  发布物 (Projects/PacMan2D.json / 游戏包.lsc 内场景)  未在仓库中 -> 由出包机补哈希")
     check("1-3 examples 场景与审计快照字节一致 (同一 SHA256)", h_ex == h_snap,
           "%s vs %s" % (h_ex[:16], h_snap[:16]))

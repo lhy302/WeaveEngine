@@ -106,6 +106,12 @@
 **版本发布后整体移入 `archive/v<版本>/`**，并在 `archive/_README.md` 登记。
 取证方法见 [guides/SCAN_PROTOCOL.md](guides/SCAN_PROTOCOL.md)，倒查流程见 [design/开发流程_任务后倒查.md](design/开发流程_任务后倒查.md)。
 
+**当前已有记录**：
+
+| 文件 | 内容 |
+|---|---|
+| [audit/impl_B7-24_API矩阵_20261117.md](audit/impl_B7-24_API矩阵_20261117.md) | **B7-24 批 0 第一步**：两端公开 API 矩阵（GL 105 / VK 38 / GL 独有 77 / VK 独有 10）+ 77 条四类分类草案 + 门（`Loom/tests/test_engine_api_matrix.py`）+ 4 条待裁决 |
+
 > beta6 及以前的所有审计记录已在 [archive/](archive/_README.md)。
 
 ---
