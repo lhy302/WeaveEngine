@@ -812,6 +812,17 @@ class SceneDriver(EngineCore):
             if self._clock is not None:
                 self._clock.reset()
 
+    def _load_scene_data(self, data, base_dir=None):
+        """VK 侧场景装配（★S4）：直接走本驱动已有的 load_from_data。
+
+        公共的 `load_scene(path)` 在 engine_core.EngineCore（读文件 → 判类型 →
+        调本方法），所以"按路径换场景"在两端是**同一个函数对象**；差别只剩
+        装配器本身（GL: sceneio.scene_from_dict / VK: 本文件 build_* + 相机段）。
+        base_dir = 场景文件目录（相对资源：天空盒六面图/贴图按它解析）。
+        """
+        self.load_from_data(data, base_dir)
+        return True
+
     @property
     def camera_pos(self):
         """相机世界位置.
@@ -842,7 +853,9 @@ class SceneDriver(EngineCore):
         导致脚本 on_collision_*/on_trigger_* **永不触发**、AudioSource play/stop
         **永不发生**（同一份内容两端结果不同）。门：tests/test_vk_logic_frame_parity.py。"""
         self._dispatch_fixed_update(fixed_dt)
-        self._update_scripts(fixed_dt)
+        # 2026-11-18 (S4): 走公共 update_scripts（= TPS 样本 + 本类 _update_scripts_impl），
+        # 与 GL 的 _run_scripts → update_scripts 同一条路。
+        self.update_scripts(fixed_dt)
         self._update_animations(fixed_dt)
         clk = self._clock
         sdt = clk.sub_dt if clk is not None else fixed_dt
@@ -1020,6 +1033,17 @@ class SceneDriver(EngineCore):
             # 恢复首帧一次性结算成数百像素的巨值（B6 契约: mouse_rel 只能是"本帧"增量）。
             self._pending_mouse_rel = (0.0, 0.0)
             self.mouse_rel = (0, 0)
+            # 2026-11-18 (S4): 暂停期清体检墙钟锚点 —— 与 GL advance_logic 的暂停分支
+            # 同口径（否则恢复首帧 wall_dt = 整段停顿时长，污染 get_logic_time_ratio）。
+            self._logic_wall_last = None
+            # 2026-11-18 (S4): F10 单步 —— 内核 step_logic_once 只置 _step_requested，
+            # **真正消费它的是这里**：恰好跑 1 个逻辑帧后继续冻结。
+            # （原来 VK 根本不看这个标志 → 同一次 F10 在 VK 上什么都不发生 = 假实现。）
+            if getattr(self, '_step_requested', False):
+                self._step_requested = False
+                r = self._step_one_logic_frame(render_dt)
+                self._end_frame_input()
+                return r
             self._end_frame_input()
             return (0, 0)
         self._pause_reanchored = False        # 恢复态: 允许下一次暂停再重锚一次
@@ -1031,6 +1055,9 @@ class SceneDriver(EngineCore):
         if getattr(self, 'dev_mouse_enabled', False):
             self.apply_dev_camera_mouse()
         if self._split_enable and self._clock is not None:
+            # 2026-11-18 (S4): 逻辑时钟体检样本 —— 与 GL _clock_advance 同一份记账
+            # （floor=False: VK 喂给时钟的就是 render_dt，如实记，可能 <1）。
+            self._logic_ratio_tick(render_dt, self._clock, floor=False)
             r = self._clock.advance(render_dt)
             # 方案二: 外推资格 = 设置开 + 本渲染帧没跑逻辑步 (落点帧回退);
             # 挂到 _interp._extrap_mode 供 vk_renderer.world_matrices 消费
@@ -1042,12 +1069,34 @@ class SceneDriver(EngineCore):
             self._dispatch_late_update(render_dt)
             self._end_frame_input()
             return r
-        self._update_scripts(render_dt)
+        self.update_scripts(render_dt)          # S4: 公共入口（TPS 样本 + 本类 impl）
         self._update_animations(render_dt)      # beta6 C1: 动画先于物理 (同序)
         self._step_physics(render_dt)
         # 2026-10-18 阶段1档序11 LateUpdate（绑死模式: update 之后）
         self._dispatch_late_update(render_dt)
         self._end_frame_input()
+        return (1, 1)
+
+    def _step_one_logic_frame(self, render_dt=None):
+        """暂停态下**恰好**跑 1 个逻辑帧（F10 单步的后端实现，S4）。
+
+        时钟存在（分离模式）→ clk.step_once(): 直注 fixed_dt 后排干 accumulator，
+        回调链走完整的 _logic_frame（FixedUpdate/脚本/动画/物理/音频/prep/派发/插值）
+        —— 与 GL 单步用的是同一个时钟方法。
+        无时钟（logic_fps<=0 绑死模式）→ 三段跑一遍（= 1 个"逻辑帧"）。
+        返回 (steps, phys_steps)，与 advance_logic 同口径。
+        """
+        clk = getattr(self, '_clock', None)
+        if clk is not None:
+            r = clk.step_once()
+            it = getattr(self, '_interp', None)
+            if it is not None:
+                it.alpha = clk.alpha
+            return r
+        dt = 0.0 if render_dt is None else float(render_dt)
+        self.update_scripts(dt)
+        self._update_animations(dt)
+        self._step_physics(dt)
         return (1, 1)
 
     def _end_frame_input(self):
@@ -1437,6 +1486,16 @@ class SceneDriver(EngineCore):
                 sc._script = None
                 sc._script_broken = True
 
+    def _update_scripts_impl(self, dt):
+        """公共 update_scripts（EngineCore 薄封装）的后端实现入口（S4）。
+
+        只做委托：真正的实现在本类 `_update_scripts`。保留这个名字而不是把实现
+        搬过来，是因为 `_update_scripts` 这个名字有既有调用方/探针在用
+        （tests/test_vk_logic_frame_parity 的段序追踪、test_vk_camera_align、
+        test_beta3_batch2_camera_proj 直调旧名）。经 self 取属性 → 实例级插桩仍生效。
+        """
+        return self._update_scripts(dt)
+
     def _dispatch_fixed_update(self, fixed_dt):
         """2026-10-18 阶段1档序10 FixedUpdate（Vk 后端同步版）。"""
         try:
@@ -1765,6 +1824,72 @@ class SceneDriver(EngineCore):
         # 写入 (滚轮/脚本) 两侧都原样接受; 钳制只发生在"数据入口"
         # (场景加载 clamp_camera_distance) 与 GL 滚轮的 UI 交互里。
         self.distance = float(v)
+
+    # ---------------- S4: clear_scene / remove_subtree 的后端实现 ----------------
+    def _backend_scene_cleared(self):
+        """清场景钩子（VK）：清碰撞包围盒顶点缓存。
+
+        与 GL 的 `_release_bucket_resources` 对应 —— 那边释放 GPU 桶缓冲，
+        这边没有 GPU 资源，但有一份按 id(mesh) 键的碰撞缓存（_coll_cache），
+        旧网格丢弃后它只会变成死条目（id 复用还可能假命中），所以一起清。
+        """
+        cc = getattr(self, '_coll_cache', None)
+        if isinstance(cc, dict):
+            cc.clear()
+
+    def _remove_one_model(self, model):
+        """删除单个节点（VK 侧；remove_subtree 逐节点调用，★S4）。
+
+        与 GL 的 loom_model_gpu._remove_one_model 同语义（on_destroy → 材质去引用 →
+        断父链 → 剩余子物体提为根 → current_model_index 收口），差别只在 GPU 部分:
+        VK 的模型没有 vbo/vao/阴影缓冲（渲染层自己按 mesh 建管线），所以不解缓冲引用，
+        改为同步剪 LOD 候选集合（VK 独有缓存）。
+        """
+        for cam in list(getattr(model, 'camera_children', [])):
+            self.set_camera_parent(cam, None, preserve_world=True)
+        if model in self.models:
+            # C1 (2026-10-16): 物体销毁前派发 on_destroy（obj 仍可读终态）
+            for sc in model.scripts:
+                inst = getattr(sc, '_script', None)
+                if inst is not None and not getattr(sc, '_script_broken', False):
+                    try:
+                        inst.on_destroy()
+                    except Exception as e:
+                        print("[脚本] %s.on_destroy 出错: %r" % (model.name, e))
+                    if hasattr(inst, 'stop_all_coroutines'):
+                        try:
+                            inst.stop_all_coroutines()
+                        except Exception as e:
+                            print("[脚本] %s.stop_all_coroutines 出错: %r"
+                                  % (model.name, e))
+            self.models.remove(model)
+            self._bump_struct()                # 组3: 结构变更失效 (ancestry+SoA)
+        # LOD 候选集合同步剪枝 (同 remove_model)
+        lod = getattr(self, '_lod_models', None)
+        if isinstance(lod, list):
+            try:
+                lod.remove(model)
+            except ValueError:
+                pass
+        # M23: 材质若不再被任何物体引用 -> 从材质库移除 (避免孤儿堆积)
+        mat = getattr(getattr(model, 'renderer', None), 'material', None)
+        if mat is not None and mat in self.materials:
+            if not any(getattr(getattr(o, 'renderer', None), 'material', None) is mat
+                       for o in self.models):
+                self.materials.remove(mat)
+        if model.parent is not None:
+            if model in model.parent.children:
+                model.parent.children.remove(model)
+            model.parent = None
+        # P-10 兜底: 仍挂着的子物体提升为根 (批量矩阵与 model_world_matrix 语义一致)
+        for ch in list(getattr(model, 'children', ())):
+            if ch is not model and ch in self.models:
+                try:
+                    self.set_parent(ch, None, preserve_world=False)
+                except Exception:
+                    ch.transform.parent = None
+        if self.current_model_index >= len(self.models):
+            self.current_model_index = max(0, len(self.models) - 1)
 
     def remove_model(self, m):
         """从模型列表移除 (count_touch 等脚本用; 引擎侧含 GPU 释放, 驱动无 GPU)."""

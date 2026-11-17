@@ -2,7 +2,8 @@
 """loom_lighting.py — GLEngine 光源/光照上传/阴影 VP 子系统。
 
 从 engine.py 抽出 (作为 LightingMixin 供 GLEngine 继承):
-  add_light / remove_light / find_model_by_guid / _uniform / _upload_lights
+  _backend_light_removed / find_model_by_guid / _uniform / _upload_lights
+  (S4: add_light / remove_light 的公共面已搬进 engine_core.EngineCore)
   _scene_light_bounds / _model_aabbs_par / _aabbs_batched / _scene_light_bounds_par
   _dir_light_vp / _parallel_shadow_and_collision / _pipeline_light_vps
   _compute_light_vps / _point_light_vp
@@ -41,33 +42,16 @@ from loom_scene_entities import LightState
 
 class LightingMixin:
     # ================ 光源管理 (M21: 场景光源实体; M29 阴影) ================
-    def add_light(self, kind='directional', position=None, direction=None,
-                  color=(1.0, 1.0, 1.0), intensity=1.0, name=None, guid=None,
-                  mode='full', shape='circle', size=5.0, shadow=True,
-                  azimuth=None, elevation=None, roll=None, range=10.0,
-                  spot_inner_angle=30.0, spot_outer_angle=60.0):
-        """添加场景光源 (不可见实体, 不渲染网格/不参与拾取). 返回 LightState.
-        M29: mode='full'|'beam', shape='circle'|'rect', size=截面尺寸, shadow=是否投射阴影.
-        M30: 平行光方向用 azimuth/elevation/roll (度); 旧 direction 向量仍兼容 (自动反算).
-        range: 点光影响半径 (对齐 Unity Light.range, 默认 10).
-        2026-10-19 序9 聚光灯: kind='spot' 时 spot_inner_angle/outer_angle 生效."""
-        light = LightState(kind=kind, position=position, direction=direction,
-                           color=color, intensity=intensity, name=name, guid=guid,
-                           mode=mode, shape=shape, size=size, shadow=shadow,
-                           azimuth=azimuth, elevation=elevation, roll=roll,
-                           range=range,
-                           spot_inner_angle=spot_inner_angle,
-                           spot_outer_angle=spot_outer_angle)
-        self.lights.append(light)
-        return light
-
-    def remove_light(self, light):
-        """从场景移除光源 (释放其阴影贴图)"""
+    # ★S4（2026-11-18）：add_light / remove_light 的**数据面**已搬进
+    # engine_core.EngineCore（两端同一份：建 LightState + append / 从 lights 摘掉）。
+    # 本 mixin 只剩 GL 的资源钩子：删光源时释放它的阴影贴图。
+    # 说明：add 时 GL 无需动作 —— 阴影贴图是阴影 pass 里按 guid 惰性建的
+    # （_shadow_maps 的写点在 loom_shadow），旧 add_light 也只是 append。
+    def _backend_light_removed(self, light):
+        """光源移出场景前调（GL）：释放它的阴影贴图（原 remove_light 的资源段）。"""
         sm = self._shadow_maps.pop(light.guid, None)
         if sm is not None:
             self._release_shadow_map(sm)
-        if light in self.lights:
-            self.lights.remove(light)
     # 2026-11-17 (S2-2): find_model_by_guid 已搬进 loom_model_data.ModelDataMixin
     # （纯数据查找，无 GPU 依赖 → 两端共享同一份）。
 

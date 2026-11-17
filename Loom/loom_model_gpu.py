@@ -268,42 +268,25 @@ class ModelGpuMixin:
         if self.current_model_index >= len(self.models):
             self.current_model_index = max(0, len(self.models) - 1)
 
-    def remove_subtree(self, root):
-        """删除 root 及其全部子孙 (M14: 删除物体/撤销 redo 用).
-        2026-08-16 相机物体化: 先脱掉整棵子树上挂的摄像机 (父链完整, 世界不跳),
-        再逐个删节点.
-        2026-11-07 P-10: 逐节点走 _remove_one_model (不是 remove_model) ——
-        避免"父节点再触发一次子树删除"的递归/重复; _remove_one_model 在删父时
-        把剩余子物体提升为根, 保证批量/递归矩阵语义一致。"""
-        sub = list(self.collect_subtree(root))
-        for m in sub:
-            for cam in list(getattr(m, 'camera_children', [])):
-                self.set_camera_parent(cam, None, preserve_world=True)
-        for m in sub:
-            self._remove_one_model(m)
-
-    def clear_scene(self):
-        """清空全部模型 (M16: 新建/加载场景用)"""
-        for m in list(self.models):
-            self.remove_model(m)
-        self.models.clear()
-        self._bump_struct()                    # 组3: 结构变更失效 (ancestry+SoA)
-        self.materials.clear()               # M23: 材质库随场景一起清空
-        bb = getattr(self, '_bb_cache', None)
-        if bb is not None:
-            bb.clear()                       # 网格顶点缓存随场景清空
+    # ★S4（2026-11-18）：remove_subtree / clear_scene / load_scene 的**公共面**已搬进
+    # engine_core.EngineCore（两端同一份）。本 mixin 只留 GL 后端的两件事：
+    #   · _backend_scene_cleared ：清场景时释放桶共享几何/实例缓冲（原 clear_scene 尾段）；
+    #   · _load_scene_data       ：sceneio.scene_from_dict 装配（原 load_scene 的装配段）。
+    # 逐节点删除的 GL 实现仍在本文件的 _remove_one_model（remove_subtree 调它）。
+    def _backend_scene_cleared(self):
+        """场景数据清空后调（GL）：释放桶共享几何/实例缓冲（A2）。"""
         self._release_bucket_resources()     # A2: 桶共享几何/实例缓冲统一释放
-        self.current_model_index = 0
 
-    def load_scene(self, path):
-        """M37/M38: 运行时切换到另一个场景文件 (Unity SceneManager.LoadScene 式).
-        清空当前场景 + 加载新场景 (物体/光源/摄像机/材质). 支持明文 JSON 与
-        混淆场景 (LOOMSC1, 自动解密). 返回是否成功.
-        供脚本/菜单运行时换关卡 (菜单场景 -> 游戏场景)."""
+    def _load_scene_data(self, data, base_dir=None):
+        """GL 侧场景装配：清场景 → 重置光源/相机 → sceneio.scene_from_dict → 时钟对齐。
+
+        逐行照搬原 load_scene 的装配段（行为零变化）。
+        base_dir：**故意忽略** —— 原 GL load_scene 也没把场景目录传给
+        scene_from_dict（GL 的相对资源解析走资产上下文/旧路径），补传会改变
+        GL 的资产解析结果 = 改可观察行为。VK 侧（SceneDriver._load_scene_data）
+        才用它。这一条差异已在交付报告里登记。
+        """
         import sceneio as _sio
-        data = _sio.load_scene_data(path)
-        if not isinstance(data, dict):
-            return False
         self.clear_scene()
         self.lights.clear()
         self.cameras.clear()

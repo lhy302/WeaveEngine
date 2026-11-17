@@ -985,7 +985,13 @@ class GLEngine(EngineCore, ShadowMixin, HudMixin, RenderMixin, ModelGpuMixin, Li
             return {'ok': False, 'action': str(action), 'keys': ks,
                     'saved': False, 'error': str(e)}
 
-    def update_scripts(self, delta_time):
+    def _update_scripts_impl(self, delta_time):
+        """GL 侧脚本调度实现（★S4, 2026-11-18）。
+
+        公共名 `update_scripts` 在 engine_core.EngineCore —— 薄封装：记一个 TPS
+        样本后调本方法。下面的函数体逐行照搬原 GLEngine.update_scripts（含首行
+        解锁键轮询与原来那段说明），**行为零变化**。
+        """
         self._poll_mouse_unlock_key()
         """播放期每帧调用: 遍历物体上所有脚本组件 (M25: 可多个), 惰性实例化并 update.
         优化 (2026-10-01): 快速早退与活跃脚本过滤 —— 场景无脚本时 0 迭代直接退出，
@@ -1347,18 +1353,11 @@ class GLEngine(EngineCore, ShadowMixin, HudMixin, RenderMixin, ModelGpuMixin, Li
         clk = clk if clk is not None else self._ensure_split()
         if clk is None:
             return (0, 0)
-        now = time.perf_counter()
-        last = getattr(self, '_logic_wall_last', None)
-        wall_dt = 0.0 if last is None else (now - last)
-        if wall_dt < 0.0:
-            wall_dt = 0.0
-        self._logic_wall_last = now
-        # 单帧墙钟按 maximum_logic_delta 截断: 与时钟内部的死亡螺旋保险同口径,
-        # 体检比值不会被一次长卡顿 (场景加载/窗口拖动) 污染。
-        wall_dt = min(wall_dt, clk.maximum_logic_delta)
-        dt_eff = max(float(render_dt or 0.0), wall_dt)
-        self._logic_dt_sum = getattr(self, '_logic_dt_sum', 0.0) + dt_eff
-        self._logic_wall_sum = getattr(self, '_logic_wall_sum', 0.0) + wall_dt
+        # ★S4 (2026-11-18): 墙钟下限 + 体检记账已收进 EngineCore._logic_ratio_tick
+        # （VK 的 advance_logic 用同一份记账，floor=False）。数值与旧实现逐位一致:
+        # dt_eff = max(调用方 dt, 实测墙钟)，单帧墙钟按 maximum_logic_delta 截断
+        # (死亡螺旋保险同口径, 体检比值不会被一次长卡顿污染)。
+        dt_eff, wall_dt = self._logic_ratio_tick(render_dt, clk, floor=True)
         # 2026-11-09 E1 现场取证: 按线程记调用数与最大间隔 (判定时钟被谁在推/推得够不够/是否双推)。
         try:
             import threading as _th
@@ -1489,49 +1488,23 @@ class GLEngine(EngineCore, ShadowMixin, HudMixin, RenderMixin, ModelGpuMixin, Li
     # 2026-11-17 (S2-2): toggle_logic_paused / set_logic_paused 已搬进 EngineCore
     # （暂停语义两端共享；VK 的 set_logic_paused 覆盖内核版，toggle 走同一份）。
 
-    def step_logic_once(self):
-        """步进 1 逻辑帧 (F10, MC 同款): 仅暂停态生效 — 置请求标志,
-        下一渲染帧 advance_logic 消费 (恰好 1 逻辑帧后继续冻结)."""
-        if not getattr(self, '_logic_paused', False):
-            return False
-        self._step_requested = True
-        return True
-
-    def get_logic_time_ratio(self):
-        """逻辑时钟拿到的时间 / 真实墙钟 (1.0 = 时钟没被 dt 口径亏欠)。
-
-        2026-11-09 E1 (beta5) 体检口, 配合 get_tps() 用:
-          · ratio ≈ 1 且 TPS < 目标 → 瓶颈是**每个逻辑帧本身太贵**
-            (看 _stage_times 的 logic_step / pipe_wait);
-          · ratio 恒 >= 1（_clock_advance 取 max(调用方 dt, 实测墙钟)；ratio<1 结构性不可能）。
-          ratio≈1 → 时钟拿到了全部墙钟，缺口在每逻辑帧成本（不要再去怀疑 dt 口径）。
-        返回 None = 还没采到样本。
-        """
-        if self._logic_wall_sum <= 1e-9:
-            return None
-        return self._logic_dt_sum / self._logic_wall_sum
-
-    def get_tps(self):
-        """实测 TPS (逻辑帧/秒, 2 秒滑动窗口; 状态栏直读). 暂停时 → 0."""
-        if not self._tps_events:
-            return 0.0
-        now = time.time()
-        n = len(self._tps_events)
-        span = now - self._tps_events[0]
-        if span <= 0.01:
-            return 0.0
-        return n / span
+    # 2026-11-18 (S4): step_logic_once / get_logic_time_ratio / get_tps 已搬进
+    # engine_core.EngineCore（两端同一份实现）。这里不再各写一遍 —— 门
+    # tests/test_user_api_parity.py 要求 `GLEngine.step_logic_once is
+    # SceneDriver.step_logic_once`（同一个函数对象）。
+    #   · step_logic_once        ：置 _step_requested（VK 的 advance_logic 真的消费它）；
+    #   · get_tps                ：读 _tps_events（样本由公共 update_scripts 记）；
+    #   · get_logic_time_ratio   ：读 _logic_dt_sum / _logic_wall_sum（GL 在
+    #                              _clock_advance 里记，VK 在 advance_logic 里记）。
 
     def _run_scripts(self, dt):
         """脚本更新分发 (2026-08-14 多核优化): 有专用脚本线程则交给它 (同步等待),
         否则内联 (测试直调 update_scripts / 未启用并行 时行为零变化)."""
         # 批5: TPS 实测 (逻辑帧/秒滑动窗口, 状态栏显示 — 用户直读"逻辑时钟
         # 到底在不在走/能不能停下")
-        now = time.time()
-        self._tps_events.append(now)
-        cutoff = now - 2.0
-        while self._tps_events and self._tps_events[0] < cutoff:
-            self._tps_events.pop(0)
+        # ★S4 (2026-11-18): 采样本体已收进 EngineCore._tps_sample，由公共
+        # `update_scripts` 包装在每个逻辑帧记一次（VK 走同一条路径 → VK 的
+        # get_tps() 不再恒 0）。这里不再单独记，否则同一逻辑帧记两次。
         runner = getattr(self, '_script_runner', None)
         if runner is None:
             self.update_scripts(dt)

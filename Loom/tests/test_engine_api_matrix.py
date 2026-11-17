@@ -40,6 +40,12 @@ beta7 批 0（B7-24）要定一份两端都必须实现的 IEngineAPI。在契�
   mouse_unlock_requested）。**注意（2026-11-17 独立审查 P2-11 纠错）**：它们在
   loom_input.py:225-228 定义，经 EngineCore 继承后是**共同成员**，不是 GL 独有 ——
   本条原描述写错了，实测 api_matrix() 里两端都为 True。
+- **v3.3（2026-11-18 S4 用户 API 补齐）**：9 条用户 API 从 GL 独有变成**两端同一份**
+  （add_light / remove_light / clear_scene / remove_subtree / load_scene / get_tps /
+  get_logic_time_ratio / step_logic_once / update_scripts 全搬进 engine_core.EngineCore，
+  后端差异走 `_backend_*` 钩子 / `_xxx_impl`）→ VK 98 → **107**，共同 88 → **97**，
+  GL 独有 24 → **15**。判据从「差异在缩小」升级为「同一个函数对象」，见
+  tests/test_user_api_parity.py。
 - 两个口径的数字不可混用。当前基线见下方 EXPECTED_*_TOTAL 常量（会随每次收敛更新），
   不要在本 docstring 里写死数字（原写「以 109/39 为基线」已过期，独立审查 P2-12）。
 
@@ -179,12 +185,12 @@ def api_matrix():
 # 每一项 = 今天「一端有、另一端没有」的公开方法。修完一条就从这里删掉一条，并写进 IEngineAPI 契约；
 # 新增一条 = 门红。
 EXPECTED_GL_ONLY = frozenset({
-    'add_light', 'blit_texture', 'clear_scene', 'draw_lines',
+    'blit_texture', 'draw_lines',
     'draw_screen_lines', 'draw_screen_polygon', 'draw_screen_rect', 'draw_text_quad',
-    'draw_texture_quad', 'get_frame_jitter', 'get_logic_time_ratio', 'get_tps',
-    'load_scene', 'pop_scissor', 'present_health', 'push_scissor',
-    'remove_light', 'remove_subtree', 'render', 'reset_sky_state',
-    'run', 'should_fallback_remote', 'step_logic_once', 'update_scripts',
+    'draw_texture_quad', 'get_frame_jitter',
+    'pop_scissor', 'present_health', 'push_scissor',
+    'render', 'reset_sky_state',
+    'run', 'should_fallback_remote',
 })
 
 EXPECTED_VK_ONLY = frozenset({
@@ -195,7 +201,7 @@ EXPECTED_VK_ONLY = frozenset({
 
 # 计数断言（防「两端同时改名」这种集合差异看不出来的漂移）
 EXPECTED_GL_TOTAL = 112
-EXPECTED_VK_TOTAL = 98
+EXPECTED_VK_TOTAL = 107      # v3.3: +9 条用户 API 进内核（两端同一份实现）
 
 
 def _call_groups():

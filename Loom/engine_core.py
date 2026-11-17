@@ -37,6 +37,8 @@
   · 后端差异只能出现在 GLEngine / VkEngine 这两侧，**不许**渗回内核。
 """
 
+import time
+
 from loom_camera import CameraMixin
 from loom_frame_components import FrameComponentMixin
 from loom_input import InputMixin
@@ -45,6 +47,7 @@ from loom_model_data import ModelDataMixin
 from loom_physics import PhysicsMixin
 from loom_profiler import ProfilerMixin
 from loom_raycast import RaycastMixin
+from loom_scene_entities import LightState   # S4: 光源实体（纯数据, 无 GPU 依赖）
 from loom_scene_query import SceneQueryMixin
 from loom_transform import TransformMixin
 
@@ -434,3 +437,263 @@ class EngineCore(TransformMixin, PhysicsMixin, InputMixin, CameraMixin,
     def on_quit_request(self):
         """退出钩子。返回 True = 允许退出。默认允许。"""
         return True
+
+    # ==========================================================================
+    # S4（2026-11-18）：用户 API —— 两端**同一份实现**，后端差异只经钩子/impl 落地
+    # ==========================================================================
+    # 人类要求（2026-11-17/18，反复重申）：
+    #   「两个后端暴露给用户的 API 都是一样的，选择哪个后端在用户端就是换个配置，
+    #     类似于 JVM 虚拟机：不管底层用的什么后端，往上暴露的接口都一样。」
+    # 判据不是「差异在缩小」，而是：用户 API 集合两端完全相同，且**是同一个函数对象**
+    # （`getattr(GLEngine, n) is getattr(SceneDriver, n)`）。门：tests/test_user_api_parity.py。
+    #
+    # 分工（写在这里是为了让下一个接手的人不用猜）：
+    #   · 公共语义（数据怎么变、什么时候叫后端）→ 本文件，只写一份；
+    #   · 后端资源（GL 阴影贴图/桶缓冲；VK 无 GPU 资源）→ `_backend_*` 钩子，**可选**
+    #     （后端不定义就跳过，见 _call_backend_hook 的 MRO 说明）；
+    #   · 后端装配（场景怎么建、脚本怎么跑）→ `_xxx_impl`，两端各一份。
+    #
+    # 不许在这里出现 moderngl / wgpu / loom_shaders / loom_shadow / loom_render /
+    # loom_hud / loom_model_gpu / loom_lighting / loom_glfw_window（本文件纪律）。
+
+    # ---------------- 光源：数据在两端同一份，资源事交钩子 ----------------
+    def add_light(self, kind='directional', position=None, direction=None,
+                  color=(1.0, 1.0, 1.0), intensity=1.0, name=None, guid=None,
+                  mode='full', shape='circle', size=5.0, shadow=True,
+                  azimuth=None, elevation=None, roll=None, range=10.0,
+                  spot_inner_angle=30.0, spot_outer_angle=60.0):
+        """添加场景光源 (不可见实体, 不渲染网格/不参与拾取). 返回 LightState.
+        M29: mode='full'|'beam', shape='circle'|'rect', size=截面尺寸, shadow=是否投射阴影.
+        M30: 平行光方向用 azimuth/elevation/roll (度); 旧 direction 向量仍兼容 (自动反算).
+        range: 点光影响半径 (对齐 Unity Light.range, 默认 10).
+        2026-10-19 序9 聚光灯: kind='spot' 时 spot_inner_angle/outer_angle 生效.
+
+        ★S4（2026-11-18）：**纯数据 + 后端钩子**。建 LightState 与 append 这两步
+        两端逐字相同，所以只写在这里；后端要做的资源事走 `_backend_light_added`。
+        原 GL 实现（loom_lighting.LightingMixin.add_light）就只有这两步 ——
+        语义逐位不变（GL 的阴影贴图是渲染 pass 里惰性建的，add 时无需动作）。
+        """
+        light = LightState(kind=kind, position=position, direction=direction,
+                           color=color, intensity=intensity, name=name, guid=guid,
+                           mode=mode, shape=shape, size=size, shadow=shadow,
+                           azimuth=azimuth, elevation=elevation, roll=roll,
+                           range=range,
+                           spot_inner_angle=spot_inner_angle,
+                           spot_outer_angle=spot_outer_angle)
+        self.lights.append(light)
+        self._call_backend_hook('_backend_light_added', light)
+        return light
+
+    def remove_light(self, light):
+        """从场景移除光源 (释放其阴影贴图).
+
+        ★S4：先给后端一次释放机会（GL 释放该光源的阴影贴图；VK 空操作），再改数据。
+        顺序与原 GL 实现逐位一致（先 pop 阴影图，再从 self.lights 摘掉）。
+        """
+        self._call_backend_hook('_backend_light_removed', light)
+        if light in self.lights:
+            self.lights.remove(light)
+
+    def _call_backend_hook(self, name, *args):
+        """调一个**可选**的 `_backend_*` 钩子；后端没定义就跳过（返回 None）。
+
+        为什么不在 EngineCore 里写"空实现"当默认：GLEngine 的 MRO 是
+        `GLEngine → EngineCore → …mixin`，内核里写的同名方法会把 GL mixin 的
+        覆盖**遮住**（实测踩过：在核心里加空 _backend_light_removed 之后，
+        GL 删光源不再释放阴影贴图 —— 名字都在，功能没了）。所以默认 = 没有这个
+        钩子，由后端按需定义（GL 在 loom_lighting / loom_model_gpu，VK 在
+        scene_driver）。`_backend_upload_model` 是同一个套路（默认在
+        loom_model_data，真实现走 `_build_gpu`）。
+        """
+        fn = getattr(self, name, None)
+        if fn is not None:
+            return fn(*args)
+        return None
+
+    # ---------------- 场景：数据在两端同一份，资源事交钩子 ----------------
+    def clear_scene(self):
+        """清空全部模型 (M16: 新建/加载场景用).
+
+        ★S4：数据面（逐个 remove_model → models/materials/网格顶点缓存清空 →
+        current_model_index 归零）两端同一份；后端资源释放走 `_backend_scene_cleared`
+        （GL: _release_bucket_resources 释放桶共享 VBO/VAO；VK: 无 GPU 资源）。
+        GL 侧原实现逐行照搬到这里，行为零变化。
+
+        ★已知残留差异（本次**不做**，留痕待裁决）：本方法逐模型调 `remove_model`，
+        而两端的 remove_model 语义不同 —— GL 版会递归子树并在删节点时派发脚本
+        `on_destroy`；VK 版（scene_driver.remove_model）只从 models 摘除 + 剪 LOD
+        候选，**不派发 on_destroy**。所以同一份脚本在「清场景/换场景」时，GL 会收到
+        on_destroy、VK 不会。要抹平必须改 VK 的 remove_model（既有公共成员，另有
+        test_lod_fastpath 等锁着），超出本次「补齐 9 条用户 API」的范围 ——
+        已写进交付报告的「未做未核清单」。
+        """
+        for m in list(self.models):
+            self.remove_model(m)
+        self.models.clear()
+        self._bump_struct()                    # 组3: 结构变更失效 (ancestry+SoA)
+        self.materials.clear()               # M23: 材质库随场景一起清空
+        bb = getattr(self, '_bb_cache', None)
+        if bb is not None:
+            bb.clear()                       # 网格顶点缓存随场景清空
+        self._call_backend_hook('_backend_scene_cleared')   # A2: 后端资源释放
+        self.current_model_index = 0
+
+    def remove_subtree(self, root):
+        """删除 root 及其全部子孙 (M14: 删除物体/撤销 redo 用).
+        2026-08-16 相机物体化: 先脱掉整棵子树上挂的摄像机 (父链完整, 世界不跳),
+        再逐个删节点.
+        2026-11-07 P-10: 逐节点走 _remove_one_model (不是 remove_model) ——
+        避免"父节点再触发一次子树删除"的递归/重复; _remove_one_model 在删父时
+        把剩余子物体提升为根, 保证批量/递归矩阵语义一致。
+
+        ★S4：收集子树 / 脱摄像机 / 逐节点删这三段两端完全相同，只写一份；
+        逐节点的后端差异（GL 解 GPU 缓冲引用、VK 无 GPU）在各自的
+        `_remove_one_model` 里。GL 侧原实现逐行照搬到这里。
+        """
+        sub = list(self.collect_subtree(root))
+        for m in sub:
+            for cam in list(getattr(m, 'camera_children', [])):
+                self.set_camera_parent(cam, None, preserve_world=True)
+        for m in sub:
+            self._remove_one_model(m)
+
+    def load_scene(self, path):
+        """M37/M38: 运行时切换到另一个场景文件 (Unity SceneManager.LoadScene 式).
+        清空当前场景 + 加载新场景 (物体/光源/摄像机/材质). 支持明文 JSON 与
+        混淆场景 (LOOMSC1, 自动解密). 返回是否成功.
+
+        ★S4：公共段（读文件 → 判类型 → 交给后端装配）只写一份；装配走
+        `_load_scene_data(data, base_dir)`：
+          · GL ：sceneio.scene_from_dict（原 load_scene 的现有路径，逐位不变）；
+          · VK ：SceneDriver.load_from_data（它已有的装配路径）。
+        base_dir = 场景文件目录。VK 用它解析相对资源；**GL 侧现有实现不吃这个参数**
+        （原 load_scene 也没传 base_dir）—— 为了不改 GL 的可观察行为，GL 的
+        _load_scene_data 故意忽略它（见 loom_model_gpu._load_scene_data 注释）。
+        """
+        try:
+            import sceneio as _sio
+        except Exception as e:
+            print('[场景] 场景 IO 不可用 (%r) -> load_scene 失败' % (e,))
+            return False
+        data = _sio.load_scene_data(path)
+        if not isinstance(data, dict):
+            return False
+        try:
+            import os as _os
+            base_dir = _os.path.dirname(_os.path.abspath(path))
+        except Exception:
+            base_dir = None
+        return bool(self._load_scene_data(data, base_dir))
+
+    # ---------------- 逻辑时钟观测面（TPS / 体检比值 / 单步） ----------------
+    def _tps_sample(self):
+        """记一个逻辑帧时间戳 (TPS 实测滑动窗口, 2 秒).
+
+        ★S4：原来只有 GL 的 `_run_scripts` 里内联这几行，VK 侧**从不记** ——
+        `get_tps()` 在 VK 上恒 0（等于假实现）。现在收成一份，由公共
+        `update_scripts` 在每个逻辑帧记一次（两端同源）。
+        """
+        # 实例属性守卫：测试桩（__new__ 不跑 __init__）没有 _tps_events 时惰性建
+        # （与 _bump_struct / _script_keys_dict 同款）。不写死 self._tps_events 是
+        # 因为 update_scripts 是**公共入口**，桩也会直调它（test_scripts /
+        # test_add_script_cache 就是这么用的）。
+        ev = getattr(self, '_tps_events', None)
+        if ev is None:
+            ev = self._tps_events = []
+        now = time.time()
+        ev.append(now)
+        cutoff = now - 2.0
+        while ev and ev[0] < cutoff:
+            ev.pop(0)
+
+    def get_tps(self):
+        """实测 TPS (逻辑帧/秒, 2 秒滑动窗口; 状态栏直读). 暂停时 → 0."""
+        ev = getattr(self, '_tps_events', None)
+        if not ev:
+            return 0.0
+        now = time.time()
+        n = len(ev)
+        span = now - ev[0]
+        if span <= 0.01:
+            return 0.0
+        return n / span
+
+    def _logic_ratio_tick(self, render_dt, clk=None, floor=True):
+        """记一次逻辑时钟体检样本，返回 (dt_eff, wall_dt)。
+
+        dt_eff = 本次**喂给时钟**的逻辑时间；wall_dt = 本次真实墙钟间隔。
+        get_logic_time_ratio() = Σdt_eff / Σwall_dt（1.0 = 时钟没被 dt 口径亏欠）。
+
+        · floor=True （GL 口径，engine._clock_advance 用）：
+          dt_eff = max(调用方 dt, 实测墙钟) —— 与旧实现逐位一致；
+        · floor=False（VK 口径，SceneDriver.advance_logic 用）：
+          VK 喂给时钟的就是宿主给的 render_dt，所以如实记 render_dt
+          （比值可能 <1，那正是「宿主 dt 口径比真实帧长小」的信号）。
+          VK 这条路径**不动时钟推进语义**，只做体检记账。
+
+        ★S4：这两个字段原先只有 GL 的 _clock_advance 在累加，VK 恒 None。
+        """
+        now = time.perf_counter()
+        last = getattr(self, '_logic_wall_last', None)
+        wall_dt = 0.0 if last is None else (now - last)
+        if wall_dt < 0.0:
+            wall_dt = 0.0
+        self._logic_wall_last = now
+        if clk is not None:
+            # 单帧墙钟按 maximum_logic_delta 截断 (与时钟内部死亡螺旋保险同口径)
+            wall_dt = min(wall_dt, clk.maximum_logic_delta)
+        if render_dt is None:
+            dt_in = wall_dt
+        else:
+            try:
+                dt_in = float(render_dt)
+            except (TypeError, ValueError):
+                dt_in = wall_dt
+        dt_eff = max(dt_in, wall_dt) if floor else dt_in
+        self._logic_dt_sum = getattr(self, '_logic_dt_sum', 0.0) + dt_eff
+        self._logic_wall_sum = getattr(self, '_logic_wall_sum', 0.0) + wall_dt
+        return dt_eff, wall_dt
+
+    def get_logic_time_ratio(self):
+        """逻辑时钟拿到的时间 / 真实墙钟 (1.0 = 时钟没被 dt 口径亏欠)。
+
+        2026-11-09 E1 (beta5) 体检口, 配合 get_tps() 用:
+          · ratio ≈ 1 且 TPS < 目标 → 瓶颈是**每个逻辑帧本身太贵**
+            (看 _stage_times 的 logic_step / pipe_wait);
+          · GL 侧 ratio 恒 >= 1（_clock_advance 取 max(调用方 dt, 实测墙钟)，
+            ratio<1 结构性不可能）；VK 侧如实记宿主 dt，可能 <1（见
+            _logic_ratio_tick 的两种口径）。
+        返回 None = 还没采到样本。
+        """
+        wall = getattr(self, '_logic_wall_sum', 0.0)
+        if wall <= 1e-9:
+            return None
+        return getattr(self, '_logic_dt_sum', 0.0) / wall
+
+    def step_logic_once(self):
+        """步进 1 逻辑帧 (F10, MC 同款): 仅暂停态生效 — 置请求标志,
+        下一渲染帧 advance_logic 消费 (恰好 1 逻辑帧后继续冻结).
+
+        ★S4：VK 的 advance_logic 现在**真的消费** `_step_requested`
+        （暂停分支里走 clk.step_once() = 恰好 1 个逻辑帧）。原来 VK 只认
+        logic_paused、根本不看这个标志 —— 同一次 F10 在 VK 上什么都不发生。
+        """
+        if not self._logic_paused_state():
+            return False
+        self._step_requested = True
+        return True
+
+    # ---------------- 脚本推进入口（薄封装，实现交后端） ----------------
+    def update_scripts(self, delta_time):
+        """播放期每帧调用: 遍历物体上所有脚本组件 (M25: 可多个), 惰性实例化并 update.
+
+        ★S4：本方法是**薄封装** —— 先记一个 TPS 样本（每个逻辑帧恰好一次，
+        两端同源），再交给后端的 `_update_scripts_impl`：
+          · GL ：engine.GLEngine._update_scripts_impl（C 批处理 rotate + 通用 update，
+                 含解锁键轮询）；
+          · VK ：scene_driver.SceneDriver._update_scripts_impl（同语义，纯 Python）。
+        这样 `GLEngine.update_scripts is SceneDriver.update_scripts` 成立（同一个
+        函数对象），而两端脚本调度的实现差异收在各自的 impl 里。
+        """
+        self._tps_sample()
+        return self._update_scripts_impl(delta_time)

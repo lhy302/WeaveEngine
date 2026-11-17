@@ -365,10 +365,41 @@ class NotSupportedOnBackend(RuntimeError):
 |---|---|---|
 | `update_audio`（音频段） | **已落地 2026-11-17** | B7-26：VK 补音频段，两端调同一份 `loom_frame_components.update_audio`；VK 公开方法 39 → **40**，API 矩阵门基线已同步（口径 v2.1）；门 `test_vk_logic_frame_parity.py` |
 | 碰撞事件派发（`on_collision_*` / `on_trigger_*`） | **已落地 2026-11-17** | B7-26：新增 `loom_collision.dispatch`，GL/VK 同一函数；事件序列对拍两端逐条相等 |
-| `update_animations` / `update_physics` / `update_scripts`（§4.3 B 类） | 待 0b | 语义已在 VK `_logic_frame` 内联，但**公开名未统一**（VK 是 `_update_animations` / `_step_physics` / `_update_scripts`） |
+| `update_animations` / `update_physics` / `update_scripts`（§4.3 B 类） | `update_scripts` **已落地 2026-11-18（S4）**；其余待 0b | S4：`update_scripts` 的公共薄封装进 `engine_core.EngineCore`，两端是同一个函数对象；后端实现走 `_update_scripts_impl`（VK 那份仍叫 `_update_scripts`，有既有调用方/段序追踪在用） |
+| **S4（2026-11-18）：9 条用户 API 两端同一份实现** | **已落地** | `add_light` / `remove_light` / `clear_scene` / `remove_subtree` / `load_scene` / `get_tps` / `get_logic_time_ratio` / `step_logic_once` / `update_scripts` 全部搬进 `engine_core.EngineCore`；后端差异走 `_backend_*` 钩子 / `_xxx_impl`。VK 公开方法 98 → **107**，共同 88 → **97**，GL 独有 24 → **15**。门 `test_user_api_parity.py`（ALL PASS）+ API 矩阵门基线 v3.3（详见 §12） |
 | A 类其余 36 条 + 属性面 3 条 + B 类其余 | 待 0b | — |
 
 ---
 
 > **下一步**：人类复核本契约（尤其 §4.3 形态方向、§3 的 40 条边界）。复核通过后开 0b，
 > 或先做批 1 的四个 P0 真缺陷（B7-18 / B7-21 / B7-17 / B7-26）—— 批 1 不依赖 0b，只依赖本契约的「契约名」。
+
+---
+
+## 12 S4 落地细节（2026-11-18）—— 用户 API 的两端同一份实现
+
+判据（人类原话）：「两个后端暴露给用户的 API 都是一样的，选择哪个后端在用户端就是换个配置，
+类似于 JVM 虚拟机：不管底层用的什么后端，往上暴露的接口都一样。」
+→ 门 `tests/test_user_api_parity.py` 除了查「两端都有」，还查
+`getattr(GLEngine, n) is getattr(SceneDriver, n)`（**同一个函数对象**，不是各写一遍）。
+
+| 用户 API | 公共面（唯一实现，engine_core.EngineCore） | 后端层（各自一份） |
+|---|---|---|
+| `add_light` / `remove_light` | 建 LightState + append / 从 `lights` 摘掉 | 钩子 `_backend_light_added` / `_backend_light_removed`（GL 在 `loom_lighting` 释放阴影贴图；VK 无需定义） |
+| `clear_scene` | 逐个 remove_model + 清 materials / 网格顶点缓存 + current_model_index 归零 | 钩子 `_backend_scene_cleared`（GL 释放桶资源；VK 清碰撞包围盒缓存） |
+| `remove_subtree` | `collect_subtree` + 脱摄像机 + 逐节点 `_remove_one_model` | `_remove_one_model`（GL 在 `loom_model_gpu`，VK 在 `scene_driver`） |
+| `load_scene(path)` | 读文件 → 判类型 → 交装配（返回 bool） | `_load_scene_data(data, base_dir)`（GL: `sceneio.scene_from_dict`；VK: `load_from_data`） |
+| `get_tps` | 读 `_tps_events` | `_tps_sample()` 由公共 `update_scripts` 每逻辑帧记一次（**VK 现在真的在记**，之前恒 0 = 假实现） |
+| `get_logic_time_ratio` | 读 `_logic_dt_sum` / `_logic_wall_sum` | `_logic_ratio_tick()`：GL 在 `_clock_advance`（floor=True，恒 ≥1），VK 在 `advance_logic`（floor=False，如实记宿主 dt） |
+| `step_logic_once` | 仅暂停态置 `_step_requested` | VK `advance_logic` 暂停分支**真的消费**它（`clk.step_once()` = 恰好 1 个逻辑帧） |
+| `update_scripts` | 薄封装：记 TPS 样本 → 调 `_update_scripts_impl` | GL 在 `engine.py`；VK 的 impl 委托它已有的 `_update_scripts` |
+
+实测（`tests/_tmp/probe_user_api.py`，60 渲染帧 + 真实墙钟）：
+GL `get_tps()≈30.0` / `get_logic_time_ratio()≈1.016`；VK `get_tps()≈29.1` / `ratio≈0.97`；
+两端 `step_logic_once()` 在暂停态都**恰好前进 1 个逻辑帧**（未请求的暂停帧前进 0 帧）。
+
+**已知残留差异（登记，不在 S4 范围）**：
+1. `clear_scene` / `load_scene` 在 VK 侧**不派发**脚本 `on_destroy`（VK 的 `remove_model` 是浅删），
+   GL 会派发。抹平必须改 VK 既有公共成员 `remove_model`（`test_lod_fastpath` 等锁着），需单独裁决。
+2. GL 的 `_load_scene_data` **不吃** `base_dir`（原 `load_scene` 就没传，GL 的相对资源走资产上下文），
+   VK 吃。补传会改变 GL 的资产解析结果 = 改可观察行为，故保持原样。
