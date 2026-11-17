@@ -55,7 +55,7 @@ def _enforce_fail_exit_code():
   · GL : loom_glfw_window._on_key_cb 的做法 —— 翻成 ev 递进 EngineCore.handle_key_event
   · VK : vk_player.host_key_forward   —— vk_player._on_key 调的就是它（步 2 收敛点）
 
-覆盖 8 组：① 单键按下/松开 ② 多键同时 ③ 动作映射 ④ 未映射键(F5) ⑤ Tab 解锁链
+覆盖 8 组：① 单键按下/松开 ② 多键同时 ③ 动作映射 ④ 无动作绑定的键(F5) + 真正未映射键(F13) ⑤ Tab 解锁链
           ⑥ UI 焦点消费 ⑦ 宿主直写 script_keys（兼容路径） ⑧ 引擎键 F9 + 内核钩子
 另加一条**不变量**：script_keys 恒等于「key_state 派生结果」∪「键名直写过渡项」
 （两端每一步都查；这是步 2 收敛成「唯一写者」的判据）。
@@ -306,14 +306,14 @@ s.step('松 space')
 s.compare('③ 动作映射')
 
 print()
-print("=== ④. 未映射键 F5（进物理快照，但不触发任何动作）+ 内核钩子 ===")
+print("=== ④. 无动作绑定的键 F5（在 _KEYMAP 里 -> 进 script_keys，但没绑动作）+ 内核钩子 ===")
 s = _Steps()
 s.feed(pygame.K_F5, True)
 g, v = s.step('按 F5')
 check('按 F5 时两端 key_state[F5] 均 True',
       all(dict(x[0][1]).get(pygame.K_F5) is True for x in (g, v)),
       'GL=%r VK=%r' % (dict(g[0][1]).get(pygame.K_F5), dict(v[0][1]).get(pygame.K_F5)))
-check('按 F5 时两端 is_key(F5) 均 True（键名在 _KEYMAP 里）',
+check('按 F5 时两端 is_key(F5) 均 True（F5 **在** _KEYMAP 里 —— 它不是未映射键）',
       all(dict(x[2][1])['F5'] is True for x in (g, v)),
       'GL=%r VK=%r' % (dict(g[2][1])['F5'], dict(v[2][1])['F5']))
 check('按 F5 不触发任何动作（两端动作全 False）',
@@ -324,7 +324,29 @@ check('F5 事件进了两端内核钩子 on_key_event（各 1 次）',
       'GL=%d VK=%d' % (len(s.pair.hook_gl), len(s.pair.hook_vk)))
 s.feed(pygame.K_F5, False)
 s.step('松 F5')
-s.compare('④ 未映射键 F5')
+s.compare('④ 无动作绑定的键 F5')
+
+print()
+print("=== ④b. 真正未映射的键 F13（只进 key_state 键码，不进 script_keys） ===")
+# 为什么单独补这一条：F5 **在** _KEYMAP 里（93 个键名之一），拿它当「未映射键」是错的；
+# 真正未映射的键（如 F13）只能以键码存在，不该在 script_keys 里出现。
+_K_UNMAPPED = getattr(pygame, 'K_F13', None)
+if _K_UNMAPPED is not None:
+    s = _Steps()
+    s.feed(_K_UNMAPPED, True)
+    g, v = s.step('按 F13（未映射）')
+    check('未映射键进两端 key_state（键码）',
+          all(dict(x[0][1]).get(_K_UNMAPPED) is True for x in (g, v)),
+          'GL=%r VK=%r' % (dict(g[0][1]).get(_K_UNMAPPED), dict(v[0][1]).get(_K_UNMAPPED)))
+    check('未映射键不进 script_keys（无键名可映射，两端同）',
+          all(not any(dict(x[2][1]).values()) or 'F13' not in dict(x[2][1]) for x in (g, v)),
+          'GL=%r VK=%r' % ([k for k, val in dict(g[2][1]).items() if val],
+                           [k for k, val in dict(v[2][1]).items() if val]))
+    s.feed(_K_UNMAPPED, False)
+    s.step('松 F13')
+    s.compare('④b 真正未映射键 F13')
+else:
+    print('  SKIP pygame 无 K_F13')
 
 print()
 print("=== ⑤. Tab 解锁链（写键码 → poll_unlock 翻转 → 松开 → 再按回锁） ===")
