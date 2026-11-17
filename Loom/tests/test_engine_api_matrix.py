@@ -29,6 +29,9 @@ beta7 批 0（B7-24）要定一份两端都必须实现的 IEngineAPI。在契�
   FrameComponent/Profiler/LogicThread/Raycast）的 ~100 个方法两端共享，另有 3 个统一宿主事件入口
   handle_key_event / handle_text_input / handle_quit_request。
   → GL 112 / VK 82 / 共同 **72** / GL 独有 **40** / VK 独有 10。
+- **v3.1（2026-11-17 S2-2 部分完成）**：11 个纯数据查询方法（Layer/Tag/查找/SendMessage/设置层标签）
+  从 GLEngine 搬进 loom_scene_query.SceneQueryMixin（无 GPU 依赖）→ VK 82 → **93**，
+  GL 独有 40 → **29**，共同 72 → **83**。
   差异从 79 条缩到 40 条，**这是「一个引擎」的直接证据**，不是「逐条补 VK」。
   新增的 3 条 GL 独有 = 3 个鼠标状态属性（mouse_locked / mouse_lock_allowed /
   mouse_unlock_requested），它们正是「脚本读状态在 VK 下 AttributeError」的实例。
@@ -173,13 +176,11 @@ EXPECTED_GL_ONLY = frozenset({
     'add_light', 'add_material', 'add_model', 'attach_model',
     'blit_texture', 'clear_scene', 'draw_lines', 'draw_screen_lines',
     'draw_screen_polygon', 'draw_screen_rect', 'draw_text_quad', 'draw_texture_quad',
-    'find_all_by_name', 'find_by_name', 'find_by_script', 'find_by_tag',
     'find_model_by_guid', 'get_frame_jitter', 'get_logic_time_ratio', 'get_tps',
-    'layer_id', 'layer_name', 'load_scene', 'pop_scissor',
-    'present_health', 'push_scissor', 'register_tag', 'remove_light',
-    'remove_subtree', 'render', 'reset_sky_state', 'run',
-    'send_message_to_name', 'set_object_layer', 'set_object_tag', 'should_fallback_remote',
-    'step_logic_once', 'tag_exists', 'toggle_logic_paused', 'update_scripts',
+    'load_scene', 'pop_scissor', 'present_health', 'push_scissor',
+    'remove_light', 'remove_subtree', 'render', 'reset_sky_state',
+    'run', 'should_fallback_remote', 'step_logic_once', 'toggle_logic_paused',
+    'update_scripts',
 })
 
 EXPECTED_VK_ONLY = frozenset({
@@ -190,7 +191,7 @@ EXPECTED_VK_ONLY = frozenset({
 
 # 计数断言（防「两端同时改名」这种集合差异看不出来的漂移）
 EXPECTED_GL_TOTAL = 112
-EXPECTED_VK_TOTAL = 82
+EXPECTED_VK_TOTAL = 93
 
 
 def _call_groups():

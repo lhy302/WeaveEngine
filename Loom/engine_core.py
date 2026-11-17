@@ -20,8 +20,10 @@
 - **S2-1（2026-11-17，本次）**：建立 EngineCore 骨架，把 8 个**后端无关** mixin 归位到内核，
   GLEngine 改为 `EngineCore + 6 个 GL 后端/宿主 mixin`。**行为零变化**（无 super() 调用、
   唯一跨 mixin 重名的 `_prof_*` 已由 loom_render._mro_prof 做成 MRO 顺序无关）。
-- S2-2（待做）：把 `GLEngine.__init__` 里后端无关的字段/生命周期搬进 `EngineCore.__init__`，
-  GL 资源创建收敛到 `GLEngine._init_backend()`。
+- **S2-2（部分完成，2026-11-17）**：11 个纯数据查询方法（Layer/Tag/查找/SendMessage/设置层标签）
+  已从 `GLEngine` 搬进 `loom_scene_query.SceneQueryMixin`（只碰 `self.models`，无 GPU 依赖）。
+  剩下待做：`add_model`/`add_material`/`add_light` 等的「数据 vs GPU 上传」拆分，
+  以及 `GLEngine.__init__` 里后端无关字段搬进 `EngineCore.__init__`。
 - S2-3（待做）：`SceneDriver` 改为继承 EngineCore，逐个删除 VK 侧重复实现（每删一个跑门）。
 - S2-4（待做）：`VkEngine(EngineCore, VkBackend)` 装配，`vk_player` 改用它。
 
@@ -42,11 +44,13 @@ from loom_logic_thread import LogicThreadMixin
 from loom_physics import PhysicsMixin
 from loom_profiler import ProfilerMixin
 from loom_raycast import RaycastMixin
+from loom_scene_query import SceneQueryMixin
 from loom_transform import TransformMixin
 
 
 class EngineCore(TransformMixin, PhysicsMixin, InputMixin, CameraMixin,
-                 FrameComponentMixin, ProfilerMixin, LogicThreadMixin, RaycastMixin):
+                 FrameComponentMixin, ProfilerMixin, LogicThreadMixin, RaycastMixin,
+                 SceneQueryMixin):
     """后端无关的引擎内核（唯一实现）。
 
     继承顺序 = 原 GLEngine 里这几个 mixin 的相对顺序（保持不变，便于对拍）。
