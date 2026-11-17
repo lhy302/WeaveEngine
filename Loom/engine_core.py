@@ -511,6 +511,23 @@ class EngineCore(TransformMixin, PhysicsMixin, InputMixin, CameraMixin,
         return None
 
     # ---------------- 场景：数据在两端同一份，资源事交钩子 ----------------
+    def remove_model(self, model):
+        """删除模型（Q3=A / Unity 语义：仍有子物体 = 连整棵子树一起删）。
+
+        ★S4 收口（2026-11-18）：本方法原只在 GL（loom_model_gpu.remove_model），
+        VK 侧有一份**浅删**版本（只从 models 摘除 + 剪 LOD，**不派发 on_destroy**、
+        不递归子树）→ 同一份脚本在「清场景 / 换场景 / 删物体」时，GL 收到 on_destroy、
+        VK 收不到，而且删父会留下悬空子物体。这是**用户可观察的语义差异**，
+        与「两端用户 API 一样」的要求冲突，故收进内核、两端共用一份。
+        后端差异只在 `_remove_one_model`（GL 解 GPU 引用 / VK 剪 LOD 候选）。
+        """
+        if model is None:
+            return
+        if getattr(model, 'children', None):
+            self.remove_subtree(model)
+            return
+        self._remove_one_model(model)
+
     def clear_scene(self):
         """清空全部模型 (M16: 新建/加载场景用).
 

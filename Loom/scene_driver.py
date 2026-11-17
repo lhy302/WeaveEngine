@@ -1891,15 +1891,8 @@ class SceneDriver(EngineCore):
         if self.current_model_index >= len(self.models):
             self.current_model_index = max(0, len(self.models) - 1)
 
-    def remove_model(self, m):
-        """从模型列表移除 (count_touch 等脚本用; 引擎侧含 GPU 释放, 驱动无 GPU)."""
-        if m in self.models:
-            self.models.remove(m)
-        # LOD 候选集合同步剪枝 (否则被删物体还会被 _update_lod 选模/算世界位置)
-        try:
-            self._lod_models.remove(m)
-        except ValueError:
-            pass
-
+    # 2026-11-18（S4）：浅版 remove_model 已删除 —— 它只从 models 摘除 + 剪 LOD，
+    # **不派发 on_destroy、不递归子树**，与 GL 语义不同（用户可观察）。
+    # 现继承 EngineCore.remove_model（子树递归 + on_destroy），后端差异在 _remove_one_model。
 
 # 2026-10-18: _DriverUI 空壳已删除, 改用 loom_ui.UIManager (真数据模型, 无 GPU 依赖).

@@ -200,19 +200,9 @@ class ModelGpuMixin:
         self._fw32 = None
         self._render_buckets = []
 
-    def remove_model(self, model):
-        """删除模型 (Q3=A, 2026-11-07: 仍有子物体 = 连整棵子树一起删, Unity 语义).
-
-        无子物体走 _remove_one_model; 有子物体委托 remove_subtree。旧实现只删
-        父节点、把子物体留在 models 里且 parent 悬空 → 批量矩阵(缺失父=根)与
-        递归矩阵(沿悬空父合成)两套语义分叉 (P-10)。
-        2026-08-16 相机物体化: 先脱掉挂在本物体下的摄像机 (世界不跳)."""
-        if model is None:
-            return
-        if getattr(model, 'children', None):
-            self.remove_subtree(model)
-            return
-        self._remove_one_model(model)
+    # 2026-11-18（S4）：remove_model 已收进 EngineCore（两端共用一份，含子树递归
+    # 与 on_destroy 派发）。本类只保留 _remove_one_model —— 那才是 GL 的后端部分
+    # （解 vbo/vao 引用、桶资源共享释放）。
 
     def _remove_one_model(self, model):
         """删除单个节点 (内部; remove_subtree 逐节点调用).

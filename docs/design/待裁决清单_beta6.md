@@ -77,6 +77,9 @@
 
 | **Q-B7-30-1** | **独立审查判定「未达标」**（2026-11-17，未参与实现的子代理）：三道门全绿但判据被证伪 —— F9/F10/F11/Tab 在 VK 上无效、`key_state` 两套键空间、`vk_player` 未接 `handle_key_event`、14 条 API 在 VK 仍 AttributeError | **主审建议**：本轮已修 P0-5/P0-6/P0-4/c4/`is_playing`（一整类 AttributeError 已消灭）；**P0-2/P0-3（键空间重构 + vk_player 接入）单独立项**，估 2-3 人天；其余 a1~a14 估 3-5 人天 | 决定「两后端合并」能否在 beta7 收口 | **部分执行后回退（2026-11-18）**：P0-3/P0-2 尝试一次，3 个测试文件变红（`test_unlock_key` / `test_render_api` / `test_vk_camera_align` + `test_beta3_batch2`），已整批 `git checkout` 回退，基线 clean。根因：`script_keys` 有 4 个写者（GLFW 泵/editor 帧头/外部 ctx/测试夹具），不是一次 P0 补丁能改的。失败点与下次两步走法见 `docs/audit/scan_P0-3键空间_P0-2接入_20261118.md` | **已推进（2026-11-18）**：按文档两步走法完成 —— 步 1 `32c9cee`（key_state 键码化，两端 is_key/get_action 同一份）、步 2 `76220e9`（script_keys 收敛 + `vk_player.host_key_forward` 接统一入口 + 新门 `test_input_chain_parity`）。lead 独立验收通过（`docs/audit/verify_P0-3步2_验收_20261118.md`）：6 条门全绿、run_all 177.5s、独立探针 5 组全绿。**遗留**：GL 泵每帧写 key_state（行为变化已留痕）、VK 播放器 F9/F10/F11 未真窗口点验 | 已关闭（有条件） |
 
+| **Q-B7-31-1** | **用户 API 等价是否已达标**：9 条用户 API 已收进 `EngineCore`（同一函数对象），两端共同公开成员 **97**，GL 独有 15 / VK 独有 10（全部登记为后端内部并写明理由） | **主审判定：达标**（`test_user_api_parity` 8 条断言全绿 + lead 独立探针 9 条功能全绿 + 对象身份全 True）。剩余「后端内部」25 条按设计不该是用户 API | 决定 S4 能否收口 | **已关闭（达标）** |
+| **Q-B7-31-2** | 子代理报告「VK 的 `clear_scene`/`load_scene` 不派发脚本 `on_destroy`」，建议留待裁决 | **主审判定：不留，已补** —— 这是用户可观察的副作用差异（脚本生命周期钩子），按「两端 API 一样」的要求必须一致。修法：`remove_model` 收进 `EngineCore`（子树递归 + on_destroy），删掉两端各自的副本 | 影响脚本在 VK 上的生命周期语义 | **已关闭（已修）** |
+
 > 证据与逐条表：`docs/audit/impl_B7-24_API矩阵_20261117.md`（§3 全 77 条 / §4 VK 独有 10 条 / §6 这四个问题）。
 
 ## B. 已关闭（不再需要回答，留痕备查）

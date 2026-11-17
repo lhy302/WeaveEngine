@@ -121,6 +121,7 @@
 | [audit/impl_S1S2_单一引擎门面_20261117.md](audit/impl_S1S2_单一引擎门面_20261117.md) | **S1+S2 实施记录**：新增 `EngineCore` 中立内核，两端共同成员 30→72、GL 独有 79→40；顺带修了 VK `key_state` 恒空的真缺陷；并记录 `test_hub_update` 假绿与 `is_program_files` 缺陷 |
 | [audit/scan_P0-3键空间_P0-2接入_20261118.md](audit/scan_P0-3键空间_P0-2接入_20261118.md) | **失败留痕**：键空间统一 + vk_player 接入的尝试与回退（3 个测试红 → 整批回退），含 5 个失败点、根因（`script_keys` 有 4 个写者）与下次的两步走法 |
 | [audit/verify_P0-3步2_验收_20261118.md](audit/verify_P0-3步2_验收_20261118.md) | **P0-3 步 2 独立验收**：6 条门全绿 + run_all 177.5s + lead 独立探针 5 组；含「子代理自报值核对」与未核清单（GL 泵写 key_state、VK F9/F10/F11 未实机） |
+| [audit/verify_S4用户API_验收_20261118.md](audit/verify_S4用户API_验收_20261118.md) | **S4 用户 API 等价验收**：9 条用户 API 两端同一函数对象、共同成员 88→97、GL 独有 15/VK 独有 10 全为后端内部；含 lead 补掉的 `on_destroy` 语义差异 |
 | 口径 v2 更新（属性面入契约后：GL 109 / VK 39 / GL 独有 80 / VK 独有 10）与四类正式划分见 [design/契约_IEngineAPI_20261117.md](design/契约_IEngineAPI_20261117.md)；本文件正文是 v1 快照，保留不改 |
 
 > beta6 及以前的所有审计记录已在 [archive/](archive/_README.md)。
