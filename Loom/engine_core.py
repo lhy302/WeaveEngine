@@ -41,6 +41,7 @@ from loom_camera import CameraMixin
 from loom_frame_components import FrameComponentMixin
 from loom_input import InputMixin
 from loom_logic_thread import LogicThreadMixin
+from loom_model_data import ModelDataMixin
 from loom_physics import PhysicsMixin
 from loom_profiler import ProfilerMixin
 from loom_raycast import RaycastMixin
@@ -50,7 +51,7 @@ from loom_transform import TransformMixin
 
 class EngineCore(TransformMixin, PhysicsMixin, InputMixin, CameraMixin,
                  FrameComponentMixin, ProfilerMixin, LogicThreadMixin, RaycastMixin,
-                 SceneQueryMixin):
+                 SceneQueryMixin, ModelDataMixin):
     """后端无关的引擎内核（唯一实现）。
 
     继承顺序 = 原 GLEngine 里这几个 mixin 的相对顺序（保持不变，便于对拍）。
@@ -174,6 +175,55 @@ class EngineCore(TransformMixin, PhysicsMixin, InputMixin, CameraMixin,
             return bool(self.on_quit_request())
         except Exception:
             return True
+
+    # ============ S2-2：暂停语义（两端同一份） ============
+    # GL 原来把 `toggle_logic_paused` 写死依赖自己的 `_ensure_split()`；VK 另有
+    # `set_logic_paused`。收敛为：内核提供 `set_logic_paused`（GL 侧实现）+ 通用
+    # `toggle_logic_paused`；VK 自己的 `set_logic_paused` 覆盖内核版 → 两端都走同一个
+    # `toggle_logic_paused`，返回同一语义。
+
+    def _logic_paused_state(self):
+        """当前是否暂停。GL 用 `_logic_paused`，VK 用 `logic_paused` —— 两个名字都认。"""
+        return bool(getattr(self, '_logic_paused',
+                            getattr(self, 'logic_paused', False)))
+
+    def _ensure_logic_clock(self):
+        """拿时钟。GL 走 `_ensure_split()`（会按需建）；其它后端直接用 `_clock`。"""
+        fn = getattr(self, '_ensure_split', None)
+        if callable(fn):
+            return fn()
+        return getattr(self, '_clock', None)
+
+    def set_logic_paused(self, paused):
+        """暂停/恢复逻辑时钟（GL 侧实现；VK 有同名实现会覆盖本方法）。
+        暂停边界：清 accumulator 余量 + 清墙钟锚点 + 插值对齐 + 渲染世界缓存失效。"""
+        self._logic_paused = bool(paused)
+        if self._logic_paused:
+            clk = self._ensure_logic_clock()
+            if clk is not None:
+                try:
+                    clk.reset()
+                except Exception:
+                    pass
+            self._logic_wall_last = None
+            it = getattr(self, '_interp', None)
+            if it is not None:
+                try:
+                    it.align()
+                except Exception:
+                    pass
+            self._render_world = None
+        return self._logic_paused
+
+    def toggle_logic_paused(self):
+        """暂停/恢复逻辑时钟（F9，MC 同款暂停世界 TPS）：渲染帧照跑，逻辑帧冻结。
+        分离未开（旧绑死模式）= 无暂停语义（返回 False 不生效）。"""
+        if not getattr(self, 'is_playing', False):
+            return False
+        if self._ensure_logic_clock() is None:
+            return False
+        self.set_logic_paused(not self._logic_paused_state())
+        return self._logic_paused_state()
 
     # ============ S1：与后端无关的输入状态（两端同一份初值） ============
     # 2026-11-17 实测差异（本模块的门 test_host_event_parity 抓到的）：

@@ -68,15 +68,8 @@ class LightingMixin:
             self._release_shadow_map(sm)
         if light in self.lights:
             self.lights.remove(light)
-
-
-    def find_model_by_guid(self, guid):
-        """按 guid 找普通物体 (GameObject), 找不到返回 None. 相机挂父/撤销解析用."""
-        for m in self.models:
-            if m.guid == guid:
-                return m
-        return None
-
+    # 2026-11-17 (S2-2): find_model_by_guid 已搬进 loom_model_data.ModelDataMixin
+    # （纯数据查找，无 GPU 依赖 → 两端共享同一份）。
 
     def _uniform(self, name):
         """组6件3: self.prog uniform 句柄缓存 (消每帧字符串哈希+查找).

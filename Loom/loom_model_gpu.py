@@ -27,66 +27,9 @@ from loom_color import _hex_rgba
 
 
 class ModelGpuMixin:
-    # ================ GPU 几何构建 ================
-    def add_model(self, mesh, position, rotation, normal_mode='flat',
-                  name=None, scale=None, visible=True, color=None, saturation=1.0):
-        """
-        添加模型并一次性上传展平几何到 VBO.
-        normal_mode: 'flat' 用面法线 (平直光照, 立方体), 'vertex' 用顶点径向法线 (光滑光照, 球体)
-        name/scale/visible/color: 编辑器扩展属性 (color 为 hex 时覆盖网格面色为单色材质)
-        saturation: 终色饱和度 0..2 (0=灰阶, 1=原始, >1=增艳)
-        """
-        model = GameObject(mesh, position, rotation,
-                           name=name, scale=scale, visible=visible,
-                           primitive=getattr(mesh, 'primitive', None),
-                           params=getattr(mesh, 'params', None),
-                           color=color, normal_mode=normal_mode,
-                           saturation=saturation)
-        if model.name is None:
-            # 自动命名: 按基元类型 (编辑器场景) / 网格种类 (默认场景)
-            prim = model.primitive
-            model.name = {None: '物体', 'cube': '立方体', 'sphere': '球体',
-                          'plane': '平面'}.get(prim, '物体')
-        # 稳定身份 (M16): 每个物体一个 GUID, 场景/Prefab 引用用
-        if model.guid is None:
-            model.guid = uuid.uuid4().hex
-        self._build_gpu(model)
-        self._register_model_material(model)   # M23: 材质进库, 供共享引用
-        self.models.append(model)
-        self._bump_struct()                    # 组3: 结构变更失效 (ancestry+SoA)
-        return model
-
-    # ================ 材质库管理 (M23) ================
-    def add_material(self, color=None, saturation=1.0, name=None, guid=None):
-        """新建材质并加入材质库 (供物体共享引用). 返回 Material."""
-        mat = Material(color=color, saturation=saturation, name=name, guid=guid)
-        self.materials.append(mat)
-        return mat
-
-    def _find_material(self, guid):
-        """按 guid 在材质库找材质 (找不到返回 None)."""
-        if guid:
-            for mat in self.materials:
-                if mat.guid == guid:
-                    return mat
-        return None
-
-    def _register_model_material(self, model):
-        """把物体自带的材质登记进材质库 (未在库中则加入), 保证共享可被引用."""
-        mat = model.renderer.material
-        if mat is not None and mat not in self.materials:
-            self.materials.append(mat)
-
-    def attach_model(self, model, index=None):
-        """重新挂载已存在的 GameObject (撤销删除/Prefab 实例化): 重建 GPU 几何并加入列表."""
-        if model.vbo is None or model.vao is None:
-            self._build_gpu(model)
-        if index is None:
-            self.models.append(model)
-        else:
-            self.models.insert(index, model)
-        self._bump_struct()                    # 组3: 结构变更失效 (ancestry+SoA)
-        return model
+    # 2026-11-17 (S2-2): add_model / attach_model / add_material / _find_material /
+    # _register_model_material 已搬进 loom_model_data.ModelDataMixin（数据面进内核，
+    # GPU 上传走 _backend_upload_model 钩子）。本类只剩真正的 GPU 侧实现。
 
     @staticmethod
     def _mesh_key(model):

@@ -32,6 +32,9 @@ beta7 批 0（B7-24）要定一份两端都必须实现的 IEngineAPI。在契�
 - **v3.1（2026-11-17 S2-2 部分完成）**：11 个纯数据查询方法（Layer/Tag/查找/SendMessage/设置层标签）
   从 GLEngine 搬进 loom_scene_query.SceneQueryMixin（无 GPU 依赖）→ VK 82 → **93**，
   GL 独有 40 → **29**，共同 72 → **83**。
+- **v3.2（2026-11-17 S2-2 续）**：add_model / attach_model / add_material / find_model_by_guid /
+  toggle_logic_paused 也进内核（数据面进内核，GPU 上传走 _backend_upload_model 钩子）
+  → VK 93 → **98**，GL 独有 29 → **24**，共同 83 → **88**。
   差异从 79 条缩到 40 条，**这是「一个引擎」的直接证据**，不是「逐条补 VK」。
   新增的 3 条 GL 独有 = 3 个鼠标状态属性（mouse_locked / mouse_lock_allowed /
   mouse_unlock_requested），它们正是「脚本读状态在 VK 下 AttributeError」的实例。
@@ -173,14 +176,12 @@ def api_matrix():
 # 每一项 = 今天「一端有、另一端没有」的公开方法。修完一条就从这里删掉一条，并写进 IEngineAPI 契约；
 # 新增一条 = 门红。
 EXPECTED_GL_ONLY = frozenset({
-    'add_light', 'add_material', 'add_model', 'attach_model',
-    'blit_texture', 'clear_scene', 'draw_lines', 'draw_screen_lines',
-    'draw_screen_polygon', 'draw_screen_rect', 'draw_text_quad', 'draw_texture_quad',
-    'find_model_by_guid', 'get_frame_jitter', 'get_logic_time_ratio', 'get_tps',
+    'add_light', 'blit_texture', 'clear_scene', 'draw_lines',
+    'draw_screen_lines', 'draw_screen_polygon', 'draw_screen_rect', 'draw_text_quad',
+    'draw_texture_quad', 'get_frame_jitter', 'get_logic_time_ratio', 'get_tps',
     'load_scene', 'pop_scissor', 'present_health', 'push_scissor',
     'remove_light', 'remove_subtree', 'render', 'reset_sky_state',
-    'run', 'should_fallback_remote', 'step_logic_once', 'toggle_logic_paused',
-    'update_scripts',
+    'run', 'should_fallback_remote', 'step_logic_once', 'update_scripts',
 })
 
 EXPECTED_VK_ONLY = frozenset({
@@ -191,7 +192,7 @@ EXPECTED_VK_ONLY = frozenset({
 
 # 计数断言（防「两端同时改名」这种集合差异看不出来的漂移）
 EXPECTED_GL_TOTAL = 112
-EXPECTED_VK_TOTAL = 93
+EXPECTED_VK_TOTAL = 98
 
 
 def _call_groups():

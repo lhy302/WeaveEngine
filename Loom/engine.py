@@ -816,15 +816,10 @@ class GLEngine(EngineCore, ShadowMixin, HudMixin, RenderMixin, ModelGpuMixin, Li
     # rebind_action 已抽出到 loom_input.InputMixin (见类定义继承).
 
     # ================ 脚本系统 (M27) ================
-    def set_logic_paused(self, paused):
-        """2026-11-07: 统一暂停接口 (脚本/编辑器/播放器同语义).
-
-        2026-11-09 P1-A: 进入暂停时清墙钟锚点 (与 toggle_logic_paused 同一口径),
-        保证恢复首帧 wall_dt=0, 不补暂停期欠账。
-        """
-        self._logic_paused = bool(paused)
-        if self._logic_paused:
-            self._logic_wall_last = None
+    # 2026-11-17 (S2-2): set_logic_paused / toggle_logic_paused 统一到 EngineCore。
+    # 旧的本类版本只设标志 + 清墙钟锚点，**不** reset 时钟/对齐插值 —— 而 toggle 会做。
+    # 两者口径不一致本身就是缺陷（同一件事两种效果）；内核版按 toggle 的完整口径实现，
+    # 于是 set_logic_paused(True) 与 toggle 到暂停态现在**效果相同**。
 
     def request_game_exit(self):
         """2026-11-07: 统一"退出游戏"接口.
@@ -1496,27 +1491,8 @@ class GLEngine(EngineCore, ShadowMixin, HudMixin, RenderMixin, ModelGpuMixin, Li
                           lambda: self.update_physics(render_dt, events=False))
             self.update_audio(render_dt)
             self._advanced_this_frame = True
-
-    def toggle_logic_paused(self):
-        """暂停/恢复逻辑时钟 (F9, MC 同款暂停世界 TPS): 渲染帧照跑
-        (开发者相机/交互不受影响 — 批5 独立性), 逻辑帧冻结; F10 步进生效.
-        分离未开 (旧绑死模式) = 无暂停语义 (返回 False 不生效)."""
-        if not getattr(self, 'is_playing', False):
-            return False
-        if self._ensure_split() is None:
-            return False
-        self._logic_paused = not getattr(self, '_logic_paused', False)
-        if self._logic_paused:
-            # 暂停边界: 清 accumulator 余量 (恢复时从整拍开始, 不补暂停期欠账)
-            self._clock.reset()
-            # 2026-11-09 P1-A: 同时清墙钟锚点 —— _clock_advance 的 wall_dt 下限
-            # 是另一个"补欠账"入口, 只 reset() 时钟不足以兑现本契约。
-            self._logic_wall_last = None
-            it = getattr(self, '_interp', None)
-            if it is not None:
-                it.align()
-            self._render_world = None
-        return self._logic_paused
+    # 2026-11-17 (S2-2): toggle_logic_paused / set_logic_paused 已搬进 EngineCore
+    # （暂停语义两端共享；VK 的 set_logic_paused 覆盖内核版，toggle 走同一份）。
 
     def step_logic_once(self):
         """步进 1 逻辑帧 (F10, MC 同款): 仅暂停态生效 — 置请求标志,
