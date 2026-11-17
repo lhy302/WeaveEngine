@@ -217,26 +217,21 @@ class _PlayerWidget:
                 km = _build_qt_to_pg()
                 k = km.get(ev.key())
                 if k is not None and self._engine is not None:
-                    self._engine.key_state[k] = True
-                    try:
-                        from types import SimpleNamespace
-                        self._engine.on_key_event(SimpleNamespace(
-                            type='KEYDOWN', key=k, mod=0))
-                    except Exception:
-                        pass
+                    # 2026-11-17 (S1 事件面统一): 宿主只负责「把 Qt 事件翻成 ev 递进去」，
+                    # 顺序编排（UI 优先 → 钩子 → key_state）全在内核 handle_key_event 里，
+                    # 与编辑器/GL 播放器**同一个入口**（后端无感）。
+                    from types import SimpleNamespace
+                    self._engine.handle_key_event(SimpleNamespace(
+                        type='KEYDOWN', key=k, mod=0))
                 super().keyPressEvent(ev)
 
             def keyReleaseEvent(self, ev):
                 km = _build_qt_to_pg()
                 k = km.get(ev.key())
                 if k is not None and self._engine is not None:
-                    self._engine.key_state[k] = False
-                    try:
-                        from types import SimpleNamespace
-                        self._engine.on_key_event(SimpleNamespace(
-                            type='KEYUP', key=k, mod=0))
-                    except Exception:
-                        pass
+                    from types import SimpleNamespace
+                    self._engine.handle_key_event(SimpleNamespace(
+                        type='KEYUP', key=k, mod=0))
                 super().keyReleaseEvent(ev)
 
             def mousePressEvent(self, ev):

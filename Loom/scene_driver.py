@@ -25,6 +25,7 @@ from engine import GameObject, Point3D, LightState, DEFAULT_ACTIONS
 # 重建"配了 LOD 的模型"集合, 无 LOD 场景每帧 O(1) 早退 (不再全量扫描).
 import weakref
 
+from engine_core import EngineCore   # S2-3: 后端无关的引擎内核（与 GLEngine 同一个）
 from loom_components import (MeshRendererComponent, animator_from_dict,
                             evaluate_animations, physics_disabled_by_env,
                             AudioSystem)
@@ -450,7 +451,11 @@ def link_camera_parents(cameras, cam_dicts, models):
             parent.camera_children.append(cam)
 
 
-class SceneDriver:
+# 2026-11-17 (S2-3 门面收敛 / JVM 模型): SceneDriver 不再是「第二个引擎」——
+# 它继承 EngineCore（后端无关内核），自己只保留「VK 侧装配 + 后端驱动」的部分。
+# MRO: SceneDriver 自己的定义优先（保持现有行为），EngineCore 补上 VK 侧原先缺的能力。
+# 用户视角判据：同一份脚本 + 同一场景 + 同一输入 → 两端事件/状态序列逐条相等。
+class SceneDriver(EngineCore):
     """播放器中间层: 场景 + 每帧步进 (脚本/物理/动画/轨道相机) + VP 计算.
 
     帧循环 (后端调用):  vp, cam_pos = world.step(dt)  → 后端画 world.models/world.lights
@@ -499,6 +504,10 @@ class SceneDriver:
         # B1: 脚本 "引擎 API 最小面" 输入/相机安全默认 (无输入=不动; 后端口喂键时
         # 直接写 key_state / actions)
         self.key_state = {}                      # 键名 -> bool (同 engine.script_keys)
+        # 2026-11-17 (S1): 输入状态初值改由内核建立 —— 与 GL 同一份（_key + 相机键快照）。
+        # 原来这里是空 dict 且没有 _key，导致 handle_key_event 永远记不上键、
+        # VK 下相机键/脚本按键全失效（门 test_host_event_parity 抓到）。
+        self._init_input_state()
         self.actions = dict(DEFAULT_ACTIONS)     # 动作 -> 键名列表 (同 engine.actions)
         # 2026-11-08 批2 (01 号遗留①): 键位加载改走"只读模板 + 用户层 delta"体系,
         # 权威常量来自 loom_input（模板名只在那里定义一次），用户层覆盖来自

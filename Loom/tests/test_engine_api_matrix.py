@@ -23,7 +23,13 @@ beta7 批 0（B7-24）要定一份两端都必须实现的 IEngineAPI。在契�
 - v2（2026-11-17 人类裁决 Q-B7-24-2「属性面要进契约」后）：含普通类属性
   → GL 109 / VK 39 / 共同 29 / GL 独有 80 / VK 独有 10。
 - v2.1（2026-11-17 B7-26 落地后）：VK 新增公开方法 update_audio（音频段，契约 A 类）
-  → GL 109 / VK 40 / 共同 30 / GL 独有 79 / VK 独有 10。基线已同步删掉 update_audio 一行。
+  → GL 109 / VK 40 / 共同 30 / GL 独有 79 / VK 独有 10。
+- **v3（2026-11-17 S1+S2 门面收敛后，JVM 模型）**：新增 engine_core.EngineCore（后端无关内核），
+  GLEngine 与 SceneDriver **都继承它** → 8 个后端无关 mixin（Transform/Physics/Input/Camera/
+  FrameComponent/Profiler/LogicThread/Raycast）的 ~100 个方法两端共享，另有 3 个统一宿主事件入口
+  handle_key_event / handle_text_input / handle_quit_request。
+  → GL 112 / VK 82 / 共同 **72** / GL 独有 **40** / VK 独有 10。
+  差异从 79 条缩到 40 条，**这是「一个引擎」的直接证据**，不是「逐条补 VK」。
   新增的 3 条 GL 独有 = 3 个鼠标状态属性（mouse_locked / mouse_lock_allowed /
   mouse_unlock_requested），它们正是「脚本读状态在 VK 下 AttributeError」的实例。
 - 两个口径的数字不可混用；本门自 v2 起以 109/39 为基线。
@@ -164,29 +170,16 @@ def api_matrix():
 # 每一项 = 今天「一端有、另一端没有」的公开方法。修完一条就从这里删掉一条，并写进 IEngineAPI 契约；
 # 新增一条 = 门红。
 EXPECTED_GL_ONLY = frozenset({
-    'mouse_lock_allowed',
-    'mouse_locked',
-    'mouse_unlock_requested',
-    'add_camera', 'add_light', 'add_material', 'add_model',
-    'apply_game_bindings', 'apply_orbit_camera', 'attach_model', 'blit_texture',
-    'clear_scene', 'collect_subtree', 'collider_bounds', 'compute_render_matrices',
-    'compute_world_matrices', 'draw_lines', 'draw_screen_lines', 'draw_screen_polygon',
-    'draw_screen_rect', 'draw_text_quad', 'draw_texture_quad', 'find_all_by_name',
-    'find_by_name', 'find_by_script', 'find_by_tag', 'find_model_by_guid',
-    'get_bounding_box', 'get_current_model', 'get_frame_jitter', 'get_logic_time_ratio',
-    'get_tps', 'is_ancestor', 'layer_id', 'layer_name',
-    'load_scene', 'model_world_matrix', 'move_camera', 'on_key_event',
-    'on_quit_request', 'on_text_input', 'parent_world_matrix', 'pop_scissor',
-    'present_health', 'profile_snapshot', 'push_scissor', 'raycast',
-    'raycast_all', 'raycast_screen', 'register_tag', 'remove_camera',
-    'remove_light', 'remove_subtree', 'render', 'reset_sky_state',
-    'resolve_collisions', 'resolve_unlock_key_conflict', 'rotate_camera', 'run',
-    'save_action_bindings', 'script_occupied_keys', 'select_next_model', 'send_message_to_name',
-    'set_camera_parent', 'set_object_layer', 'set_object_tag', 'set_parent',
-    'should_fallback_remote', 'step_logic_once', 'sync_script_keys', 'tag_exists',
-    'toggle_logic_paused', 'update_animations', 'update_physics',
-    'update_scripts', 'validate_action_binding', 'world_rotation_matrix', 'world_scale',
-    'world_to_local',
+    'add_light', 'add_material', 'add_model', 'attach_model',
+    'blit_texture', 'clear_scene', 'draw_lines', 'draw_screen_lines',
+    'draw_screen_polygon', 'draw_screen_rect', 'draw_text_quad', 'draw_texture_quad',
+    'find_all_by_name', 'find_by_name', 'find_by_script', 'find_by_tag',
+    'find_model_by_guid', 'get_frame_jitter', 'get_logic_time_ratio', 'get_tps',
+    'layer_id', 'layer_name', 'load_scene', 'pop_scissor',
+    'present_health', 'push_scissor', 'register_tag', 'remove_light',
+    'remove_subtree', 'render', 'reset_sky_state', 'run',
+    'send_message_to_name', 'set_object_layer', 'set_object_tag', 'should_fallback_remote',
+    'step_logic_once', 'tag_exists', 'toggle_logic_paused', 'update_scripts',
 })
 
 EXPECTED_VK_ONLY = frozenset({
@@ -196,8 +189,8 @@ EXPECTED_VK_ONLY = frozenset({
 })
 
 # 计数断言（防「两端同时改名」这种集合差异看不出来的漂移）
-EXPECTED_GL_TOTAL = 109
-EXPECTED_VK_TOTAL = 40
+EXPECTED_GL_TOTAL = 112
+EXPECTED_VK_TOTAL = 82
 
 
 def _call_groups():

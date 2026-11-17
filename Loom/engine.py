@@ -48,6 +48,7 @@ from loom_shaders import (  # noqa: E402
     _LINE_VERT, _LINE_FRAG,
     _WORLD_UI_VERT, _WORLD_UI_FRAG,
 )
+from engine_core import EngineCore   # S2-1: 后端无关的引擎内核 (JVM 模型)
 from loom_shadow import ShadowMixin   # M29 阴影子系统 (已抽出)
 from loom_frame_components import FrameComponentMixin   # 每帧组件推进 (音频/动画/碰撞回调)
 from loom_physics import PhysicsMixin   # M28 碰撞 + M31 刚体物理 (已抽出)
@@ -193,9 +194,11 @@ def gc_play_exit():
         print("[gc] gc_play_exit 失败 (忽略): %r" % (e,))
 
 
-class GLEngine(ShadowMixin, FrameComponentMixin, PhysicsMixin, InputMixin, HudMixin, CameraMixin,
-               RenderMixin, ModelGpuMixin, LightingMixin, GlfwWindowMixin, TransformMixin,
-               ProfilerMixin, LogicThreadMixin, RaycastMixin):
+# 2026-11-17 (S2-1 门面收敛 / JVM 模型): 后端无关的 8 个 mixin 归位到 EngineCore，
+# 本类只保留「GL 后端 + GL 宿主」这一侧。行为零变化（mixin 内无 super() 调用；唯一跨 mixin
+# 重名的 _prof_* 已由 loom_render._mro_prof 做成 MRO 顺序无关）。详见 engine_core.py。
+class GLEngine(EngineCore, ShadowMixin, HudMixin, RenderMixin, ModelGpuMixin, LightingMixin,
+               GlfwWindowMixin):
     # 组2 (2026-08-30) _ancestry_ranges 结果缓存 (tin/tout, 类级):
     # key=(id(models 列表对象), _ANCESTRY_GEN 版本号); 五个结构变更点
     # (add_model/remove_model/clear_scene/set_parent/remove_camera) 写 _ANCESTRY_GEN
@@ -377,10 +380,11 @@ class GLEngine(ShadowMixin, FrameComponentMixin, PhysicsMixin, InputMixin, HudMi
         self._key = {name: _KEYMAP[ch] for name, ch in KEY_BINDINGS.items()}
         # 存储按键状态 (按住类按键; 2026-08-28 清除玩具期 MODEL_*/ROTATE_* 键控)
         self.key_state = {}
-        for name in ('CAMERA_FORWARD', 'CAMERA_BACKWARD', 'CAMERA_LEFT', 'CAMERA_RIGHT',
-                     'CAMERA_UP', 'CAMERA_DOWN', 'LOOK_LEFT', 'LOOK_RIGHT',
-                     'LOOK_UP', 'LOOK_DOWN'):
+        for name in self._CAMERA_KEYS:
             self.key_state[self._key[name]] = False
+        # 2026-11-17 (S1): 与 VK 走同一个内核初始化（幂等，此处不改变任何已有值）——
+        # 保证「事件 API 的初值」两端同源，不再各自内联一份。
+        self._init_input_state()
 
         # 帧率计数
         self.last_time = time.perf_counter()   # 高精度单调钟 (与帧 dt 同源)

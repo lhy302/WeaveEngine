@@ -333,20 +333,11 @@ class GlfwWindowMixin:
         # char_callback 收到提交文本 -> on_text_input 钩子（兼容 pygame TEXTINPUT 语义）
         # 2026-10-18 阶段3: UI 输入框焦点优先接收（IME 中文从这里进 InputField）
         if self._pending_chars:
-            ui = getattr(self, 'ui', None)
+            # 2026-11-17 (S1): 文本入口统一走 handle_text_input（UI 优先 → 钩子），
+            # 与 VK 播放器/打包游戏调的是同一个方法。
+            from types import SimpleNamespace
             for text in self._pending_chars:
-                if ui is not None:
-                    try:
-                        if ui.dispatch_text(text):
-                            continue
-                    except Exception:
-                        pass
-                try:
-                    from types import SimpleNamespace
-                    self.on_text_input(
-                        SimpleNamespace(type='TEXTINPUT', text=text))
-                except Exception:
-                    pass
+                self.handle_text_input(SimpleNamespace(type='TEXTINPUT', text=text))
             self._pending_chars.clear()
 
         # 鼠标三键状态
@@ -453,59 +444,10 @@ def _on_key_cb(win, key, scancode, action, mods):
     pg_key = _glfw_to_pg(key)
     if pg_key is None:
         return
-
-    # F11 全屏（引擎层，先于 on_key_event 钩子）
-    if action == glfw.PRESS and e.allow_fullscreen and pg_key == pygame.K_F11:
-        e._toggle_fullscreen()
-        return
-
-    # F9 / F10 逻辑时钟（引擎层）
-    if action == glfw.PRESS:
-        if pg_key == pygame.K_F9:
-            try:
-                st = e.toggle_logic_paused()
-                print("[逻辑时钟] %s" % ("已恢复" if st else "已暂停 (F10 步进)")
-                      if st is not None else "")
-            except Exception:
-                pass
-            return
-        if pg_key == pygame.K_F10:
-            try:
-                if e.step_logic_once():
-                    print("[逻辑时钟] 步进 1 逻辑帧")
-            except Exception:
-                pass
-            return
-
-    # 2026-10-18 阶段3: UI 输入框优先接收键盘事件（焦点元素消费则跳过后续）
-    if action == glfw.PRESS:
-        ui = getattr(e, 'ui', None)
-        if ui is not None:
-            try:
-                if ui.dispatch_key(pg_key, getattr(e, '_mods', 0)):
-                    return
-            except Exception:
-                pass
-
-    # on_key_event 钩子（编辑器输入框等可吞掉）
-    try:
-        ev = _make_key_event(e, pg_key, action)
-        if e.on_key_event(ev):
-            return
-    except Exception:
-        pass
-
-    if action == glfw.PRESS:
-        if pg_key == e._key.get('SELECT_NEXT_MODEL'):
-            try:
-                e.select_next_model()
-            except Exception:
-                pass
-        elif pg_key in e.key_state:
-            e.key_state[pg_key] = True
-    elif action == glfw.RELEASE:
-        if pg_key in e.key_state:
-            e.key_state[pg_key] = False
+    # 2026-11-17 (S1 事件面统一): 顺序编排全部收进 EngineCore.handle_key_event ——
+    # 编辑器 / GL 播放器 / VK 播放器 / 打包游戏调的是**同一个**入口，
+    # 后端只负责「把 GLFW 事件翻成 ev 递进去」。
+    e.handle_key_event(_make_key_event(e, pg_key, action))
 
 
 def _make_key_event(e, pg_key, action):
@@ -601,10 +543,8 @@ def _on_window_close_cb(win):
     e = _get_engine(win)
     if e is None:
         return
-    try:
-        if e.on_quit_request():
-            e._running = False
-    except Exception:
+    # 2026-11-17 (S1): 统一走 handle_quit_request（钩子抛异常也按允许退出，防卡死）
+    if e.handle_quit_request():
         e._running = False
 
 
