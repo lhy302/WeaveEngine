@@ -26,7 +26,11 @@ from engine import GameObject, Point3D, LightState, DEFAULT_ACTIONS
 import weakref
 
 from loom_components import (MeshRendererComponent, animator_from_dict,
-                            evaluate_animations, physics_disabled_by_env)
+                            evaluate_animations, physics_disabled_by_env,
+                            AudioSystem)
+# 2026-11-17 (B7-26): 碰撞配对/事件派发与音频段的**共享实现**（GL 侧同一份）
+import loom_collision as _lc
+import loom_frame_components as _lfc
 # 2026-11-06 相机对齐 (双后端): CameraState 实体 (纯数据类, 无 GL 依赖) ——
 # 场景 cameras/active_camera 在 Vk 侧也要还原, 否则"场景里的 Camera 实体"
 # 在 Vulkan 播放器里完全不存在, 只能看轨道相机。
@@ -608,6 +612,13 @@ class SceneDriver:
             _s_clock = {}
         self._split_enable = split_enabled(_s_clock)   # 设置面 logic_fps<=0 判定
         self._clock = clock_from_settings(_s_clock) if self._split_enable else None
+        # ---- B7-26: 逻辑帧后三段所需状态 ----
+        self.audio = None                 # 惰性建（_ensure_audio），与 GL 同一个 AudioSystem 类
+        self._audio_disabled = False      # 建失败后本场不再重试（可见降级，只警告一次）
+        self._audio_warned = False
+        self._prep_pairs = None           # 本逻辑帧的碰撞对（_logic_prep 产出）
+        self._prep_err_logged = False
+        self._coll_cache = {}             # 包围盒顶点缓存（按 id(mesh)）
         if self._clock is not None:
             self._clock.on_logic_step.append(self._logic_frame)
             # 批5: 物理不挂 on_physics_step (已删) — 子步在 _logic_frame 内循环
@@ -807,10 +818,14 @@ class SceneDriver:
 
     # ---------------- 每帧步进 ----------------
     def _logic_frame(self, fixed_dt):
-        """逻辑步 = 最高同步点 (批5): 脚本 → 动画 → 物理子步 ×N
-        (次序同 engine._logic_frame; beta6 C1 把动画提到物理之前, 让
-        "物理管线开/关"两种配置的最终位形一致).
-        2026-10-18 阶段1档序10 FixedUpdate：_update_scripts 前派发。"""
+        """逻辑步 = 最高同步点 (批5). 段序与 engine._logic_frame **逐段一致**：
+
+          [FixedUpdate] → [脚本] → [动画] → [物理子步 ×N] → [音频] →
+          [prep: 碰撞对] → [碰撞事件派发] → [插值翻页]
+
+        2026-11-17 (B7-26) 补齐后三段：原来 VK 只有前四段 + 插值翻页，
+        导致脚本 on_collision_*/on_trigger_* **永不触发**、AudioSource play/stop
+        **永不发生**（同一份内容两端结果不同）。门：tests/test_vk_logic_frame_parity.py。"""
         self._dispatch_fixed_update(fixed_dt)
         self._update_scripts(fixed_dt)
         self._update_animations(fixed_dt)
@@ -818,8 +833,80 @@ class SceneDriver:
         sdt = clk.sub_dt if clk is not None else fixed_dt
         for _ in range(clk.sub_steps if clk is not None else 1):
             self._step_physics(sdt)
+        # 音频段（与 GL 同位置：物理子步之后、prep 之前）
+        self.update_audio(fixed_dt)
+        # prep 段：算本逻辑帧的碰撞对（GL 的 prep 还算 AABB/光源 VP 缓存，
+        # VK 的渲染侧自己每帧算 VP，这里只需要碰撞对 —— 见 _logic_prep 注释）
+        self._logic_prep(fixed_dt)
+        # 碰撞事件派发（消费 prep 产出的对；每逻辑帧一次，改脚本状态必须主线程）
+        # 注意用 `is not None` 而不是真值判断 —— **空列表也必须派发**：
+        # 上一帧有对、这一帧没有 = 物体分开了，要发 on_collision_end /
+        # on_trigger_exit。用真值判断会漏掉所有「离开」事件（实测踩过）。
+        if self._prep_pairs is not None:
+            self._dispatch_collision_events(self._prep_pairs)
         if self._interp is not None:
             self._interp.advance()
+
+    # ---------------- B7-26: 逻辑帧后三段 ----------------
+    def _ensure_audio(self):
+        """惰性建音频后端（与 GL 同一个 AudioSystem 类）。
+        建失败 → 只警告一次并返回 None（**可见**降级，不静默吞：I6 不变量）。"""
+        if self.audio is not None:
+            return self.audio
+        if self._audio_disabled:
+            return None
+        try:
+            self.audio = AudioSystem()
+        except Exception as e:
+            self._audio_disabled = True
+            if not self._audio_warned:
+                self._audio_warned = True
+                print("[驱动] 音频后端不可用 (%r) -> 本场无音频（与 GL 的降级口径一致）" % (e,))
+            return None
+        return self.audio
+
+    def _sync_audio_listener(self):
+        """监听器跟随相机 —— 调 loom_frame_components 的共享实现（与 GL 同一份）。"""
+        if self.audio is None:
+            return
+        return _lfc.sync_audio_listener(self)
+
+    def update_audio(self, dt):
+        """音频段：按 AudioSource 组件 playing 状态 play/stop（与 GL 同一份实现）。"""
+        if self._ensure_audio() is None:
+            return
+        return _lfc.update_audio(self, dt)
+
+    def _logic_prep(self, fixed_dt):
+        """逻辑帧尾 prep —— VK 侧只需要「碰撞对」这一项。
+
+        与 GL 的差别（有意，非遗漏）：GL 的 prep 还算 AABB 缓存与光源 VP 缓存，
+        那是 GL 渲染侧复用的；VK 的 VP 在 vk_renderer._pack_light_vps 每帧自己算，
+        不需要在这里缓存。
+
+        性能口径（明确不做对齐，路线登记 §6.5）：配对走 loom_collision.pairs 的朴素
+        O(n²) 候选对；GL 走 SAP + C 内核。**只在本场有脚本时才配对**（没有脚本就没人
+        监听碰撞事件），避免无脚本场景白付这份成本。"""
+        self._prep_pairs = None
+        models = self.models
+        if len(models) < 2:
+            return
+        if not any(getattr(m, "scripts", None) for m in models):
+            return
+        try:
+            worlds = np.array([object_world_matrix(m) for m in models],
+                              dtype=np.float64)
+            self._prep_pairs = _lc.pairs(models, worlds, self._coll_cache)
+        except Exception as e:
+            # 可见降级（每场只报一次）：配对失败不该让整帧崩，但也不许静默
+            if not self._prep_err_logged:
+                self._prep_err_logged = True
+                print("[驱动] 碰撞配对失败 (%r) -> 本场不再派发碰撞事件" % (e,))
+
+    def _dispatch_collision_events(self, pairs):
+        """把碰撞对派发成 on_collision_*/on_trigger_* —— 调 loom_collision 的共享实现，
+        与 GL 侧 PhysicsMixin._dispatch_collision_events 是**同一个函数**。"""
+        return _lc.dispatch(self.models, pairs)
 
     def set_logic_paused(self, paused):
         """2026-11-07: 统一暂停接口 (VK 播放器)."""

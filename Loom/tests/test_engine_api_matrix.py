@@ -22,6 +22,8 @@ beta7 批 0（B7-24）要定一份两端都必须实现的 IEngineAPI。在契�
   这是 beta6 审计口径，首版矩阵与 docs/audit/impl_B7-24_API矩阵_20261117.md 用的是它。
 - v2（2026-11-17 人类裁决 Q-B7-24-2「属性面要进契约」后）：含普通类属性
   → GL 109 / VK 39 / 共同 29 / GL 独有 80 / VK 独有 10。
+- v2.1（2026-11-17 B7-26 落地后）：VK 新增公开方法 update_audio（音频段，契约 A 类）
+  → GL 109 / VK 40 / 共同 30 / GL 独有 79 / VK 独有 10。基线已同步删掉 update_audio 一行。
   新增的 3 条 GL 独有 = 3 个鼠标状态属性（mouse_locked / mouse_lock_allowed /
   mouse_unlock_requested），它们正是「脚本读状态在 VK 下 AttributeError」的实例。
 - 两个口径的数字不可混用；本门自 v2 起以 109/39 为基线。
@@ -182,7 +184,7 @@ EXPECTED_GL_ONLY = frozenset({
     'save_action_bindings', 'script_occupied_keys', 'select_next_model', 'send_message_to_name',
     'set_camera_parent', 'set_object_layer', 'set_object_tag', 'set_parent',
     'should_fallback_remote', 'step_logic_once', 'sync_script_keys', 'tag_exists',
-    'toggle_logic_paused', 'update_animations', 'update_audio', 'update_physics',
+    'toggle_logic_paused', 'update_animations', 'update_physics',
     'update_scripts', 'validate_action_binding', 'world_rotation_matrix', 'world_scale',
     'world_to_local',
 })
@@ -195,7 +197,7 @@ EXPECTED_VK_ONLY = frozenset({
 
 # 计数断言（防「两端同时改名」这种集合差异看不出来的漂移）
 EXPECTED_GL_TOTAL = 109
-EXPECTED_VK_TOTAL = 39
+EXPECTED_VK_TOTAL = 40
 
 
 def _call_groups():

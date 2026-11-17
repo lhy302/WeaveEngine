@@ -17,67 +17,98 @@ import weakref
 from loom_components import evaluate_animations, physics_disabled_by_env
 
 
+# ============ 2026-11-17 (B7-26): 音频段与碰撞回调的**共享实现**（两端同一份） ============
+# 原来这两个方法只长在 FrameComponentMixin 上，VK 的 SceneDriver 一个都没有 —— 于是 VK 下
+# AudioSource 的 play/stop 永不发生、脚本碰撞回调永不触发。抽成模块级函数后 GL/VK 都调同一份。
+
+
+def sync_audio_listener(host):
+    """监听器隐式跟随相机（契约 §3 / A1 决策）：优先当前玩家视角摄像机，
+    无则用引擎内部相机（GL 的 `camera + camera_yaw/pitch`，VK 的 `camera_pos + yaw/pitch`）。
+    相机看向 -ez，故监听器前向 = -ez，上方向 = ey。失败静默（降级为无 3D 参照）。"""
+    try:
+        cam = host.active_camera_object()
+        if cam is not None:
+            pos = host.camera_world_position(cam)
+            _ex, ey, ez = host.camera_world_basis(cam)
+        else:
+            pos = getattr(host, 'camera', None)
+            if pos is None:
+                pos = host.camera_pos
+            yaw = getattr(host, 'camera_yaw', None)
+            if yaw is None:
+                yaw = getattr(host, 'yaw', 0.0)
+            pitch = getattr(host, 'camera_pitch', None)
+            if pitch is None:
+                pitch = getattr(host, 'pitch', 0.0)
+            cy, sy = math.cos(yaw), math.sin(yaw)
+            cp, sp = math.cos(pitch), math.sin(pitch)
+            ey = (-sy * sp, cp, -cy * sp)
+            ez = (sy * cp, sp, cy * cp)
+        fwd = (-ez[0], -ez[1], -ez[2])
+        host.audio.set_listener((pos.x, pos.y, pos.z), fwd, ey)
+    except Exception:
+        pass          # 监听器同步失败不影响音频播放（降级为无 3D 参照）
+
+
+def update_audio(host, dt):
+    """M34: 每帧按 AudioSource 组件 playing 状态 play/stop（播放状态变化才操作）。
+    逐行照抄原 FrameComponentMixin.update_audio（行为不变），宿主只需提供
+    `models / audio / world_position / active_camera_object / camera_world_position /
+    camera_world_basis` 与 `camera 或 camera_pos`。"""
+    sync_audio_listener(host)
+    for m in host.models:
+        a = m.audio_source
+        if a is None or not a.clip:
+            continue
+        spatial = a.is_spatial() if hasattr(a, 'is_spatial') else False
+        key = (a.clip, bool(a.playing))
+        if key != a._key:
+            if a.playing:
+                if spatial:
+                    p = host.world_position(m)
+                    a._last_pos = (p.x, p.y, p.z)
+                    host.audio.play_spatial(
+                        a.clip, a._last_pos, loop=a.loop, volume=a.volume,
+                        min_distance=a.min_distance,
+                        max_distance=a.max_distance,
+                        rolloff=a.rolloff, owner=id(a))
+                else:
+                    host.audio.play(a.clip, a.loop, a.volume, owner=id(a))
+            elif a._key is not None:   # 只在曾播放过才 stop（初始/新组件不空停）
+                host.audio.stop(a.clip, owner=id(a))
+            a._key = key
+            continue
+        if spatial and a.playing:      # 已在播：仅位置变化时更新
+            p = host.world_position(m)
+            cur = (p.x, p.y, p.z)
+            last = getattr(a, '_last_pos', None)
+            if last is None or (abs(cur[0] - last[0]) > 1e-4
+                                or abs(cur[1] - last[1]) > 1e-4
+                                or abs(cur[2] - last[2]) > 1e-4):
+                a._last_pos = cur
+                host.audio.update_sound_position(a.clip, cur, owner=id(a))
+
+
+def call_collision_cb(m, hook, other):
+    """调物体上所有脚本的碰撞回调（坏脚本标记不崩帧）。实现已收敛到 loom_collision。"""
+    return _lc.call_cb(m, hook, other)
+
+
+import loom_collision as _lc   # noqa: E402  (模块级共享：碰撞回调)
+
 class FrameComponentMixin:
 
     def _sync_audio_listener(self):
-        """2026-10-18 3D 音频 (契约 §3): 监听器隐式跟随相机 (A1 决策).
-        优先当前玩家视角摄像机; 无则用引擎内部相机 (self.camera + yaw/pitch).
-        相机看向 -ez (视图空间), 故监听器前向 = -ez, 上方向 = ey."""
-        try:
-            cam = self.active_camera_object()
-            if cam is not None:
-                pos = self.camera_world_position(cam)
-                _ex, ey, ez = self.camera_world_basis(cam)
-            else:
-                pos = self.camera
-                cy, sy = math.cos(self.camera_yaw), math.sin(self.camera_yaw)
-                cp, sp = math.cos(self.camera_pitch), math.sin(self.camera_pitch)
-                ey = (-sy * sp, cp, -cy * sp)
-                ez = (sy * cp, sp, cy * cp)
-            fwd = (-ez[0], -ez[1], -ez[2])
-            self.audio.set_listener((pos.x, pos.y, pos.z), fwd, ey)
-        except Exception:
-            pass          # 监听器同步失败不影响音频播放 (降级为无 3D 参照)
-
+        """监听器隐式跟随相机。2026-11-17 (B7-26): 实现搬进模块级 sync_audio_listener ——
+        VK 侧 SceneDriver 调的是**同一个函数**。"""
+        return sync_audio_listener(self)
     def update_audio(self, dt):
-        """M34: 每帧按 AudioSource 组件 playing 状态 play/stop (播放状态变化才操作).
-        B2 (2026-08-30): owner=id(组件) —— game-audio 句柄级音量, 同 clip 多组件
-        各自独立 (pygame 同 Sound 共享音量, 旧语义下多音量互踩).
-        2026-10-18 3D 音频: category=music 强制 2D; sfx/voice 走 3D (带位置+距离衰减).
-        空间化音源移动时每帧更新位置 (容差 1e-4, 未移动零开销)."""
-        self._sync_audio_listener()
-        for m in self.models:
-            a = m.audio_source
-            if a is None or not a.clip:
-                continue
-            spatial = a.is_spatial() if hasattr(a, 'is_spatial') else False
-            key = (a.clip, bool(a.playing))
-            if key != a._key:
-                if a.playing:
-                    if spatial:
-                        p = self.world_position(m)
-                        a._last_pos = (p.x, p.y, p.z)
-                        self.audio.play_spatial(
-                            a.clip, a._last_pos, loop=a.loop, volume=a.volume,
-                            min_distance=a.min_distance,
-                            max_distance=a.max_distance,
-                            rolloff=a.rolloff, owner=id(a))
-                    else:
-                        self.audio.play(a.clip, a.loop, a.volume, owner=id(a))
-                elif a._key is not None:   # 只在曾播放过才 stop (初始/新组件不空停)
-                    self.audio.stop(a.clip, owner=id(a))
-                a._key = key
-                continue
-            if spatial and a.playing:      # 已在播: 仅位置变化时更新
-                p = self.world_position(m)
-                cur = (p.x, p.y, p.z)
-                last = getattr(a, '_last_pos', None)
-                if last is None or (abs(cur[0] - last[0]) > 1e-4
-                                    or abs(cur[1] - last[1]) > 1e-4
-                                    or abs(cur[2] - last[2]) > 1e-4):
-                    a._last_pos = cur
-                    self.audio.update_sound_position(a.clip, cur, owner=id(a))
+        """M34: 每帧按 AudioSource 组件 playing 状态 play/stop。
 
+        2026-11-17 (B7-26): 实现搬进模块级 update_audio —— VK 侧调同一份，
+        两端 AudioSource 语义不可能再分叉。行为逐位不变。"""
+        return update_audio(self, dt)
     def update_animations(self, dt):
         """推进动画并应用变换 (位置/旋转/缩放).
 
@@ -112,16 +143,7 @@ class FrameComponentMixin:
         self._anim_fallback_models = ()
 
     def _call_collision_cb(self, m, hook, other):
-        """调物体上所有脚本的碰撞回调 (坏脚本标记不崩帧)."""
-        for sc in m.scripts:
-            inst = getattr(sc, '_script', None)
-            if inst is None or getattr(sc, '_script_broken', False):
-                continue
-            fn = getattr(inst, hook, None)
-            if fn is None:
-                continue
-            try:
-                fn(other)
-            except Exception as e:
-                print("[脚本] %s(%s) %s 出错: %r" % (m.name, sc.script_id, hook, e))
-                sc._script_broken = True
+        """调物体上所有脚本的碰撞回调（坏脚本标记不崩帧）。
+
+        2026-11-17 (B7-26): 实现已收敛到 loom_collision.call_cb（VK 侧同一份）。"""
+        return call_collision_cb(m, hook, other)

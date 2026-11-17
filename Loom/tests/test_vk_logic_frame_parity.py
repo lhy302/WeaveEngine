@@ -41,33 +41,27 @@ def _enforce_fail_exit_code():
     _os_gate._exit(1)
 
 
-"""test_vk_logic_frame_parity.py — B7-26 门：逻辑帧段序与段内效果必须两端一致。
+"""test_vk_logic_frame_parity.py — B7-26 门：逻辑帧段序 / 段内效果 / 配对集合 两端一致。
 
-缺陷（2026-11-17 取证）：VK {BT}_logic_frame{BT} 只有 5 段，GL 有 8 段。
+缺陷（2026-11-17 修复前取证）：VK {BT}_logic_frame{BT} 只有 5 段，GL 有 8 段 ——
   GL  ：FixedUpdate → 脚本 → 动画 → 物理子步×N → **音频** → **prep** → **碰撞事件派发** → 插值翻页
   VK  ：FixedUpdate → 脚本 → 动画 → 物理子步×N → 插值翻页
-  缺的三段里，最要命的是**碰撞事件派发**：{BT}_dispatch_collision_events{BT} 在 VK 侧**完全不存在**，
-  脚本的 {BT}on_collision_start/end/stay{BT}、{BT}on_trigger_enter/exit/stay{BT} 在 VK 下永不触发；
-  其次 {BT}update_audio{BT} 未接 —— VK 下 AudioSource 的 play/stop 永不发生。
+  缺的三段里最要命的是**碰撞事件派发**：{BT}_dispatch_collision_events{BT} / {BT}_logic_prep{BT} /
+  {BT}update_audio{BT} 在 VK 侧**整条链都不存在** → 脚本 {BT}on_collision_*{BT} / {BT}on_trigger_*{BT} 永不触发、
+  AudioSource play/stop 永不发生。
 
-本门是**已知缺口门（只许缩小）**——与 B7-24 的 API 矩阵门同一手法：
-缺口集合被冻结成基线，**新缺口 → 红；修好没删行 → 红**。这样 run_all 保持全绿，
-而「还差什么」是机器可查的，不靠人记。
+修复（B7-26）：抽 {BT}loom_collision.py{BT}（配对/判重/派发/回调）+ {BT}loom_frame_components{BT} 的
+模块级 {BT}sync_audio_listener{BT} / {BT}update_audio{BT}，GL 与 VK 调**同一份**；VK 补三段。
 
-已知缺口（2026-11-17 基线）：段 {audio, prep, dispatch}；能力 {update_audio,
-_dispatch_collision_events, _logic_prep}。
+本门四部分：
+  一 段序对拍：同一逻辑帧内各段的**调用顺序**逐项相等（实例级插桩，不锁源码字符串）；
+  二 能力面：VK 暴露 {BT}update_audio{BT} / {BT}_logic_prep{BT} / {BT}_dispatch_collision_events{BT}；
+  三 配对集合对拍：GL 的 SAP+C 内核配对 与 共享 {BT}loom_collision.pairs{BT} **产出同一集合**
+    （这是「VK 用朴素 O(n²) 也不改变语义」的证明）；
+  四 事件序列对拍：同一场景跑两帧（重叠→分离），两端 {BT}on_collision_start/end{BT} 序列逐条相等。
 
-原计划的「三 效果对拍：碰撞回调次数」**未纳入**（留痕）：
-  VK 侧没有 {BT}add_model{BT}，两端只能一端走 {BT}add_model{BT}（GL 已知能触发）、一端走
-  {BT}load_from_data{BT}，夹具不同源；实测该夹具下 GL 也是 0 次，说明夹具本身没造出
-  可触发对（不是引擎问题）。**改为「能力面缺失即不可能触发」的推断 + 契约 A 类要求**，
-  真正的事件序列对拍等 B7-26 实现时补（届时两端都有同源夹具）。
-
-本门三部分：
-  一 段序对拍：同一逻辑帧内各段的**调用顺序**逐项相等（用实例级插桩记录，不锁源码字符串）；
-  二 能力面：VK 必须暴露契约 A 类的 {BT}update_audio{BT} / 碰撞事件派发能力；
-  三 效果对拍：同一场景（两个重叠立方体 + 一个带 {BT}on_collision_start{BT} 的脚本）跑一个逻辑帧，
-    两端回调次数都必须 > 0。
+脚本用**真实注册脚本**（{BT}scripts.register{BT} + {BT}m.add_script(id){BT}），不走「手塞 _script」的捷径 ——
+后者会被 {BT}_run_scripts{BT} 重新解析成 None（实测踩过），测不到真链路。
 """
 
 import os
@@ -81,9 +75,12 @@ os.environ['LOOM_NO_PARALLEL'] = '1'
 os.environ.setdefault('LOOM_NO_DIALOG', '1')
 
 import moderngl                                            # noqa: E402
+import numpy as np                                         # noqa: E402
 import engine as E                                         # noqa: E402
 import scene_driver as SD                                  # noqa: E402
 import sceneio                                             # noqa: E402
+import loom_collision as _lc                               # noqa: E402
+from scripts import Script as _BaseScript, register as _register_script   # noqa: E402
 
 E.GLEngine._build_gpu = lambda self, m: None               # 无头：不建 VBO/VAO
 
@@ -100,69 +97,56 @@ def check(label, cond, detail=''):
 _CTX = moderngl.create_standalone_context()
 
 
-def make_scene():
-    """两个重叠的立方体（都带 collider），一个简单相机。"""
+# ---- 计数脚本：走真实注册/实例化路径（script_id = 类名） ----
+HITS = []
+
+
+class LogicFrameProbe(_BaseScript):
+    script_id = 'LogicFrameProbe'      # scripts.register 的键就是 cls.script_id
+    name = '逻辑帧对拍探针'
+
+    def on_collision_start(self, other):
+        HITS.append(('start', other.name))
+
+    def on_collision_end(self, other):
+        HITS.append(('end', other.name))
+
+
+_register_script(LogicFrameProbe)
+
+
+def make_scene(gap=0.2):
+    """两个立方体（都带 box collider），间距 gap（<1 即重叠）。"""
     return {
         'version': 12,
         'camera': {'target': [0, 0, 0], 'distance': 8, 'yaw': 0.6, 'pitch': -0.3},
         'gravity': -9.8,
         'skybox': None,
         'objects': [
-            {'id': 'a', 'type': 'cube', 'params': {'size': 1},
+            {'id': 'a', 'type': 'cube', 'params': {'size': 1}, 'name': 'A',
              'position': [0, 0.5, 0], 'rotation': [0, 0, 0], 'scale': [1, 1, 1],
              'color': '#ffffff', 'visible': True,
              'collider': {'shape': 'box', 'enabled': True}},
-            {'id': 'b', 'type': 'cube', 'params': {'size': 1},
-             'position': [0.2, 0.5, 0], 'rotation': [0, 0, 0], 'scale': [1, 1, 1],
+            {'id': 'b', 'type': 'cube', 'params': {'size': 1}, 'name': 'B',
+             'position': [gap, 0.5, 0], 'rotation': [0, 0, 0], 'scale': [1, 1, 1],
              'color': '#ffffff', 'visible': True,
              'collider': {'shape': 'box', 'enabled': True}},
         ],
-        'lights': [{'id': 'sun', 'kind': 'directional', 'direction': [-0.3, -1.0, -0.2],
-                    'color': [1, 1, 1], 'intensity': 1.0, 'shadow': False,
-                    'mode': 'full', 'shape': 'circle', 'size': 5}],
-        'materials': [], 'cameras': [], 'active_camera': None,
+        'lights': [], 'materials': [], 'cameras': [], 'active_camera': None,
     }
 
 
-class Counter:
-    """计数脚本。on_fixed_update/on_late_update 必须显式定义 ——
-    GL 的 _dispatch_fixed_update 用 type(inst).on_fixed_update is _Base.on_fixed_update
-    判断「脚本是否覆盖了该钩子」，缺属性会 AttributeError。"""
-
-    def __init__(self):
-        self.start = 0
-        self.enter = 0
-
-    def on_fixed_update(self, dt):
-        pass
-
-    def on_late_update(self, dt):
-        pass
-
-    def on_collision_start(self, other):
-        self.start += 1
-
-    def on_trigger_enter(self, other):
-        self.enter += 1
-
-
-def attach_counter(models):
-    """给每个物体挂一个计数脚本（GL/VK 用同一种挂法）。"""
-    out = []
+def attach_probe(models):
     for m in models:
-        sc = m.add_script(None)
-        c = Counter()
-        sc._script = c
-        out.append(c)
-    return out
+        m.add_script('LogicFrameProbe')
 
-
-# 已知缺口基线（只许缩小，不许增大）
-KNOWN_MISSING_SEGMENTS = {'audio', 'prep', 'dispatch'}
-KNOWN_MISSING_CAPS = {'update_audio', '_dispatch_collision_events', '_logic_prep'}
 
 # ---------------- 一. 段序对拍 ----------------
 print("=== 一. 段序对拍（同一逻辑帧内的段调用顺序） ===")
+
+# 物理子步数随设置变（这里 N=2），所以参考序里不放 physics，单独按「已有段相对顺序」比
+REFERENCE_ORDER = ['FixedUpdate', 'scripts', 'animations',
+                   'audio', 'prep', 'dispatch', 'interp']
 
 GL_SEGMENTS = [
     ('_dispatch_fixed_update', 'FixedUpdate'),
@@ -188,10 +172,11 @@ def trace(engine, table):
     """实例级插桩：包一层记录调用顺序，跑一个逻辑帧后还原。"""
     seen = []
     saved = []
+    missing = []
     for attr, label in table:
         fn = getattr(engine, attr, None)
         if fn is None:
-            seen.append(label + ':MISSING')
+            missing.append(label)
             continue
         saved.append((attr, fn))
 
@@ -201,10 +186,7 @@ def trace(engine, table):
                 return fn(*a, **k)
             return wrapper
 
-        try:
-            setattr(engine, attr, make())
-        except Exception:
-            seen.append(label + ':NO-SETATTR')
+        setattr(engine, attr, make())
     it = getattr(engine, '_interp', None)
     orig_adv = None
     if it is not None:
@@ -219,72 +201,92 @@ def trace(engine, table):
         engine._logic_frame(1.0 / 60.0)
     finally:
         for attr, orig in saved:
-            try:
-                setattr(engine, attr, orig)
-            except Exception:
-                pass
+            setattr(engine, attr, orig)
         if orig_adv is not None:
-            try:
-                it.advance = orig_adv
-            except Exception:
-                pass
-    return seen
+            it.advance = orig_adv
+    return seen, missing
 
 
-def missing_of(seq):
-    return {s.split(':')[0] for s in seq if s.endswith(':MISSING')}
+def build_gl(gap=0.2):
+    e = E.GLEngine(320, 240, ctx=_CTX)
+    e.clear_scene()
+    sceneio.scene_from_dict(e, make_scene(gap))
+    e.is_playing = True
+    e.parallel = None
+    e._collision_pool = None
+    e._frame_pool = None
+    attach_probe(e.models)
+    return e
 
 
-gl = E.GLEngine(320, 240, ctx=_CTX)
-gl.clear_scene()
-sceneio.scene_from_dict(gl, make_scene())
-gl.is_playing = True
-gl.parallel = None
-gl._collision_pool = None
-gl._frame_pool = None
-vk = SD.SceneDriver()
-vk.load_from_data(make_scene())
+def build_vk(gap=0.2):
+    d = SD.SceneDriver()
+    d.load_from_data(make_scene(gap))
+    attach_probe(d.models)
+    return d
 
-gl_seq = trace(gl, GL_SEGMENTS)
-vk_seq = trace(vk, VK_SEGMENTS)
+
+gl = build_gl()
+vk = build_vk()
+gl_seq, gl_missing = trace(gl, GL_SEGMENTS)
+vk_seq, vk_missing = trace(vk, VK_SEGMENTS)
 print('  GL 段序: ' + ' -> '.join(gl_seq))
 print('  VK 段序: ' + ' -> '.join(vk_seq))
 
-check('GL 段序就是参考实现（8 段齐全 + 插值翻页）',
-      gl_seq == ['FixedUpdate', 'scripts', 'animations', 'physics', 'physics',
-                 'audio', 'prep', 'dispatch', 'interp'],
-      'GL=%s' % (gl_seq,))
-
-vk_missing = missing_of(vk_seq)
-check('VK 缺口 == 已知基线（新增缺口即红）', vk_missing == KNOWN_MISSING_SEGMENTS,
-      '实测缺口=%s 基线=%s' % (sorted(vk_missing), sorted(KNOWN_MISSING_SEGMENTS)))
-check('基线里没有「已补齐但没删行」的条目',
-      not (KNOWN_MISSING_SEGMENTS - vk_missing),
-      '已补齐请从 KNOWN_MISSING_SEGMENTS 删除: %s' % sorted(KNOWN_MISSING_SEGMENTS - vk_missing))
-
-# VK 已跑到的段，相对顺序必须与 GL 一致（缺口之外不许乱序）
-gl_order = [s for s in gl_seq if not s.endswith(':MISSING')]
-vk_order = [s for s in vk_seq if not s.endswith(':MISSING')]
-check('VK 已有段的相对顺序与 GL 一致', vk_order == [s for s in gl_order if s in vk_order],
-      'GL=%s VK=%s' % (gl_order, vk_order))
+check('GL 段序 = 参考实现（8 段齐全 + 插值翻页）',
+      [s for s in gl_seq if s != 'physics'] == REFERENCE_ORDER and gl_missing == [],
+      'GL=%s missing=%s' % (gl_seq, gl_missing))
+check('VK 段序与 GL 逐项相等（段数含物理子步）', gl_seq == vk_seq,
+      'GL=%s VK=%s' % (gl_seq, vk_seq))
+check('VK 无缺失段', vk_missing == [], 'missing=%s' % (vk_missing,))
 
 # ---------------- 二. 能力面 ----------------
 print()
 print("=== 二. 能力面（契约 A 类要求） ===")
-CAPS = ('update_audio', '_dispatch_collision_events', '_logic_prep')
-vk_missing_caps = {c for c in CAPS if not callable(getattr(vk, c, None))}
-check('VK 缺的能力 == 已知基线', vk_missing_caps == KNOWN_MISSING_CAPS,
-      '实测缺=%s 基线=%s' % (sorted(vk_missing_caps), sorted(KNOWN_MISSING_CAPS)))
-check('能力基线里没有「已补齐但没删行」的条目',
-      not (KNOWN_MISSING_CAPS - vk_missing_caps),
-      '已补齐请从 KNOWN_MISSING_CAPS 删除: %s' % sorted(KNOWN_MISSING_CAPS - vk_missing_caps))
+CAPS = ('update_audio', '_logic_prep', '_dispatch_collision_events')
+for cap in CAPS:
+    check('VK 暴露 %s' % cap, callable(getattr(vk, cap, None)),
+          'hasattr=%s' % hasattr(vk, cap))
 
-check('GL 三项能力都在（参考实现）',
-      all(callable(getattr(gl, c, None)) for c in CAPS),
-      'GL missing=%s' % [c for c in CAPS if not callable(getattr(gl, c, None))])
+# ---------------- 三. 配对集合对拍 ----------------
+print()
+print("=== 三. 配对集合对拍（GL SAP+C 内核  vs  共享 loom_collision.pairs） ===")
+for gap, tag in ((0.2, '重叠'), (0.99, '重叠(临界)'), (1.5, '分离')):
+    e = build_gl(gap)
+    gl_pairs = set(e._collision_pairs_parallel())
+    worlds = e.compute_world_matrices(e.models)
+    shared_pairs = set(_lc.pairs(e.models, worlds, {}))
+    check('gap=%s（%s）：两端配对集合相同' % (gap, tag), gl_pairs == shared_pairs,
+          'GL=%s shared=%s' % (sorted(gl_pairs), sorted(shared_pairs)))
+
+# ---------------- 四. 事件序列对拍 ----------------
+print()
+print("=== 四. 事件序列对拍（重叠 → 分离，两帧） ===")
+
+
+def run_two_frames(build):
+    """第 1 帧重叠（应 start），第 2 帧把 B 挪远（应 end）。返回事件序列。"""
+    HITS.clear()
+    eng = build(0.2)
+    eng._logic_frame(1.0 / 60.0)
+    # 挪远：直接改 position（两端同一操作）
+    eng.models[1].position = E.Point3D(5.0, 0.5, 0.0)
+    eng._logic_frame(1.0 / 60.0)
+    return list(HITS)
+
+
+gl_hits = run_two_frames(build_gl)
+vk_hits = run_two_frames(build_vk)
+print('  GL 事件: %s' % (gl_hits,))
+print('  VK 事件: %s' % (vk_hits,))
+check('两端都产生了碰撞事件（>0）', len(gl_hits) > 0 and len(vk_hits) > 0,
+      'GL=%d VK=%d' % (len(gl_hits), len(vk_hits)))
+check('两端事件序列逐条相等', gl_hits == vk_hits,
+      'GL=%s VK=%s' % (gl_hits, vk_hits))
+check('序列含 start 与 end（真的走了进入+离开）',
+      any(h[0] == 'start' for h in gl_hits) and any(h[0] == 'end' for h in gl_hits),
+      'GL=%s' % (gl_hits,))
 
 print()
-print('  缺口清单（B7-26 待补）: 段 %s / 能力 %s'
-      % (sorted(KNOWN_MISSING_SEGMENTS), sorted(KNOWN_MISSING_CAPS)))
 print('总结果: ' + ('ALL PASS' if ok else '有 FAIL'))
 sys.exit(0 if ok else 1)

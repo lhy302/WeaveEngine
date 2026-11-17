@@ -340,5 +340,16 @@ class NotSupportedOnBackend(RuntimeError):
 
 ---
 
+## 11 落地进度（滚动更新）
+
+| 条目 | 状态 | 证据 |
+|---|---|---|
+| `update_audio`（音频段） | **已落地 2026-11-17** | B7-26：VK 补音频段，两端调同一份 `loom_frame_components.update_audio`；VK 公开方法 39 → **40**，API 矩阵门基线已同步（口径 v2.1）；门 `test_vk_logic_frame_parity.py` |
+| 碰撞事件派发（`on_collision_*` / `on_trigger_*`） | **已落地 2026-11-17** | B7-26：新增 `loom_collision.dispatch`，GL/VK 同一函数；事件序列对拍两端逐条相等 |
+| `update_animations` / `update_physics` / `update_scripts`（§4.3 B 类） | 待 0b | 语义已在 VK `_logic_frame` 内联，但**公开名未统一**（VK 是 `_update_animations` / `_step_physics` / `_update_scripts`） |
+| A 类其余 36 条 + 属性面 3 条 + B 类其余 | 待 0b | — |
+
+---
+
 > **下一步**：人类复核本契约（尤其 §4.3 形态方向、§3 的 40 条边界）。复核通过后开 0b，
 > 或先做批 1 的四个 P0 真缺陷（B7-18 / B7-21 / B7-17 / B7-26）—— 批 1 不依赖 0b，只依赖本契约的「契约名」。

@@ -41,71 +41,16 @@ from loom_types import Point3D
 # 取 1e-9 与本分支入口判据 (dist < 1e-9, 见 _push_out) 同量级, 影响面最小.
 _PUSH_TIE_EPS = 1e-9
 
-
-def _script_overrides_stay(inst):
-    """C1: 脚本实例是否重写了 on_collision_stay (非 Script 基类空方法).
-    未定义 → 走原热路径早退 (保持'无事件零开销'契约)."""
-    if inst is None:
-        return False
-    try:
-        from scripts import Script as _BaseScript
-    except ImportError:
-        return False
-    fn = getattr(type(inst), 'on_collision_stay', None)
-    return fn is not None and fn is not getattr(_BaseScript, 'on_collision_stay', None)
-
-
-def _any_script_overrides_stay(scripts):
-    """物体上是否有任一脚本实例覆盖了 on_collision_stay."""
-    for sc in scripts:
-        inst = getattr(sc, '_script', None)
-        if inst is None or getattr(sc, '_script_broken', False):
-            continue
-        if _script_overrides_stay(inst):
-            return True
-    return False
-
-
-# ---- 2026-10-18 阶段1档序17 Trigger（路线见 docs/design/功能补全5档施工路线图 §2.7）----
-
-def _script_overrides_trigger_stay(inst):
-    """脚本实例是否重写了 on_trigger_stay（非 Script 基类空方法）。
-    未定义 → 走原热路径早退（保持'无事件零开销'契约，与 on_collision_stay 同）。"""
-    if inst is None:
-        return False
-    try:
-        from scripts import Script as _BaseScript
-    except ImportError:
-        return False
-    fn = getattr(type(inst), 'on_trigger_stay', None)
-    return fn is not None and fn is not getattr(_BaseScript, 'on_trigger_stay', None)
-
-
-def _any_script_needs_stay(scripts):
-    """物体上任一脚本实例覆盖了 on_collision_stay 或 on_trigger_stay（任一即需 stay 派发）。
-    Trigger 语义：任一方 is_trigger 时走 trigger 路径（enter/exit/stay），
-                 双方都不是 trigger 时走 collision 路径（start/end/stay）。
-    因此只要任一脚本覆盖了 stay 类方法，就说明该物体可能在 stay 派发中收到事件。"""
-    for sc in scripts:
-        inst = getattr(sc, '_script', None)
-        if inst is None or getattr(sc, '_script_broken', False):
-            continue
-        if _script_overrides_stay(inst):
-            return True
-        if _script_overrides_trigger_stay(inst):
-            return True
-    return False
-
-
-def _is_trigger_pair(m_a, m_b):
-    """两物体任一 collider 的 is_trigger=True 则判定为 Trigger 对（触发事件路径）。
-    Unity 语义：任一方是 trigger 就走 OnTrigger* 而非 OnCollision*。"""
-    ca = getattr(m_a, 'collider', None)
-    cb = getattr(m_b, 'collider', None)
-    ta = bool(getattr(ca, 'is_trigger', False)) if ca is not None else False
-    tb = bool(getattr(cb, 'is_trigger', False)) if cb is not None else False
-    return ta or tb
-
+# 2026-11-17 (B7-26): 脚本钩子判定与碰撞派发搬进 loom_collision 共享实现，
+# 这里 re-export 同名符号 —— 既有导入点（本文件内 + 外部）不需要改，
+# 且两端（GL PhysicsMixin / VK SceneDriver）从此用的是**同一份**判定与派发代码。
+import loom_collision as _lc
+from loom_collision import (                     # noqa: F401  (兼容 re-export)
+    _any_script_needs_stay,
+    _is_trigger_pair,
+    _script_overrides_stay,
+    _script_overrides_trigger_stay,
+)
 
 class PhysicsMixin:
 
@@ -854,46 +799,12 @@ class PhysicsMixin:
         self._dispatch_collision_events(pairs)        # 串行派发 (改脚本状态)
 
     def _dispatch_collision_events(self, pairs):
-        """把碰撞对 [(i,j),...] 串行派发成 on_collision_start/end (改脚本状态, 必须主线程).
-        2026-08-15: 从检测中拆出, 让检测能与阴影 VP 并行 (检测只读)."""
-        neigh = {}
-        for i, j in pairs:
-            neigh.setdefault(i, set()).add(j)
-            neigh.setdefault(j, set()).add(i)
-        # 组2 (2026-08-30): id->对象 一次建 (旧: 每事件 next() 生成器全表扫 O(n))
-        id2m = {id(o): o for o in self.models}
-        for i, m in enumerate(self.models):
-            if not m.scripts:
-                continue
-            current = {id(self.models[j]) for j in neigh.get(i, ())}
-            prev = getattr(m, '_colliding', set())
-            # C1 (2026-10-16): 有脚本覆盖 on_collision_stay 时, 即使集合不变也要派发.
-            # 2026-10-18 Trigger: 扩展为 needs_stay（collision_stay / trigger_stay 任一）.
-            has_stay = _any_script_needs_stay(m.scripts)
-            if current == prev and not has_stay:
-                continue
-            # 2026-10-18 Trigger 分流（与 inline 版逐位一致）
-            for cid in current - prev:
-                other = id2m.get(cid)
-                if other is not None and _is_trigger_pair(m, other):
-                    self._call_collision_cb(m, 'on_trigger_enter', other)
-                else:
-                    self._call_collision_cb(m, 'on_collision_start', other)
-            for cid in prev - current:
-                other = id2m.get(cid)
-                if other is not None and _is_trigger_pair(m, other):
-                    self._call_collision_cb(m, 'on_trigger_exit', other)
-                else:
-                    self._call_collision_cb(m, 'on_collision_end', other)
-            if has_stay:
-                for cid in current & prev:
-                    other = id2m.get(cid)
-                    if other is not None and _is_trigger_pair(m, other):
-                        self._call_collision_cb(m, 'on_trigger_stay', other)
-                    else:
-                        self._call_collision_cb(m, 'on_collision_stay', other)
-            m._colliding = current
+        """把碰撞对 [(i,j),...] 串行派发成 on_collision_*/on_trigger_*（改脚本状态，必须主线程）。
 
+        2026-11-17 (B7-26): 实现搬进 loom_collision.dispatch —— VK 侧 SceneDriver 调的是
+        **同一个函数**，两端事件语义不可能再分叉。行为逐位不变（原实现整段搬走）。
+        """
+        return _lc.dispatch(self.models, pairs)
     def _collision_pairs_parallel(self, aabbs=None):
         """全部碰撞对 [(i,j), ...] (i<j, 无副作用).
         aabbs: 可选**全量对齐** AABB 列表 (阴影与碰撞共享的那份, 当帧位形) —— 给定则
