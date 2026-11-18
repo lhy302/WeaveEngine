@@ -110,34 +110,23 @@ def _chain_callback(setter, win, our_cb, tag=''):
 
 
 def host_key_forward(driver, ui_bridge, pg_key, down, mods=0):
-    """GLFW 键事件 -> driver 的**唯一**喂键入口（P0-3 步 2 的收敛点）。
+    """GLFW 键事件 -> driver 的**唯一**喂键入口（P0-3 步 2 / S1 的收敛点）。
 
-    与 GL 的 loom_glfw_window._on_key_cb 同序：
-      · 按下沿先喂 UI 焦点元素，被消费则到此为止（输入框里按 W 不该同时驱动角色）；
-      · 其余全部交给 EngineCore.handle_key_event（唯一入口：F11/F9/F10 -> UI ->
-        on_key_event 钩子 -> key_state(键码) -> 派生 script_keys）。
+    2026-11-18 实机点验修正：**完全委托内核**，本函数不再自己喂 UI。
 
-    修前现场：这里直接 driver.key_state[**键名**] = down —— 于是 VK 播放器上
-    F9/F10/F11 全不生效（内核根本没被调用）、UI 顺序与 GL 不一致、key_state 里
-    混进字符串键名（键码空间被污染）。那是键码化之前的 VK 私有语义。
+    为什么必须去掉「先喂 UI」这一步（真窗口实测）：
+      · 内核 handle_key_event 的段序是 ①F11 ②F9/F10 ③UI ④钩子 ⑤key_state，
+        与 GL 的 GLFW 回调**同序**；
+      · 旧实现先调 ui_bridge.on_key()，而它包的是**同一个** UIManager（vk_ui.UIInputBridge
+        构造自 driver.ui），于是引擎键在到达内核之前就被 UI 吞掉了 —— 实测 VK 播放器
+        上 **F9 暂停 / F10 单步 / F11 全屏 全部失效**（按 F9 只看到 UI 吃掉事件）。
+      · 顺带也去掉了 `_ui_dispatch_external = True`：UI 由内核第③步派发，不会重复。
 
-    返回 True = 已被 UI 消费（内核不再处理）。
+    返回 True = 已被消费（UI 焦点或引擎快捷键）。
     """
-    if down and ui_bridge is not None:
-        try:
-            if ui_bridge.on_key(pg_key, mods):
-                return True
-        except Exception:
-            pass
-    try:
-        # 本宿主已经自己喂过 UI -> 让内核跳过它自己的 UI 派发（否则同键派发两次）。
-        driver._ui_dispatch_external = True
-    except Exception:
-        pass
     from types import SimpleNamespace
     return bool(driver.handle_key_event(SimpleNamespace(
         type='KEYDOWN' if down else 'KEYUP', key=pg_key, mod=mods, unicode='')))
-
 
 def _wheel_taken_by_scrollview(ui, pos):
     """本帧滚轮是否真被 UI 的 ScrollView 吃掉 (滚轮专属判据, scan_05 P-09).

@@ -399,15 +399,24 @@ check('UI 消费时两端 is_key(a) 均 False',
       'GL=%r VK=%r' % (dict(g[2][1])['a'], dict(v[2][1])['a']))
 check('UI 每按一次只派发一次（GL ui.dispatch_key=1）', len(s.pair.gl_ui.calls) == 1,
       s.pair.gl_ui.calls)
-check('UI 每按一次只派发一次（VK bridge.on_key=1，内核不重复派发）',
-      len(s.pair.bridge.calls) == 1, s.pair.bridge.calls)
-check('VK 内核第③步被跳过（driver.ui.dispatch_key 没被调用）', len(s.pair.vk_ui.calls) == 0,
-      s.pair.vk_ui.calls)
+# 2026-11-18 契约更正（真窗口实机点验驱动）：
+#   旧断言要求「宿主 bridge 喂 UI、内核第③步跳过」—— 那条设计本身是缺陷：
+#   host_key_forward 先喂 UI 会把 F9/F10/F11 在到达内核前吞掉，实测 VK 播放器上
+#   F9 暂停 / F10 单步 / F11 全屏全部失效。
+#   新契约（与 GL 同序）：UI 由**内核第③步**派发一次（driver.ui 就是 bridge 包的那个
+#   UIManager），宿主只把 ev 递进 handle_key_event。
+check('UI 每按一次只派发一次（VK 内核第③步=1，宿主不再自己喂）',
+      len(s.pair.vk_ui.calls) == 1, s.pair.vk_ui.calls)
+check('VK 宿主不再绕过内核自己喂 UI（bridge.on_key 未被调用）',
+      len(s.pair.bridge.calls) == 0, s.pair.bridge.calls)
+check('两端 UI 派发次数相等（各 1 次，同一语义）',
+      len(s.pair.gl_ui.calls) == len(s.pair.vk_ui.calls) == 1,
+      'GL=%d VK=%d' % (len(s.pair.gl_ui.calls), len(s.pair.vk_ui.calls)))
 s.feed(pygame.K_a, False)
 s.step('UI 消费后松开 a')
 check('松开沿不派发 UI（两端仍各 1 次）',
-      len(s.pair.gl_ui.calls) == 1 and len(s.pair.bridge.calls) == 1,
-      'GL=%d VK=%d' % (len(s.pair.gl_ui.calls), len(s.pair.bridge.calls)))
+      len(s.pair.gl_ui.calls) == 1 and len(s.pair.vk_ui.calls) == 1,
+      'GL=%d VK=%d' % (len(s.pair.gl_ui.calls), len(s.pair.vk_ui.calls)))
 s.compare('⑥ UI 焦点消费')
 
 print()

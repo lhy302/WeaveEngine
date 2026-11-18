@@ -133,20 +133,23 @@ def frame_plan(clear_color: Sequence[float] = CLEAR_COLOR_RGBA,
                include_shadow: bool = False,
                include_hud: bool = False,
                include_ui: bool = False,
-               include_post: bool = False) -> FramePlan:
+               include_post: bool = False,
+               screen_format: str = 'rgba8unorm') -> FramePlan:
     """构造一帧的 Pass 列表（编辑器 / 播放器共用）——**按参数缓存**，返回同一 frozen 对象。"""
     _stage = post_stage() if include_post else 0     # 分级（见 loom_post.post_stage；0 = 关）
     if _stage <= 0:
         include_post = False                         # LOOM_POST_STAGE=0 -> 与 LOOM_POST=0 同义
     flags = (bool(include_sky), bool(include_world_canvas), bool(include_shadow),
-             bool(include_hud), bool(include_ui), bool(include_post), _stage)
+             bool(include_hud), bool(include_ui), bool(include_post), _stage,
+             screen_format)   # 原样保留（VK 传的是 wgpu 枚举，不能 str()）
     if clear_color is CLEAR_COLOR_RGBA:      # 两条渲染路径都用默认常量 -> 走极速键
-        key = (True,) + flags
+        _fmt_key = str(flags[-1])
+        key = (True,) + flags[:-1] + (_fmt_key,)
     else:
-        key = (tuple(round(float(c), 6) for c in clear_color),) + flags
+        key = (tuple(round(float(c), 6) for c in clear_color),) + flags[:-1] + (_fmt_key,)
     plan = _PLAN_CACHE.get(key)
     if plan is None:
-        plan = _build_plan(clear_color, *flags)
+        plan = _build_plan(clear_color, *flags[:-1], screen_format=flags[-1])
         _PLAN_CACHE[key] = plan
     return plan
 
@@ -158,13 +161,19 @@ def _build_plan(clear_color: Sequence[float],
                 include_hud: bool = False,
                 include_ui: bool = False,
                 include_post: bool = False,
-                post_stage_value: int = 3) -> FramePlan:
+                post_stage_value: int = 3,
+                screen_format: str = 'rgba8unorm') -> FramePlan:
     """构造一帧的 Pass 列表（编辑器 / 播放器共用）。
 
     顺序与迁移前逐位同序：主 pass（清屏 + 几何） -> 天空 -> World Canvas。
     天空的深度/剔除语义 = 「几何后画 + LEQUAL 等值通过 + 不剔除」（GL 现状）。
     """
-    targets = (TargetDecl(SCREEN_TARGET, format='rgba8unorm', size='screen', depth='own'),)
+    # 2026-11-18（实机点验抓到的 P0）：SCREEN 目标格式**不能写死 rgba8unorm** ——
+    # VK 真窗口的交换链格式是 bgra8unorm（本机 NVIDIA 实测），管线按 rgba8unorm 建、
+    # pass 却渲染到 bgra8unorm 表面 → wgpu 校验直接抛「render pipeline targets are
+    # incompatible with render pass」，**VK 播放器在真窗口上一帧都出不来**。
+    # GL 侧渲染到自己的 FBO（rgba8），故默认值保持 rgba8unorm 不变 → GL 行为零变化。
+    targets = (TargetDecl(SCREEN_TARGET, format=screen_format, size='screen', depth='own'),)
     # 2026-11-10 阶段 2B2: 开后处理时主链写 HDR，最后经 tonemap 回 LDR。
     scene_target = HDR_TARGET if include_post else SCREEN_TARGET
     if include_post:

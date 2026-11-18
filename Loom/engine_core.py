@@ -621,7 +621,14 @@ class EngineCore(TransformMixin, PhysicsMixin, InputMixin, CameraMixin,
         ev.append(now)
         cutoff = now - 2.0
         while ev and ev[0] < cutoff:
-            ev.pop(0)
+            # 2026-11-18 实机点验 P0：EngineCore.__init__ 建的是 deque(maxlen=256)，
+            # 而 deque.pop() **不接受参数** —— 原来写 ev.pop(0) 会在「窗口超过 2 秒」时
+            # 抛 TypeError，把整个渲染循环打挂（VK 播放器跑几百帧必崩）。
+            # list / deque 两种容器都要能裁：deque 用 popleft，list 用 pop(0)。
+            if hasattr(ev, 'popleft'):
+                ev.popleft()
+            else:
+                ev.pop(0)
 
     def get_tps(self):
         """实测 TPS (逻辑帧/秒, 2 秒滑动窗口; 状态栏直读). 暂停时 → 0."""

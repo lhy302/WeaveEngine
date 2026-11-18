@@ -570,7 +570,9 @@ class VkRenderer:
             except (TypeError, ValueError):
                 sc = 1.0
             sizes[t.name] = (max(1, int(round(w * sc))), max(1, int(round(h * sc))))
-            fmts[t.name] = str(getattr(t, 'format', 'rgba16float'))
+            # 2026-11-18 实机点验: 不能 str() —— VK 的 SCREEN 目标格式是 wgpu 枚举
+            # （surface 的 bgra8unorm），str() 会变成 'TextureFormat.3' 让 wgpu 直接 KeyError。
+            fmts[t.name] = getattr(t, 'format', 'rgba16float')
         self._ensure_post_targets(w, h, sizes, fmts)
 
     def _ensure_post_targets(self, w, h, sizes=None, fmts=None):
@@ -1742,7 +1744,10 @@ class VkRenderer:
                           include_world_canvas=bool(world_items),
                           include_hud=bool(hud_lines),
                           include_ui=(ui is not None),
-                          include_post=self._post_on)
+                          include_post=self._post_on,
+                          # 2026-11-18 实机点验 P0: SCREEN 目标必须是**真实表面格式**
+                          # （bgra8unorm），否则管线格式与 pass 目标不符 → wgpu 校验失败。
+                          screen_format=self.format)
         self._frame_plan = plan
         if world_items:
             try:
