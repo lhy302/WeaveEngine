@@ -572,6 +572,13 @@ class SceneDriver(VkWindowMixin, EngineCore):
             print('[输入] 键位加载失败 (%r) -> 用默认键位' % (e,))
             self.actions = dict(DEFAULT_ACTIONS)
         self.mouse_rel = (0, 0)                  # 本帧鼠标增量 (像素, 同 engine.mouse_rel)
+        # 2026-11-18（F-6，人类裁决「用户 API，VK端补全」，Q-B7-40）: 光标位置成员 ——
+        # 与 engine.GLEngine.mouse_pos 同名同类型同语义: **int 像素元组**
+        # （GL 初值 engine.py:434 `self.mouse_pos = (0, 0)`；更新点
+        #  loom_glfw_window._on_cursor_pos_cb:638 `e.mouse_pos = (int(x), int(y))`）。
+        # ★不是转发宿主桥 vk_ui.UIInputBridge.pos —— 那个是 **float** 元组（给 UI 命中用），
+        #   直接暴露会造出一个新的 float vs int 差异。更新点见 _on_cursor_event（唯一）。
+        self.mouse_pos = (0, 0)
         # 2026-11-08 人类裁决（鼠标锁定语义重构）: **默认不锁** —— 没人要求就不锁。
         # 规则:
         #   · 只有游戏配置里**显式**写了 mouse_lock_allowed / mouse_locked 才生效；
@@ -602,6 +609,9 @@ class SceneDriver(VkWindowMixin, EngineCore):
         self.mouse_wheel = 0                     # 本帧滚轮 (+上/-下), 帧末清零(_end_frame_input)
         self.mouse_look_sens = 0.01              # 开发者视角 像素->弧度 (GL editor 同值)
         self.on_mouse_lock_changed = None        # 后端回调: 据此冻结/释放光标 (GL 同语义)
+        # F-2 (2026-11-18): 后端光标模式**已经**落地的那个状态 (None=还没落地过)。
+        # set_mouse_locked 只在「状态变了」或「后端还没落地成当前状态」时触发回调。
+        self._lock_backend_applied = None
         self._pending_mouse_rel = (0.0, 0.0)     # 后端喂入的增量累积 (帧首结算成 mouse_rel)
         self.camera = Point3D(0, 0, -5)          # 脚本接管相机 (first_person 等)
         self.camera_yaw = 0.0
@@ -1638,11 +1648,22 @@ class SceneDriver(VkWindowMixin, EngineCore):
         """游戏级开关: 本游戏**是否允许**锁定鼠标（人类裁决 2026-11-08, 默认 False）.
 
         能力②的实现点: 脚本可以在某场景/某时刻显式开关（例如进 FPS 关卡才允许锁）。
-        allowed 变 False 时若当前处于锁定态 -> 立即解锁（否则玩家会被永久锁死、
-        光标出不来，这正是打包版吃豆人的现场）。返回生效后的 allowed。
+        切换后**立即按新状态应用**（不是等下一帧），与 loom_input.InputMixin
+        .set_mouse_lock_allowed:347-365 逐行同语义:
+          · True  -> 按 [特殊场景 | 玩家解锁意图] 重新计算并应用；
+          · False -> 清玩家解锁意图 + 立刻释放鼠标（锁不能再被任何脚本强行打开）。
+        返回: 切换后的布尔值。
+
+        2026-11-18（F-7 对齐 GL 两方向，Q-B7-40）: 旧 VK 实现 True 方向**什么都不做**、
+        False 方向只解锁**不清** mouse_unlock_requested —— 同一串脚本调用在两端
+        产生不同的 (mouse_locked, mouse_unlock_requested, 光标捕获位) 三元组
+        （用户可感知: 脚本 set_mouse_lock_allowed(True) 之后 GL 已锁、VK 还没锁）。
         """
         self.mouse_lock_allowed = bool(allowed)
-        if not self.mouse_lock_allowed and getattr(self, 'mouse_locked', False):
+        if self.mouse_lock_allowed:
+            self._apply_mouse_lock()
+        else:
+            self.mouse_unlock_requested = False
             self.set_mouse_locked(False)
         return self.mouse_lock_allowed
 
@@ -1653,8 +1674,27 @@ class SceneDriver(VkWindowMixin, EngineCore):
         只允许解锁方向；这样"没人要求就不锁"是硬保证，脚本误调也锁不上。
         后端光标副作用只经 `on_mouse_lock_changed` 回调转发（不在这里碰 GLFW），
         与 GL 侧 set_mouse_locked -> view/glfw 的分工保持一致。
+
+        2026-11-18（F-1，Q-B7-40）补返回值 —— 与 loom_input.InputMixin
+        .set_mouse_locked:378 同一契约:
+          返回: True=已应用（或已解锁）; False=因"不允许锁"被拒绝。
+        脚本 `if engine.set_mouse_locked(True):` 两端从此走同一分支（旧 VK 恒返回 None）。
+
+        2026-11-18（F-2，Q-B7-40）幂等化: **状态未变化时不触发 on_mouse_lock_changed**。
+        旧实现每次调用都触发回调 -> 播放器 `_apply_cursor_mode` 重置增量基线 `_prev`
+        （vk_player.py:591）-> 锁定中脚本每帧重申 set_mouse_locked(True) 这种常见写法
+        在 VK 上下一帧 mouse_rel=(0,0) **断流一帧**; GL 只在光标模式变化时重锚
+        （loom_glfw_window._update_mouse_rel 的 mode 分支），故连续不断流。
+        例外（必须触发）: `_lock_backend_applied` 还不是当前状态 —— 启动即锁时
+        __init__ 已按策略写好 mouse_locked（prev == want），若不补这一次，
+        光标模式永远不会落地（玩家看到的是"没锁"，是修 F-2 引入的新缺陷）。
+        ★**被拒绝**的请求仍按"有效状态"(False) 转发一次 —— 既有门
+        test_beta3_batch2_camera_proj 4c「回调按有效状态转发（仍为 False，后端不会误锁）」
+        钉的就是这条；幂等豁免只针对"请求被接受且状态未变"。解锁态下这次转发对
+        mouse_rel 无影响（未锁定不覆盖 mouse_rel，与 GL 同），故不复活 F-2 的断流。
         """
         want = bool(locked)
+        denied = False
         if want and not bool(getattr(self, 'mouse_lock_allowed', False)):
             self._warn_once('lock_not_allowed',
                             '[输入] 本游戏不允许锁定鼠标 (mouse_lock_allowed=False): '
@@ -1662,14 +1702,19 @@ class SceneDriver(VkWindowMixin, EngineCore):
                             'set_mouse_lock_allowed(True) / 在 游戏设置.json 写 '
                             'mouse_lock_allowed=true')
             want = False
+            denied = True
+        prev = getattr(self, 'mouse_locked', None)
         self.mouse_locked = want
         cb = self.on_mouse_lock_changed
-        if cb is not None:
+        applied = getattr(self, '_lock_backend_applied', None)
+        if cb is not None and (denied or prev is not want or applied is not want):
             try:
                 cb(want)
+                self._lock_backend_applied = want
             except Exception as e:
                 self._warn_once('mouse_lock_cb',
                                 '[输入] 鼠标锁定回调异常 (%r) -> 后端光标可能不同步' % (e,))
+        return not denied
 
     def _apply_mouse_lock(self):
         """按 [特殊场景标志 | 玩家解锁意图] 计算实际锁定 — 同 InputMixin._apply_mouse_lock."""
@@ -1680,18 +1725,22 @@ class SceneDriver(VkWindowMixin, EngineCore):
         (特殊场景下强制清零, 退出特殊场景后鼠标自动回锁).
 
         不允许锁定鼠标的游戏里这个是空操作（意图保持 False，不会"解锁一个本来就没锁的光标"）。
+
+        2026-11-18（F-1，Q-B7-40）补返回值 —— 与 InputMixin.toggle_mouse_locked:463
+        同一契约: 返回 True=有响应; False=因不允许锁而被忽略（旧 VK 两条分支都返回 None）。
         """
         if not bool(getattr(self, 'mouse_lock_allowed', False)):
             self._warn_once('toggle_not_allowed',
                             '[输入] 本游戏不允许锁定鼠标 -> 解锁键无效果'
                             ' (mouse_lock_allowed=False)')
             self.mouse_unlock_requested = False
-            return
+            return False
         if self._ui_capture_mouse:
             self.mouse_unlock_requested = False
         else:
             self.mouse_unlock_requested = not self.mouse_unlock_requested
         self._apply_mouse_lock()
+        return True
 
     def set_ui_capture_mouse(self, capture):
         """特殊场景 (UI 菜单/暂停) 强制显示鼠标并清解锁意图 — 同 InputMixin."""
@@ -1699,6 +1748,18 @@ class SceneDriver(VkWindowMixin, EngineCore):
         if capture:
             self.mouse_unlock_requested = False
         self._apply_mouse_lock()
+
+    def _on_cursor_event(self, x, y):
+        """光标事件落点（VK **唯一**实现）—— 与 GL loom_glfw_window._on_cursor_pos_cb:634-638
+        同源同语义: `mouse_pos = (int(x), int(y))`（int 像素截断；负值同样向零截断，
+        与 GL 的 int() 逐值相等）。
+
+        调用方 = vk_player._on_cursor（GLFW 光标回调 set_cursor_pos_callback 的唯一落点，
+        vk_player.py:558-562）。宿主桥 vk_ui.UIInputBridge.pos 是**同源不同表示**:
+        桥留 float（给 UI 命中/滚动判定用），本成员留 int（脚本读，与 GL 同类型）。
+        两者同一时刻由同一次光标事件写入 —— 这是 F-6「逐值相等」的结构保证。
+        """
+        self.mouse_pos = (int(x), int(y))
 
     def feed_mouse_rel(self, dx, dy):
         """后端喂光标增量 (像素). 仅锁定状态累积 —— 与 loom_glfw_window._update_mouse_rel

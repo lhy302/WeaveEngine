@@ -6,7 +6,7 @@
     一样，不管选择什么后端对用户脚本的表现一致。」
 
 本门验什么（Q-B7-37-1 P2）：**同一串**鼠标锁定/解锁/移动输入喂进两端**生产入口**，
-逐项比对可观察结果（不是"各自为 True"）。七组：
+逐项比对可观察结果（不是"各自为 True"）。十一组（①~⑦ = P2 原面；⑧~⑪ = F-1/F-2/F-6/F-7）：
   ① 状态位翻转      set_mouse_locked(True/False) / toggle_mouse_locked() 后
                     (mouse_locked, mouse_unlock_requested, 光标捕获位) 序列逐项相等
   ② 策略闸门        mouse_lock_allowed=False 时 F11 / 解锁键(Tab) / set_mouse_locked(True)
@@ -21,6 +21,14 @@
   ⑦ 暂停期解锁键    F9 暂停期间按解锁键（Tab）两端都必须能解锁（F-3）；按住跨帧
                     不得重复翻转（VK 一帧内 poll 两次 = 暂停分支 + 渲染帧采样，
                     GL 宿主路径也可能 advance_logic + render 同帧各 poll 一次）
+  ⑧ F-6 mouse_pos   两端都有 int 像素成员 mouse_pos；同一串光标输入（未锁定/锁定/
+                    解锁后三态）逐值相等；不是转发宿主桥 float pos
+  ⑨ F-1 返回值      set_mouse_locked / toggle_mouse_locked 的返回值序列两端逐项相等
+                    （含"不允许锁被拒绝"那两条 + 生产播放器守卫路径）
+  ⑩ F-2 幂等        锁定中连续 3 帧重申 set_mouse_locked(True)：mouse_rel 不断流、
+                    序列逐项相等（旧 VK 每帧都断流成 (0,0)）
+  ⑪ F-7 两方向      set_mouse_lock_allowed(True)/(False) 两个方向后
+                    (locked, requested, 捕获位) 三元组两端逐项相等
 
 两端生产入口（真窗口，不拼假对象；§5 反模式 8）：
   GL : engine.GLEngine(640,400) 自建 GLFW 窗口（loom_glfw_window._init_glfw_window）
@@ -67,17 +75,35 @@ R1/F-3 修后（2026-11-18，本门 **37 条全绿**；修前 = 30 绿 / 7 红 =
     render 自己推进时钟、不经过 advance_logic）/ `loom_logic_thread` 暂停分支
     （Qt 宿主异步播放态）。按下沿判定（`_unlock_key_prev`）保证同帧重复 poll 不翻两次。
   · **未改 VK**（VK 是对的）；**未动 F-1/F-2/F-6/F-7**（另派单）。
+F-1/F-2/F-6/F-7 修后（2026-11-18，Q-B7-40，**只改 VK 侧**）：本门 **52 条全绿**
+（37 条原样 + 15 条新增，原有 37 条一条未动、基线未移）；修前 4 条各自单独回退
+（gen.py 逐项开关，非读码推断）全部判红，红原文见交付报告与提交信息。
   · 组⑦ 的帧形：GL = 泵（物理键快照）→ 本帧 KEYDOWN → render；VK = 渲染帧镜像。
     泵每帧用 glfw.get_key 重建 script_keys，故"本帧按键"必须排在泵之后注入。
 
-附加发现（探针实测/源码证据，超出七组点名输入、不在本门断言；各自修复落地后再补牙）：
-  F-1 VK set_mouse_locked/toggle_mouse_locked 返回 None，GL 返回 True/False
-      （scene_driver.py:1649-1672/1678-1694 vs loom_input.py:367-403/458-472）——
-      脚本 if engine.toggle_mouse_locked(): 两端走不同分支（GL 真 / VK 假）。
-  F-2 锁定中幂等 set_mouse_locked(True)（脚本每帧重申锁定的常见写法）：VK 下一帧
-      mouse_rel=(0,0) 断流一帧，GL 连续。根因：scene_driver.set_mouse_locked 每次调用
-      都触发 on_mouse_lock_changed → vk_player._apply_cursor_mode 重置 _prev
-      （vk_player.py:591）；GL 只在模式变化时由 _update_mouse_rel 的 mode 分支重锚。
+F-1/F-2/F-6/F-7 修后（2026-11-18，Q-B7-40；**只改 VK 侧**，GL 一行未动）：
+  · F-1（组⑨）：VK set_mouse_locked 补 `return not denied`（True=已应用/已解锁，
+    False=因"不允许锁"被拒绝）、toggle_mouse_locked 两条分支补 True/False；
+    vk_player._install_lock_policy_guard 的守卫分支也补 `return False`
+    （旧实现 return None —— 生产播放器路径同样会让脚本 if 两端走不同分支）。
+    修前红：GL=[False,True,True,True,True,True,True,False,True]
+            VK=[None,None,None,None,None,None,None,None,None]
+  · F-2（组⑩）：VK set_mouse_locked **状态未变化时不触发 on_mouse_lock_changed**
+    （新增 `_lock_backend_applied` 记录"后端已落地的那个状态"；启动即锁时
+    __init__ 已按策略写好 mouse_locked，靠这一条例外保证光标模式仍会落地）。
+    修前红：锁定中连续 3 帧重申 set(True)，GL mouse_rel=[(10,5),(10,5),(10,5)]、
+            VK=[(0,0),(0,0),(0,0)]（断流一帧 = 每帧都断）。
+  · F-6（组⑧）：VK 补 `mouse_pos` 成员 —— **int 像素元组**，初值 (0,0)，唯一更新点
+    `SceneDriver._on_cursor_event`（由 vk_player._on_cursor = GLFW 光标回调调用，
+    与 GL loom_glfw_window._on_cursor_pos_cb 同源同语义 `(int(x), int(y))`）。
+    **不是**转发宿主桥 vk_ui.UIInputBridge.pos（那是 float，直接暴露会造出新的
+    float vs int 差异）。修前红：GL=(100, 60) VK=None（脚本读 = AttributeError）。
+  · F-7（组⑪）：VK set_mouse_lock_allowed 对齐 GL 两个方向 —— True→立即按
+    [特殊场景 | 玩家解锁意图] 重算并应用；False→清 mouse_unlock_requested + 解锁。
+    修前红：set_mouse_lock_allowed(True) 后 GL=(True,False,True) VK=(False,False,False)；
+            set_mouse_lock_allowed(False) 后 GL=(False,False,False) VK=(False,True,False)。
+
+历史附加发现（保留原文，F-1/F-2/F-6/F-7 四条已在上面结清）：
   F-3 F9 暂停期间按解锁键：VK 解锁（advance_logic 暂停分支自带 poll_unlock
       + vk_player 渲染帧采样，双保险）；GL 暂停帧**无人轮询**（GL 唯一轮询点 =
       update_scripts 首行 engine.py:995，暂停时不执行）——同一串输入两端结果不同。
@@ -86,12 +112,13 @@ R1/F-3 修后（2026-11-18，本门 **37 条全绿**；修前 = 30 绿 / 7 红 =
       ShowCursor（loom_input.py:443，含状态未变的幂等调用）；VK apply_mouse_lock_backend
       同款（runtime.py:88/92）——反复重申锁定后解锁，光标显示计数不归零（两端同病，
       对拍中立，属共享质量问题）。
-  F-6 mouse_pos 成员面：GL 引擎有 engine.mouse_pos（int 元组）；VK SceneDriver 无此成员
-      （等观测量只在宿主桥 vk_ui.UIInputBridge.pos，float 元组）——脚本直接读
-      engine.mouse_pos 在 VK 上 AttributeError；是否 ① 层用户 API 待契约裁决。
-  F-7 set_mouse_lock_allowed 两方向应用语义不齐：GL True→立即按意图应用（锁定）、
-      False→清 requested + 解锁（loom_input.py:347-365，test_unlock_key I 段钉过 GL）；
-      VK True→什么都不做、False→只解锁**不清 requested**（scene_driver.py:1637-1647）。
+  F-6（**已修，2026-11-18 人类裁决「用户 API，VK端补全」**）: 原状 = GL 引擎有
+      engine.mouse_pos（int 元组）；VK SceneDriver 无此成员（等观测量只在宿主桥
+      vk_ui.UIInputBridge.pos，float 元组）→ 脚本读 engine.mouse_pos 在 VK 上
+      AttributeError。修法见上「F-1/F-2/F-6/F-7 修后 · F-6」。
+  F-7（**已修**）: 原状 = GL True→立即按意图应用（锁定）、False→清 requested + 解锁
+      （loom_input.py:347-365，test_unlock_key I 段钉过 GL）；VK True→什么都不做、
+      False→只解锁**不清 requested**（旧 scene_driver.py:1637-1647）。
 
 结构断言改名防护（B7-16 复查 P0-1 教训）：结构段用**递归**扫描定位生产文件（排除
 tests/），并同时覆盖当前名与历史名（_poll_unlock_local 必须不存在 = 批2已删的旧拷贝）。
@@ -255,12 +282,31 @@ class Pair:
         self.bridge = vk_ui.UIInputBridge(getattr(self.vk, 'ui', None))
         # vk_player._apply_cursor_mode:590-606 逐行镜像（win = 注入的真窗口）
         self._prev = [None]
+        self._vk_mode = [None]                 # 最近一次真正落到 VK 窗口上的光标模式
 
         def _apply_cursor_mode(locked):
             self._prev[0] = None
+            _m = bool(locked)
+            _changed = self._vk_mode[0] is not _m
+            self._vk_mode[0] = _m
             x, y = glfw.get_cursor_pos(self.vk_win)
             self.bridge.on_cursor(x, y)
             runtime.apply_mouse_lock_backend(self.vk_win, bool(locked), tag='VK 播放器')
+            if _changed:
+                # ★纯测试拓扑伪影隔离（**生产只有一个玩家窗口**）：
+                # 本进程里同时活着多对真窗口，任一侧切到 CURSOR_DISABLED 时 GLFW 会把
+                # 物理光标挪到该窗口中心（SetCursorPos）—— 这注入一条 raw motion，落进
+                # **另一侧** disabled 窗口的虚拟坐标（GLFW virtualCursorPos），于是下一帧
+                # glfw.get_cursor_pos 跳一个不可预测的值（本门 ④/⑤ 曾因此偶发红）。
+                # 处理: 先排空这条伪影，再把 GL 的增量基线重锚（= 下一帧是吸收帧），
+                # 之后两端位移才是"同一串光标输入"的真实结果。
+                # **只在真实模式切换时做** —— 状态未变的重复回调不做（那正是 F-2 组⑩
+                # 要钉的东西：若这里无条件重锚，F-2 未修也会变绿 = 门被测试自己糊掉）。
+                pump(3, 0.02)
+                try:
+                    self.gl._prev_cursor = None
+                except Exception:
+                    pass
 
         self.vk.on_mouse_lock_changed = _apply_cursor_mode
         self.vk.set_mouse_lock_allowed(False)          # 归零
@@ -299,9 +345,21 @@ class Pair:
         return ((int(self.gl.mouse_pos[0]), int(self.gl.mouse_pos[1])),
                 tuple(self.gl.mouse_rel))
 
+    def _cursor(self, x, y):
+        """vk_player._on_cursor:558-562 的逐行镜像：宿主桥 float 落点 + F-6 的 int 落点。
+
+        F-6 的 int 落点在驱动侧 `_on_cursor_event`（生产唯一实现，见
+        scene_driver._on_cursor_event）。这里用 getattr 取：**未实现时由组⑧ 的断言判红**，
+        而不在这里抛 —— 否则一个未实现项会让整道门中断，看不到其它组的证据。
+        """
+        self.bridge.on_cursor(x, y)
+        fn = getattr(self.vk, '_on_cursor_event', None)
+        if callable(fn):
+            fn(x, y)
+
     def vk_frame(self, x, y):
         """VK 生产帧：生产光标回调 + vk_player.draw 帧首逐行镜像（643-668）。"""
-        self.bridge.on_cursor(x, y)                    # vk_player._on_cursor:558-562 的全部内容
+        self._cursor(x, y)                             # vk_player._on_cursor:558-562 的全部内容
         self.bridge.begin_frame()                      # vk_player.py:643
         _x, _y = self.bridge.pos
         _p = self._prev[0]
@@ -315,6 +373,15 @@ class Pair:
 
     def feed(self, x, y):
         return self.gl_frame(x, y), self.vk_frame(x, y)
+
+    def pos(self):
+        """两端**脚本可读的光标位置成员**（GL engine.mouse_pos / VK driver.mouse_pos）。
+
+        缺成员返回 None（组⑧ 据此判红）；不做"退回宿主桥 float pos"的容错替代 ——
+        那正是 F-6 要禁的假对齐（float vs int 会变成新的两端差异）。
+        """
+        return (getattr(self.gl, 'mouse_pos', None),
+                getattr(self.vk, 'mouse_pos', None))
 
     def state(self):
         """两端状态位 + 光标捕获位（捕获位经 GLFW API 独立回读，不用引擎自报）。"""
@@ -632,6 +699,147 @@ p.key(pygame.K_F9, True)
 p.key(pygame.K_F9, False)
 check('⑦ F9 后两端都恢复', (not p.gl._logic_paused_state()) and (not p.vk._logic_paused_state()),
       'GL=%r VK=%r' % (p.gl._logic_paused_state(), p.vk._logic_paused_state()))
+
+
+# ============================ ⑧ F-6 mouse_pos 成员面 ============================
+print()
+print("=== ⑧. F-6 mouse_pos：两端同名同类型同语义（int 像素，不是桥的 float pos） ===")
+p = Pair()
+rows = []
+p.allow(True)
+p.lock(False)
+def _is_int2(v):
+    """2 元 int 元组（排除 float / list / bool —— 桥的 float pos 就是这条要挡的）。"""
+    return (isinstance(v, tuple) and len(v) == 2
+            and all(isinstance(x, int) and not isinstance(x, bool) for x in v))
+
+
+_gp, _vp = p.pos()
+check('⑧ 两端都有 mouse_pos 成员（脚本读 engine.mouse_pos 不再 AttributeError）',
+      _gp is not None and _vp is not None, 'GL=%r VK=%r' % (_gp, _vp))
+# 初值**不**逐值比：GL 窗口一建好 GLFW 就可能已投递一次真实光标位置（值 = 物理光标），
+# 而 VK 侧本夹具没有注册真实窗口光标回调、只在 feed 时喂 —— 初值不可比（纯夹具差异，
+# 不是后端差异）。值的一致性由下面的序列断言负责；这里只钉"类型与 GL 一致"。
+check('⑧ 两端 mouse_pos 都是 2 元 int 元组（与 GL 同类型，不是 float / list）',
+      _is_int2(_gp) and _is_int2(_vp), 'GL=%r VK=%r' % (_gp, _vp))
+
+
+def step8(label, x, y):
+    p.feed(x, y)
+    g, v = p.pos()
+    rows.append((label, g, v))
+
+
+step8('未锁 feed(100,60)', 100, 60)
+step8('未锁 feed(140,62)', 140, 62)
+step8('未锁 feed(120.7,63.4)（float 入）', 120.7, 63.4)
+p.lock(True)
+step8('锁定 feed(120.7,63.4)', 120.7, 63.4)
+step8('锁定 feed(210,85)', 210, 85)
+step8('锁定 feed(233.9,97.2)（float 入）', 233.9, 97.2)
+p.lock(False)
+step8('解锁后 feed(300,150)', 300, 150)
+step8('解锁后 feed(-5.5,-3.25)（负 float 入）', -5.5, -3.25)
+seq_check('⑧ mouse_pos 序列：两端逐值相等（未锁定 / 锁定 / 解锁后三态）', rows)
+_flat = [x for (_l, g, v) in rows for x in (v or ())]
+check('⑧ mouse_pos 逐元素是 int（不是 float —— 不转发宿主桥 float pos）',
+      bool(_flat) and all(isinstance(x, int) for x in _flat),
+      'VK 值类型=%s' % sorted({type(x).__name__ for x in _flat}))
+_gp_now, _vp_now = p.pos()
+check('⑧ VK mouse_pos 与宿主桥 pos 同源（同一光标事件的 int 截断逐值相等）',
+      _vp_now == (int(p.bridge.pos[0]), int(p.bridge.pos[1])),
+      'VK=%r 桥=%r' % (_vp_now, p.bridge.pos))
+
+# ============================ ⑨ F-1 返回值 ============================
+print()
+print("=== ⑨. F-1 返回值：set_mouse_locked / toggle_mouse_locked 两端逐项相等 ===")
+p = Pair()
+rows = []
+p.allow(False)
+rows.append(('allowed=False set(True)（被拒）',
+             p.gl.set_mouse_locked(True), p.vk.set_mouse_locked(True)))
+p.allow(True)
+rows.append(('allowed=True set(True)', p.gl.set_mouse_locked(True), p.vk.set_mouse_locked(True)))
+rows.append(('幂等重申 set(True)', p.gl.set_mouse_locked(True), p.vk.set_mouse_locked(True)))
+rows.append(('set(False)', p.gl.set_mouse_locked(False), p.vk.set_mouse_locked(False)))
+rows.append(('幂等重申 set(False)', p.gl.set_mouse_locked(False), p.vk.set_mouse_locked(False)))
+rows.append(('toggle#1', p.gl.toggle_mouse_locked(), p.vk.toggle_mouse_locked()))
+rows.append(('toggle#2', p.gl.toggle_mouse_locked(), p.vk.toggle_mouse_locked()))
+p.allow(False)
+rows.append(('allowed=False toggle（被拒）',
+             p.gl.toggle_mouse_locked(), p.vk.toggle_mouse_locked()))
+p.allow(True)
+rows.append(('allowed=True toggle', p.gl.toggle_mouse_locked(), p.vk.toggle_mouse_locked()))
+seq_check('⑨ 返回值序列：两端逐项相等（含被拒绝那两条）', rows)
+_types = sorted({type(x).__name__ for (_l, g, v) in rows for x in (g, v)})
+check('⑨ 返回值是 bool（不是 None —— 旧 VK 恒 None 会让脚本 if 两端走不同分支）',
+      _types == ['bool'], '实测类型=%s' % _types)
+check('⑨ 「不允许锁」时 set_mouse_locked(True) 两端都返回 False',
+      rows[0][1] is False and rows[0][2] is False, 'GL=%r VK=%r' % (rows[0][1], rows[0][2]))
+p2 = Pair()
+p2.allow(False)
+vk_player._install_lock_policy_guard(p2.vk)        # 生产 VK 播放器启动时装的同一守卫
+_gret = p2.gl.set_mouse_locked(True)
+_vret = p2.vk.set_mouse_locked(True)
+check('⑨ 生产播放器守卫路径：被拒也返回 False（不是 None）',
+      _gret is False and _vret is False, 'GL=%r VK=%r' % (_gret, _vret))
+
+# ============================ ⑩ F-2 幂等重申不断流 ============================
+print()
+print("=== ⑩. F-2 幂等 set_mouse_locked(True)：锁定中连续重申不得断流一帧 ===")
+p = Pair()
+p.allow(True)
+p.lock(True)
+p.feed(200, 80)                    # 吸收帧：锁定切换后首帧只建立增量基线（值不进断言）
+_g0, _v0 = p.feed(200, 80)
+check('⑩ 起点：两端都锁定、锚帧 mouse_rel 都是 (0,0)',
+      _g0 == _v0 == ((200, 80), (0, 0)), 'GL=%s VK=%s' % (_g0, _v0))
+rows = []
+for _i in range(3):
+    _x, _y = 210 + 10 * _i, 85 + 5 * _i
+    p.gl.set_mouse_locked(True)    # 脚本每帧重申锁定（FPS 脚本的常见写法）
+    p.vk.set_mouse_locked(True)
+    _g, _v = p.feed(_x, _y)
+    rows.append(('重申 set(True)#%d 后 feed(%d,%d)' % (_i + 1, _x, _y), _g, _v))
+seq_check('⑩ 锁定中连续 3 帧重申 set(True)：mouse_rel 序列两端逐项相等', rows)
+_rels = [rel for (_l, gv, vv) in rows for rel in (gv[1], vv[1])]
+check('⑩ 每帧 mouse_rel 都非 (0,0)（不断流）',
+      all(r != (0, 0) for r in _rels), '实测=%s' % (_rels,))
+
+# ============================ ⑪ F-7 set_mouse_lock_allowed 两方向 ============================
+print()
+print("=== ⑪. F-7 set_mouse_lock_allowed 两方向：三元组逐项相等 ===")
+p = Pair()
+rows = []
+
+
+def step11(label):
+    s = p.state()
+    rows.append((label, s[0], s[1]))
+
+
+p.allow(False)
+step11('基线 allowed=False')
+p.allow(True)                      # 方向一：True -> 立即按当前意图应用（锁定）
+step11('set_mouse_lock_allowed(True)')
+_sg, _sv = p.state()
+check('⑪ True 方向：两端都**立即**按意图锁上（不是等下一帧）',
+      _sg[0] is True and _sv[0] is True and _sg[2] is True and _sv[2] is True,
+      'GL=%r VK=%r' % (_sg, _sv))
+p.key(pygame.K_TAB, True)          # 造出"有解锁意图"的起点（requested=True）
+p.poll()
+p.key(pygame.K_TAB, False)
+p.poll()
+step11('Tab 解锁（requested=True）')
+p.allow(False)                     # 方向二：False -> 清 requested + 解锁
+step11('set_mouse_lock_allowed(False)')
+_sg, _sv = p.state()
+check('⑪ False 方向：两端都清 mouse_unlock_requested 且解锁',
+      _sg == (False, False, False) and _sv == (False, False, False),
+      'GL=%r VK=%r' % (_sg, _sv))
+p.allow(True)
+step11('再 set_mouse_lock_allowed(True)')
+seq_check('⑪ 两方向：两端三元组逐项相等（locked / requested / 捕获位）', rows)
 
 # ============================ 收尾：必须释放光标捕获 ============================
 print()

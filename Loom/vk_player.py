@@ -202,7 +202,9 @@ def _install_lock_policy_guard(driver):
                 driver._lock_denied_logged = True
                 print('[鼠标] mouse_lock_allowed=False -> 忽略 set_mouse_locked(True) (本局只报一次)')
             driver.mouse_locked = False
-            return
+            # 2026-11-18（F-1，Q-B7-40）: 与 GL / SceneDriver 同返回 ——
+            # 被拒绝 = False（旧实现 return None，脚本 if 判断两端不同分支）。
+            return False
         return orig(locked)
 
     driver.set_mouse_locked = guarded
@@ -560,6 +562,10 @@ def run_vk(scene=None, frames_n=None, keep=False, mini=False, no_shadow=False,
                 # UI 是否捕获鼠标 (点击/拖动) 能决定是否喂给相机, 与 GL 的
                 # ui_consumed 门控同语义。
                 ui_bridge.on_cursor(x, y)
+                # 2026-11-18（F-6，Q-B7-40）: 与 GL loom_glfw_window._on_cursor_pos_cb
+                # 同源 —— 脚本可读的 **int 像素坐标** 落在这里（float 版留在宿主桥给 UI
+                # 命中/滚动判定用；不把 float 直接当 mouse_pos 暴露）。
+                driver._on_cursor_event(x, y)
 
             _BTN = {glfw.MOUSE_BUTTON_LEFT: 1, glfw.MOUSE_BUTTON_MIDDLE: 2,
                     glfw.MOUSE_BUTTON_RIGHT: 3}
