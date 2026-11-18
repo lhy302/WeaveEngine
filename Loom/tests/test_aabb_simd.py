@@ -2,7 +2,9 @@
 """test_aabb_simd.py — D3: AABB 内核 AVX2 与标量**逐位一致** + CPUID 分派可用性.
 
 断言:
-  ① 分派查询可用 (loom_aabbs_simd_impl 存在, 返回 0/1)
+  ① 分派查询可用 (loom_aabbs_simd_impl 存在, 返回 0/1) + **独立判据**
+     (kernel32!IsProcessorFeaturePresent(PF_AVX2_INSTRUCTIONS_AVAILABLE))
+     与它不矛盾: 独立判据说支持而它报 0 -> FAIL(探测坏了, 不是机器不支持)
   ② 真实形状 (V=2035/1617/24/4, n 配套) 下 scalar / avx2 / 分派版 三者
      min/max **逐字节相同** (有限输入; 引擎顶点恒有限)
   ③ 尾部路径覆盖: V=1..7 全跑一遍逐位一致 (AVX2 每轮 4 顶点 + 标量尾)
@@ -248,11 +250,69 @@ def main():
             rs.append(t_a / max(t_s, 1e-9))
         return rs, _st.median(rs), _st.median(ts), _st.median(tas)
 
-    if fastpath.aabbs_simd_impl() == 1:
+    # ---------------- 独立判据: 本机是否支持 AVX2 (不经被测对象) ----------------
+    # 为什么必须有它 (Q-B7-34-2, 独立审核实测的静默假绿通道):
+    #   旧写法 `if fastpath.aabbs_simd_impl() == 1:` 用**被测对象自己**的探测结果
+    #   决定要不要跑两个加速门。探测一旦坏掉 (AVX2 机器上恒报 0), 两门整段跳过,
+    #   只剩一行 SKIP -> ALL PASS / exit 0。实测变异 simd_impl_reports_0 全绿。
+    # 独立判据 = kernel32!IsProcessorFeaturePresent(PF_AVX2_INSTRUCTIONS_AVAILABLE=40):
+    #   · 由 Windows 内核/ntdll 回答 (用内核启动时建的 CPU 特性表), **不经过**
+    #     loom_kernels.dll, 也不经过 fastpath.aabbs_simd_impl() —— 与本 DLL 里那段
+    #     __cpuid/_xgetbv 是两条独立代码路径, 探测被改坏不会连带改变它的答案。
+    #   · 语义与 DLL 的门槛同源: OSXSAVE + AVX + XGETBV(XMM|YMM 已开) + CPUID leaf7
+    #     EBX.bit5, 即「本进程能否真的执行 AVX2 指令」—— 正是要判的那件事。
+    #   · 它只可能「漏报支持」(老系统无该 feature id 时返回 FALSE), 不会把不支持的
+    #     机器误判成支持, 所以不会引入假红。
+    def _cpu_avx2_independent():
+        """True/False = 本机是否支持 AVX2 (独立于 loom_kernels.dll 的判据);
+        None = 该判据在本机不可用。"""
+        if sys.platform != 'win32':
+            return None
+        try:
+            import ctypes
+            _k32 = ctypes.WinDLL('kernel32', use_last_error=True)
+            _fn = _k32.IsProcessorFeaturePresent
+            _fn.restype = ctypes.c_int
+            _fn.argtypes = [ctypes.c_uint32]
+            return bool(_fn(40))       # PF_AVX2_INSTRUCTIONS_AVAILABLE (Win10 1709+)
+        except Exception:
+            return None
+
+    _cpu_avx2 = _cpu_avx2_independent()
+    _impl = fastpath.aabbs_simd_impl()
+    # LOOM_NO_SIMD=1 是**人为要求**走标量 (与 C 侧 _simd_impl 的判据同一写法:
+    # 只认正好 "1"), 此时 impl=0 不是探测坏了, 属于合法跳过。
+    _no_simd_env = (os.environ.get('LOOM_NO_SIMD') == '1')
+    if _cpu_avx2 is None:
+        print('  (独立判据 kernel32!IsProcessorFeaturePresent 不可用: 退回只看 '
+              'aabbs_simd_impl(), 该分支不具备「探测坏掉也能抓红」的能力)')
+
+    # 判据组合 (三条, 缺一不可; 顺序即优先级):
+    #   ① 独立判据=支持 且 impl!=1 (且未被 LOOM_NO_SIMD=1 显式要求标量)
+    #      -> FAIL「探测坏了, 不是机器不支持」(不是 SKIP);
+    #   ② 独立判据=不支持 且 impl=0 -> SKIP (合法跳过, 保留 SKIP 行);
+    #   ③ impl=1 -> 跑两个加速门 (现状; 独立判据=支持/不支持都跑, 因为 DLL 只在
+    #      自己的 CPUID 通过时才报 1, 此时走 AVX2 路径不会非法指令)。
+    if _cpu_avx2 is True and _impl != 1 and not _no_simd_env:
+        check('性能门禁: 本机支持 AVX2 时 aabbs_simd_impl() 必须报 1 (实测 %r)' % (_impl,),
+              False,
+              '探测坏了, 不是机器不支持: 独立判据 kernel32!IsProcessorFeaturePresent('
+              'PF_AVX2_INSTRUCTIONS_AVAILABLE=40)=True, 而 fastpath.aabbs_simd_impl()=%r。'
+              ' 两个加速门不能因被测对象自报 0 而整段跳过 —— 那正是静默假绿通道。'
+              % (_impl,))
+        t_scalar = _entry_ms(True, reps=100)
+        print('  (探测坏了: 跳过入口级/批量级加速门禁; 上面的 FAIL 已让本测试变红)')
+    elif _impl == 1:
         # ---- 入口级: 宽松门 (B) ----
         # 修后实测中位数分布 0.781~0.845 (空载 17 次 + 8 进程背景负载 2 次)。
-        # 阈值 1.05 → 相对最坏实测 0.845 留 24% 余量; 只挡「AVX2 反而比标量
-        # 慢」, 不在此设严格门 (入口级真实加速仅 ~1.2x, 信噪比不够)。
+        # 阈值 1.05; 只挡「AVX2 反而比标量慢」, 不在此设严格门 (入口级真实
+        # 加速仅 ~1.2x, 信噪比不够)。
+        # ★余量口径 (Q-B7-34-4: 后续调阈值必须按同一把尺比):
+        #   本文件说的「留 24% 余量」= **阈值 ÷ 实测最坏 − 1** = 1.05 / 0.841 − 1
+        #   = 0.249 ≈ 24.9% (最坏实测取 0.841; 用分布上沿 0.845 则 24.3%)。
+        #   另一种常见口径「实测距阈值的相对余量」= (阈值 − 实测) / 阈值 =
+        #   (1.05 − 0.841) / 1.05 = 19.9% —— 两个数字都对, 但**不是同一把尺**;
+        #   引用时请连口径一起引 (否则「24%」和「19.9%」会看起来像矛盾)。
         e_rs, e_med, t_scalar, t_avx = _ratio_median(_entry_ms)
         print('  入口级 (7 轮交替, reps=%d): scalar=%.3f ms  avx2=%.3f ms  比值[%s] 中位数=%.3f'
               % (_ENTRY_REPS, t_scalar, t_avx,
@@ -262,8 +322,11 @@ def main():
 
         # ---- 批量级: 严格加速门 (B) ----
         # 修后实测中位数分布 0.427~0.458 (空载 17 次 + 8 进程负载 2 次), 真实
-        # 加速 2.18~2.34x。阈值 0.65 (= 至少 1.54x) → 相对最坏实测 0.458 留 42%
-        # 余量; 真回归 (AVX2 收益掉到 1.54x 以下, 例如分派回退标量 → 比值 ~1.0) 必红。
+        # 加速 2.18~2.34x。阈值 0.65 (= 至少 1.54x); 真回归 (AVX2 收益掉到
+        # 1.54x 以下, 例如分派回退标量 → 比值 ~1.0) 必红。
+        # ★余量口径 (同入口级, Q-B7-34-4): 「留 42% 余量」= 阈值 ÷ 实测最坏 − 1
+        #   = 0.65 / 0.457 − 1 = 0.422 ≈ 42.2% (最坏实测 0.457; 用 0.458 则 41.9%)。
+        #   按「实测距阈值的相对余量」口径则是 (0.65 − 0.457) / 0.65 = 29.7% ≈ 30%。
         b_rs, b_med, b_s, b_a = _ratio_median(_batch_ms)
         print('  批量级 (n=90,V=2035; 7 轮交替, reps=%d): scalar=%.3f ms  avx2=%.3f ms  '
               '比值[%s] 中位数=%.3f (加速 %.2fx)'
@@ -272,8 +335,13 @@ def main():
         check('性能门禁: 批量级 AVX2 <= 0.65x 标量 (>=1.54x 加速, 实测中位数 %.3f)' % b_med,
               b_med <= 0.65, 'ratio=%.3f 加速=%.2fx' % (b_med, 1.0 / max(b_med, 1e-9)))
     else:
+        # 合法跳过, 两种来源: (a) 独立判据与 impl 一致认为本机不支持 AVX2;
+        # (b) 本进程被 LOOM_NO_SIMD=1 显式要求走标量 (人为要求, 不是探测坏了)。
         t_scalar = _entry_ms(True, reps=100)
-        print('  (无 AVX2: 跳过入口级/批量级加速门禁, scalar=%.3f ms)' % t_scalar)
+        print('  SKIP 入口级/批量级加速门禁: %s (独立判据=%r, aabbs_simd_impl()=%r)'
+              % ('LOOM_NO_SIMD=1 强制标量' if _no_simd_env else '本机不支持 AVX2',
+                 _cpu_avx2, _impl))
+        print('  (无 AVX2: scalar=%.3f ms)' % t_scalar)
     check('性能门禁: 入口级单批绝对上限 (<=40ms, 实测 %.2f)' % t_scalar, t_scalar <= 40.0)
 
     # LOOM_NO_SIMD=1 -> 强制标量 (子进程验证: 环境在首次探测时读一次)

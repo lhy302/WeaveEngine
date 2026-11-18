@@ -118,6 +118,13 @@ def host_key_forward(driver, ui_bridge, pg_key, down, mods=0):
     与 GL 播放器 / 编辑器 / 打包游戏是**同一份实现**（JVM 式「换后端不换 API」：
     同一串输入事件 → 同一串可观察结果）。
 
+    ★ 但「输入链路已统一」不等于「每个键在 VK 上都已生效」（Q-B7-34-4 补正）：内核第①步
+    的 F11 全屏要先过 `getattr(self, 'allow_fullscreen', False)`（engine_core.py:163），
+    而 **VK 侧根本没有 `allow_fullscreen` 属性**（`git grep allow_fullscreen` 只命中
+    engine.py / editor.py；SceneDriver 从未设置它）→ 该判据恒为 False，内核第①步在 VK
+    上**仍是空操作**，F11 在 VK 播放器上依旧是死键（既有 Q-B7-32-1 待答）。上面那句
+    「顺序编排已收进内核」说的是**链路**，不是「F11 在 VK 上已可用」—— 两者别混。
+
     被本裁决取代的旧设计（不要改回去）：宿主先 `ui_bridge.on_key(...)` 喂一次 UI，
     未消费才进内核，再置一个实例标志让内核跳过它自己的 UI 步。那是「宿主 + 内核
     两个写者对**同一个** UIManager 双写」，只靠一个布尔标志防重复派发；该标志已

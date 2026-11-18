@@ -7,6 +7,8 @@
      **逐步状态一致**: Button 点击回调、Slider 拖动值、InputField 输入/提交、
      焦点元素、hover 元素、每帧 consumed 标记.
   2. 相机门控: UI 消费点击/拖动时 wants_camera()=False, 纯 hover/空白时=True.
+  3. 静态断言 (Q-B7-34-3): 生产代码里没有 UIInputBridge.on_key / on_text 的调用方
+     —— 键/文本只能走内核; 宿主直调 = 绕过内核的第二个 UI 写者, 行为门抓不到.
 
 本测试无 GPU / 无窗口, 只碰 loom_ui 的数据层 (与后端无关).
 """
@@ -128,6 +130,69 @@ def check(label, cond, detail=''):
     else:
         print('FAIL ' + label + (('  ' + str(detail)) if detail else ''))
 
+# ============================================================================
+# Q-B7-34-3: 静态断言「UIInputBridge.on_key / on_text 在生产代码里无调用方」
+#
+# 背景（裁决 Q-B7-33-1=B 的字面要求 vs 实际）: 裁决要求 vk_ui.UIInputBridge 只留
+# 鼠标/滚轮, 实际 on_key / on_text / dispatch_key / dispatch_text 四个方法全部保留
+# —— 真实原因: 本测试第 1) 段用 dispatch_key / dispatch_text 做 UI 层对拍, 删掉
+# 就没有对照物了（方案 b）。
+# 保留的代价: 将来任何宿主直接调 on_key / on_text = **绕过内核的第二个 UI 写者**
+# （输入框打一个字出两个字）, 而现有行为门抓不到这种「接回」—— 宿主自己喂一次 UI,
+# 内核第③步又喂一次, 两个写者打的是同一个 UIManager。
+# 所以补这条静态断言: 生产代码（Loom/**.py, 排除 tests/ 与 vk_ui.py 自身定义）里
+# 不允许出现对这两个方法的调用点, 也不允许 getattr(x, 'on_key'/'on_text') 间接取用。
+# 为什么只扫 on_key / on_text, 不扫 dispatch_key / dispatch_text: 后两个是**转调内层**
+# （on_key -> self.dispatch_key -> self.ui.dispatch_key）, 而内核第③步在
+# engine_core.py:193/235 里对 UIManager 的正当调用也是 `ui.dispatch_key(...)` ——
+# 纯按名字扫会把那条**正确**的生产调用误判成违规（假红）。on_key / on_text 是
+# 桥独有的名字, 只可能来自「宿主直喂桥」这一种接回方式, 所以可以安全地全量扫。
+# ============================================================================
+def bridge_direct_call_sites(paths):
+    """在给定 .py 文件里找 UIInputBridge.on_key / on_text 的调用点.
+
+    返回 [(路径, 行号, 属性名), ...]; 除直接调用外, 也覆盖 getattr(x, 'on_key')
+    这种间接取用（第二条接回方式）。定义处（def on_key）不是 Call, 不会被算作调用。
+    """
+    import ast
+    hits = []
+    for path in paths:
+        try:
+            with open(path, 'rb') as f:
+                src = f.read().decode('utf-8', 'replace')
+            tree = ast.parse(src, filename=path)
+        except Exception:
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            fn = node.func
+            if isinstance(fn, ast.Attribute) and fn.attr in ('on_key', 'on_text'):
+                hits.append((path, node.lineno, fn.attr))
+            elif (isinstance(fn, ast.Name) and fn.id == 'getattr'
+                  and len(node.args) >= 2
+                  and isinstance(node.args[1], ast.Constant)
+                  and node.args[1].value in ('on_key', 'on_text')):
+                hits.append((path, node.lineno, 'getattr(%r)' % (node.args[1].value,)))
+    return hits
+
+
+def production_py_files(root):
+    """生产代码清单: root 下所有 .py, 排除 tests/（门自己）与 __pycache__/_tmp。"""
+    out = []
+    for dirpath, dirnames, filenames in _os.walk(root):
+        dirnames[:] = sorted(d for d in dirnames
+                             if d not in ('tests', '__pycache__', '_tmp'))
+        for fn in sorted(filenames):
+            if not fn.endswith('.py'):
+                continue
+            p = _os.path.join(dirpath, fn)
+            rel = _os.path.relpath(p, root).replace('\\', '/')
+            if rel == 'vk_ui.py':      # 定义处自身（on_key 内部转调 dispatch_key）不算调用方
+                continue
+            out.append(p)
+    return out
+
 
 def main():
     # ---------------- 1) 两条路径跑同一事件序列 ----------------
@@ -244,6 +309,29 @@ def main():
     check('无焦点时按键不消费 (GL 语义)',
           b5.dispatch_key(K_BACKSPACE) is False
           and mgr5.dispatch_key(K_BACKSPACE) is False)
+
+    # ---------------- 5) 静态断言: 桥的 on_key/on_text 无生产调用方 (Q-B7-34-3) ----------------
+    # 为什么这条断言是必要的: 见文件上方 Q-B7-34-3 说明 —— 保留这两个方法等于留了一个
+    # 「宿主绕过内核直喂 UI」的接口, 行为门看不见, 只有静态扫描能守住。
+    _root = _os.path.dirname(HERE)
+    _prod = production_py_files(_root)
+    _hits = [(_os.path.relpath(p, _root).replace('\\', '/'), ln, attr)
+             for (p, ln, attr) in bridge_direct_call_sites(_prod)]
+    check('静态断言: 生产代码无 UIInputBridge.on_key / on_text 调用方（键/文本只能走内核）',
+          not _hits, '扫了 %d 个生产 .py，命中 %d 处: %r' % (len(_prod), len(_hits), _hits[:5]))
+    ok = ok and not _hits
+    # 扫描器自检: 把同一段「直调」写成临时样本, 必须被抓到 —— 否则这条断言可能空转
+    import tempfile
+    with tempfile.TemporaryDirectory() as _td:
+        _probe = _os.path.join(_td, 'planted_direct_call.py')
+        with open(_probe, 'w', encoding='utf-8') as _f:
+            _f.write('def f(bridge, ev):\n'
+                     '    bridge.on_key(ev)\n'
+                     '    return getattr(bridge, "on_text")(ev)\n')
+        _planted = bridge_direct_call_sites([_probe])
+    check('静态断言扫描器自检: 故意直调 .on_key 与 getattr(...,"on_text") 的样本必须被抓到',
+          len(_planted) == 2, _planted)
+    ok = ok and len(_planted) == 2
 
     print()
     if ok and not _FAILED:
