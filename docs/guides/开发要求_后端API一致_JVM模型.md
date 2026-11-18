@@ -138,12 +138,19 @@ GLEngine  /  VkEngine               ← 各自实现 _backend_xxx（GPU 上传 /
 | 时钟设置传播 | `test_clock_settings_propagation.py` | 13 |
 | beam 灯像素对拍 | `test_beam_light_backend_parity.py` | 8 |
 | A/B 像素（26 场景） | `test_ab_gl_vk.py` | 26 场景 |
+| **P1 场景加载/切换的用户可见结果**（load_scene / clear_scene / 版本迁移 / 相对资源路径） | `test_scene_load_parity.py` | 69 |
+
+> **P1 门当前状态（2026-11-18）**：`test_scene_load_parity.py` 已落地，**17 条断言为红**
+> （= 修前必红，缺陷已定位，见该门文件头的 R1~R8 留痕）：VK 装配路径不迁移（B7-17，v8 相机
+> yaw 停在 1.5707963）、版本闸门 3 处重复且无单一入口（B7-16）、GL 先清场景再校验（失败把旧
+> 场景清空）、VK 不登记自建默认材质（材质库条数差）、GL 相对资源路径不按场景目录解析。
+> 修 B7-16/B7-17 后本门应全绿；在此之前 `run_all` 只会有这一条红。
 
 ### 4.2 尚无对拍门的面（**按此优先级补**，见 Q-B7-37-1）
 
 | 优先级 | 面 | 为什么用户能感知 |
 |---|---|---|
-| **P1** | **场景加载/切换的用户可见结果**（`load_scene` / `clear_scene` / 场景版本迁移） | 脚本最常碰；B7-17 就是这里出的缺陷（v8 场景 GL 90° vs VK 1.5708°） |
+| ~~**P1**~~（已落地 → §4.1） | ~~场景加载/切换的用户可见结果~~ | 门 = `test_scene_load_parity.py`；B7-17（v8 场景 GL 90° vs VK 1.5708°）由本门锁住 |
 | **P2** | **鼠标锁定与光标捕获**（`set_mouse_locked` / `toggle_mouse_locked` / `mouse_unlock_requested`） | 玩家直接感知（能不能转视角） |
 | **P3** | **UI 命中与焦点**（点击/hover/输入框焦点/滚动） | 用户点按钮没反应就是缺陷 |
 | **P4** | **音频播放状态**（play/stop/3D 位置/音量） | 有声卡就能听出来 |
