@@ -115,15 +115,28 @@ class _FakeUI:
 
 
 class _FakeBridge:
-    """最小 UI 输入桥桩：VK 宿主先喂它（对应 vk_player 的 ui_bridge.on_key）。"""
+    """最小 UI 输入桥桩：与生产 UIInputBridge **同构** —— 它自己不是 UI，只是
+    「包着一个 UIManager，on_key 就转给那个 UIManager.dispatch_key」
+    （vk_ui.py:826-828 on_key -> dispatch_key -> self.ui.dispatch_key）。
 
-    def __init__(self, consume=False):
-        self.consume = bool(consume)
-        self.calls = []
+    生产里被包的那个 UIManager 就是 driver.ui 本身（vk_player.py:362
+    `ui_bridge = UIInputBridge(getattr(driver, 'ui', None))`），所以「宿主喂桥」
+    与「内核 handle_key_event 第③步喂 driver.ui」打到的是**同一个对象**。
+    夹具必须同构，否则「同一 UI 被派发两次」这个真实风险在本门里根本不可见。
+    """
+
+    def __init__(self, ui=None):
+        self.ui = ui                      # 与生产同构：桥只包 UI，不自己消费
+        self.calls = []                   # 宿主喂桥的次数（仅进诊断信息，不作断言对象）
 
     def on_key(self, pg, mods=0):
         self.calls.append(pg)
-        return self.consume
+        return self.dispatch_key(pg, mods)
+
+    def dispatch_key(self, pg, mods=0):
+        if self.ui is None:
+            return False
+        return bool(self.ui.dispatch_key(pg, mods))
 
 
 _VK_FORWARD = getattr(vk_player, 'host_key_forward', None)
@@ -144,9 +157,13 @@ class _Pair:
         self.vk = SD.SceneDriver()
         self.vk.is_playing = True
         self.vk.actions = dict(DEFAULT_ACTIONS)
+        # 夹具保真（2026-11-18 裁决 Q-B7-33-2=A）：生产里 UIInputBridge 包的就是
+        # driver.ui（vk_player.py:362），「宿主喂桥」与「内核第③步喂 driver.ui」
+        # 打到的是**同一个** UI。所以这里只能有一个 _FakeUI 对象：既给 driver.ui，
+        # 又给桥包。用两个独立假对象会把「同一 UI 被派发两次」这个真实风险测漏。
         self.vk_ui = _FakeUI(consume_ui)
-        self.vk.ui = self.vk_ui            # 内核第③步若没被跳过就会打到这里（重复派发）
-        self.bridge = _FakeBridge(consume_ui)
+        self.vk.ui = self.vk_ui
+        self.bridge = _FakeBridge(self.vk_ui)
         self.hook_gl = []
         self.hook_vk = []
         self.gl.on_key_event = lambda ev: (self.hook_gl.append(ev), False)[1]
@@ -387,8 +404,16 @@ s.step('再松 Tab')
 s.compare('⑤ Tab 解锁链')
 
 print()
-print("=== ⑥. UI 焦点消费（key_state 不更新 + UI 只派发一次） ===")
+print("=== ⑥. UI 焦点消费（key_state 不更新 + 同一个 UI 只派发一次） ===")
+# 本段为什么数「同一个 UI 对象的派发次数」而不是「桥/内核各自被调用几次」：
+#   生产 vk_player.py:362 的 UIInputBridge 包的就是 driver.ui —— 宿主先喂桥、
+#   内核第③步又会喂 driver.ui，两者是**同一个 UIManager**。真实风险是「同一个
+#   UIManager 被派发两次」（输入框打一个字出两个字）；它只能由「那一个对象的
+#   总派发次数」观测到。分别数两个对象 = 锁实现细节，重构就会误红（接手须知 §7-1）。
 s = _Steps(consume_ui=True)
+check('夹具保真：假桥包的就是内核那一个假 UI 对象（与生产 UIInputBridge(driver.ui) 同构）',
+      s.pair.bridge.ui is s.pair.vk.ui,
+      'bridge.ui id=%r driver.ui id=%r' % (id(s.pair.bridge.ui), id(s.pair.vk.ui)))
 s.feed(pygame.K_a, True)
 g, v = s.step('UI 消费 a')
 check('UI 消费时两端 key_state 都不更新（未记按下）',
@@ -397,20 +422,46 @@ check('UI 消费时两端 key_state 都不更新（未记按下）',
 check('UI 消费时两端 is_key(a) 均 False',
       dict(g[2][1])['a'] is False and dict(v[2][1])['a'] is False,
       'GL=%r VK=%r' % (dict(g[2][1])['a'], dict(v[2][1])['a']))
-check('UI 每按一次只派发一次（GL ui.dispatch_key=1）', len(s.pair.gl_ui.calls) == 1,
-      s.pair.gl_ui.calls)
-check('UI 每按一次只派发一次（GL ui.dispatch_key=1）', len(s.pair.gl_ui.calls) == 1,
-      s.pair.gl_ui.calls)
-check('UI 每按一次只派发一次（VK bridge.on_key=1，内核不重复派发）',
-      len(s.pair.bridge.calls) == 1, s.pair.bridge.calls)
-check('VK 内核第③步被跳过（driver.ui.dispatch_key 没被调用）', len(s.pair.vk_ui.calls) == 0,
-      s.pair.vk_ui.calls)
+check('UI 消费：按一次键，两端各自的 UI 对象都只被派发 1 次',
+      len(s.pair.gl_ui.calls) == 1 and len(s.pair.vk_ui.calls) == 1,
+      'GL ui.dispatch_key=%d / VK 同一个 ui.dispatch_key=%d（桥转发=%d）'
+      % (len(s.pair.gl_ui.calls), len(s.pair.vk_ui.calls), len(s.pair.bridge.calls)))
 s.feed(pygame.K_a, False)
 s.step('UI 消费后松开 a')
-check('松开沿不派发 UI（两端仍各 1 次）',
-      len(s.pair.gl_ui.calls) == 1 and len(s.pair.bridge.calls) == 1,
-      'GL=%d VK=%d' % (len(s.pair.gl_ui.calls), len(s.pair.bridge.calls)))
+check('UI 消费：松开沿不增加派发次数（两端 UI 仍各 1 次）',
+      len(s.pair.gl_ui.calls) == 1 and len(s.pair.vk_ui.calls) == 1,
+      'GL=%d VK=%d' % (len(s.pair.gl_ui.calls), len(s.pair.vk_ui.calls)))
 s.compare('⑥ UI 焦点消费')
+
+print()
+print("=== ⑥b. UI 不消费（键穿到内核）：同一个 UI 每按一次仍只派发 1 次 ===")
+# 这条是本门真正的牙：宿主先喂 UI（未消费）→ 进内核 handle_key_event，第③步若
+# 再喂一次**同一个** driver.ui，就是「一次按键派发两次」。生产靠 vk_player.
+# host_key_forward 里 `driver._ui_dispatch_external = True` 让内核跳过第③步；
+# 那行一旦失效，本段必须变红（已实测：去掉该行 -> 本段 FAIL）。
+s = _Steps(consume_ui=False)
+s.feed(pygame.K_a, True)
+g, v = s.step('UI 不消费 a')
+check('UI 不消费时两端 key_state 都更新（键确实穿到内核）',
+      dict(g[0][1]).get(pygame.K_a) is True and dict(v[0][1]).get(pygame.K_a) is True,
+      'GL=%r VK=%r' % (dict(g[0][1]).get(pygame.K_a), dict(v[0][1]).get(pygame.K_a)))
+check('UI 不消费：按一次键，两端各自的 UI 对象都只被派发 1 次',
+      len(s.pair.gl_ui.calls) == 1 and len(s.pair.vk_ui.calls) == 1,
+      'GL ui.dispatch_key=%d / VK 同一个 ui.dispatch_key=%d（桥转发=%d）'
+      % (len(s.pair.gl_ui.calls), len(s.pair.vk_ui.calls), len(s.pair.bridge.calls)))
+s.feed(pygame.K_a, False)
+s.feed(pygame.K_w, True)
+g, v = s.step('再按 w（UI 仍不消费）')
+check('UI 不消费：连按两键后两端 UI 各被派发 2 次（每次按键恰好 +1，不叠加）',
+      len(s.pair.gl_ui.calls) == 2 and len(s.pair.vk_ui.calls) == 2,
+      'GL=%d VK=%d（桥转发=%d）'
+      % (len(s.pair.gl_ui.calls), len(s.pair.vk_ui.calls), len(s.pair.bridge.calls)))
+s.feed(pygame.K_w, False)
+s.step('松 w')
+check('UI 不消费：松开沿不增加派发次数（两端 UI 仍各 2 次）',
+      len(s.pair.gl_ui.calls) == 2 and len(s.pair.vk_ui.calls) == 2,
+      'GL=%d VK=%d' % (len(s.pair.gl_ui.calls), len(s.pair.vk_ui.calls)))
+s.compare('⑥b UI 不消费时同一 UI 只派发一次')
 
 print()
 print("=== ⑦. 宿主直写 script_keys（老宿主/测试夹具的兼容路径） ===")
