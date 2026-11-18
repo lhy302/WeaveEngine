@@ -100,6 +100,62 @@ def _make_hwnd(win):
         return None
 
 
+# ======================== Win32（私有 user32 + 显式 argtypes） ========================
+# 与 VK 侧同值（不要改）：Win32 置顶常量与 SetWindowPos 标志
+_HWND_TOPMOST = -1
+_HWND_NOTOPMOST = -2
+_SWP_NOSIZE = 0x0001
+_SWP_NOACTIVATE = 0x0010
+_SWP_SHOWWINDOW = 0x0040
+
+
+def _user32():
+    """**私有** user32 句柄（显式 argtypes）。
+
+    2026-11-18 (Q-B7-36-2) 根因：本模块原先直接用 ctypes.windll.user32 调
+    SetWindowPos 且**没有声明 argtypes**。第二个参数是 HWND（x64 上 8 字节指针），
+    不声明 argtypes 时 ctypes 把 Python int 按 32 位传 -> HWND_TOPMOST(-1) 被截断
+    -> SetWindowPos 返回 0（失败）-> WS_EX_TOPMOST 从未置位（"置顶"静默失效）。
+
+    为什么 new 一个 WinDLL 而不是用 ctypes.windll.user32：后者是**全进程共享**的
+    函数对象，给它设 argtypes 等于暗中改别人的行为；这里只影响本模块自己的函数指针。
+    """
+    try:
+        from ctypes import wintypes
+        u = ctypes.WinDLL('user32', use_last_error=True)
+        sp = u.SetWindowPos
+        sp.restype = wintypes.BOOL
+        sp.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
+                       ctypes.c_int, ctypes.c_int, ctypes.c_uint]
+        gr = u.GetWindowRect
+        gr.restype = wintypes.BOOL
+        gr.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+        return u
+    except Exception:
+        return None
+
+
+def _window_rect_now(hwnd):
+    """当前窗口矩形 (left, top, right, bottom)；取不到返回 None。
+
+    坐标空间注意：这是 Win32 的**窗口矩形**（含边框），而 glfw.set_window_pos 的参数是
+    **client 区**原点。本机实测：set_window_pos(73,102) -> client 原点 (73,102)、
+    GetWindowRect=(64,64,...)，边框偏移 (9,38)。所以「记录用 GetWindowRect、还原用
+    Win32 SetWindowPos 的原始窗口坐标」是自洽的一对（见 _place_fullscreen_window）。
+    """
+    u = _user32()
+    if u is None or not hwnd:
+        return None
+    try:
+        from ctypes import wintypes
+        r = wintypes.RECT()
+        if u.GetWindowRect(hwnd, ctypes.byref(r)):
+            return (int(r.left), int(r.top), int(r.right), int(r.bottom))
+    except Exception:
+        pass
+    return None
+
+
 # ======================== IME 说明（B1 决策） ========================
 # GLFW 3.4 官方 API 没有 IME 预编辑串回调（实测 glfwSetPreeditCallback
 # 在 glfw3.dll 中不存在，已用 _glfw_symbol_probe.py 验证）。
@@ -156,7 +212,9 @@ class GlfwWindowMixin:
         self.width = width
         self.height = height
         self.fullscreen = False
-        self._window_rect = None
+        self._window_rect = None            # 进入全屏前的窗口矩形 (l,t,r,b)
+        self._window_client = None          # 进入全屏前的 client 尺寸 (w,h)
+        self._fullscreen_warned = set()     # 全屏失败/降级已打印过（同一原因只打一次）
         self._desktop_size = self._desktop_resolution()
         self._running = True
         # 每帧瞬态（由回调写入，_handle_events 轮转）
@@ -220,11 +278,27 @@ class GlfwWindowMixin:
         """假全屏：无边框 + 铺满桌面 + 置顶（不切显示器分辨率）.
 
         P-07 修复 (2026-11-06): 外部 GL 上下文模式 (Qt 宿主 QOpenGLWidget /
-        PlayerApp(ctx=...) 远程白屏修复路径) 没有 GLFW 窗口 —— `_glfw_win`
-        只在 _init_glfw_window 里创建。旧实现直接 `win = self._glfw_win`，
+        PlayerApp(ctx=...) 远程白屏修复路径) 没有 GLFW 窗口 —— _glfw_win
+        只在 _init_glfw_window 里创建。旧实现直接 win = self._glfw_win，
         此时抛 AttributeError，F11 一按即崩 (玩家发布路径默认就是这个模式)。
         契约 (engine.py:265 "外部模式: 无 pygame 窗口 (Qt 宿主管窗口)") 决定了
         全屏必须由宿主窗口负责，引擎只维护自身状态位与视口，不做窗口操作。
+
+        === 2026-11-18 修复 Q-B7-36-1：退出全屏必须**真还原** ===
+        旧顺序（错）：先 set_window_size(桌面) + set_window_pos(0,0)，再在
+        _place_fullscreen_window 里 GetWindowRect 记录 _window_rect —— 记到的是
+        **全屏后**的矩形；而 window_size 这时已被 _on_window_size_cb 刷成全屏尺寸。
+        于是退出时按全屏矩形"还原" -> 实测 1920x1055 @ (0,0)（原 640x400 @ (73,102)，
+        用户报的现场）。
+        新顺序（与 VK 侧 loom_vk_window.VkWindowMixin._set_fullscreen 逐项一致）：
+          进全屏 ① 取桌面分辨率
+                 ② **先**记录原窗口矩形 GetWindowRect + 原 client 尺寸
+                 ③ DECORATED=FALSE -> set_window_size(桌面) -> set_window_pos(0,0)
+                 ④ Win32 SetWindowPos(HWND_TOPMOST) 置顶
+          退全屏 ① DECORATED=TRUE -> set_window_size(原 client) -> set_window_pos(原矩形)
+                 ② Win32 SetWindowPos(HWND_NOTOPMOST, 原窗口坐标) 取消置顶并落回原位
+                 ③ 清空记录（下次进全屏重新记录）
+        两端语义必须一致（人类目标：后端可换、用户可观察结果不变）。
         """
         want = bool(fullscreen)
         win = getattr(self, '_glfw_win', None)
@@ -244,55 +318,115 @@ class GlfwWindowMixin:
             except Exception:
                 pass
             return
-        self.fullscreen = want
-        if fullscreen:
+        if want:
             w, h = self._desktop_resolution()
-            self.width = max(320, int(w))
-            self.height = max(240, int(h))
-            glfw.set_window_attrib(win, glfw.DECORATED, glfw.FALSE)
-            glfw.set_window_size(win, self.width, self.height)
-            glfw.set_window_pos(win, 0, 0)
-            self._place_fullscreen_window()
+            dw, dh = max(320, int(w)), max(240, int(h))
+            # ② **进入全屏之前**记录真实几何（Q-B7-36-1：这一步必须最早）
+            if getattr(self, '_window_rect', None) is None:
+                _client = self._client_size_now(win)      # 兼作句柄验活（假窗口直接跳过）
+                self._window_client = _client
+                if _client is not None:
+                    self._window_rect = _window_rect_now(_make_hwnd(win))
+                    if self._window_rect is None:
+                        self._fullscreen_warn(
+                            '拿不到原窗口矩形（GetWindowRect/glfwGetWin32Window 失败）'
+                            ' -> 退出全屏时无法还原窗口位置')
+            self.fullscreen = True
+            glfw.set_window_attrib(win, glfw.DECORATED, glfw.FALSE)   # ③ 去边框
+            glfw.set_window_size(win, dw, dh)                         #    铺满桌面
+            glfw.set_window_pos(win, 0, 0)                            #    左上角
+            self.width, self.height = dw, dh      # 窗口调用后再落字段（回调可能改写）
+            self._place_fullscreen_window()                           # ④ 置顶
         else:
-            w, h = self.window_size
-            self.width = max(320, int(w))
-            self.height = max(240, int(h))
-            glfw.set_window_attrib(win, glfw.DECORATED, glfw.TRUE)
-            glfw.set_window_size(win, self.width, self.height)
-            if self._window_rect:
-                x, y = self._window_rect[0], self._window_rect[1]
-                glfw.set_window_pos(win, x, y)
-            self._place_fullscreen_window()
+            # ---- 退全屏：边框 / client 尺寸 / 位置 / 非置顶 全部还原 ----
+            rect = getattr(self, '_window_rect', None)
+            cw, ch = getattr(self, '_window_client', None) or self.window_size
+            cw, ch = max(320, int(cw)), max(240, int(ch))
+            self.fullscreen = False
+            glfw.set_window_attrib(win, glfw.DECORATED, glfw.TRUE)    # ① 还边框
+            # 注意：还边框那一下 Windows 会同步发 WM_SIZE -> _on_window_size_cb ->
+            # _on_resize 改写 self.width/height（实测被改成 1920x1055）。所以这里
+            # **只用局部量**（进入前记录的 client 尺寸），绝不读 self.width/height。
+            glfw.set_window_size(win, cw, ch)                         #    还原 client 尺寸
+            if rect:
+                glfw.set_window_pos(win, int(rect[0]), int(rect[1]))  #    还原位置
+            self.width, self.height = cw, ch
+            self._place_fullscreen_window()                           # ② 取消置顶 + 落回原位
+            self._window_rect = None
+            self._window_client = None
+            # 还边框/改尺寸会触发 _on_window_size_cb，可能把 width/height 刷成过渡值；
+            # 以真实 client 尺寸收口（两端 width/height 必须同值）。
+            _real = self._client_size_now(win)
+            if _real:
+                self.width, self.height = _real
+            self.window_size = (self.width, self.height)
         try:
             self.ctx.viewport = (0, 0, self.width, self.height)
         except Exception:
             pass
 
+    def _client_size_now(self, win):
+        """当前 client 尺寸 (w,h)（失败返回 None -> 调用方走 window_size 兜底）."""
+        try:
+            w, h = glfw.get_window_size(win)
+            return (max(320, int(w)), max(240, int(h)))
+        except Exception:
+            return None
+
+    def _fullscreen_warn(self, msg):
+        """全屏失败/降级：**必须可见**（同一原因只打印一次，不刷屏、不静默）.
+
+        旧实现整段包在 try/except Exception: pass 里 —— 置顶在 x64 上静默失败了
+        没人知道（Q-B7-36-2）。这里把失败变成一行明确日志。
+        """
+        key = str(msg)
+        seen = getattr(self, '_fullscreen_warned', None)
+        if not isinstance(seen, set):
+            seen = self._fullscreen_warned = set()
+        if key in seen:
+            return
+        seen.add(key)
+        print('[全屏] %s' % (key,))
+
     def _toggle_fullscreen(self):
         self._set_fullscreen(not self.fullscreen)
 
     def _place_fullscreen_window(self):
-        """Win32 置顶/取消置顶（GLFW 无 set_always_on_top API）."""
+        """Win32 置顶 / 取消置顶（GLFW 没有 set_always_on_top API）.
+
+        2026-11-18 修复 Q-B7-36-2：
+          · 旧代码用 ctypes.windll.user32 且**没有 argtypes** -> x64 上第二参数
+            HWND_TOPMOST(-1) 被按 32 位截断 -> SetWindowPos 返回 0（失败），
+            WS_EX_TOPMOST 从未置位；外层 except: pass 让失败完全不可见。
+          · 现在：私有 user32 + 显式 argtypes + c_void_p(-1)/(-2)（= 句柄宽度），
+            失败**打一行**日志（同一原因只打一次）。
+        取消置顶时用记录的**窗口矩形**坐标（Win32 窗口坐标，不是 glfw 的 client 坐标）
+        —— 与 VK 侧同一对调用，保证两端退出后落到同一个像素。
+        """
+        u = _user32()
+        if u is None:
+            self._fullscreen_warn('拿不到私有 user32 句柄 -> 置顶/取消置顶不可用')
+            return
+        hwnd = _make_hwnd(self._glfw_win)
+        if not hwnd:
+            self._fullscreen_warn('拿不到 Win32 HWND（glfwGetWin32Window 失败）'
+                                  ' -> 置顶/取消置顶不可用')
+            return
         try:
-            hwnd = _make_hwnd(self._glfw_win)
-            if not hwnd:
-                return
-            user32 = ctypes.windll.user32
-            SWP_NOSIZE, SWP_NOACTIVATE, SWP_SHOWWINDOW = 0x0001, 0x0010, 0x0040
             if self.fullscreen:
-                if self._window_rect is None:
-                    from ctypes import wintypes
-                    r = wintypes.RECT()
-                    if user32.GetWindowRect(hwnd, ctypes.byref(r)):
-                        self._window_rect = (r.left, r.top, r.right, r.bottom)
-                user32.SetWindowPos(hwnd, -1, 0, 0, self.width, self.height,
-                                    SWP_NOACTIVATE | SWP_SHOWWINDOW)
+                ok = u.SetWindowPos(hwnd, ctypes.c_void_p(_HWND_TOPMOST), 0, 0,
+                                    int(self.width), int(self.height),
+                                    _SWP_NOACTIVATE | _SWP_SHOWWINDOW)
             else:
-                x, y = (self._window_rect[0], self._window_rect[1]) if self._window_rect else (0, 0)
-                user32.SetWindowPos(hwnd, -2, x, y, 0, 0,
-                                    SWP_NOSIZE | SWP_NOACTIVATE)
-        except Exception:
-            pass
+                rect = getattr(self, '_window_rect', None)
+                x, y = (int(rect[0]), int(rect[1])) if rect else (0, 0)
+                ok = u.SetWindowPos(hwnd, ctypes.c_void_p(_HWND_NOTOPMOST), x, y, 0, 0,
+                                    _SWP_NOSIZE | _SWP_NOACTIVATE)
+            if not ok:
+                self._fullscreen_warn('SetWindowPos 失败 (GetLastError=%s)'
+                                      % (ctypes.get_last_error(),))
+        except Exception as e:
+            self._fullscreen_warn('SetWindowPos 抛异常: %r' % (e,))
 
     # ---------------- 每帧事件轮转 ----------------
     def _handle_events(self):
