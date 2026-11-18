@@ -148,6 +148,24 @@ Q-B7-40-1 修后（2026-11-18，**只改 GL 侧 runtime.py + 本门**，VK 一�
 
 结构断言改名防护（B7-16 复查 P0-1 教训）：结构段用**递归**扫描定位生产文件（排除
 tests/），并同时覆盖当前名与历史名（_poll_unlock_local 必须不存在 = 批2已删的旧拷贝）。
+
+Q-B7-43-1 修后（2026-11-18，**只改本门夹具 + 注释**，业务代码一行未动、断言表达式一字未改）：
+  · 症状：本门 ④/⑤/⑩ 组「吸收帧」偶发假红，签名
+    GL=((300,150),(20,50)) VK=((300,150),(0,0))（= GL 多出一份假位移）。
+  · 根因（与 test_ui_hit_parity 同一根因，实测日志见提交信息）：glfw.set_cursor_pos
+    底层是 Win32 SetCursorPos，**物理光标的落地是异步的**；而 GL 的增量结算点
+    loom_glfw_window._update_mouse_rel:535 读的就是 glfw.get_cursor_pos。修前 gl_frame
+    是「set_cursor_pos -> _handle_events（结算）」，少了「等落点真的生效」这一拍 ——
+    结算读到**上一个**落点，于是本帧位移多算/少算一份。恰好 ④/⑤/⑩ 的「吸收帧」
+    （刚切 CURSOR_DISABLED、_prev_cursor 被重锚成 None 的那一帧）把这份假增量整份
+    记进 mouse_rel，VK 侧同一帧是 (0,0) → 对拍红。
+  · 修法：新增夹具函数 settle_cursor()（见其注释）—— 结算前先「落点可见 + 队列静默」。
+    只建输入前提，不改任何 check/seq_check 的表达式、不放宽任何语义、不加重跑逻辑。
+  · 为什么没选「单窗口复用」：GL 侧句柄由 engine.GLEngine 构造时自建（带 OpenGL
+    上下文），VK 侧要 NO_API 句柄；复用同一句柄要么改业务代码（禁止），要么让两端共用
+    同一个 CURSOR 模式 —— 那本门 ①~③/⑨/⑪/⑫ 的「两端状态位各自翻转」就测不成了。
+  · 有牙证明（造业务回归仍必须红）：把 VK 的 vk_ui.UIInputBridge.ui_active 改回跨帧
+    判据（恢复 _pressed_elem 跨帧持按）→ 本门 ⑧ 组当场红；还原后绿。见提交信息原文。
 """
 import atexit as _atexit_gate
 import os as _os_gate
@@ -367,6 +385,12 @@ class Pair:
         """GL 生产帧：物理光标落点 + 生产泵（poll_events + _update_mouse_rel 结算）
         + 生产光标回调（与 GLFW 投递同一函数；手动喂 = 等价事件注入）。"""
         glfw.set_cursor_pos(self.gl._glfw_win, x, y)
+        # Q-B7-43-1：物理光标落地是异步的 —— 必须先 settle_cursor() 把落点与消息队列
+        # 都排空，再让生产泵结算 mouse_rel（loom_glfw_window._update_mouse_rel:535 读
+        # glfw.get_cursor_pos）。修前少了这一拍：结算读到**上一个**落点 → 位移多出一份
+        # 假增量，④/⑤/⑩ 组的「吸收帧」偶发红 GL=((300,150),(20,50)) VK=((300,150),(0,0))。
+        # 只建输入前提，不动任何断言。
+        settle_cursor(self.gl._glfw_win, self.gl, x, y)
         self.gl._handle_events()
         _on_cursor_pos_cb(self.gl._glfw_win, x, y)
         return ((int(self.gl.mouse_pos[0]), int(self.gl.mouse_pos[1])),
@@ -418,6 +442,107 @@ class Pair:
             (bool(self.vk.mouse_locked), bool(self.vk.mouse_unlock_requested),
              _mode_disabled(self.vk_win)),
         )
+
+
+# ==================== Q-B7-43-1：物理光标落点/消息队列排空协议 ====================
+
+_SETTLED_AT = {}          # id(win) -> 上一次已排空到位的注入点（pyglfw 的 window 不可哈希）
+
+
+def settle_cursor(win, eng, x, y, maxit=40, dt=0.002, stable=2):
+    """把物理光标真的落到 (x,y)，并把这次移动产生的 WM_MOUSEMOVE 全部派发干净。
+
+    **这是夹具的输入前提，不是断言、不是重跑**（不碰任何 check 的表达式，不改任何被测
+    语义；只在注入事件之前把「玩家真的把鼠标移到这里了」这个前提建好）。
+
+    为什么必须先做（Q-B7-43-1 修前偶发假红的根因，实测证据见提交信息）：
+      glfw.set_cursor_pos 底层是 Win32 SetCursorPos，**物理光标的落地是异步的**：
+        · 紧跟着的 glfw.get_cursor_pos（= GetCursorPos + ScreenToClient，读物理光标）
+          可能仍回读到**上一个**落点 —— 而生产 _on_mouse_button_cb 正是自己再读一次
+          get_cursor_pos 来定 e.mouse_pos（loom_glfw_window.py:657-661），于是「按下
+          帧」的 mouse_pos 被写成上一帧的位置 → 命中全落 root。本门 ①/② 组偶发假红的
+          签名 GL=('root','root',None,None) 就是它。
+        · 上一次 set_cursor_pos 产生的 WM_MOUSEMOVE 还可能排在消息队列里，晚一拍才被
+          poll_events 派发，把 e.mouse_pos 覆盖回旧值。
+      生产里这两件事都不可能发生：真实玩家的一次移动在 LBUTTONDOWN 之前一定已经投递完
+      （Windows 保证同一窗口的鼠标消息相对有序），而且生产只有一个玩家窗口。夹具用
+      set_cursor_pos 代替「玩家的手」，就必须先复刻这个顺序，再注入按键/滚轮。
+      修前本门用「set_cursor_pos + 两次 poll_events」代替这一步 —— 少的就是这一拍。
+
+    判据（两个阶段合成一个循环）：
+      · 窗口内坐标：要求 glfw.get_cursor_pos 与 engine.mouse_pos 都**等于**注入点；
+      · 画布外坐标（如 (-50,-50)）：物理光标会被桌面边界钳住，回读永远 != 注入点，
+        退而求其次要求「回读已经真的动过（!= 注入前的值，或上一帧就注入的同一坐标）」
+        且随后连续 stable 次不再变化（= 这次投递已落地、队列已静默）。
+    返回 True = 排空到位；False = 到上限仍未到位（此时照旧往下走，红不红由断言决定 ——
+    夹具**不**吞掉任何判定）。
+    """
+    t = (int(x), int(y))
+    try:
+        w, h = glfw.get_window_size(win)
+        reachable = (0 <= t[0] < int(w)) and (0 <= t[1] < int(h))
+        rb0 = tuple(int(v) for v in glfw.get_cursor_pos(win))
+    except Exception:
+        reachable, rb0 = False, None
+    already = _SETTLED_AT.get(id(win)) == t
+    ok = 0
+    prev = None
+    for _ in range(maxit):
+        try:
+            glfw.poll_events()
+        except Exception:
+            pass
+        try:
+            rb = tuple(int(v) for v in glfw.get_cursor_pos(win))
+            mp = tuple(getattr(eng, 'mouse_pos', ()))
+        except Exception:
+            rb, mp = None, None
+        if reachable:
+            same = (rb == t and mp == t)
+            if not same:
+                # 切 CURSOR_DISABLED 后的首个轮询，GLFW 3.4 会把虚拟坐标重置为物理
+                # 光标位置；这里再落一次 = 玩家把鼠标又移回注入点，直到回读收敛。
+                try:
+                    glfw.set_cursor_pos(win, x, y)
+                except Exception:
+                    pass
+        else:
+            same = ((rb != rb0 or already) and (rb, mp) == prev)
+        prev = (rb, mp)
+        ok = ok + 1 if same else 0
+        if ok >= stable:
+            _SETTLED_AT[id(win)] = t
+            return True
+        time.sleep(dt)
+    _SETTLED_AT[id(win)] = t
+    return False
+
+
+def absorb(p, x, y, maxn=8):
+    """吸收帧协议（Q-B7-43-1）：光标模式刚切换后的前若干帧只用来「让 GLFW 的虚拟坐标
+    初始化到位」，值不进断言。
+
+    实测（2026-11-18，机制探针 tests/_tmp/probe_q_b7_43_1_mech3.py）：切到
+    CURSOR_DISABLED 后的**首个**轮询，GLFW 3.4 会把虚拟坐标重新初始化成物理光标位置
+    （= 窗口中心附近，多窗测试进程里不可预测），于是那一帧 glfw.get_cursor_pos 与注入点
+    不等 → 本帧位移多算一份假增量。修前协议是「固定丢 1 帧」—— 快机器上通常 1 帧就收敛，
+    但这一步滞后时假增量就落进被断言的那一帧（④/⑤/⑩ 假红签名
+    GL=((300,150),(20,50)) VK=((300,150),(0,0))）。
+    现在改成**按条件**丢：一直丢到 glfw 回读到注入点（上限 maxn 帧），再交给断言。
+    上限有界，只丢「虚拟坐标还没初始化到位」的帧 —— 不吞任何被测语义：真缺陷会让随后的
+    锚帧继续红（⑩ 的「锚帧 mouse_rel 都是 (0,0)」、④ 的「锁定锚帧」都还在断言里）。
+    """
+    out = None
+    for _ in range(maxn):
+        out = p.feed(x, y)
+        try:
+            ok = (tuple(int(v) for v in glfw.get_cursor_pos(p.gl._glfw_win))
+                  == (int(x), int(y)))
+        except Exception:
+            ok = False
+        if ok:
+            break
+    return out
 
 
 def pump(n=15, dt=0.02):
@@ -559,11 +684,10 @@ rows.append(('未锁 feed(100,60)', g, v))
 g, v = p.feed(140, 62)
 rows.append(('未锁 feed(140,62)', g, v))
 p.lock(True)
-_ga, _va = p.feed(140, 62)         # 瞬态吸收帧：GLFW 3.4 首个 disabled 轮询把虚拟坐标
-                                   # 初始化为物理光标位置（与喂入值有一帧滞后，多窗测试进程
-                                   # 里不可预测）。生产里不存在该伪影（真实移动连续，两端
-                                   # 首帧都由重锚定为 (0,0)）—— 此帧只建立 tracking 基线，
-                                   # 值打印不进断言。
+# 吸收帧（Q-B7-43-1：按条件丢到虚拟坐标初始化到位为止，见 absorb() 注释）。
+# 生产里不存在该伪影（真实移动连续，两端首帧都由重锚定为 (0,0)）—— 这些帧只建立
+# tracking 基线，值打印不进断言。
+_ga, _va = absorb(p, 140, 62)
 print('    （吸收帧不进断言：GL=%s VK=%s）' % (_ga, _va))
 g, v = p.feed(140, 62)
 check('④ 锁定后两端光标捕获位都翻（GLFW 回读）',
@@ -583,7 +707,7 @@ check('④ 解锁后两端捕获位都释放（GLFW 回读）',
       'GL=%r VK=%r' % (_mode_disabled(p.gl._glfw_win), _mode_disabled(p.vk_win)))
 rows.append(('解锁 feed(300,150)', g, v))
 p.lock(True)
-p.feed(300, 150)                   # 瞬态吸收帧（同上，值不进断言）
+absorb(p, 300, 150)                # 吸收帧（同上，值不进断言）
 g, v = p.feed(300, 150)
 rows.append(('回锁锚帧 feed(300,150)', g, v))
 g, v = p.feed(310, 155)
@@ -599,7 +723,7 @@ p.allow(True)
 g, v = p.feed(200, 80)             # 未锁预热帧：把两端的光标起点归到同一位置
 rows.append(('未锁预热 feed(200,80)', g, v))
 p.lock(True)
-p.feed(200, 80)                    # 瞬态吸收帧（同组④，值不进断言）
+absorb(p, 200, 80)                 # 吸收帧（同组④，值不进断言）
 g, v = p.feed(200, 80)
 rows.append(('锁定锚帧 feed(200,80)', g, v))
 g, v = p.feed(210, 85)
@@ -817,7 +941,7 @@ print("=== ⑩. F-2 幂等 set_mouse_locked(True)：锁定中连续重申不得�
 p = Pair()
 p.allow(True)
 p.lock(True)
-p.feed(200, 80)                    # 吸收帧：锁定切换后首帧只建立增量基线（值不进断言）
+absorb(p, 200, 80)                 # 吸收帧：锁定切换后只建立增量基线（值不进断言）
 _g0, _v0 = p.feed(200, 80)
 check('⑩ 起点：两端都锁定、锚帧 mouse_rel 都是 (0,0)',
       _g0 == _v0 == ((200, 80), (0, 0)), 'GL=%s VK=%s' % (_g0, _v0))

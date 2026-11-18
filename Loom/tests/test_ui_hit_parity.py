@@ -100,6 +100,29 @@ tests/ 与 __pycache__/_tmp），并同时覆盖**当前名与历史名** ——
 「本帧被 UI 消费」时仍是非 0（脚本可读），VK 因为 feed 被 wants_camera 门控所以是 0。
 两者**相机**行为已一致（GL 的 move_camera/rotate_camera 在 ui_consumed 时早退），差的只是
 「脚本在 UI 消费帧读 mouse_rel」这一面。
+
+Q-B7-43-1 修后（2026-11-18，**只改本门夹具 + 注释**，业务代码一行未动、断言表达式一字未改）：
+  · 症状：本门 ①/②/③ 组偶发假红，签名 GL=('root','root',None,None) 而 VK 正确
+    （干净 HEAD 也复现 → 与本轮任何改动无关，是夹具自身的竞态）。实测修前 2/20 次红。
+  · 根因（实测日志见提交信息）：glfw.set_cursor_pos 底层是 Win32 SetCursorPos，
+    **物理光标的落地是异步的**。修前 gl_frame 只「set_cursor_pos + 两次 poll_events」
+    就当光标已到位，于是：
+      (a) 生产 _on_mouse_button_cb 自己再读一次 glfw.get_cursor_pos
+          （loom_glfw_window.py:657-661）时，回读到的是**上一个**落点 → 按下帧的
+          e.mouse_pos 被写成上一帧的位置 → 命中全落 root（= 本门假红签名）；
+      (b) 上一次 set_cursor_pos 产生的 WM_MOUSEMOVE 还排在消息队列里，晚一拍才被
+          poll_events 派发，把 e.mouse_pos 覆盖回旧值。
+    生产里两者都不存在：真实玩家的一次移动在 LBUTTONDOWN 之前一定已经投递完（Windows
+    保证同一窗口鼠标消息相对有序），且生产只有一个玩家窗口。
+  · 修法：新增夹具函数 settle_cursor()（见其注释）—— 注入事件前先「落点可见 + 队列
+    静默」再喂 _on_cursor_pos_cb / _on_mouse_button_cb。**只是建输入前提**，不改任何
+    check/seq_check 的表达式、不放宽任何语义、不加任何重跑逻辑。
+  · 为什么没选「单窗口复用」：GL 侧的 GLFW 句柄由 runtime.PlayerApp / engine.GLEngine
+    构造时自建并绑定 OpenGL 上下文，VK 侧要的是 NO_API 句柄；复用同一个句柄要么改业务
+    代码（本任务禁止），要么让 VK 用 GL 的窗口 —— 那会污染 GL 的 GLFW 回调 user_pointer
+    并让两端共用同一个 CURSOR 模式（等于改生产接线，且 ⑧ 组「两端一起上锁」就测不成了）。
+  · 有牙证明（造业务回归仍必须红）：把 GL 的 runtime.PlayerApp._dispatch_ui_mouse 的
+    ui_consumed 恒置 False → 本门 ⑤/⑧ 组当场红；还原后绿。见提交信息原文。
 """
 import atexit as _atexit_gate
 import os as _os_gate
@@ -448,14 +471,16 @@ class Pair:
         _on_mouse_button_cb 会自己读 glfw.get_cursor_pos（loom_glfw_window.py:657-661）；
         手动再喂一次 _on_cursor_pos_cb 是因为本进程里窗口不持真实鼠标焦点时 WM_MOUSEMOVE
         会晚一个 poll 才到 —— 喂的是 **GLFW 投递的同一个函数**（等价事件注入，同 P2 门）。
+        Q-B7-43-1（夹具竞态）：物理光标落地是**异步**的，所以注入前必须先 settle_cursor()
+        把落点与消息队列都排空（见该函数注释），否则按下帧的 mouse_pos 会被写成上一帧
+        的位置（假红）。这只建前提，不动任何断言。
         """
         win = self.gl._glfw_win
         glfw.set_cursor_pos(win, x, y)
-        try:
-            glfw.poll_events()
-            glfw.poll_events()
-        except Exception:
-            pass
+        # Q-B7-43-1：先把「物理光标真的落在 (x,y) + 这次移动的消息已派发干净」建好，
+        # 再注入光标/按键/滚轮（修前只 poll 两次 = 少这一拍，偶发把 mouse_pos 写成上一帧
+        # 的位置 → ①/② 组假红 GL=('root','root',None,None)）。
+        settle_cursor(win, self.gl, x, y)
         _on_cursor_pos_cb(win, x, y)
         if press:
             _on_mouse_button_cb(win, glfw.MOUSE_BUTTON_LEFT, glfw.PRESS, 0)
@@ -554,6 +579,80 @@ class Pair:
         from collections import Counter
         return (tuple(sorted(Counter(self.clicks_gl).items())),
                 tuple(sorted(Counter(self.clicks_vk).items())))
+
+
+# ==================== Q-B7-43-1：物理光标落点/消息队列排空协议 ====================
+
+_SETTLED_AT = {}          # id(win) -> 上一次已排空到位的注入点（pyglfw 的 window 不可哈希）
+
+
+def settle_cursor(win, eng, x, y, maxit=40, dt=0.002, stable=2):
+    """把物理光标真的落到 (x,y)，并把这次移动产生的 WM_MOUSEMOVE 全部派发干净。
+
+    **这是夹具的输入前提，不是断言、不是重跑**（不碰任何 check 的表达式，不改任何被测
+    语义；只在注入事件之前把「玩家真的把鼠标移到这里了」这个前提建好）。
+
+    为什么必须先做（Q-B7-43-1 修前偶发假红的根因，实测证据见提交信息）：
+      glfw.set_cursor_pos 底层是 Win32 SetCursorPos，**物理光标的落地是异步的**：
+        · 紧跟着的 glfw.get_cursor_pos（= GetCursorPos + ScreenToClient，读物理光标）
+          可能仍回读到**上一个**落点 —— 而生产 _on_mouse_button_cb 正是自己再读一次
+          get_cursor_pos 来定 e.mouse_pos（loom_glfw_window.py:657-661），于是「按下
+          帧」的 mouse_pos 被写成上一帧的位置 → 命中全落 root。本门 ①/② 组偶发假红的
+          签名 GL=('root','root',None,None) 就是它。
+        · 上一次 set_cursor_pos 产生的 WM_MOUSEMOVE 还可能排在消息队列里，晚一拍才被
+          poll_events 派发，把 e.mouse_pos 覆盖回旧值。
+      生产里这两件事都不可能发生：真实玩家的一次移动在 LBUTTONDOWN 之前一定已经投递完
+      （Windows 保证同一窗口的鼠标消息相对有序），而且生产只有一个玩家窗口。夹具用
+      set_cursor_pos 代替「玩家的手」，就必须先复刻这个顺序，再注入按键/滚轮。
+      修前本门用「set_cursor_pos + 两次 poll_events」代替这一步 —— 少的就是这一拍。
+
+    判据（两个阶段合成一个循环）：
+      · 窗口内坐标：要求 glfw.get_cursor_pos 与 engine.mouse_pos 都**等于**注入点；
+      · 画布外坐标（如 (-50,-50)）：物理光标会被桌面边界钳住，回读永远 != 注入点，
+        退而求其次要求「回读已经真的动过（!= 注入前的值，或上一帧就注入的同一坐标）」
+        且随后连续 stable 次不再变化（= 这次投递已落地、队列已静默）。
+    返回 True = 排空到位；False = 到上限仍未到位（此时照旧往下走，红不红由断言决定 ——
+    夹具**不**吞掉任何判定）。
+    """
+    t = (int(x), int(y))
+    try:
+        w, h = glfw.get_window_size(win)
+        reachable = (0 <= t[0] < int(w)) and (0 <= t[1] < int(h))
+        rb0 = tuple(int(v) for v in glfw.get_cursor_pos(win))
+    except Exception:
+        reachable, rb0 = False, None
+    already = _SETTLED_AT.get(id(win)) == t
+    ok = 0
+    prev = None
+    for _ in range(maxit):
+        try:
+            glfw.poll_events()
+        except Exception:
+            pass
+        try:
+            rb = tuple(int(v) for v in glfw.get_cursor_pos(win))
+            mp = tuple(getattr(eng, 'mouse_pos', ()))
+        except Exception:
+            rb, mp = None, None
+        if reachable:
+            same = (rb == t and mp == t)
+            if not same:
+                # 切 CURSOR_DISABLED 后的首个轮询，GLFW 3.4 会把虚拟坐标重置为物理
+                # 光标位置；这里再落一次 = 玩家把鼠标又移回注入点，直到回读收敛。
+                try:
+                    glfw.set_cursor_pos(win, x, y)
+                except Exception:
+                    pass
+        else:
+            same = ((rb != rb0 or already) and (rb, mp) == prev)
+        prev = (rb, mp)
+        ok = ok + 1 if same else 0
+        if ok >= stable:
+            _SETTLED_AT[id(win)] = t
+            return True
+        time.sleep(dt)
+    _SETTLED_AT[id(win)] = t
+    return False
 
 
 def pump(n=15, dt=0.02):
