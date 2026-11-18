@@ -109,6 +109,11 @@ class LogicThreadMixin:
                 if getattr(self, '_logic_paused', False):
                     # 2026-11-09 P1-A: 暂停期清墙钟锚点, 恢复首帧不补欠账
                     self._logic_wall_last = None
+                    # ★F-3 (Q-B7-39-4, 2026-11-18): 异步逻辑线程暂停期同样冻结了
+                    #   update_scripts 首行的解锁键轮询 —— 这里补 poll（与同步路径
+                    #   advance_logic 暂停分支同语义；本线程**非暂停期本来就通过**
+                    #   update_scripts 轮询该键, 线程口径不变）。
+                    self.poll_unlock()
                     if getattr(self, '_step_requested', False):
                         self._step_requested = False
                         self._profile('logic_step', lambda: clk.step_once())

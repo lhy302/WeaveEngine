@@ -543,6 +543,15 @@ class GlfwWindowMixin:
         dy = cy - self._prev_cursor[1]
         self._prev_cursor = (cx, cy)
         # GLFW_CURSOR_DISABLED 模式会虚化坐标（光标每帧回中心），dx/dy 直接当相对位移
+        # ★R1 (Q-B7-39-1, 2026-11-18): 逻辑暂停期**不结算**本帧增量 —— 与 VK
+        #   scene_driver.advance_logic 暂停分支同语义（B6 契约: mouse_rel 只能是
+        #   "本帧"增量; 暂停期既不结算也不累积, 恢复首帧不得有积压）。
+        #   ★_prev_cursor **照常推进**: 暂停期光标仍在动, 基线必须跟着走 —— 否则
+        #   恢复首帧会把整段停顿时长内的位移一次性结算成巨值(积压)。
+        _paused = getattr(self, '_logic_paused_state', None)
+        if _paused is not None and _paused():
+            self.mouse_rel = (0, 0)
+            return
         self.mouse_rel = (int(dx), int(dy))
 
     # ---------------- 交换缓冲 / 关闭 ----------------

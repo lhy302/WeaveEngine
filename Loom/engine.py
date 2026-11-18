@@ -939,9 +939,15 @@ class GLEngine(EngineCore, ShadowMixin, HudMixin, RenderMixin, ModelGpuMixin, Li
         语义: 与 update_scripts 内部调用**同一实现**（_poll_mouse_unlock_key），
               不依赖逻辑帧 —— 暂停（F9 / 通关暂停）时逻辑帧不跑, 宿主需每渲染帧
               直接调用本方法。
-        调用方（第 2 批）: scene_driver.SceneDriver 的 advance_logic 暂停早退分支
-              之前 / vk_player 渲染循环；GL 侧 GLEngine.update_scripts 已内置，
-              编辑器/播放器**不要**重复调用（否则同帧翻转两次）。
+        调用方（现状）:
+          · VK : scene_driver.advance_logic 暂停早退分支 + vk_player 渲染循环（双保险）
+          · GL : 非暂停期由 update_scripts 首行内置；**暂停期**由三条暂停分支各 poll
+                 一次（2026-11-18 F-3/Q-B7-39-4）——
+                 engine.advance_logic 暂停分支（宿主同步路径）/
+                 loom_render.render 暂停分支（GLFW run() 玩家主循环）/
+                 loom_logic_thread 暂停分支（Qt 宿主异步播放态）。
+        重复调用是**安全**的: _poll_mouse_unlock_key 只看**按下沿**（_unlock_key_prev），
+        同一帧键态再 poll 一次返回 False，不会翻两次。
         """
         return self._poll_mouse_unlock_key()
 
@@ -1450,6 +1456,18 @@ class GLEngine(EngineCore, ShadowMixin, HudMixin, RenderMixin, ModelGpuMixin, Li
                 # 的契约。三条暂停路径 (本处 / loom_render.render / 逻辑线程)
                 # 统一在这里重新锚定。
                 self._logic_wall_last = None
+                # ★F-3 (Q-B7-39-4, 2026-11-18): 暂停期逻辑帧不跑 → update_scripts
+                #   首行的解锁键轮询不执行。暂停冻结的是"游戏逻辑", 不能把**输入
+                #   逃生通道**一起冻掉 —— 与 VK scene_driver.advance_logic 暂停分支
+                #   同位置同语义（裁决 D6=A: 引擎独占该键；_poll_mouse_unlock_key 只看
+                #   按下沿, 同帧重复 poll 不会翻两次）。
+                self.poll_unlock()
+                # ★R1 (Q-B7-39-1, 2026-11-18): 暂停期鼠标增量既不结算也不累积
+                #   （B6 契约: mouse_rel 只能是"本帧"增量; 与 VK 暂停分支逐行同语义）。
+                #   GL 的累积点是 _update_mouse_rel 的 _prev_cursor —— 那里暂停期照常
+                #   推进基线但不结算（loom_glfw_window._update_mouse_rel），所以恢复
+                #   首帧只拿到"恢复这一帧"的位移, 不补暂停期欠账。
+                self.mouse_rel = (0, 0)
                 if not getattr(self, '_step_requested', False):
                     # 暂停且无步进请求: 本渲染帧零逻辑 (世界冻结), 渲染照跑
                     self._advanced_this_frame = True

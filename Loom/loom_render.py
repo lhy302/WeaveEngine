@@ -1143,6 +1143,15 @@ class RenderMixin:
         # 2026-08-16 相机物体化: 挂父激活相机每帧重应用 -> 世界位姿随父移动
         # (Unity 父子语义). 仅挂父相机触发; 根相机/无激活相机行为不变; 脚本在
         # _run_scripts 里后写仍覆盖 (玩家控制器契约不变).
+        # ★F-3 (Q-B7-39-4, 2026-11-18): 暂停期**逻辑帧不跑** → update_scripts 首行的
+        #   解锁键轮询不执行 → 暂停期按解锁键没反应（输入逃生通道被"暂停"冻掉）。
+        #   VK 侧是"双保险"（advance_logic 暂停分支 poll 一次 + vk_player 每渲染帧再
+        #   采样一次）；GL 玩家主循环走的就是本方法，这里补上渲染帧这一次，与
+        #   vk_player.poll_unlock_frame 同位置同语义（按下沿才翻转, 同帧重复 poll
+        #   不会翻两次）。同步宿主路径由 advance_logic 暂停分支覆盖, 本处是 GLFW
+        #   run() 主循环（render 自己推进时钟, 不经过 advance_logic）的唯一轮询点。
+        if getattr(self, '_logic_paused', False):
+            self.poll_unlock()
         _cam = self.active_camera_object()
         if _cam is not None and _cam.parent is not None:
             self.apply_camera(_cam)

@@ -6,7 +6,7 @@
     一样，不管选择什么后端对用户脚本的表现一致。」
 
 本门验什么（Q-B7-37-1 P2）：**同一串**鼠标锁定/解锁/移动输入喂进两端**生产入口**，
-逐项比对可观察结果（不是"各自为 True"）。六组：
+逐项比对可观察结果（不是"各自为 True"）。七组：
   ① 状态位翻转      set_mouse_locked(True/False) / toggle_mouse_locked() 后
                     (mouse_locked, mouse_unlock_requested, 光标捕获位) 序列逐项相等
   ② 策略闸门        mouse_lock_allowed=False 时 F11 / 解锁键(Tab) / set_mouse_locked(True)
@@ -18,6 +18,9 @@
   ⑤ 暂停期行为      logic_paused 时鼠标增量既不结算也不累积（B6 契约：mouse_rel 只能是
                     "本帧"增量）——两端一致；恢复后无积压
   ⑥ 键盘解锁键 Tab  按住 Tab 跨帧轮询解锁（P1 门 test_input_chain_parity ⑤ 的回归锚）
+  ⑦ 暂停期解锁键    F9 暂停期间按解锁键（Tab）两端都必须能解锁（F-3）；按住跨帧
+                    不得重复翻转（VK 一帧内 poll 两次 = 暂停分支 + 渲染帧采样，
+                    GL 宿主路径也可能 advance_logic + render 同帧各 poll 一次）
 
 两端生产入口（真窗口，不拼假对象；§5 反模式 8）：
   GL : engine.GLEngine(640,400) 自建 GLFW 窗口（loom_glfw_window._init_glfw_window）
@@ -45,7 +48,7 @@
 
 已知差异登记表：**必须为空**（KNOWN_DIFFS）。任何"差不多"/阈值/容差都不许。
 
-修前红证据（R1，HEAD=3d87dce 实测，见本文件尾 R1 段输出）：
+修前红证据（R1，HEAD=3d87dce / d7b1404 实测，原文见提交信息与交付报告）：
   R1 组⑤红：GL 暂停期 mouse_rel 逐帧结算新值 ((40,20),(20,-10),(-10,15))，VK 恒 (0,0)
     —— B6「暂停期既不结算也不累积」GL 侧未实现；用户可感知路径：F9 暂停 + F10 单步时
     脚本读 mouse_rel（GL 视角转 / VK 不转）。
@@ -53,7 +56,21 @@
     run 循环 loom_render.py:1313 暂停期照跑泵）+ engine.GLEngine.advance_logic 暂停分支
     （engine.py:1446-1459 不清 mouse_rel）；VK 参照实现 scene_driver.py:1059-1062。
 
-附加发现（探针实测/源码证据，超出六组点名输入、不在本门断言；各自修复落地后再补牙）：
+R1/F-3 修后（2026-11-18，本门 **37 条全绿**；修前 = 30 绿 / 7 红 = ⑤ + ⑦×2 +
+结构锚点×3 + ④ 偶发 1 次）：
+  · R1（Q-B7-39-1）：GL 泵结算点 `loom_glfw_window._update_mouse_rel` 加逻辑暂停门控
+    —— 暂停期**只推进 _prev_cursor 基线、不结算 mouse_rel**（不结算不累积，恢复首帧
+    只拿"恢复这一帧"的位移）；`engine.advance_logic` 暂停分支与 VK 逐行同语义
+    清 `mouse_rel=(0,0)`。
+  · F-3（Q-B7-39-4）：GL **三条暂停分支各 poll 一次**解锁键 —— `engine.advance_logic`
+    暂停分支（宿主同步路径）/ `loom_render.render` 暂停分支（GLFW run() 玩家主循环，
+    render 自己推进时钟、不经过 advance_logic）/ `loom_logic_thread` 暂停分支
+    （Qt 宿主异步播放态）。按下沿判定（`_unlock_key_prev`）保证同帧重复 poll 不翻两次。
+  · **未改 VK**（VK 是对的）；**未动 F-1/F-2/F-6/F-7**（另派单）。
+  · 组⑦ 的帧形：GL = 泵（物理键快照）→ 本帧 KEYDOWN → render；VK = 渲染帧镜像。
+    泵每帧用 glfw.get_key 重建 script_keys，故"本帧按键"必须排在泵之后注入。
+
+附加发现（探针实测/源码证据，超出七组点名输入、不在本门断言；各自修复落地后再补牙）：
   F-1 VK set_mouse_locked/toggle_mouse_locked 返回 None，GL 返回 True/False
       （scene_driver.py:1649-1672/1678-1694 vs loom_input.py:367-403/458-472）——
       脚本 if engine.toggle_mouse_locked(): 两端走不同分支（GL 真 / VK 假）。
@@ -64,6 +81,7 @@
   F-3 F9 暂停期间按解锁键：VK 解锁（advance_logic 暂停分支自带 poll_unlock
       + vk_player 渲染帧采样，双保险）；GL 暂停帧**无人轮询**（GL 唯一轮询点 =
       update_scripts 首行 engine.py:995，暂停时不执行）——同一串输入两端结果不同。
+      → **已修（2026-11-18，组⑦ 已加牙；见下「R1/F-3 修后」）**。
   F-5 ShowCursor 计数：GL _apply_cursor_backend 每次 set_mouse_locked 调用都无条件
       ShowCursor（loom_input.py:443，含状态未变的幂等调用）；VK apply_mouse_lock_backend
       同款（runtime.py:88/92）——反复重申锁定后解锁，光标显示计数不归零（两端同病，
@@ -197,6 +215,13 @@ src_has('loom_render.py', 'self.set_mouse_locked(False)', True,
         'GL run() finally 退出释放鼠标（loom_render run 收尾）')
 src_has('vk_player.py', '_release_cursor', True,
         'VK 渲染循环 finally 退出释放鼠标')
+# R1/F-3 修后锚点（暂停期门控的唯一实现点；漂移 = 门失真，必须当场红）
+src_has('loom_glfw_window.py', '_logic_paused_state', True,
+        'GL 泵结算点的逻辑暂停门控仍在（R1：暂停不结算 mouse_rel）')
+src_has('engine.py', 'self.poll_unlock()', True,
+        'GL advance_logic 暂停分支的解锁键轮询仍在（F-3）')
+src_has('loom_render.py', 'self.poll_unlock()', True,
+        'GL 渲染帧（玩家主循环）暂停期解锁键采样仍在（F-3）')
 check('已知差异登记表为空（不许登记任何容差）', not KNOWN_DIFFS, KNOWN_DIFFS)
 
 
@@ -544,6 +569,69 @@ check('⑥ 轮询返回序列两端逐项相等且符合按下沿预期',
       'GL=%s VK=%s 期望=%s' % (_gl_rets, _vk_rets, _expect_rets))
 seq_check('⑥ Tab 跨帧轮询：两端状态逐项相等', rows)
 
+
+# ============================ ⑦ 暂停期解锁键（F-3） ============================
+print()
+print("=== ⑦. 暂停期按解锁键：两端都必须能解锁（F-3：暂停不冻输入逃生通道） ===")
+p = Pair()
+rows = []
+p.allow(True)
+p.lock(True)
+p.key(pygame.K_F9, True)
+p.key(pygame.K_F9, False)
+check('⑦ F9 后两端都进入暂停', p.gl._logic_paused_state() and p.vk._logic_paused_state(),
+      'GL=%r VK=%r' % (p.gl._logic_paused_state(), p.vk._logic_paused_state()))
+
+
+def vk_render_frame():
+    """VK 生产渲染帧（vk_player.draw:643-668 逐行镜像，同组④/⑤的 vk_frame —— 只是
+    不喂光标事件，本组只测解锁键轮询）。"""
+    p.bridge.begin_frame()
+    p.vk.advance_logic(FRAME_DT)
+    vk_player.poll_unlock_frame(p.vk)
+
+
+def gl_pump():
+    """GL 生产泵（run() 主循环第一步：poll_events + 用 glfw.get_key 重建 script_keys）。
+    ★顺序要点：泵每帧用**物理键真相**重建 script_keys，所以"本帧按键"必须排在泵之后
+    注入 —— 真实按键由 poll_events 投递、泵内 get_key 也是 PRESS，两者同帧同值。"""
+    p.gl._handle_events()
+
+
+# 暂停期按解锁键：GL 泵 -> 本帧 KEYDOWN -> GL 渲染帧（暂停期唯一轮询点）；VK 渲染帧
+gl_pump()
+p.key(pygame.K_TAB, True)
+p.gl.render(FRAME_DT)
+vk_render_frame()
+_sg, _sv = p.state()
+rows.append(('暂停期按 Tab 一帧', _sg, _sv))
+check('⑦ 暂停期按解锁键：两端都解锁了（状态位 + 光标捕获位都翻）',
+      _sg[0] is False and _sv[0] is False and _sg[2] is False and _sv[2] is False,
+      'GL=%r VK=%r' % (_sg, _sv))
+
+# 按住不放再来一帧（泵照常，键态仍为按下）：按下沿语义 -> 不得再翻一次
+# （VK 一帧内 poll 两次=暂停分支+渲染帧采样，GL 宿主路径也可能 advance_logic+render
+#   同帧各 poll 一次 —— 双保险不得变成"翻两次"）
+gl_pump()
+p.key(pygame.K_TAB, True)
+p.gl.render(FRAME_DT)
+vk_render_frame()
+_sg, _sv = p.state()
+rows.append(('暂停期按住 Tab 第 2 帧', _sg, _sv))
+
+# 松开：仍不翻
+p.key(pygame.K_TAB, False)
+gl_pump()
+p.gl.render(FRAME_DT)
+vk_render_frame()
+_sg, _sv = p.state()
+rows.append(('暂停期松 Tab', _sg, _sv))
+seq_check('⑦ 暂停期解锁键：两端状态逐项相等（按住不重复翻转）', rows)
+
+p.key(pygame.K_F9, True)
+p.key(pygame.K_F9, False)
+check('⑦ F9 后两端都恢复', (not p.gl._logic_paused_state()) and (not p.vk._logic_paused_state()),
+      'GL=%r VK=%r' % (p.gl._logic_paused_state(), p.vk._logic_paused_state()))
 
 # ============================ 收尾：必须释放光标捕获 ============================
 print()

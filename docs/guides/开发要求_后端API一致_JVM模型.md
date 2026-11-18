@@ -138,7 +138,7 @@ GLEngine  /  VkEngine               ← 各自实现 _backend_xxx（GPU 上传 /
 | 时钟设置传播 | `test_clock_settings_propagation.py` | 13 |
 | beam 灯像素对拍 | `test_beam_light_backend_parity.py` | 8 |
 | A/B 像素（26 场景） | `test_ab_gl_vk.py` | 26 场景 |
-| 鼠标锁定与光标捕获 | `test_mouse_lock_parity.py` | 30（29 绿 / **1 红 = R1**） |
+| 鼠标锁定与光标捕获 | `test_mouse_lock_parity.py` | 37（**全绿**；R1/F-3 已修，F-1/F-2/F-6/F-7 待修） |
 | **P1 场景加载/切换的用户可见结果**（load_scene / clear_scene / 版本迁移 / 相对资源路径） | `test_scene_load_parity.py` | 69 |
 
 > **P1 门当前状态（2026-11-18，B7-16/B7-17 修后）**：`test_scene_load_parity.py` **69 条全绿**
@@ -156,7 +156,7 @@ GLEngine  /  VkEngine               ← 各自实现 _backend_xxx（GPU 上传 /
 | 优先级 | 面 | 为什么用户能感知 |
 |---|---|---|
 | ~~**P1**~~（已落地 → §4.1） | ~~场景加载/切换的用户可见结果~~ | 门 = `test_scene_load_parity.py`；B7-17（v8 场景 GL 90° vs VK 1.5708°）由本门锁住 |
-| ~~P2~~ | ~~鼠标锁定与光标捕获~~ **门已建（`test_mouse_lock_parity.py`，30 条）**：R1 修前红 + F-1/F-2/F-3/F-6/F-7 五个附加发现待修 | — |
+| ~~P2~~ | ~~鼠标锁定与光标捕获~~ **门已建（`test_mouse_lock_parity.py`，37 条）**：R1 + F-3 已修（暂停期门控：mouse_rel 不结算不累积 + 三条暂停分支 poll 解锁键）；F-1/F-2/F-6/F-7 待修（另派单） | — |
 | **P3** | **UI 命中与焦点**（点击/hover/输入框焦点/滚动） | 用户点按钮没反应就是缺陷 |
 | **P4** | **音频播放状态**（play/stop/3D 位置/音量） | 有声卡就能听出来 |
 | **P5** | **相机轨道 / 开发者视角** | 编辑器用户直接感知 |
