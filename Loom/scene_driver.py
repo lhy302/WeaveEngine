@@ -674,15 +674,15 @@ class SceneDriver(VkWindowMixin, EngineCore):
         # 2026-11-09 (Q1=A / Q3=A / Q5=A): 与 GL/编辑器**逐条一致** —— 复用 sceneio 的解析
         # 入口: 缺 skybox 键 / null -> **默认蓝**; 失败出声并记 valid/error（不静默、不回退成无天空）。
         # 相机级优先见下方 effective_skybox()。base_dir = 场景文件目录（六面图相对路径用）。
-        # 2026-11-10 Q-VER-1=A: 与 GL 播放器同一道版本闸门（GL 走 sceneio.scene_from_dict
-        # -> migrate -> check_engine_version；VK 原来**没有**这道门，会静默加载更高版本场景）。
-        # 抛 sceneio.SceneVersionError 后由 run_player/game_player 统一「弹窗+退出」。
-        try:
-            import sceneio as _sio_ver
-            _sio_ver.check_engine_version(data)
-        except Exception as _ver_e:
-            if _ver_e.__class__.__name__ == 'SceneVersionError':
-                raise
+        # 2026-11-10 Q-VER-1=A / 2026-11-18 B7-16+B7-17: 版本闸门**与迁移**都走场景契约的
+        # 唯一入口 sceneio.prepare()（= gate + migrate），且必须在**任何状态变更之前**跑：
+        # 场景要求更高版本时抛 SceneVersionError（由 run_player/game_player 统一
+        # 「弹窗+退出」），当前场景与驱动状态原样保留（R5）。
+        # B7-17 根因：旧代码这里只调 check_engine_version、不调 migrate —— VK 装配路径
+        # 从不迁移，v8 老场景的相机 yaw 停在 1.5707963（弧度当度用），GL 是 90.0。
+        # 现在两端走同一份迁移实现（不再各端各写），B7-16 门：其它文件 0 处闸门调用。
+        import sceneio as _sio_ver
+        data = _sio_ver.prepare(data)
         ctx = None
         try:
             import sceneio as _sio
@@ -718,6 +718,15 @@ class SceneDriver(VkWindowMixin, EngineCore):
         _mats = {m.guid: m for m in self.materials}
         self._lod_wpos = {}          # 换场景: 旧模型的缓存立刻失效
         self.models = build_models(data, materials=_mats)
+        # 2026-11-18（B7-16 面门 R6）：无 material_id 的物体，GL 侧走 add_model ->
+        # _register_model_material，会把**物体自建的默认材质**登记进材质库（用户脚本
+        # 可枚举 engine.materials，且 tests/test_sceneio.py 的「v4 旧对象加载 -> 自建
+        # 材质进库」锁的就是这条 GL 语义）。VK 的 build_models 直接建 GameObject、不登记
+        # -> 同一场景两端材质库条数不同（GL=2 / VK=1）。这里复用内核同一个
+        # _register_model_material（数据面，无 GPU 依赖），顺序与 GL 一致：先材质库、
+        # 再建物体、再登记。
+        for _m in self.models:
+            self._register_model_material(_m)
         # 换场景: 重新登记配了 LOD 的模型 (空场景 -> _lod_models 空 -> 每帧早退)
         self._rebuild_lod_models()
         # 每场一条物理桥异常日志: 新场景重置"已打印/计数"

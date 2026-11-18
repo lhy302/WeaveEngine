@@ -140,11 +140,15 @@ GLEngine  /  VkEngine               ← 各自实现 _backend_xxx（GPU 上传 /
 | A/B 像素（26 场景） | `test_ab_gl_vk.py` | 26 场景 |
 | **P1 场景加载/切换的用户可见结果**（load_scene / clear_scene / 版本迁移 / 相对资源路径） | `test_scene_load_parity.py` | 69 |
 
-> **P1 门当前状态（2026-11-18）**：`test_scene_load_parity.py` 已落地，**17 条断言为红**
-> （= 修前必红，缺陷已定位，见该门文件头的 R1~R8 留痕）：VK 装配路径不迁移（B7-17，v8 相机
-> yaw 停在 1.5707963）、版本闸门 3 处重复且无单一入口（B7-16）、GL 先清场景再校验（失败把旧
-> 场景清空）、VK 不登记自建默认材质（材质库条数差）、GL 相对资源路径不按场景目录解析。
-> 修 B7-16/B7-17 后本门应全绿；在此之前 `run_all` 只会有这一条红。
+> **P1 门当前状态（2026-11-18，B7-16/B7-17 修后）**：`test_scene_load_parity.py` **69 条全绿**
+> （修前 = 52 PASS / 17 FAIL，红证据见该门文件头 R1~R8 留痕）。修法：场景契约独立成模块
+> `Loom/loom_scene_contract.py`（`CURRENT_VERSION` / `SceneVersionError` / `gate` / `migrate` /
+> `prepare`），**所有打开场景的路径都走 `prepare()`**（编辑器 / GL 播放器 / VK 播放器 / 打包
+> 游戏 / 游戏包 / EAI 命令），散落的 5 处闸门调用收敛到契约模块（其它文件 0 处）；VK 装配
+> 路径因此自动迁移（v8 相机 yaw 90.0）；闸门前移到任何状态变更之前（失败不再清空当前场景）；
+> VK 装配侧复用内核 `_register_model_material` 登记自建默认材质；GL 装配侧补传 `base_dir`
+> （相对资源按场景目录解析）。契约模块自身的门 = `test_scene_contract.py`（36 条，含「单独
+> import 不拉 engine/GPU」的子进程断言）。
 
 ### 4.2 尚无对拍门的面（**按此优先级补**，见 Q-B7-37-1）
 

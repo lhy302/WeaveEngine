@@ -268,20 +268,26 @@ class ModelGpuMixin:
         self._release_bucket_resources()     # A2: 桶共享几何/实例缓冲统一释放
 
     def _load_scene_data(self, data, base_dir=None):
-        """GL 侧场景装配：清场景 → 重置光源/相机 → sceneio.scene_from_dict → 时钟对齐。
+        """GL 侧场景装配：**先过场景契约闸门+迁移** → 清场景 → 重置光源/相机 →
+        sceneio.scene_from_dict → 时钟对齐。
 
-        逐行照搬原 load_scene 的装配段（行为零变化）。
-        base_dir：**故意忽略** —— 原 GL load_scene 也没把场景目录传给
-        scene_from_dict（GL 的相对资源解析走资产上下文/旧路径），补传会改变
-        GL 的资产解析结果 = 改可观察行为。VK 侧（SceneDriver._load_scene_data）
-        才用它。这一条差异已在交付报告里登记。
+        逐行照搬原 load_scene 的装配段（行为零变化），只加两处**已证明是缺陷**的修复：
+          · B7-16（R5）：prepare() 必须在 clear_scene **之前**。旧顺序是"先清空再让
+            scene_from_dict 内部迁移/校验"，于是加载更高版本场景失败时 GL 把当前场景
+            清空了、VK 保留 —— 同一个失败两端用户可见结果不同。
+          · B7-16（R7）：base_dir 现在**传下去**。旧实现故意忽略它，于是 GL 从别的 CWD
+            启动时按 CWD 解析天空盒相对路径（找不到图 -> 回退默认蓝），而 VK 按场景
+            目录解析成功。runtime.PlayerApp 初始化那条路本来就传 base_dir，GL 的
+            load_scene 不传才是分叉；补传 = 让 GL 的两条路一致，不是新增语义。
         """
         import sceneio as _sio
+        # 场景契约唯一入口（闸门 + 迁移）：任何状态变更之前（R5）
+        data = _sio.prepare(data)
         self.clear_scene()
         self.lights.clear()
         self.cameras.clear()
         self.active_camera = None
-        _sio.scene_from_dict(self, data)
+        _sio.scene_from_dict(self, data, base_dir=base_dir)
         # 分离批1/2: 换场景边界对齐 (清累积器; 快照重抓加载位姿, 首帧不插值)
         clk = getattr(self, '_clock', None)
         if clk is not None:

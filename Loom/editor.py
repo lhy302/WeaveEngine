@@ -1236,10 +1236,13 @@ class EditorApp(GLEngine):
         if not isinstance(data, dict):
             self._notify("加载失败: 场景文件格式非法 (顶层不是对象)", (235, 90, 90))
             return
-        # beta6 C1/D7: 版本闸门 —— 场景要求更高引擎版本时在**清空旧场景之前**
-        # 拒绝 (旧引擎加载新字段会静默丢弃, 所以宁可拒绝)。
+        # beta6 C1/D7 + B7-16: 场景契约唯一入口 prepare()（版本闸门 + 数据迁移）——
+        # 必须在**清空旧场景之前**跑：场景要求更高引擎版本时拒绝加载并保留当前场景
+        # （旧引擎加载新字段会静默丢弃，所以宁可拒绝；先 clear 再校验会把用户工作清掉）。
+        # 迁移也在这里做完：v8 老场景的相机弧度->度不再依赖下游 scene_from_dict 内部那一步，
+        # 编辑器 / GL 播放器 / VK 播放器 / 打包游戏 / 游戏包 / EAI 命令走同一份实现。
         try:
-            sceneio.check_engine_version(data)
+            data = sceneio.prepare(data)
         except sceneio.SceneVersionError as e:
             print("[编辑器] 场景版本不兼容, 保留当前场景:", e)
             self._notify("加载失败: %s" % e, (235, 90, 90))

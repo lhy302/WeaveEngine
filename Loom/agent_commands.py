@@ -541,9 +541,12 @@ def cmd_scene_load(win, args):
         return {'error': '场景读取失败: %r' % (e,)}
     if not isinstance(_data, dict):
         return {'error': '场景格式非法（顶层不是对象）: %s' % path}
+    # B7-16: 场景契约唯一入口 prepare()（版本闸门 + 数据迁移）—— 与编辑器 / 播放器 /
+    # 打包游戏走同一份实现。这里先跑一遍，是为了在**调用 _load_scene 之前**就能回
+    # {'error': ...}（Agent 侧要看到原因，而不是只看到"加载未完成"）。
     import sceneio as _sio
     try:
-        _sio.check_engine_version(_data)
+        _data = _sio.prepare(_data)
     except _sio.SceneVersionError as e:
         return {'error': '场景版本不兼容: %s' % e}
     ed._load_scene(path)   # 低层: 直载不弹框不确认 (丢弃当前改动语义)
