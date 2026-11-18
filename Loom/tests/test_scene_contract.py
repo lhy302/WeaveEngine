@@ -60,14 +60,17 @@ def _enforce_fail_exit_code():
      非法类型抛 / 当前版本恰好满足时放行 / 更低要求放行。
   D. **migrate 语义**（= 原 sceneio.migrate）：v8 相机弧度->度、v1 物体补 id、
      version 抬到当前版本、非 dict 降级不抛、v3/v4 老格式补齐。
-  E. **prepare 的顺序是契约**：闸门**先于任何数据变更**（更高版本场景抛错后 data 原样 ——
-     这正是 R5「加载失败把当前场景清空」的根因面）；且 prepare 幂等（连跑两次结果一致）。
+  E. **prepare 只是便捷组合**：闸门**只有一道、在 migrate() 里面**（prepare 不再自己额外
+     gate —— B7-16 复查 P0-2 实测那道是冗余的，删掉后本门曾 36 PASS / 0 FAIL = 死断言）。
+     真实不变量：更高版本场景**被拒**且抛错后 data 原样（闸门先于任何数据变更，这正是 R5
+     「加载失败把当前场景清空」的根因面）、迁移到 CURRENT_VERSION、幂等、迁移恰好跑 1 次。
   F. **sceneio 的同名符号是同一份实现**（re-export 不许各写一份）；且 sceneio.prepare
      的迁移那一步**真的经过 sceneio.migrate 这个符号**（tests/test_scene_load_parity.py
      的 ③-migrate 就是按这个符号观察 VK 装配路径的）。
 
-结构面「其它文件 0 处 check_engine_version( / migrate(」在
-tests/test_scene_load_parity.py 的 ③-gate / ③-migrate（那里要两端真实实例），本门不重复造。
+结构面「其它文件 0 处 gate( / check_engine_version( / sceneio.gate( / migrate(」在
+tests/test_scene_load_parity.py 的 ③-gate / ③-migrate（那里要两端真实实例，且递归扫
+Loom/**/*.py），本门不重复造。
 """
 
 import os
@@ -216,10 +219,25 @@ def t_migrate():
           and 'script' not in m3['objects'][0], m3['objects'][0])
 
 
-# ==================== E. prepare 的顺序 + 幂等 ====================
+# ==================== E. prepare = 便捷组合（闸门在 migrate 内，唯一一道） ====================
 def t_prepare():
     print()
-    print('=== E. prepare = 闸门先于任何数据变更（R5 的根因面）+ 幂等 ===')
+    print('=== E. prepare = 便捷组合（闸门在 migrate 内唯一一道）+ 迁移 + 幂等 ===')
+
+    # E0：prepare 必须**恰好**跑一次迁移实现 —— 它是便捷组合，不是第二条并行路径。
+    calls = []
+
+    def _spy(d, *a, **kw):
+        calls.append(1)
+        return C.migrate(d, *a, **kw)
+
+    C.prepare({'version': 8, 'objects': []}, migrate_fn=_spy)
+    check('E0 prepare 恰好调用迁移实现 1 次（便捷组合，不重复跑迁移）',
+          len(calls) == 1, '被调次数=%d' % (len(calls),))
+
+    # E1/E2：真实不变量 —— 过高版本**被拒**，且拒绝时 data 原样未改（闸门先于任何数据变更）。
+    # 修前状态（B7-16 复查 P0-2 实测）：prepare 里另有一道冗余 gate，于是"删 prepare 的
+    # gate"或"删 migrate 的 gate"本门都 36 PASS / 0 FAIL —— E1/E2 当时是死断言。
     newer = {'version': 8, 'min_engine_version': '99.0.0',
              'cameras': [{'id': 'c1', 'yaw': 1.5707963267948966}],
              'objects': [{'name': 'x'}]}
@@ -229,20 +247,33 @@ def t_prepare():
         C.prepare(newer)
     except C.SceneVersionError:
         raised = True
-    check('E1 更高版本场景 prepare -> 抛 SceneVersionError', raised)
+    check('E1 更高版本场景 prepare -> 抛 SceneVersionError（拒绝来自 migrate 内那道唯一闸门）',
+          raised)
     check('E2 抛错时 data **原样未改**（闸门先于任何数据变更）',
           repr(newer) == snapshot, repr(newer))
+
+    # E2b：prepare **自己不许再加一道闸门** —— 注入一个空迁移时它只做组合、不拦版本。
+    # 这条钉住「闸门只有一道、在 migrate 内」这个裁决：谁把 gate 搬回 prepare，这里立刻红
+    # （否则冗余第二道会重新掩盖"真闸门在哪"，正是 P0-2 死断言的根因）。
+    raised_again = False
+    try:
+        C.prepare(dict(newer), migrate_fn=lambda d: d)
+    except C.SceneVersionError:
+        raised_again = True
+    check('E2b prepare 自己不额外设闸门（注入空迁移时不拦；闸门只在 migrate 内那一道）',
+          raised_again is False)
 
     d = {'version': 8, 'objects': [{'id': 'o', 'type': 'cube'}],
          'cameras': [{'id': 'c', 'yaw': 1.5707963267948966, 'pitch': 0.0}]}
     p1 = C.prepare(d)
     after1 = repr(p1)
     p2 = C.prepare(p1)
-    check('E3 prepare 幂等（连跑两次结果一致）', repr(p2) == after1,
+    check('E3 prepare 迁移到 CURRENT_VERSION', p1['version'] == C.CURRENT_VERSION,
+          p1['version'])
+    check('E4 prepare 幂等（连跑两次结果一致）', repr(p2) == after1,
           'once=%s twice=%s' % (after1[:60], repr(p2)[:60]))
-    check('E4 prepare 返回值 = 迁移后的同一份数据（可直接喂装配）',
-          p1 is d and p1['version'] == C.CURRENT_VERSION)
-    check('E5 prepare 对「无 min_engine_version 的旧场景」照常放行并迁移',
+    check('E5 prepare 返回值 = 迁移后的同一份数据（可直接喂装配）', p1 is d)
+    check('E6 prepare 对「无 min_engine_version 的旧场景」照常放行并迁移',
           C.prepare({'version': 1, 'objects': [{'name': 'n'}]})['version']
           == C.CURRENT_VERSION)
 

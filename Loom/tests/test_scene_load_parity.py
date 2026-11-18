@@ -57,7 +57,8 @@ def _enforce_fail_exit_code():
      版本高于引擎的场景两端都必须**可见失败**。
   ④ clear_scene：models/materials/lights 全空、current_model_index==0、脚本 on_destroy 两端都派发。
   ⑤ 切换两次（A→B→A）：第二次加载 A 后内容与第一次逐项相等（材质库/桶缓存/LOD/物理桥不残留）。
-  ⑥ 相对资源路径：场景引用 sky/xxx.png 时两端都按**场景文件目录**解析（不是 CWD）。
+  ⑥ 相对资源路径：场景引用 sky/xxx.png / 材质 albedo 用 tex/xxx.png 相对路径时，两端都按
+     **场景文件目录**解析（不是 CWD）—— ⑥-1..6 锁天空盒，⑥-7..11 锁材质贴图（R7 的真实范围）。
 
 夹具纪律（§5 反模式 8：与生产同构）：
   · GL 端 = runtime.PlayerApp(..., scene_data=...)（播放器生产入口），换场景走用户 API
@@ -76,6 +77,14 @@ def _enforce_fail_exit_code():
   · R3 ③-gate 闸门单一入口：check_engine_version( 有 3 处重复调用
     （agent_commands.py / editor.py / scene_driver.py），没有单一入口。修点 = B7-16
     （契约模块 loom_scene_contract.py）。**修复方若另起了模块名，改本断言的白名单。**
+    **2026-11-18 独立复查 P0-1（本条曾是假门）**：函数改名为 gate 之后，断言仍只认旧名字
+    `check_engine_version(`，于是"在 editor.py 里用**新名字** `gate({})` 插一处重复闸门"
+    仍然 69 PASS / 0 FAIL 全绿（复查实测 M1，本地复现）；且 _call_sites 只 glob
+    `Loom/*.py` 一层，扫不到 Loom/ui、Loom/core_components。已改为：递归扫
+    Loom/**/*.py（跳 tests/、_tmp/、__pycache__、player_runtime/）、按标识符边界匹配、
+    跳过注释与 docstring 行，并且**同时**断言新名 `gate(` / 旧名 `check_engine_version(` /
+    限定名 `sceneio.gate(`；白名单按「文件 + 所在函数」锁（契约模块全部 + sceneio.py 的
+    load_prefab / instantiate_prefab 两条 prefab 闸门）。
   · R4 ③-v1 VK 物体 guid：v1 老场景物体无 id → GL 迁移后补出 guid，VK 仍为 None。修点 = B7-16/17。
   · R5 ③-newer 失败后当前场景未被破坏：GL 侧**先 clear_scene 再校验**（migrate 在
     scene_from_dict 内），于是"加载失败"在 GL 上把当前场景清空、VK 上保留 → 失败语义不一致。
@@ -91,11 +100,15 @@ def _enforce_fail_exit_code():
     如需改 clear_scene 契约请人类裁决，不属 B7-16/B7-17 范围。
   · R7 ⑥-2 GL 相对路径：GL 的 _load_scene_data 故意忽略 base_dir（loom_model_gpu.py 注释），
     从别处 CWD 启动时 GL 按 CWD 找图失败、VK 按场景目录成功。修点：GL 装配侧传 base_dir。
+    **2026-11-18 独立复查 P1-5（已补门）**：R7 改的是 base_dir，而它同时喂
+    `sceneio._CUR_BASE_DIR` 与 `asset_context(base_dir)` —— 影响的是 GL **全部**相对资源
+    （材质贴图 / 资产 guid 探测根），旧门只锁天空盒等于只锁了 R7 的一小块。已补 ⑥-7..11
+    （材质 albedo 相对路径 + 从不同 CWD 加载 + 两端都按场景目录解析成功）。
 
 已知差异登记表：**必须为空**才算通过（不许用阈值/容差把差异糊过去）。
 """
 
-import glob
+import ast
 import json
 import math
 import os
@@ -386,25 +399,106 @@ def group2_content(gl, vk, p_main, p_other):
 
 
 # ==================== ③ 场景版本迁移 ====================
-def _call_sites(needle, exclude_basenames):
-    """扫源码找某个调用的落点（定义处/契约模块除外）。结构面断言用。"""
-    hits = []
-    for p in sorted(glob.glob(os.path.join(ROOT, '*.py'))):
-        base = os.path.basename(p)
-        if base in exclude_basenames:
+# B7-16 独立复查（P0-1）：旧 _call_sites 有两个钝点，把 ③-gate 变成了一条**假门**：
+#   ① 只 glob Loom/*.py **一层** —— Loom/ui、Loom/core_components 等子目录里的重复闸门
+#      根本扫不到；
+#   ② 只按**旧名字** check_engine_version( 匹配 —— 本次提交把函数改名为 gate，于是"用新名字
+#      在 editor.py 里插一处重复闸门"仍然 69 PASS / 0 FAIL 全绿（复查实测 M1）。
+# 现在：递归扫 Loom/**/*.py；跳过 tests/、_tmp/、__pycache__、player_runtime/（后者是
+# .gitignore 里的打包产物，扫它会让结构面断言取决于"本机有没有打过包"）；按**标识符边界**
+# 匹配（`_sha_gate(` / `propagate(` 不算 `gate(`）；跳过注释行与 docstring 行（散文里提到
+# 函数名不是调用点）；并回报**所在函数名**，白名单按函数锁（行号会漂，函数名不会）。
+_SRC_SKIP_DIRS = ('tests', '_tmp', '__pycache__', 'player_runtime')
+
+
+def _parse_meta(src):
+    """-> (docstring 行号集合, [(起, 止, 函数名)])。解析失败一律空（退化为只跳注释行）。"""
+    doc, funcs = set(), []
+    try:
+        tree = ast.parse(src)
+    except SyntaxError:
+        return doc, funcs
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            body = getattr(node, 'body', None) or []
+            if (body and isinstance(body[0], ast.Expr)
+                    and isinstance(getattr(body[0], 'value', None), ast.Constant)
+                    and isinstance(body[0].value.value, str)):
+                first = body[0]
+                end = getattr(first, 'end_lineno', None) or first.lineno
+                doc.update(range(first.lineno, end + 1))
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            funcs.append((node.lineno, getattr(node, 'end_lineno', None) or node.lineno,
+                          node.name))
+    return doc, funcs
+
+
+def _enclosing_func(funcs, lineno):
+    """最内层包含 lineno 的函数名；不在任何函数里 -> None。"""
+    best = None
+    for start, end, name in funcs:
+        if start <= lineno <= end and (best is None or start >= best[0]):
+            best = (start, name)
+    return None if best is None else best[1]
+
+
+def _iter_sources():
+    """Loom/ 下所有 .py（递归） -> (绝对路径, 相对 Loom/ 的 posix 路径)。"""
+    for dirpath, dirnames, filenames in os.walk(ROOT):
+        rel = os.path.relpath(dirpath, ROOT)
+        parts = [] if rel == '.' else rel.split(os.sep)
+        if any(p in _SRC_SKIP_DIRS for p in parts):
+            dirnames[:] = []
             continue
+        dirnames[:] = sorted(d for d in dirnames if d not in _SRC_SKIP_DIRS)
+        for name in sorted(filenames):
+            if name.endswith('.py'):
+                yield os.path.join(dirpath, name), '/'.join(parts + [name])
+
+
+def _needle_at(line, needle):
+    """needle 在 line 里的所有出现位置（左侧不许是标识符字符：_sha_gate( 不算 gate(）。"""
+    out, start = [], 0
+    while True:
+        i = line.find(needle, start)
+        if i < 0:
+            return out
+        if i == 0 or not (line[i - 1].isalnum() or line[i - 1] == '_'):
+            out.append(i)
+        start = i + 1
+
+
+def _call_sites(needle):
+    """扫源码找某个调用的落点。返回 [(相对路径, 行号, 所在函数名|None)]，结构面断言用。"""
+    hits = []
+    for path, rel in _iter_sources():
         try:
-            with open(p, encoding='utf-8') as f:
+            with open(path, encoding='utf-8') as f:
                 src = f.read()
         except OSError:
             continue
+        doc, funcs = _parse_meta(src)
         for i, line in enumerate(src.splitlines(), 1):
-            s = line.strip()
-            if s.startswith('#'):
+            if i in doc or line.strip().startswith('#'):
                 continue
-            if needle in s:
-                hits.append('%s:%d' % (base, i))
+            if _needle_at(line, needle):
+                hits.append((rel, i, _enclosing_func(funcs, i)))
     return hits
+
+
+def _fmt_sites(sites):
+    return ['%s:%d[%s]' % (rel, lineno, func or '<module>')
+            for rel, lineno, func in sites]
+
+
+def _unexpected(sites, allow):
+    """allow = {(相对路径, 函数名|None)}；函数名 None = 该文件任意位置都允许。"""
+    out = []
+    for rel, lineno, func in sites:
+        if (rel, None) in allow or (rel, func) in allow:
+            continue
+        out.append('%s:%d[%s]' % (rel, lineno, func or '<module>'))
+    return out
 
 
 def group3_migration(gl, vk, p_v8, p_v1, p_main, p_newer):
@@ -442,13 +536,30 @@ def group3_migration(gl, vk, p_v8, p_v1, p_main, p_newer):
     print()
     print('--- ③ 结构面：场景契约单一入口（B7-16） ---')
     contract = 'loom_scene_contract.py'      # 人类裁决 B7-16 的模块名
-    sites = _call_sites('check_engine_version(', {'sceneio.py', contract})
-    check('③-gate 版本闸门只由场景契约单一入口调用（其它文件 0 处）',
-          sites == [], '未收敛的调用点: %s' % (sites,))
-    msites = _call_sites('migrate(', {'sceneio.py', contract})
-    msites = [x for x in msites if 'def migrate' not in x]
+    # 白名单按「文件 + 所在函数」锁（不按行号：行号会漂，函数名不会）：
+    #   · 契约模块内 = 唯一实现；
+    #   · sceneio.py 只有 prefab 那两条（prefab 数据不迁移，故不走 prepare，只借同一个 gate）。
+    gate_allow = {(contract, None),
+                  ('sceneio.py', 'load_prefab'),
+                  ('sceneio.py', 'instantiate_prefab')}
+    new_sites = _call_sites('gate(')
+    bad_new = _unexpected(new_sites, gate_allow)
+    check('③-gate 版本闸门（新名 gate(）只由场景契约单一入口调用（其它文件 0 处）',
+          bad_new == [], '未收敛的调用点: %s / 全部落点: %s'
+          % (bad_new, _fmt_sites(new_sites)))
+    old_sites = _call_sites('check_engine_version(')
+    bad_old = _unexpected(old_sites, gate_allow)
+    check('③-gate 版本闸门（旧名 check_engine_version(）0 处残留（改名不许留第二个入口）',
+          bad_old == [], '未收敛的调用点: %s' % (bad_old,))
+    qual_sites = _call_sites('sceneio.gate(')
+    bad_qual = _unexpected(qual_sites, gate_allow)
+    check('③-gate 版本闸门（限定名 sceneio.gate(）0 处（不许绕过契约模块点名）',
+          bad_qual == [], '未收敛的调用点: %s' % (bad_qual,))
+    migrate_sites = _call_sites('migrate(')
+    bad_mig = _unexpected(migrate_sites, {(contract, None)})
     check('③-migrate 迁移只由场景契约单一入口调用（其它文件 0 处）',
-          msites == [], '未收敛的调用点: %s' % (msites,))
+          bad_mig == [], '未收敛的调用点: %s / 全部落点: %s'
+          % (bad_mig, _fmt_sites(migrate_sites)))
 
     print()
     print('--- ③ 行为面：VK 装配路径是否经过迁移实现 ---')
@@ -464,8 +575,10 @@ def group3_migration(gl, vk, p_v8, p_v1, p_main, p_newer):
         vk.load_scene(p_v8)
     finally:
         S.migrate = _orig
-    check('③-migrate VK 装配路径经过 sceneio.migrate（迁移是唯一入口，不是各端各写）',
-          len(calls) >= 1, 'sceneio.migrate 被调次数=%d' % len(calls))
+    # B7-16 复查 P0-1 附项：原断言 len(calls) >= 1 比「单一入口」语义宽 —— 装配路径若
+    # 自己再补一次迁移（两次迁移），>= 1 照样绿。恰好 1 次才是「唯一入口」。
+    check('③-migrate VK 装配路径恰好经过 sceneio.migrate 1 次（迁移是唯一入口，不是各端各写）',
+          len(calls) == 1, 'sceneio.migrate 被调次数=%d' % len(calls))
 
     # 版本过高：可见失败 + 失败后当前场景不被破坏
     gl.load_scene(p_main)
@@ -603,6 +716,16 @@ def group5_switch(gl, vk, p_main, p_other):
 
 
 # ==================== ⑥ 相对资源路径 ====================
+def _mat_albedo(eng):
+    """材质 albedo 贴图的 (宽, 高)；None = 该材质没有贴图（= 没按场景目录解析出来）。"""
+    out = []
+    for m in getattr(eng, 'materials', []) or []:
+        t = getattr(m, 'albedo', None)
+        out.append(None if t is None else (int(getattr(t, 'width', 0)),
+                                          int(getattr(t, 'height', 0))))
+    return out
+
+
 def group6_relative(gl, vk):
     print()
     print('=== ⑥ 相对资源路径：按场景文件目录解析（不是 CWD） ===')
@@ -644,6 +767,42 @@ def group6_relative(gl, vk):
         both('⑥-4 天空盒六面文件名', g['sky_paths'], v['sky_paths'])
         both('⑥-5 天空盒有效标记', g['sky_valid'], v['sky_valid'])
         both('⑥-6 物体数（相对路径场景）', g['n_models'], v['n_models'])
+
+        # ⑥-7..11（B7-16 复查 P1-5）：R7 改的是 base_dir，而 base_dir 同时喂
+        # sceneio._CUR_BASE_DIR 与 asset_context(base_dir) —— 它影响的是 GL **全部**相对
+        # 资源（材质贴图 / 资产 guid 探测根），不只是天空盒。旧门只锁了 skybox，锁不住
+        # R7 的真实范围。这里补一条：材质贴图用相对路径、场景放 projA、从**不同 CWD**
+        # 加载 -> 两端材质贴图都必须按**场景目录**解析成功（8x8，不是 None）。
+        tex_dir = os.path.join(proj, 'tex')
+        os.makedirs(tex_dir, exist_ok=True)
+        alb = pygame.Surface((8, 8))
+        alb.fill((200, 30, 40))
+        pygame.image.save(alb, os.path.join(tex_dir, 'p1_alb.png'))
+        scene_mat = {
+            'version': S.SCENE_VERSION,
+            'skybox': {'solid_color': [1, 2, 3, 255], 'name': 'p1_solid'},
+            'materials': [{'id': 'matRel', 'name': 'matRel', 'color': '#ffffff',
+                           'albedo': {'path': 'tex/p1_alb.png', 'name': 'p1_alb'}}],
+            'objects': [{'id': 'gm1', 'name': 'rel_mat_one', 'type': 'cube',
+                         'material_id': 'matRel'}],
+            'lights': [], 'cameras': [], 'active_camera': None,
+        }
+        p_mat = os.path.join(proj, 'scene_mat.json')
+        with open(p_mat, 'w', encoding='utf-8') as f:
+            json.dump(scene_mat, f)
+        r_gl = gl.load_scene(p_mat)
+        r_vk = vk.load_scene(p_mat)
+        both('⑥-7 材质贴图相对路径 从别处 CWD 加载 返回值', r_gl, r_vk)
+        g_alb = _mat_albedo(gl)
+        v_alb = _mat_albedo(vk)
+        check('⑥-8 GL 材质 albedo 按场景目录解析成功（8x8，不是 None）',
+              g_alb == [(8, 8)], 'GL albedo=%r 资产问题=%r'
+              % (g_alb, getattr(gl, '_asset_errors', None)))
+        check('⑥-9 VK 材质 albedo 按场景目录解析成功（8x8，不是 None）',
+              v_alb == [(8, 8)], 'VK albedo=%r 资产问题=%r'
+              % (v_alb, getattr(vk, '_asset_errors', None)))
+        both('⑥-10 材质 albedo 贴图尺寸', g_alb, v_alb)
+        both('⑥-11 物体数（材质相对路径场景）', len(gl.models), len(vk.models))
     finally:
         os.chdir(old)
 

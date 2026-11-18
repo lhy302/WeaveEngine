@@ -579,9 +579,11 @@ class EngineCore(TransformMixin, PhysicsMixin, InputMixin, CameraMixin,
         `_load_scene_data(data, base_dir)`：
           · GL ：sceneio.scene_from_dict（原 load_scene 的现有路径，逐位不变）；
           · VK ：SceneDriver.load_from_data（它已有的装配路径）。
-        base_dir = 场景文件目录。VK 用它解析相对资源；**GL 侧现有实现不吃这个参数**
-        （原 load_scene 也没传 base_dir）—— 为了不改 GL 的可观察行为，GL 的
-        _load_scene_data 故意忽略它（见 loom_model_gpu._load_scene_data 注释）。
+        base_dir = 场景文件目录。**两端都按它解析相对资源**（天空盒六面图 / 材质贴图 /
+        资产 guid 的探测根）：VK 走 SceneDriver.load_from_data(base_dir=...)；GL 走
+        loom_model_gpu._load_scene_data(data, base_dir) -> sceneio.scene_from_dict(base_dir=...)。
+        （B7-16 的 R7 之前 GL 侧故意忽略该参数 —— 从别的 CWD 启动时按 CWD 找图失败、VK 按
+        场景目录成功，两端分叉；现在两端一致。门：test_scene_load_parity ⑥-1..11。）
         """
         try:
             import sceneio as _sio

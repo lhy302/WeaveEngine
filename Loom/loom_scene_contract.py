@@ -17,7 +17,7 @@
   SceneVersionError  闸门拒绝加载时抛的错误（sceneio 同名 re-export）
   gate(data)         版本闸门：场景要求的引擎版本高于当前引擎 -> 抛；通过 -> True
   migrate(data)      数据迁移：v1..v11 -> 当前版本（原地改并返回同一对象）
-  prepare(data)      **唯一推荐入口**：gate + migrate 一次做完
+  prepare(data)      **唯一推荐入口**：便捷组合，跑一次 migrate（闸门在 migrate 内，唯一一道）
 
 我负责什么 / 我不负责什么：
   ✓ 版本号常量、版本串解析、闸门判定、跨版本的数据改写（纯数据）；
@@ -257,16 +257,24 @@ def migrate(data):
     return data
 
 def prepare(data, migrate_fn=None):
-    """**场景打开的唯一推荐入口**：先过版本闸门，再做数据迁移；返回同一份数据。
+    """**场景打开的唯一推荐入口**：便捷组合 —— 跑一次迁移，返回同一份数据。
 
-    顺序是契约的一部分（不是实现细节）：闸门必须在**任何状态变更之前**跑。
-    R5 缺陷就是"先 clear_scene 再校验"，于是"加载更高版本场景失败"在 GL 上把当前场景
-    清空、在 VK 上保留 —— 同一个失败，两端用户可见结果不同。
+    **闸门只有一道，在 migrate() 里面**（migrate 第一步就是 gate(data)）。本函数**不再
+    自己额外调一次 gate**：B7-16 独立复查 P0-2 实测，旧实现这里那道 gate 是冗余的第二道 ——
+    删掉它 tests/test_scene_contract.py 仍 36 PASS / 0 FAIL，即一条**死断言**（顺序无关，
+    因为 migrate 内部本来就先 gate）。留着只会让人误以为"顺序保证在本函数里"。
+    注入的 migrate_fn 必须自带闸门（契约实现即如此），这是本函数唯一的隐含前提。
+
+    **真正的顺序保证在调用点，不在本函数**：调用方必须在**任何状态变更之前**
+    （clear_scene / engine.materials.clear / 装配）调用本函数 —— 版本过高时它抛
+    SceneVersionError，此刻数据与引擎状态都还没动过。R5 缺陷就是"先 clear_scene 再校验"：
+    加载更高版本场景失败在 GL 上把当前场景清空、在 VK 上保留 —— 同一个失败，两端用户可见
+    结果不同。各入口的实际调用点：editor.py / loom_model_gpu._load_scene_data /
+    scene_driver.load_from_data / agent_commands.py（结构面门：test_scene_load_parity ③-gate）。
 
     migrate_fn：迁移实现注入点（默认本模块的 migrate）。sceneio 传入它自己 re-export 的
     `migrate` 符号，保证 `sceneio.migrate` 仍然是**真正被调用**的实现（历史调用点、
     monkeypatch 探针、tests/test_scene_load_parity.py ③-migrate 都按那个符号观察）。
     语义只有一份 —— 本函数不重复实现迁移。
     """
-    gate(data)                                  # 1) 闸门（先于任何状态变更）
-    return (migrate if migrate_fn is None else migrate_fn)(data)   # 2) 数据迁移
+    return (migrate if migrate_fn is None else migrate_fn)(data)   # 数据迁移（内含唯一闸门）

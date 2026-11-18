@@ -1929,10 +1929,16 @@ def scene_from_dict(engine, data, camera_out=None, base_dir=None, ctx=None):
     ctx: 资产上下文（beta6 B1）。None 时按 base_dir 自动探测；探测不到 = 旧路径模式。"""
     global _CUR_BASE_DIR
     _CUR_BASE_DIR = base_dir          # 密闭夹具：无项目资产库时相对资源路径仍按场景目录解析
-    # B7-16: 场景契约唯一入口（闸门 + 迁移）。装配侧（编辑器 / GL _load_scene_data /
-    # runtime.PlayerApp 初始化）已经在**清空旧场景之前**调过一次 prepare()，这里再调一次
-    # 是幂等的（version 已是当前版本 -> 迁移分支全部跳过）；同时保证"直接调
-    # scene_from_dict"的老调用点也一定经过闸门与迁移。
+    # B7-16: 场景契约唯一入口（闸门 + 迁移）。**闸门在这里仍然生效**（prepare -> migrate
+    # 第一步就是 gate），但"先校验、后清空"的顺序保证**不在本函数**：本函数被调用时，调用方
+    # （editor.py:1245 / loom_model_gpu._load_scene_data / scene_driver.load_from_data /
+    # agent_commands.py:549）已经在**任何状态变更之前**调过一次 prepare()，版本过高在那里
+    # 就抛了，走不到这里。这里再调一次是幂等的（version 已是当前版本 -> 迁移分支全部跳过）；
+    # 同时保证"直接调 scene_from_dict"的老调用点也一定经过闸门与迁移。
+    # 注（2026-11-18 复查 P1-3 改正）：runtime.PlayerApp 初始化是**先建默认场景、后 prepare**
+    # （runtime.py:114-115 清掉构造函数自建的默认模型，:148 才进本函数）—— 这是既有行为，
+    # 清的是默认模型、不是用户当前场景，因此不违反 R5（R5 说的是"加载失败不许把用户当前
+    # 场景清掉"）。旧注释写成"PlayerApp 已在清空旧场景之前调过 prepare"，与事实相反。
     data = prepare(data)
     if ctx is None:
         ctx = asset_context(base_dir)
