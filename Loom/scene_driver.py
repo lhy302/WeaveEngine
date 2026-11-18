@@ -38,6 +38,10 @@ import loom_frame_components as _lfc
 from loom_scene_entities import CameraState
 from scripts import get_script
 from loom_ui import UIManager, Canvas  # 2026-10-18: Canvas UI (替换 _DriverUI 空壳)
+# 2026-11-18 (Q-B7-32-1 = ①): VK 宿主窗口的假全屏（F11）—— 与 GL 的
+# loom_glfw_window.GlfwWindowMixin._set_fullscreen 同语义（三步：去边框/铺桌面/置顶）。
+# 只含下划线成员，不进用户 API 面；GL 侧一行未动。
+from loom_vk_window import VkWindowMixin
 
 # B1: 物理桥 (零 GL; 缺失/导入失败 -> physb=None -> 无物理步进)
 try:
@@ -455,7 +459,7 @@ def link_camera_parents(cameras, cam_dicts, models):
 # 它继承 EngineCore（后端无关内核），自己只保留「VK 侧装配 + 后端驱动」的部分。
 # MRO: SceneDriver 自己的定义优先（保持现有行为），EngineCore 补上 VK 侧原先缺的能力。
 # 用户视角判据：同一份脚本 + 同一场景 + 同一输入 → 两端事件/状态序列逐条相等。
-class SceneDriver(EngineCore):
+class SceneDriver(VkWindowMixin, EngineCore):
     """播放器中间层: 场景 + 每帧步进 (脚本/物理/动画/轨道相机) + VP 计算.
 
     帧循环 (后端调用):  vp, cam_pos = world.step(dt)  → 后端画 world.models/world.lights
@@ -484,6 +488,20 @@ class SceneDriver(EngineCore):
         self.logic_paused = False
         self.request_quit = False
         self._request_exit_play = False
+        # 2026-11-18（人类裁决 Q-B7-32-1 = ①）：F11 假全屏。
+        # 与 GL 的 GLEngine（engine.py:229 allow_fullscreen=True）逐项对齐 ——
+        # 内核 engine_core.py:163 第①步的判据 getattr(self,'allow_fullscreen',False)
+        # 在 VK 上原先恒 False，F11 是死键；现在 VK 播放器同样允许全屏
+        # （编辑器不涉及 VK，其 allow_fullscreen=False 保持原样）。
+        self.allow_fullscreen = True
+        self.fullscreen = False          # 状态位（与 GL 同名同义）
+        self._window_rect = None         # 进入全屏前的窗口矩形 (l,t,r,b) -> 退出还原
+        self._window_client = None       # 进入全屏前的 client 尺寸 (w,h) -> 退出还原
+        self._desktop_size = None        # 桌面分辨率末档兜底（正常走 GetSystemMetrics/GLFW）
+        self._fullscreen_degraded_logged = False
+        # 宿主（vk_player._register_input）注入的窗口句柄 / 画布；拿不到 -> 可见降级
+        self._vk_glfw_window = None
+        self._vk_canvas = None
         # 2026-11-07 修复: VK 播放器此前**从不加载** scripts/ 游戏脚本目录
         # (GL 播放器继承 GLEngine.__init__ 会加载), 导致打包后自定义脚本不生效。
         try:
