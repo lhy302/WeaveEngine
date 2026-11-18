@@ -500,12 +500,40 @@ def main():
     t_scene_ubo()
     t_profiler_defaults()
     t_real_gl()
+    t_screen_format()
     print('')
     if _fails:
         print('失败:', _fails)
         return 1
     print('ALL PASS')
     return 0
+
+
+
+# ============ 2026-11-18 独立审核 P0 补充门：frame_plan 的格式参数化 ============
+# 背景：lead 把 screen_format 加进缓存 key 时，把 _fmt_key 写进了 if 分支内 →
+# clear_color 非默认常量时 UnboundLocalError（一条原本可用的分支被改崩），
+# 而 tests 里 clear_color 零命中、run_all 全绿掩盖了它。下面就是这个回归点的门。
+def t_screen_format():
+    print('=== F. SCREEN 目标格式参数化（screen_format） ===')
+    check('F1 默认 SCREEN 格式 = rgba8unorm（GL 行为零变化）',
+          frame_plan().target_by_name(SCREEN_TARGET).format == 'rgba8unorm')
+    # E2 是「修前必红」点：clear_color 非默认常量走 else 分支
+    try:
+        p = frame_plan(clear_color=(0.1, 0.2, 0.3, 1.0))
+        check('F2 非默认 clear_color 可建 plan（原 UnboundLocalError 回归点）',
+              p.target_by_name(SCREEN_TARGET) is not None)
+    except Exception as exc:
+        check('F2 非默认 clear_color 可建 plan（原 UnboundLocalError 回归点）',
+              False, repr(exc))
+    p2 = frame_plan(screen_format='bgra8unorm')
+    check('F3 screen_format 生效（VK 真窗口传真实表面格式）',
+          p2.target_by_name(SCREEN_TARGET).format == 'bgra8unorm',
+          p2.target_by_name(SCREEN_TARGET).format)
+    check('F4 格式不同 -> 缓存分离（不污染 GL 的默认 plan）', p2 is not frame_plan())
+    p3 = frame_plan(clear_color=(0.1, 0.2, 0.3, 1.0), screen_format='bgra8unorm')
+    check('F5 clear_color + screen_format 组合可用（VK 真窗口路径）',
+          p3.target_by_name(SCREEN_TARGET).format == 'bgra8unorm')
 
 
 if __name__ == '__main__':

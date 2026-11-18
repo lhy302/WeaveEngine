@@ -570,8 +570,11 @@ class VkRenderer:
             except (TypeError, ValueError):
                 sc = 1.0
             sizes[t.name] = (max(1, int(round(w * sc))), max(1, int(round(h * sc))))
-            # 2026-11-18 实机点验: 不能 str() —— VK 的 SCREEN 目标格式是 wgpu 枚举
-            # （surface 的 bgra8unorm），str() 会变成 'TextureFormat.3' 让 wgpu 直接 KeyError。
+            # 2026-11-18 独立审核更正：原注释写「不能 str()，会把 wgpu 枚举变成
+            # 'TextureFormat.3'」—— 实测 VkRenderer.format 就是 str（'bgra8unorm'），
+            # str() 是 no-op，所以这条「连带修」不是修 bug，只是不引入无依据改动。
+            # （历史上确实出现过一次 KeyError('TextureFormat.3')，说明某个中间状态
+            #  真的传进过枚举；此后未能复现 —— **未核**，留痕。）
             fmts[t.name] = getattr(t, 'format', 'rgba16float')
         self._ensure_post_targets(w, h, sizes, fmts)
 

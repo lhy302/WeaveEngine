@@ -110,20 +110,29 @@ def _chain_callback(setter, win, our_cb, tag=''):
 
 
 def host_key_forward(driver, ui_bridge, pg_key, down, mods=0):
-    """GLFW 键事件 -> driver 的**唯一**喂键入口（P0-3 步 2 / S1 的收敛点）。
+    """GLFW 键事件 -> driver 的**唯一**喂键入口。
 
-    2026-11-18 实机点验修正：**完全委托内核**，本函数不再自己喂 UI。
+    2026-11-18 回退说明（独立审核结论）：lead 曾把这里改成「完全委托内核、不喂 UI」，
+    理由是「先喂 UI 会把 F9/F10/F11 吞掉」——**该理由已被证伪**：
+      · `loom_ui._KEY_CODE_TO_NAME` 只有 10 个键（Backspace/Delete/Left/Right/Home/End/
+        Return/KP_ENTER/Escape/Tab），**F9/F10/F11 都不在表内** → `dispatch_key` 对它们
+        恒返回 False（`loom_ui.py:520-522`），UI 在机制上吞不到引擎键；
+      · 独立审核在真窗口里把本函数换回旧实现跑，F9/F10 依旧生效（toggled:true / delta:1）。
+    所以本函数保持原设计：宿主先喂 UI，被消费则到此为止；其余交内核（内核因
+    `_ui_dispatch_external=True` 跳过它自己的 UI 步，避免同一 UIManager 派发两次）。
 
-    为什么必须去掉「先喂 UI」这一步（真窗口实测）：
-      · 内核 handle_key_event 的段序是 ①F11 ②F9/F10 ③UI ④钩子 ⑤key_state，
-        与 GL 的 GLFW 回调**同序**；
-      · 旧实现先调 ui_bridge.on_key()，而它包的是**同一个** UIManager（vk_ui.UIInputBridge
-        构造自 driver.ui），于是引擎键在到达内核之前就被 UI 吞掉了 —— 实测 VK 播放器
-        上 **F9 暂停 / F10 单步 / F11 全屏 全部失效**（按 F9 只看到 UI 吃掉事件）。
-      · 顺带也去掉了 `_ui_dispatch_external = True`：UI 由内核第③步派发，不会重复。
-
-    返回 True = 已被消费（UI 焦点或引擎快捷键）。
+    返回 True = 已被 UI 消费。
     """
+    if down and ui_bridge is not None:
+        try:
+            if ui_bridge.on_key(pg_key, mods):
+                return True
+        except Exception:
+            pass
+    try:
+        driver._ui_dispatch_external = True
+    except Exception:
+        pass
     from types import SimpleNamespace
     return bool(driver.handle_key_event(SimpleNamespace(
         type='KEYDOWN' if down else 'KEYUP', key=pg_key, mod=mods, unicode='')))

@@ -123,6 +123,7 @@
 | [audit/verify_P0-3步2_验收_20261118.md](audit/verify_P0-3步2_验收_20261118.md) | **P0-3 步 2 独立验收**：6 条门全绿 + run_all 177.5s + lead 独立探针 5 组；含「子代理自报值核对」与未核清单（GL 泵写 key_state、VK F9/F10/F11 未实机） |
 | [audit/verify_S4用户API_验收_20261118.md](audit/verify_S4用户API_验收_20261118.md) | **S4 用户 API 等价验收**：9 条用户 API 两端同一函数对象、共同成员 88→97、GL 独有 15/VK 独有 10 全为后端内部；含 lead 补掉的 `on_destroy` 语义差异 |
 | [audit/verify_真窗口实机点验_VK播放器_20261118.md](audit/verify_真窗口实机点验_VK播放器_20261118.md) | **真窗口实机点验**：抓到 3 个真缺陷（SCREEN 格式写死 → 真机必崩、`deque.pop(0)` → 2 秒后崩、宿主先喂 UI 吞掉 F9/F10/F11），已修 2 个；F11 全屏确认缺失（待裁决）；含探针自身 4 个坑 |
+| [audit/verify_缺陷复核_独立审核回应_20261118.md](audit/verify_缺陷复核_独立审核回应_20261118.md) | **独立审核回应**：4 个「缺陷」只有 2 个成立（A/B），**C 是我误判已回退**；审核还发现我的修复引入了新 P0（`_fmt_key` UnboundLocalError）已修+补门；含 E/D 证据口径更正 |
 | 口径 v2 更新（属性面入契约后：GL 109 / VK 39 / GL 独有 80 / VK 独有 10）与四类正式划分见 [design/契约_IEngineAPI_20261117.md](design/契约_IEngineAPI_20261117.md)；本文件正文是 v1 快照，保留不改 |
 
 > beta6 及以前的所有审计记录已在 [archive/](archive/_README.md)。

@@ -142,8 +142,11 @@ def frame_plan(clear_color: Sequence[float] = CLEAR_COLOR_RGBA,
     flags = (bool(include_sky), bool(include_world_canvas), bool(include_shadow),
              bool(include_hud), bool(include_ui), bool(include_post), _stage,
              screen_format)   # 原样保留（VK 传的是 wgpu 枚举，不能 str()）
+    # 2026-11-18 独立审核 P0：本行必须在 if **之外** —— 否则 clear_color 非默认常量时
+    # 走 else 分支会 UnboundLocalError（上一版把它写进了 if 里，把一条原本可用的分支改崩；
+    # tests 里 clear_color 零命中，run_all 全绿掩盖了它）。
+    _fmt_key = str(flags[-1])
     if clear_color is CLEAR_COLOR_RGBA:      # 两条渲染路径都用默认常量 -> 走极速键
-        _fmt_key = str(flags[-1])
         key = (True,) + flags[:-1] + (_fmt_key,)
     else:
         key = (tuple(round(float(c), 6) for c in clear_color),) + flags[:-1] + (_fmt_key,)
