@@ -101,6 +101,13 @@
 
 | **Q-B7-38-1** | **混合文件拆分排期**（人类 2026-11-18：「一个功能一个文件…全部解耦化对于开发有利」）：实测 `agent_commands.py` 4049 行 / **25 个顶层功能区块**、`sceneio.py` 2379 行 / **13 区块**、`editor.py` 2906 行 / 151 def。要求已落盘 `docs/guides/开发要求_功能解耦与模块化.md` | **主审建议拆序**：① `sceneio.py` 的版本迁移（= B7-16，已定）→ ② `sceneio.py` 其余按域拆（light/camera/sky/material/prefab）→ ③ `agent_commands.py` 按域拆 `eai/` 包 → ④ `editor.py` 先抽播放态与 gizmo。每次纯搬家 + run_all 全绿 | beta7 工作量会显著增加，需你定「拆到哪一层」 | **待答** |
 
+| **Q-B7-39-1** | **R1（P2 门修前红）**：GL 暂停期 `mouse_rel` 逐帧继续结算（`loom_glfw_window._update_mouse_rel` 无 `logic_paused` 门控；`engine.py:1446-1459` 暂停分支不清 `mouse_rel`），VK 符合 B6「暂停不结算不累积」。实测 `GL=((250,105),(40,20)) VK=((250,105),(0,0))` | **主审建议：修 GL**（加暂停门控 + 清 `mouse_rel`），VK 是对的 | F9 暂停时脚本读 `mouse_rel`：GL 视角转 / VK 不转 | **待修（已派单）** |
+| **Q-B7-39-2** | **F-1**：VK `set_mouse_locked`/`toggle_mouse_locked` 返回 **None**，GL 返回 True/False（GL docstring 明写「返回: True=已应用; False=被拒绝」）→ 脚本 `if engine.toggle_mouse_locked():` 两端走不同分支 | **主审建议：VK 补齐返回值**（与 GL 同语义） | 脚本分支不一致 | **待修** |
+| **Q-B7-39-3** | **F-2**：锁定中幂等 `set_mouse_locked(True)`（脚本每帧重申的常见写法）→ VK 下一帧 `mouse_rel=(0,0)` 断流一帧，GL 连续（根因：VK 每次调用都触发 `on_mouse_lock_changed` → `_apply_cursor_mode` 重置 `_prev`） | **主审建议：VK 状态未变时不触发回调** | 视角抖动（每帧重申锁定的脚本） | **待修** |
+| **Q-B7-39-4** | **F-3**：F9 暂停期间按解锁键：VK 能解锁，GL **无人轮询**（GL 唯一轮询点 `update_scripts` 首行 `engine.py:995`，暂停时不执行） | **主审建议：修 GL**（暂停分支也要 poll 解锁键，与 VK 同） | 暂停时按解锁键：VK 能松、GL 不能 | **待修** |
+| **Q-B7-39-5** | **F-6**：`mouse_pos` 成员面 —— GL 有 `engine.mouse_pos`（int），VK `SceneDriver` **无此成员** → 脚本直读在 VK 上 AttributeError | **主审建议：按契约裁定它是否 ① 层用户 API**；若是则 VK 补成员（与 GL 同类型） | 脚本 `engine.mouse_pos` 在 VK 崩 | **待裁决** |
+| **Q-B7-39-6** | **F-7**：`set_mouse_lock_allowed` 两方向语义不齐：GL True→立即应用（锁）/ False→清 requested+解锁；VK True→**什么都不做**、False→只解锁**不清 requested** | **主审建议：VK 对齐 GL**（GL 侧已被 `test_unlock_key` I 段钉住） | 脚本切 allowed 后两端行为不同 | **待修** |
+
 > 证据与逐条表：`docs/audit/impl_B7-24_API矩阵_20261117.md`（§3 全 77 条 / §4 VK 独有 10 条 / §6 这四个问题）。
 
 ## B. 已关闭（不再需要回答，留痕备查）
