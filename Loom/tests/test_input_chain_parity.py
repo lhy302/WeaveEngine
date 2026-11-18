@@ -117,9 +117,13 @@ class _FakeUI:
 class _FakeBridge:
     """最小 UI 输入桥桩：与生产 UIInputBridge **同构** —— 它自己不是 UI，只是
     「包着一个 UIManager，on_key 就转给那个 UIManager.dispatch_key」
-    （vk_ui.py:826-828 on_key -> dispatch_key -> self.ui.dispatch_key）。
+    （vk_ui.py on_key -> dispatch_key -> self.ui.dispatch_key）。
 
-    生产里被包的那个 UIManager 就是 driver.ui 本身（vk_player.py:362
+    2026-11-18 裁决 Q-B7-33-1=B 之后，宿主**不再**喂桥（键/文本全交内核），所以
+    下面 on_key 在生产路径上已无调用方，本夹具仍保留它只为「万一有人接回预喂」
+    时能立刻被 ⑥/⑥b 的派发次数抓红（self.calls 进诊断信息，不作断言对象）。
+
+    生产里被包的那个 UIManager 就是 driver.ui 本身（vk_player.py
     `ui_bridge = UIInputBridge(getattr(driver, 'ui', None))`），所以「宿主喂桥」
     与「内核 handle_key_event 第③步喂 driver.ui」打到的是**同一个对象**。
     夹具必须同构，否则「同一 UI 被派发两次」这个真实风险在本门里根本不可见。
@@ -424,7 +428,7 @@ check('UI 消费时两端 is_key(a) 均 False',
       'GL=%r VK=%r' % (dict(g[2][1])['a'], dict(v[2][1])['a']))
 check('UI 消费：按一次键，两端各自的 UI 对象都只被派发 1 次',
       len(s.pair.gl_ui.calls) == 1 and len(s.pair.vk_ui.calls) == 1,
-      'GL ui.dispatch_key=%d / VK 同一个 ui.dispatch_key=%d（桥转发=%d）'
+      'GL ui.dispatch_key=%d / VK 同一个 ui.dispatch_key=%d（宿主喂桥=%d，统一到内核后恒 0）'
       % (len(s.pair.gl_ui.calls), len(s.pair.vk_ui.calls), len(s.pair.bridge.calls)))
 s.feed(pygame.K_a, False)
 s.step('UI 消费后松开 a')
@@ -435,10 +439,10 @@ s.compare('⑥ UI 焦点消费')
 
 print()
 print("=== ⑥b. UI 不消费（键穿到内核）：同一个 UI 每按一次仍只派发 1 次 ===")
-# 这条是本门真正的牙：宿主先喂 UI（未消费）→ 进内核 handle_key_event，第③步若
-# 再喂一次**同一个** driver.ui，就是「一次按键派发两次」。生产靠 vk_player.
-# host_key_forward 里 `driver._ui_dispatch_external = True` 让内核跳过第③步；
-# 那行一旦失效，本段必须变红（已实测：去掉该行 -> 本段 FAIL）。
+# 这条是本门真正的牙：内核第③步是 UI 派发的**唯一**写者 —— 宿主（host_key_forward）
+# 只把事件递进内核，不再预喂桥/UI（2026-11-18 裁决 Q-B7-33-1=B；旧的「宿主预喂 UI +
+# 内核跳过第③步」双写者标志已删除）。若宿主又自己喂一次 UI，或内核第③步被改成派发
+# 两次，本段立刻变红（实测：见「有牙证明」）。
 s = _Steps(consume_ui=False)
 s.feed(pygame.K_a, True)
 g, v = s.step('UI 不消费 a')
@@ -447,14 +451,14 @@ check('UI 不消费时两端 key_state 都更新（键确实穿到内核）',
       'GL=%r VK=%r' % (dict(g[0][1]).get(pygame.K_a), dict(v[0][1]).get(pygame.K_a)))
 check('UI 不消费：按一次键，两端各自的 UI 对象都只被派发 1 次',
       len(s.pair.gl_ui.calls) == 1 and len(s.pair.vk_ui.calls) == 1,
-      'GL ui.dispatch_key=%d / VK 同一个 ui.dispatch_key=%d（桥转发=%d）'
+      'GL ui.dispatch_key=%d / VK 同一个 ui.dispatch_key=%d（宿主喂桥=%d，统一到内核后恒 0）'
       % (len(s.pair.gl_ui.calls), len(s.pair.vk_ui.calls), len(s.pair.bridge.calls)))
 s.feed(pygame.K_a, False)
 s.feed(pygame.K_w, True)
 g, v = s.step('再按 w（UI 仍不消费）')
 check('UI 不消费：连按两键后两端 UI 各被派发 2 次（每次按键恰好 +1，不叠加）',
       len(s.pair.gl_ui.calls) == 2 and len(s.pair.vk_ui.calls) == 2,
-      'GL=%d VK=%d（桥转发=%d）'
+      'GL=%d VK=%d（宿主喂桥=%d，统一到内核后恒 0）'
       % (len(s.pair.gl_ui.calls), len(s.pair.vk_ui.calls), len(s.pair.bridge.calls)))
 s.feed(pygame.K_w, False)
 s.step('松 w')

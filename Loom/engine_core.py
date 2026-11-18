@@ -183,10 +183,10 @@ class EngineCore(TransformMixin, PhysicsMixin, InputMixin, CameraMixin,
                 return True
 
         # ③ UI 输入框优先接收（焦点元素消费则跳过后续）
-        # 2026-11-18（P0-3 步 2）：宿主若**已经自己**把键喂过 UI（vk_player 的
-        # ui_bridge.on_key 在调本方法之前先喂一次），就置 _ui_dispatch_external=True，
-        # 内核跳过这一步 —— 否则同一次按键被 UI 处理两遍（输入框打一个字出两个字）。
-        if is_press and not getattr(self, '_ui_dispatch_external', False):
+        # 2026-11-18（人类裁决 Q-B7-33-1=B）：UI 派发的**唯一**写者就是这里 ——
+        # 所有后端（GL 播放器 / VK 播放器 / 编辑器 / 打包游戏）都把键递到本方法，
+        # 宿主不再预喂 UI。旧的「宿主预喂 UI + 内核跳过第③步」双写者标志已删除。
+        if is_press:
             ui = getattr(self, 'ui', None)
             if ui is not None:
                 try:
@@ -311,10 +311,6 @@ class EngineCore(TransformMixin, PhysicsMixin, InputMixin, CameraMixin,
     _CAMERA_KEYS = ('CAMERA_FORWARD', 'CAMERA_BACKWARD', 'CAMERA_LEFT', 'CAMERA_RIGHT',
                     'CAMERA_UP', 'CAMERA_DOWN', 'LOOK_LEFT', 'LOOK_RIGHT',
                     'LOOK_UP', 'LOOK_DOWN')
-
-    # 2026-11-18（P0-3 步 2）：宿主自己喂过 UI 时置 True，内核 handle_key_event 第③步
-    # 就跳过自己的 UI 派发（避免同一按键被 UI 处理两遍）。默认 False = 内核自己派发。
-    _ui_dispatch_external = False
 
     def _init_input_state(self):
         """建立后端无关的输入状态：`_key`（动作名→键码）+ `key_state`（相机键快照）。

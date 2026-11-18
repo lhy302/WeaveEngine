@@ -112,30 +112,26 @@ def _chain_callback(setter, win, our_cb, tag=''):
 def host_key_forward(driver, ui_bridge, pg_key, down, mods=0):
     """GLFW 键事件 -> driver 的**唯一**喂键入口。
 
-    2026-11-18 回退说明（独立审核结论）：lead 曾把这里改成「完全委托内核、不喂 UI」，
-    理由是「先喂 UI 会把 F9/F10/F11 吞掉」——**该理由已被证伪**：
-      · `loom_ui._KEY_CODE_TO_NAME` 只有 10 个键（Backspace/Delete/Left/Right/Home/End/
-        Return/KP_ENTER/Escape/Tab），**F9/F10/F11 都不在表内** → `dispatch_key` 对它们
-        恒返回 False（`loom_ui.py:520-522`），UI 在机制上吞不到引擎键；
-      · 独立审核在真窗口里把本函数换回旧实现跑，F9/F10 依旧生效（toggled:true / delta:1）。
-    所以本函数保持原设计：宿主先喂 UI，被消费则到此为止；其余交内核（内核因
-    `_ui_dispatch_external=True` 跳过它自己的 UI 步，避免同一 UIManager 派发两次）。
+    2026-11-18（人类裁决 Q-B7-33-1=B）：宿主输入**全部统一到内核**。本函数只做一件事
+    —— 把 GLFW 键翻成 ev 递给 `driver.handle_key_event`；顺序编排（F11 全屏 / F9 暂停 /
+    F10 单步 → UI 焦点优先 → on_key_event 钩子 → key_state/script_keys）全在内核里，
+    与 GL 播放器 / 编辑器 / 打包游戏是**同一份实现**（JVM 式「换后端不换 API」：
+    同一串输入事件 → 同一串可观察结果）。
 
-    返回 True = 已被 UI 消费。
+    被本裁决取代的旧设计（不要改回去）：宿主先 `ui_bridge.on_key(...)` 喂一次 UI，
+    未消费才进内核，再置一个实例标志让内核跳过它自己的 UI 步。那是「宿主 + 内核
+    两个写者对**同一个** UIManager 双写」，只靠一个布尔标志防重复派发；该标志已
+    删除，UI 派发现在只有内核第③步这一个写者。
+    `ui_bridge` 参数保留只为不动调用点（`vk_player._on_key` 仍在传），本函数**不使用**它：
+    键/文本的 UI 派发一律由内核完成（内核第③步直接喂 `driver.ui`，就是桥包着的那个
+    同一个 UIManager，所以不存在「喂错对象」）。
+
+    返回 True = 已被消费（引擎键 / UI 焦点元素 / on_key_event 钩子吞掉）。
     """
-    if down and ui_bridge is not None:
-        try:
-            if ui_bridge.on_key(pg_key, mods):
-                return True
-        except Exception:
-            pass
-    try:
-        driver._ui_dispatch_external = True
-    except Exception:
-        pass
     from types import SimpleNamespace
     return bool(driver.handle_key_event(SimpleNamespace(
         type='KEYDOWN' if down else 'KEYUP', key=pg_key, mod=mods, unicode='')))
+
 
 def _wheel_taken_by_scrollview(ui, pos):
     """本帧滚轮是否真被 UI 的 ScrollView 吃掉 (滚轮专属判据, scan_05 P-09).
@@ -358,7 +354,9 @@ def run_vk(scene=None, frames_n=None, keep=False, mini=False, no_shadow=False,
     if assets_base:
         _base_dir = assets_base          # beta6 B1: 游戏包/项目模式显式给项目根
     driver.load_from_data(data, base_dir=_base_dir)
-    # 2026-11-06 R3: UI 输入桥 (GLFW 回调缓存 -> 每帧 dispatch_mouse + 键盘/文本).
+    # 2026-11-06 R3: UI 输入桥 —— 2026-11-18（Q-B7-33-1=B）后它只剩**鼠标/滚轮/光标**
+    # 一件事：键盘与 IME 文本已全部改走内核（driver.handle_key_event / handle_text_input），
+    # 宿主不再预喂 UI（详见 host_key_forward 的说明）。
     ui_bridge = UIInputBridge(getattr(driver, 'ui', None))
     try:
         from physics_bridge import cv_available as _pb_ok
@@ -527,13 +525,17 @@ def run_vk(scene=None, frames_n=None, keep=False, mini=False, no_shadow=False,
             _chain_callback(glfw.set_key_callback, win, _on_key, 'key')
 
             def _on_char(w, codepoint):
-                # GLFW 字符回调 = IME 提交的最终文本 (与 GL _on_char_cb 同源);
-                # UI InputField 有焦点时消费, 否则无副作用.
+                # GLFW 字符回调 = IME 提交的最终文本 (与 GL _on_char_cb 同源)。
+                # 2026-11-18（人类裁决 Q-B7-33-1=B）：文本也必须走内核 ——
+                # handle_text_input 先派发 UI（InputField 有焦点时消费），UI 不消费时
+                # 再触发 on_text_input 钩子。旧实现直调 ui_bridge.on_text 绕开内核，
+                # 于是 VK 下 on_text_input 钩子永不触发（两端同一串输入 → 不同结果）。
                 try:
                     ch = chr(codepoint)
                 except (ValueError, OverflowError):
                     return
-                ui_bridge.on_text(ch)
+                from types import SimpleNamespace
+                driver.handle_text_input(SimpleNamespace(type='TEXTINPUT', text=ch))
 
             _chain_callback(glfw.set_char_callback, win, _on_char, 'char')
 

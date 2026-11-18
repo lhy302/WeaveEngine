@@ -757,9 +757,10 @@ class VkWorldUIPipeline:
 #
 #   鼠标: 帧首 dispatch_mouse(pos, 本帧新按下, 本帧新松开, wheel);
 #         未消费时再 update_hover_only(pos) —— 与 editor._dispatch_ui_mouse 同序.
-#   键盘: 按下沿立即 dispatch_key(pg_key, mods); 返回 True 时调用方**不得**再写
-#         driver.key_state (GL _on_key_cb 的 "UI 优先" 分支).
-#   文本: char callback -> dispatch_text (GL _on_char_cb -> _pending_chars -> UI).
+#   键盘/文本: **已无生产调用方**（2026-11-18 人类裁决 Q-B7-33-1=B：宿主输入全部
+#         统一到内核）—— 键走 vk_player.host_key_forward -> EngineCore.handle_key_event
+#         第③步，文本走 vk_player._on_char -> EngineCore.handle_text_input。下面的
+#         on_key / on_text 两个转发方法**保留兼容**，播放器路径不再调用它们。
 #   相机: UI 消费了点击 / 正在拖动 / 仍有按下未松开 -> wants_camera()=False,
 #         播放器本帧不喂 mouse_rel (UI 捕获鼠标时不同时转视角).
 #   滚轮: last_wheel_consumed 只回答"本帧滚轮是否被 ScrollView 消费",
@@ -824,10 +825,14 @@ class UIInputBridge:
         self._wheel += int(yoff)
 
     def on_key(self, pg_key, mods=0):
-        """按下沿调用; 返回 True = 焦点元素消费, 调用方跳过 key_state."""
+        """**已无调用方（保留兼容）**：键现走内核 EngineCore.handle_key_event 第③步
+        （vk_player.host_key_forward 只把事件递进内核，不再预喂 UI）。
+        老宿主/外部代码若仍直调本方法，语义不变（转给 self.ui.dispatch_key）。"""
         return self.dispatch_key(pg_key, mods)
 
     def on_text(self, text):
+        """**已无调用方（保留兼容）**：文本现走内核 EngineCore.handle_text_input。
+        老宿主/外部代码若仍直调本方法，语义不变（转给 self.ui.dispatch_text）。"""
         return self.dispatch_text(text)
 
     # ---- 帧首分发 ----
