@@ -92,7 +92,7 @@
 | **★ [开发要求_后端API一致_JVM模型.md](guides/开发要求_后端API一致_JVM模型.md)** | **新增后端 / 新增后端 API 必读**：JVM 式一致的定义、三层分类、7 步强制流程、门的缺口、**10 条真犯过的反模式** |
 | [SCAN_PROTOCOL.md](guides/SCAN_PROTOCOL.md) | 扫描/审计取证协议（粗筛→双向推演→四象限→探针） |
 | [Loom_E重构交接文档.md](guides/Loom_E重构交接文档.md) | engine.py mixin 重构交接 |
-| [AOCI_AGENT_GUIDE.md](guides/AOCI_AGENT_GUIDE.md) / [AOCI架构表.md](guides/AOCI架构表.md) | AOCI 认知层使用与架构台账 |
+| ~~[AOCI_AGENT_GUIDE.md](guides/AOCI_AGENT_GUIDE.md) / [AOCI架构表.md](guides/AOCI架构表.md)~~ | **已废弃（2026-11-18 人类裁定彻底放弃 AOCI）** —— 架构认知改用 `design/结构图_功能与文件_20261117.md`（Mermaid 图） |
 
 ---
 
