@@ -765,8 +765,10 @@ class VkWorldUIPipeline:
 #         统一到内核）—— 键走 vk_player.host_key_forward -> EngineCore.handle_key_event
 #         第③步，文本走 vk_player._on_char -> EngineCore.handle_text_input。下面的
 #         on_key / on_text 两个转发方法**保留兼容**，播放器路径不再调用它们。
-#   相机: UI 消费了点击 / 正在拖动 / 仍有按下未松开 -> wants_camera()=False,
-#         播放器本帧不喂 mouse_rel (UI 捕获鼠标时不同时转视角).
+#   相机: **本帧**鼠标事件被 UI 消费 -> wants_camera()=False（与 GL 的 ui_consumed
+#         同一语义，Q-B7-41-2 人类裁决「以 GL 为准」）；拖动滑条时 dispatch_mouse 的
+#         拖动分支每帧都返回 consumed=True，所以拖动期照常抢相机。播放器本帧不喂
+#         mouse_rel (UI 捕获鼠标时不同时转视角).
 #   滚轮: last_wheel_consumed 只回答"本帧滚轮是否被 ScrollView 消费",
 #         与 last_consumed (本帧鼠标事件整体) 分开, 见 _wheel_taken_by_scrollview.
 _PENDING_UP_BUG_WARNED = False
@@ -883,18 +885,27 @@ class UIInputBridge:
         # 鼠标事件整体的 consumed: 同帧"点按钮 + 滚轮"时 consumed=True
         # 但滚轮并未被 ScrollView 吃掉, 旧语义会把滚轮一起标成已消费.
         self.last_wheel_consumed = wheel_consumed_by_ui(wheel, consumed, wheel_taken)
-        # UI 捕获指针的判据 (任一成立): 本帧事件被消费 / 有元素被按住 /
-        # 拖动中 / 有 pointer-down 尚未 up. 与 GL 的 ui_consumed 不同,
-        # 这里覆盖"拖动跨帧"的情况, 避免拖动滑条时视角跟着转.
-        active = bool(consumed)
-        for attr in ('_pressed_elem', '_dragging_elem', '_last_pointer_down'):
-            if getattr(ui, attr, None) is not None:
-                active = True
-        self.ui_active = active
+        # UI 捕获指针的判据 = **本帧**鼠标事件是否被 UI 消费 —— 与 GL 的 ui_consumed
+        # **同一语义**（runtime.PlayerApp._dispatch_ui_mouse:297 就是 `self.ui_consumed =
+        # consumed`；GL 的相机门控是 runtime.move_camera / rotate_camera 在
+        # ui_consumed=True 时早退）。
+        # 2026-11-18 Q-B7-41-2（人类裁决「以 GL 为准」）：旧实现把三个**跨帧状态**
+        # 也并进这条判据（有元素被按住 / 拖动中 / 有 pointer-down 尚未 up），于是
+        # 「按住控件不动」或「在空白区按下未松开」时 VK wants_camera()=False 而 GL
+        # ui_consumed=False —— 同一份脚本两端相机行为不同（VK 不转、GL 转）。
+        # 现按 GL 对齐：跨帧持按**不再**单独抢相机；拖动滑条仍抢，因为
+        # loom_ui.dispatch_mouse 的拖动分支每帧返回 consumed=True（drag_to），
+        # 不需要额外的跨帧判据。
+        self.ui_active = bool(consumed)
         return consumed
 
     def wants_camera(self):
-        """本帧是否允许把光标增量喂给相机 (UI 未捕获)."""
+        """本帧是否允许把光标增量喂给相机 (= 本帧鼠标事件**未**被 UI 消费).
+
+        与 GL 的 `not ui_consumed` **同一语义**（Q-B7-41-2 人类裁决「以 GL 为准」）：
+        只看**本帧**的消费位，不看跨帧的「按下未松开 / 拖动中」状态 —— 否则同一串
+        输入两端相机行为分叉（旧实现就是这样，见 begin_frame 里的留痕）。
+        """
         return not self.ui_active
 
     # ---- 键盘/文本 (事件时刻立即分发, 与 GL 回调同序) ----

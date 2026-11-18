@@ -26,6 +26,12 @@
   ⑥ 坐标系一致性    GL 的 mouse_pos（int 像素）与 VK 的 mouse_pos（F-6 刚补的 int 像素）
                     喂同一 UI 树 → 命中结果相同；逐值相等 + 逐元素 int + 固定期望表
                     （期望值由夹具的几何写死，不取自任何一端 = 防 DPI/原点/Y 轴翻转）。
+  ⑦ 窗口 resize     两端窗口 640x400 -> 800x500 -> 200x100（低于下限 -> 钳到 320x240）：
+                    「UI 画布尺寸 / anchor 布局结果 / 同一坐标的命中结果（含画布外）」逐项
+                    相等，且各自 = 写死的期望表（Q-B7-41-1 修后新增）。
+  ⑧ 跨帧持按        按住 UI 控件 / 空白区按下未松开 / 拖动滑条：每帧比
+                    (GL ui_consumed, VK not wants_camera, 相机实际拿到的增量) 三元组逐项
+                    相等（Q-B7-41-2 修后新增；增量口径见该组 press_step 的说明）。
 
 两端生产入口（真窗口，不拼假对象；§5 反模式 8）：
   GL : runtime.PlayerApp(None, 640, 400, scene_data=空场景)
@@ -76,13 +82,24 @@ tests/ 与 __pycache__/_tmp），并同时覆盖**当前名与历史名** ——
     VK 侧只许经 vk_ui.UIInputBridge（当前名 begin_frame / 历史名 on_key/on_text 已在
     test_vk_ui_input.py 静态断言里守住）。
 
-留痕（未纳入本门的相邻项，只报告不修 —— 见交付报告「未做/未核清单」）：
-  · VK 侧**没有** ui.resize 调用点（GL 有 loom_glfw_window.py:258-263）：窗口 resize 后
-    VK 的 UI 画布尺寸不跟随，anchor/pivot 布局与「画布外」判定会与 GL 分叉。
-    本门把两端窗口固定成 640x400（= 两端画布尺寸），故不覆盖该场景。
-  · 「按住 UI 控件/在空白区按下未松开」时 VK wants_camera()=False 而 GL ui_consumed=False
-    （vk_ui.py:899-903 已显式声明「与 GL 的 ui_consumed 不同」）。本门只钉**点击命中控件
-    那一帧**的屏蔽（两端一致），跨帧持按的门控差异未纳入本门（需人类裁决哪一侧为准）。
+两项相邻留痕已按人类裁决修掉（2026-11-18，本门扩到 ⑦/⑧ 组，修前必红证据见
+交付报告与提交信息）：
+  · ~~VK 侧没有 ui.resize 调用点（窗口 resize 后 UI 画布不跟随）~~ -> **Q-B7-41-1 已修**
+    （裁决「判为缺陷，VK 补 ui.resize」）：唯一实现抽到共享前置 Loom/loom_ui_resize.py
+    （口径与 GL _on_resize 逐条一致：int 截断 + 下限 320x240），vk_player.draw 帧首在
+    begin_frame **之前**调用（与 GL「先 _on_resize 再 _dispatch_ui_mouse」同序）。
+    门 = ⑦ 组；GL 一行未动（基准）。
+  · ~~按住 UI 控件/在空白区按下未松开时 VK wants_camera()=False 而 GL ui_consumed=False~~
+    -> **Q-B7-41-2 已修**（裁决「以 GL 为准」）：vk_ui.UIInputBridge 的 ui_active 改成
+    **只看本帧** dispatch_mouse 的返回值（= GL 的 ui_consumed），跨帧的
+    「按下未松开/拖动中/pointer-down 未 up」三个判据已删除（拖动滑条仍抢相机，因为
+    dispatch_mouse 的拖动分支每帧返回 consumed=True）；vk_ui.py 里那段「与 GL 的
+    ui_consumed 不同」的注释已同步删改为事实（反模式 10）。门 = ⑧ 组。
+
+已知残差（本门**不锁**、只报告 —— 属另一面，需另立单）：GL 的 engine.mouse_rel 在
+「本帧被 UI 消费」时仍是非 0（脚本可读），VK 因为 feed 被 wants_camera 门控所以是 0。
+两者**相机**行为已一致（GL 的 move_camera/rotate_camera 在 ui_consumed 时早退），差的只是
+「脚本在 UI 消费帧读 mouse_rel」这一面。
 """
 import atexit as _atexit_gate
 import os as _os_gate
@@ -134,6 +151,7 @@ import glfw                                                      # noqa: E402
 import pygame                                                    # noqa: E402
 
 import loom_ui                                                   # noqa: E402  两端同一个生产 UI 管理器
+import loom_ui_resize                                            # noqa: E402  ⑦ 的共享前置（VK 侧唯一实现）
 import loom_scene_contract                                       # noqa: E402  场景版本号单点（不写死）
 import runtime                                                   # noqa: E402  GL 打包播放器（生产入口）
 import scene_driver as SD                                        # noqa: E402
@@ -141,8 +159,10 @@ import vk_player                                                 # noqa: E402
 import vk_ui                                                     # noqa: E402  夹具用生产那个桥类
 from loom_glfw_window import (_on_cursor_pos_cb,                  # noqa: E402  GL 生产光标回调
                               _on_mouse_button_cb,               # noqa: E402  GL 生产鼠标键回调
-                              _on_scroll_cb)                     # noqa: E402  GL 生产滚轮回调
-from loom_ui import (UIManager, Button, InputField, ScrollView)   # noqa: E402
+                              _on_scroll_cb,                     # noqa: E402  GL 生产滚轮回调
+                              _on_window_size_cb)                # noqa: E402  GL 生产窗口尺寸回调（⑦）
+from loom_ui import (UIManager, Button, InputField, ScrollView,     # noqa: E402
+                     Slider)                                      # noqa: E402  ⑧ 拖动门控夹具
 
 ok = True
 _PAIRS = []                       # 收尾统一释放
@@ -264,6 +284,49 @@ src_has('engine_core.py', 'ui.dispatch_text(text)', True,
         '内核 handle_text_input 是文本的 UI 派发唯一写者（engine_core.py:235）')
 check('已知差异登记表为空（不许登记任何容差）', not KNOWN_DIFFS, KNOWN_DIFFS)
 
+# ⑥ ⑦/⑧ 两面的**生产调用点**锚点（漂移 = 门失真，必须当场红）
+# Q-B7-41-1：VK 生产帧首必须把 UI 画布同步到窗口尺寸（GL 基准是 _on_resize）
+src_has('vk_player.py', 'sync_ui_canvas(_ui_now,', True,
+        'VK 生产帧首调 UI 画布同步（Q-B7-41-1；参数 = driver.ui + 宿主窗口句柄 + 兜底尺寸）')
+_vp_src = _read_prod('vk_player.py') or ''
+_i_sync = _vp_src.find('sync_ui_canvas(_ui_now,')
+_i_begin = _vp_src.find('ui_bridge.begin_frame()')
+check('结构：VK 的 UI 画布同步排在 begin_frame **之前**（与 GL「先 _on_resize 再 '
+      '_dispatch_ui_mouse」同序，否则本帧命中用旧画布尺寸）',
+      0 <= _i_sync < _i_begin, (_i_sync, _i_begin))
+_resize_defs = _grep_prod('def sync_ui_canvas')
+check('结构：UI 画布同步只由 loom_ui_resize.py 实现（其它生产文件 0 处）',
+      [p for (p, _l) in _resize_defs] == ['loom_ui_resize.py'], _resize_defs)
+_ui_resize_calls = []
+for _p in _prod_py_files():
+    try:
+        with open(_p, 'r', encoding='utf-8', errors='replace') as _f:
+            for _ln, _line in enumerate(_f, 1):
+                if _line.strip().startswith('#'):
+                    continue          # 注释里提到 ui.resize(...) 不算调用点（反模式 10 的注释≠代码）
+                if 'ui.resize(' in _line:
+                    _ui_resize_calls.append(
+                        (os.path.relpath(_p, ROOT).replace('\\', '/'), _ln))
+    except Exception:
+        continue
+check('结构：ui.resize 的生产调用点恰好 2 处（GL 基准 loom_glfw_window.py + VK 侧唯一'
+      '实现 loom_ui_resize.py）—— 修前 VK 侧是 0 处（Q-B7-41-1）',
+      len(_ui_resize_calls) == 2
+      and sorted({p for (p, _l) in _ui_resize_calls})
+      == ['loom_glfw_window.py', 'loom_ui_resize.py'],
+      _ui_resize_calls)
+src_has('loom_glfw_window.py', 'ui.resize(self.width, self.height)', True,
+        'GL 的 _on_resize 仍是基准（本任务 GL 一行未动）')
+src_has('loom_ui_resize.py', 'max(UI_MIN_W, int(w)), max(UI_MIN_H, int(h))', True,
+        'VK 侧钳制口径与 GL 同值（320x240 + int 截断）')
+# Q-B7-41-2：VK 的相机门控只看**本帧**消费位（以 GL 为准），跨帧判据不得复活
+src_has('runtime.py', 'self.ui_consumed = consumed', True,
+        'GL 的基准语义仍在：ui_consumed 只看本帧 dispatch_mouse 的返回值')
+src_has('vk_ui.py', 'self.ui_active = bool(consumed)', True,
+        'VK 的相机门控 = 本帧消费位（Q-B7-41-2「以 GL 为准」）')
+src_has('vk_ui.py', "for attr in ('_pressed_elem', '_dragging_elem', '_last_pointer_down')",
+        False, '跨帧持按判据不得复活（Q-B7-41-2 修前的差异来源）')
+
 
 # ============================ 夹具（真窗口，生产构造式） ============================
 
@@ -334,6 +397,48 @@ class Pair:
         self._prev = None            # VK 侧上一帧光标 (vk_player.draw 的 _prev)
         _PAIRS.append(self)
 
+    # ---------------- ⑦ 窗口 resize（两端生产路径） ----------------
+    def resize_both(self, w, h):
+        """两端窗口一起改到 (w,h)，并各自走**生产**的尺寸同步路径。
+
+        GL : glfw.set_window_size -> WM_SIZE -> loom_glfw_window._on_window_size_cb
+             -> _on_resize -> ui.resize(...)（生产回调；本进程里 WM 投递可能晚一拍，
+             所以再显式调**同一个回调**一次 = 等价事件注入，同本门其它事件的注入方式。
+             回调参数取窗口**实际**尺寸（get_window_size 回读 = 独立判据）。
+        VK : glfw.set_window_size -> 下一帧 vk_player.draw 帧首 sync_ui_canvas
+             （读 get_window_size = 与 GL 同源；见 vk_frame 的镜像）。
+        """
+        gw = self.gl._glfw_win
+        glfw.set_window_size(gw, w, h)
+        glfw.set_window_size(self.vk_win, w, h)
+        pump(4, 0.02)
+        _gw = tuple(int(v) for v in glfw.get_window_size(gw))
+        _on_window_size_cb(gw, _gw[0], _gw[1])          # GL 生产回调（同一函数）
+        self.vk_frame(*(self.bridge.pos))                # VK 生产帧（帧首同步画布）
+        _vw = tuple(int(v) for v in glfw.get_window_size(self.vk_win))
+        return (_gw, _vw)
+
+    # ---------------- ⑧ 鼠标上锁（生产脚本 API） ----------------
+    def lock_both(self):
+        """两端一起上锁 + 两端增量基线一起重锚（= 一帧吸收帧）。
+
+        GL 的增量基线是 loom_glfw_window._prev_cursor（生产 _update_mouse_rel 里用）；
+        VK 的增量基线是 vk_player._apply_cursor_mode 置空的 _prev（生产同款吸收帧）。
+        本进程里同时活着多对真窗口：任一侧切 CURSOR_DISABLED 时 GLFW 会把物理光标挪进
+        该窗口 -> 另一侧收到一条 raw motion（P2 门踩过的伪影），故先 pump 排空再重锚。
+        """
+        self.gl.set_mouse_lock_allowed(True)
+        self.vk.set_mouse_lock_allowed(True)
+        self.gl.set_mouse_locked(True)
+        self.vk.set_mouse_locked(True)
+        pump(3, 0.02)
+        try:
+            self.gl._prev_cursor = None
+        except Exception:
+            pass
+        self._prev = None
+        return (bool(self.gl.mouse_locked), bool(self.vk.mouse_locked))
+
     # ---------------- GL 生产帧 ----------------
     def gl_frame(self, x, y, press=False, release=False, wheel=0):
         """GL 生产帧：GLFW 投递光标/按键/滚轮 → 生产泵（poll + 结算）→ 生产 UI 派发。
@@ -363,6 +468,7 @@ class Pair:
             'pos': tuple(self.gl.mouse_pos),
             'consumed': bool(self.gl.ui_consumed),
             'wheel': int(self.gl.mouse_wheel),
+            'rel': tuple(self.gl.mouse_rel),  # ⑧：生产泵结算出的本帧增量
             'keys_true': tuple(sorted(k for k, v in (self.gl.key_state or {}).items() if v)),
         }
 
@@ -388,10 +494,19 @@ class Pair:
         _ui_now = getattr(self.vk, 'ui', None)
         if _ui_now is not None and _ui_now is not self.bridge.ui:
             self.bridge.ui = _ui_now
+        # ---- vk_player.draw 帧首（Q-B7-41-1）：UI 画布跟随窗口尺寸 ----
+        # 生产那一行是 sync_ui_canvas(_ui_now, driver._vk_glfw_window, (w, h))
+        # （loom_ui_resize 唯一实现）；这里逐行镜像，句柄取生产同一个注入点。
+        if not getattr(self.vk, 'fullscreen', False):   # 与 GL _on_window_size_cb 同款门控
+            loom_ui_resize.sync_ui_canvas(_ui_now,
+                                          getattr(self.vk, '_vk_glfw_window', None),
+                                          None)
         self.bridge.begin_frame()
         _x, _y = self.bridge.pos
+        _fed = (0, 0)                    # 本帧**真的**喂给相机的增量（0 = 被 UI 挡住）
         if self._prev is not None and self.bridge.wants_camera():
-            self.vk.feed_mouse_rel(_x - self._prev[0], _y - self._prev[1])
+            _fed = (_x - self._prev[0], _y - self._prev[1])
+            self.vk.feed_mouse_rel(_fed[0], _fed[1])
         self._prev = (_x, _y)
         _wh = self.bridge.last_wheel
         if _wh:
@@ -410,6 +525,8 @@ class Pair:
             'wheel_consumed': bool(self.bridge.last_wheel_consumed),
             'wants_camera': bool(self.bridge.wants_camera()),
             'wheel': wheel_visible,
+            'cam_rel': _fed,                 # ⑧：本帧喂给相机的增量（被挡 = (0,0)）
+            'rel': tuple(self.vk.mouse_rel),  # ⑧ 对照用（driver 结算值）
             'keys_true': tuple(sorted(k for k, v in (self.vk.key_state or {}).items() if v)),
         }
 
@@ -813,6 +930,242 @@ _c, ev = p.vk.ui.hit_test(p.vk.mouse_pos)
 check('⑥ float 入参后两端命中相同（(120,63) 落在按钮/输入框之间的空白）',
       getattr(eg, 'name', None) == getattr(ev, 'name', None) == 'root',
       (getattr(eg, 'name', None), getattr(ev, 'name', None)))
+
+
+# ============================ ⑦ 窗口 resize：UI 画布跟随 ============================
+print()
+print("=== ⑦. 窗口 resize：UI 画布尺寸 / anchor 布局 / 画布外判定，两端逐项相等（Q-B7-41-1） ===")
+print("    （人类裁决：「判为缺陷，VK 补 ui.resize」——GL 在 _on_resize 里同步画布，VK 原先没有）")
+p = Pair()
+
+
+def _add_anchored(mgr):
+    """anchor/pivot 布局夹具：三个锚定控件（几何写死在测试里，不取自任何一端）。
+
+    a_tl anchor=(0,0) pivot=(0,0) rect=(10,10,100,40)   -> 左上角固定
+    a_br anchor=(1,1) pivot=(1,1) rect=(-10,-10,100,40) -> 贴右下角（随画布走）
+    a_ct anchor=(.5,.5) pivot=(.5,.5) rect=(0,0,120,60) -> 居中（随画布走）
+    """
+    c = mgr.canvases[0]
+    tl = Button(name='a_tl', rect=(10, 10, 100, 40),
+                anchor=(0.0, 0.0), pivot=(0.0, 0.0), text='TL')
+    br = Button(name='a_br', rect=(-10, -10, 100, 40),
+                anchor=(1.0, 1.0), pivot=(1.0, 1.0), text='BR')
+    ct = Button(name='a_ct', rect=(0, 0, 120, 60),
+                anchor=(0.5, 0.5), pivot=(0.5, 0.5), text='CT')
+    for e in (tl, br, ct):
+        c.root.add_child(e)
+    return {'a_tl': tl, 'a_br': br, 'a_ct': ct}
+
+
+_anchors = (_add_anchored(p.gl.ui), _add_anchored(p.vk.ui))
+
+# 期望表（夹具几何 + anchor/pivot 公式手算写死；**不取自任何一端**）
+_RECT_EXPECT = {
+    (640, 400): {'a_tl': (10.0, 10.0, 100.0, 40.0),
+                 'a_br': (530.0, 350.0, 100.0, 40.0),
+                 'a_ct': (260.0, 170.0, 120.0, 60.0)},
+    (800, 500): {'a_tl': (10.0, 10.0, 100.0, 40.0),
+                 'a_br': (690.0, 450.0, 100.0, 40.0),
+                 'a_ct': (340.0, 220.0, 120.0, 60.0)},
+    (320, 240): {'a_tl': (10.0, 10.0, 100.0, 40.0),
+                 'a_br': (210.0, 190.0, 100.0, 40.0),
+                 'a_ct': (100.0, 90.0, 120.0, 60.0)},
+}
+_HIT_EXPECT = {
+    (640, 400): {(10, 10): 'a_tl', (700, 450): 'root', (530, 350): 'a_br',
+                 (340, 220): 'a_ct', (500, 350): 'root'},
+    (800, 500): {(10, 10): 'a_tl', (700, 450): 'a_br', (530, 350): 'root',
+                 (340, 220): 'a_ct', (500, 350): 'root'},
+    (320, 240): {(10, 10): 'a_tl', (700, 450): 'root', (530, 350): 'root',
+                 (340, 220): 'root', (500, 350): 'root'},
+}
+rows = []
+_PR = {}
+
+
+def _canvas_size(mgr):
+    c = mgr.canvases[0]
+    return (int(c.width), int(c.height))
+
+
+def _anchored_rects(mgr, elems):
+    c = mgr.canvases[0]
+    pr = (0.0, 0.0, float(c.width), float(c.height))
+    return {n: tuple(float(v) for v in e.screen_rect(pr)) for n, e in elems.items()}
+
+
+def probe_resize(label, size):
+    """比一档画布尺寸下的「画布尺寸 / anchor 矩形 / 同一坐标的命中结果」。"""
+    gs, vs = _canvas_size(p.gl.ui), _canvas_size(p.vk.ui)
+    rows.append((label + ' ·UI 画布尺寸', gs, vs))
+    check('⑦ %s：两端 UI 画布尺寸 = %s（期望表，不取自任何一端）' % (label, size),
+          gs == vs == size, (gs, vs))
+    gr = _anchored_rects(p.gl.ui, _anchors[0])
+    vr = _anchored_rects(p.vk.ui, _anchors[1])
+    for n in ('a_tl', 'a_br', 'a_ct'):
+        rows.append((label + ' ·%s 矩形' % n, gr[n], vr[n]))
+    check('⑦ %s：anchor 布局结果两端逐项相等且 = 期望表' % label,
+          gr == vr == _RECT_EXPECT[size], (gr, vr))
+    gh, vh = {}, {}
+    for pos in _HIT_EXPECT[size]:
+        gh[pos] = getattr(p.gl.ui.hit_test(pos)[1], 'name', None)
+        vh[pos] = getattr(p.vk.ui.hit_test(pos)[1], 'name', None)
+        rows.append((label + ' ·命中 %s' % (pos,), gh[pos], vh[pos]))
+    check('⑦ %s：同一坐标的命中结果两端逐项相等且 = 期望表（含「画布外」坐标）' % label,
+          gh == vh == _HIT_EXPECT[size], (gh, vh))
+    _PR[label] = {'size': size, 'gl_hit': gh, 'vk_hit': vh,
+                  'gl_rect': gr, 'vk_rect': vr}
+    return gs, vs
+
+
+probe_resize('起始 640x400', (640, 400))
+_w = p.resize_both(800, 500)
+check('⑦ 两端窗口真的到了 800x500（否则下面的期望表无意义）',
+      _w == ((800, 500), (800, 500)), _w)
+probe_resize('resize 到 800x500', (800, 500))
+_w = p.resize_both(200, 100)
+check('⑦ 两端窗口真的到了 200x100（低于 320x240 下限 -> 触发 GL 的钳制分支）',
+      _w == ((200, 100), (200, 100)), _w)
+probe_resize('resize 到 200x100（钳到 320x240）', (320, 240))
+check('⑦ 「画布外」判定随画布尺寸翻转、两端同步：点 (700,450) 在 640x400 = root（画布外），'
+      '800x500 = a_br（画布内锚定控件），320x240 = root（又出画布）',
+      (_PR['起始 640x400']['gl_hit'][(700, 450)],
+       _PR['起始 640x400']['vk_hit'][(700, 450)]) == ('root', 'root')
+      and (_PR['resize 到 800x500']['gl_hit'][(700, 450)],
+           _PR['resize 到 800x500']['vk_hit'][(700, 450)]) == ('a_br', 'a_br')
+      and (_PR['resize 到 200x100（钳到 320x240）']['gl_hit'][(700, 450)],
+           _PR['resize 到 200x100（钳到 320x240）']['vk_hit'][(700, 450)]) == ('root', 'root'),
+      {k: (v['gl_hit'][(700, 450)], v['vk_hit'][(700, 450)]) for k, v in _PR.items()})
+check('⑦ 锚定控件真的跟着画布走了、两端同步：点 (530,350) 在 640x400 = a_br（右下角原位），'
+      '800x500 = root（a_br 已随画布移到 690,450）',
+      (_PR['起始 640x400']['gl_hit'][(530, 350)],
+       _PR['起始 640x400']['vk_hit'][(530, 350)]) == ('a_br', 'a_br')
+      and (_PR['resize 到 800x500']['gl_hit'][(530, 350)],
+           _PR['resize 到 800x500']['vk_hit'][(530, 350)]) == ('root', 'root'),
+      {k: (v['gl_hit'][(530, 350)], v['vk_hit'][(530, 350)]) for k, v in _PR.items()})
+seq_check('⑦ 窗口 resize：画布尺寸 / anchor 矩形 / 命中结果，两端逐项相等', rows)
+
+
+# ============================ ⑧ 跨帧持按的相机门控 ============================
+print()
+print("=== ⑧. 跨帧持按：按住控件 / 空白区按下未松开，(ui_consumed, wants_camera, 相机增量) 两端逐项相等 ===")
+print("    （人类裁决：「以 GL 为准」——GL 的 ui_consumed 只看**本帧**事件，不看跨帧持按）")
+p = Pair()
+rows = []
+_lk = p.lock_both()
+check('⑧ 两端都已上锁（生产脚本 API；mouse_rel 的生产前提，与 GL 的 CURSOR_DISABLED 同源）',
+      _lk == (True, True), _lk)
+
+
+def press_step(label, x, y, press=False, release=False, exp_consumed=None, exp_rel=None):
+    """一帧：喂同一串光标/按键 -> 比「消费位 + 相机门控 + 相机实际拿到的增量」。
+
+    口径（写清，防"拿自报数字当证据"）：
+      · GL 的相机增量 = ui_consumed 时 (0,0)，否则生产泵结算出的 engine.mouse_rel
+        —— 因为 runtime.PlayerApp.move_camera / rotate_camera 在 ui_consumed=True 时
+        **早退**（runtime.py:306-316），本帧相机拿到的就是 0；
+      · VK 的相机增量 = vk_player.draw 里**真的**喂进 feed_mouse_rel 的那一份
+        （wants_camera()=False 时根本没喂 = (0,0)）。
+    两端都取"相机实际拿到的增量"，不是"引擎自报的鼠标值"。
+    """
+    g, v = p.frame(x, y, press, release)
+    g_rel = (0, 0) if g['consumed'] else tuple(g['rel'])
+    v_rel = tuple(v['cam_rel'])
+    rows.append((label + ' ·GL ui_consumed / VK not wants_camera',
+                 g['consumed'], not v['wants_camera']))
+    rows.append((label + ' ·相机实际拿到的增量', g_rel, v_rel))
+    if exp_consumed is not None:
+        check('⑧ %s：两端「这次事件被 UI 消费」判定一致且 = 期望 %s'
+              % (label, exp_consumed),
+              g['consumed'] == (not v['wants_camera']) == exp_consumed,
+              (g['consumed'], not v['wants_camera']))
+    if exp_rel is not None:
+        check('⑧ %s：两端相机实际拿到的增量一致且 = 期望 %s' % (label, exp_rel),
+              g_rel == v_rel == exp_rel, (g_rel, v_rel))
+    return g, v
+
+
+# 吸收帧：上锁后两端基线都已重锚，本帧无增量
+press_step('锚帧 悬停按钮 (50,36)', 50, 36, exp_consumed=False, exp_rel=(0, 0))
+# ① 按住 UI 控件：按下 -> 持按 2 帧 -> 松开 -> 再移动
+press_step('按下按钮 (60,36) 同时右移 10px', 60, 36, press=True,
+           exp_consumed=True, exp_rel=(0, 0))
+press_step('持按第 1 帧 右移 10px (70,36)', 70, 36,
+           exp_consumed=False, exp_rel=(10, 0))
+press_step('持按第 2 帧 右移 10px (80,36)', 80, 36,
+           exp_consumed=False, exp_rel=(10, 0))
+press_step('松开按钮 (80,36)', 80, 36, release=True,
+           exp_consumed=True, exp_rel=(0, 0))
+press_step('松开后右移 10px (90,36)', 90, 36,
+           exp_consumed=False, exp_rel=(10, 0))
+# ② 空白区按下未松开（GL: root 的 on_mouse_down 返回 False -> 不消费）
+press_step('移到空白 (500,350)', 500, 350, exp_consumed=False, exp_rel=(410, 314))
+press_step('空白区按下 (500,350)', 500, 350, press=True,
+           exp_consumed=False, exp_rel=(0, 0))
+press_step('空白持按第 1 帧 右下移 (520,360)', 520, 360,
+           exp_consumed=False, exp_rel=(20, 10))
+press_step('空白持按第 2 帧 右下移 (540,370)', 540, 370,
+           exp_consumed=False, exp_rel=(20, 10))
+press_step('空白区松开 (540,370)', 540, 370, release=True,
+           exp_consumed=False, exp_rel=(0, 0))
+press_step('松开后右下移 (560,380)', 560, 380,
+           exp_consumed=False, exp_rel=(20, 10))
+# ③ 拖动滑条：跨帧拖动时两端**都**继续抢相机（本次对齐没把拖动门控弄丢）
+_sld = Slider(name='sld', rect=(200, 200, 200, 24), min_value=0.0, max_value=100.0,
+              value=0.0)
+p.gl.ui.canvases[0].root.add_child(_sld)
+p.vk.ui.canvases[0].root.add_child(
+    Slider(name='sld', rect=(200, 200, 200, 24), min_value=0.0, max_value=100.0,
+           value=0.0))
+press_step('移到滑条 (210,210)', 210, 210, exp_consumed=False, exp_rel=(-350, -170))
+press_step('滑条上按下 (210,210)', 210, 210, press=True,
+           exp_consumed=True, exp_rel=(0, 0))
+press_step('拖动第 1 帧 右移 40px (250,210)', 250, 210,
+           exp_consumed=True, exp_rel=(0, 0))
+press_step('拖动第 2 帧 右移 50px (300,210)', 300, 210,
+           exp_consumed=True, exp_rel=(0, 0))
+press_step('拖动松开 (300,210)', 300, 210, release=True,
+           exp_consumed=True, exp_rel=(0, 0))
+seq_check('⑧ 跨帧持按：消费位 / 相机门控 / 相机增量，两端逐项相等', rows)
+
+
+def _row(label, kind):
+    """按标签取一行（不靠下标算，防以后加步骤错位）。"""
+    for r in rows:
+        if r[0] == label + ' ·' + kind:
+            return r[1:]
+    return None
+
+
+_hold_lb = '持按第 1 帧 右移 10px (70,36)'
+_blank_lb = '空白持按第 1 帧 右下移 (520,360)'
+check('⑧ 持按控件期间两端**都**把增量交给相机（GL ui_consumed=False / VK wants_camera()=True）'
+      '—— 这就是 Q-B7-41-2 的修前红点（旧 VK 靠跨帧 _pressed_elem 一直抢相机）',
+      _row(_hold_lb, 'GL ui_consumed / VK not wants_camera') == (False, False)
+      and _row(_hold_lb, '相机实际拿到的增量') == ((10, 0), (10, 0)),
+      (_row(_hold_lb, 'GL ui_consumed / VK not wants_camera'),
+       _row(_hold_lb, '相机实际拿到的增量')))
+check('⑧ 空白区按下未松开期间两端**都**把增量交给相机（GL ui_consumed=False / '
+      'VK wants_camera()=True）—— 旧 VK 靠跨帧 _last_pointer_down 一直抢相机',
+      _row(_blank_lb, 'GL ui_consumed / VK not wants_camera') == (False, False)
+      and _row(_blank_lb, '相机实际拿到的增量') == ((20, 10), (20, 10)),
+      (_row(_blank_lb, 'GL ui_consumed / VK not wants_camera'),
+       _row(_blank_lb, '相机实际拿到的增量')))
+_drag_rows = [r for r in rows if r[0].startswith('拖动第')]
+check('⑧ 拖动滑条时两端**都**抢相机（跨帧拖动的门控没被本次对齐弄丢：drag_to 每帧 '
+      'consumed=True，不靠跨帧判据）',
+      _drag_rows == [('拖动第 1 帧 右移 40px (250,210) ·GL ui_consumed / VK not wants_camera',
+                      True, True),
+                     ('拖动第 1 帧 右移 40px (250,210) ·相机实际拿到的增量', (0, 0), (0, 0)),
+                     ('拖动第 2 帧 右移 50px (300,210) ·GL ui_consumed / VK not wants_camera',
+                      True, True),
+                     ('拖动第 2 帧 右移 50px (300,210) ·相机实际拿到的增量', (0, 0), (0, 0))],
+      _drag_rows)
+check('⑧ 滑条两端都真被拖到同一个值（副作用也一致）',
+      abs(p.gl.ui.find('sld').value - p.vk.ui.find('sld').value) < 1e-9
+      and p.gl.ui.find('sld').value > 0.0,
+      (p.gl.ui.find('sld').value, p.vk.ui.find('sld').value))
 
 
 # ============================ 收尾 ============================

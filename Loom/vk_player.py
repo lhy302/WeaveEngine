@@ -31,6 +31,9 @@ from vk_renderer import VkRenderer
 from vk_ui import UIInputBridge      # 2026-11-06 R3: 窗口事件 -> driver.ui
 # 2026-11-18 P3-1: 滚轮判据的唯一实现在共享前置 loom_ui_input（GL/VK 同源）。
 from loom_ui_input import wheel_taken_by_scrollview as _wheel_taken_by_scrollview
+# 2026-11-18 Q-B7-41-1: 「窗口尺寸 -> UI 画布尺寸」的唯一实现在共享前置 loom_ui_resize
+# （GL 同口径；GL 侧因「GL 一行不许动」的纪律保持原样，防分叉由 test_ui_hit_parity ⑦ 组守）。
+from loom_ui_resize import sync_ui_canvas
 # 2026-11-07 scan_05 P-10 修复: 失败按"段"分类 —— 初始化段失败是**可回退信号**
 # (上层 run_player/game_player 据此改走 OpenGL), 渲染循环内失败不可同进程回退,
 # 只能打印原因后非零退出 (原来一律 os._exit, 发布链的兜底也只覆盖 init)。
@@ -628,6 +631,25 @@ def run_vk(scene=None, frames_n=None, keep=False, mini=False, no_shadow=False,
             _ui_now = getattr(driver, 'ui', None)
             if _ui_now is not None and _ui_now is not ui_bridge.ui:
                 ui_bridge.ui = _ui_now          # 场景切换/重建后重新绑定
+            # 2026-11-18 Q-B7-41-1（人类裁决「判为缺陷，VK 补 ui.resize」）：
+            # 窗口尺寸变化时 UI 画布必须跟随 —— 与 GL **同语义、同位置**：
+            #   GL: loom_glfw_window._on_window_size_cb -> _on_resize(:251-263)
+            #       = 窗口尺寸事件里先钳 320x240 再 ui.resize(...)
+            #   VK: 本处（帧首结算）—— 放在 begin_frame **之前**，因为 GL 也是
+            #       先 _on_resize 再 _dispatch_ui_mouse（同在 _handle_events 里），
+            #       顺序反了本帧的命中/hover 就会用上一帧的旧画布尺寸。
+            # 尺寸来源与 GL 同源（glfw 窗口尺寸 = 逻辑像素）；拿不到句柄才退回
+            # ctx.physical_size（framebuffer 物理像素 —— 高 DPI 下与 GL 不同，留痕见
+            # loom_ui_resize.window_size 的 docstring 与交付报告「未核」清单）。
+            # 幂等：Canvas.resize 只改根矩形，所以每帧调用 == GL 的事件驱动结果。
+            # **全屏门控与 GL 同款**：GL 的 _on_window_size_cb 在 fullscreen=True 时
+            # **不**调 _on_resize（loom_glfw_window.py:692-693，防全屏过渡期把
+            # width/height 刷成过渡值）。VK 照抄，否则「全屏期间的 UI 画布尺寸」会变成
+            # 一个新的两端差异（GL 保持进全屏前的画布，VK 跟到桌面尺寸）。
+            # 留痕：GL 这个门控导致「全屏期锚定 UI 位置不更新」—— 属 GL 基准的行为，
+            # 本任务禁改 GL，故 VK 与之对齐；全屏期画布口径**未纳入门**（未核）。
+            if not getattr(driver, 'fullscreen', False):
+                sync_ui_canvas(_ui_now, getattr(driver, '_vk_glfw_window', None), (w, h))
             ui_bridge.begin_frame()
             try:
                 _x, _y = ui_bridge.pos

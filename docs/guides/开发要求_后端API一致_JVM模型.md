@@ -140,7 +140,7 @@ GLEngine  /  VkEngine               ← 各自实现 _backend_xxx（GPU 上传 /
 | A/B 像素（26 场景） | `test_ab_gl_vk.py` | 26 场景 |
 | 鼠标锁定与光标捕获 | `test_mouse_lock_parity.py` | 62（**全绿**；R1/F-3 + F-1/F-2/F-6/F-7 + Q-B7-40-1 打包播放器路径 已修） |
 | **P1 场景加载/切换的用户可见结果**（load_scene / clear_scene / 版本迁移 / 相对资源路径） | `test_scene_load_parity.py` | 69 |
-| **P3 UI 命中与焦点**（点击命中 / hover 集合 / 焦点与键盘 / 滚动消费 / UI 消费对引擎的屏蔽 / 坐标系） | `test_ui_hit_parity.py` | 81（**全绿**；P3-1 滚轮门控已修 2026-11-18，修前 80 PASS / 1 FAIL） |
+| **P3 UI 命中与焦点**（点击命中 / hover 集合 / 焦点与键盘 / 滚动消费 / UI 消费对引擎的屏蔽 / 坐标系 / **窗口 resize 的画布跟随** / **跨帧持按的相机门控**） | `test_ui_hit_parity.py` | 144（**全绿**；P3-1 滚轮门控 2026-11-18 已修，Q-B7-41-1/41-2 2026-11-18 已修 → 81→144） |
 
 > **P1 门当前状态（2026-11-18，B7-16/B7-17 修后）**：`test_scene_load_parity.py` **69 条全绿**
 > （修前 = 52 PASS / 17 FAIL，红证据见该门文件头 R1~R8 留痕）。修法：场景契约独立成模块
@@ -152,9 +152,9 @@ GLEngine  /  VkEngine               ← 各自实现 _backend_xxx（GPU 上传 /
 > （相对资源按场景目录解析）。契约模块自身的门 = `test_scene_contract.py`（36 条，含「单独
 > import 不拉 engine/GPU」的子进程断言）。
 
-> **P3 门当前状态（2026-11-18，P3-1 修后实测）**：`test_ui_hit_parity.py` = **81 PASS / 0 FAIL（81 条全绿）**。
-> 六组：① 点击命中、② 焦点与键盘、③ hover 集合、④ 滚动消费、⑤ UI 消费对引擎的屏蔽、
-> ⑥ 坐标系一致性 —— **全绿**。
+> **P3 门当前状态（2026-11-18，Q-B7-41-1/41-2 修后实测）**：`test_ui_hit_parity.py` = **144 PASS / 0 FAIL（144 条全绿）**。
+> 八组：① 点击命中、② 焦点与键盘、③ hover 集合、④ 滚动消费、⑤ UI 消费对引擎的屏蔽、
+> ⑥ 坐标系一致性、⑦ 窗口 resize 的 UI 画布跟随、⑧ 跨帧持按的相机门控 —— **全绿**。
 > ④ 组曾红 1 条 = **P3-1（已修，2026-11-18）**：滚轮停在**可滚 ScrollView** 上时 GL
 > `engine.mouse_wheel=-3` / VK `driver.mouse_wheel=0`（同一串输入 + 同一棵树）—— 脚本读
 > `mouse_wheel` 做镜头缩放时，GL 在滚动列表的同时还会缩放，VK 不会。
@@ -167,10 +167,19 @@ GLEngine  /  VkEngine               ← 各自实现 _backend_xxx（GPU 上传 /
 > 别名，调用点与既有门不动）。
 > 修前红原文：`FAIL ④ 滚动消费：消费位 + 脚本可见滚轮 + scroll_pos，两端逐项相等
 > 可滚 ScrollView 上滚轮(-3) ·脚本可见滚轮: GL=-3 VK=0`（80 PASS / 1 FAIL）→ 修后 81 PASS / 0 FAIL。
-> 两项**未纳入本门**（留痕，已分别排单 Q-B7-41-1 / Q-B7-41-2）：① VK 侧没有 `ui.resize` 调用点
-> （窗口 resize 后 UI 画布不跟随，GL 在 `loom_glfw_window.py:258-263` 有）→ anchor/pivot 布局与
-> 「画布外」判定会分叉；② 「按住 UI 控件 / 在空白区按下未松开」时 VK `wants_camera()=False` 而
-> GL `ui_consumed=False`（`vk_ui.py` 已显式声明该差异）。
+> 两项相邻留痕已修（2026-11-18，本门 81 → 144，修前红证据见提交信息）：
+> ① **Q-B7-41-1（裁决「判为缺陷，VK 补 ui.resize」）已修** —— 唯一实现抽到共享前置
+> `Loom/loom_ui_resize.py`（口径与 GL `_on_resize` 逐条一致：int 截断 + 下限 320x240），
+> `vk_player.draw` 帧首在 `begin_frame` **之前**调用（与 GL「先 `_on_resize` 再
+> `_dispatch_ui_mouse`」同序）；**GL 一行未动**（基准）。门 = ⑦ 组（640x400 → 800x500 →
+> 200x100 钳到 320x240：画布尺寸 / anchor 矩形 / 命中结果逐项相等）。
+> ② **Q-B7-41-2（裁决「以 GL 为准」）已修** —— `vk_ui.UIInputBridge.ui_active` 改成只看
+> **本帧** `dispatch_mouse` 的返回值（= GL 的 `ui_consumed`），跨帧「按下未松开/拖动中/
+> pointer-down 未 up」三个判据已删；`vk_ui.py` 里那段「与 GL 的 `ui_consumed` 不同」的注释
+> 已同步删改（反模式 10）。门 = ⑧ 组（按住控件 / 空白区按下未松开 / 拖动滑条：`(ui_consumed,
+> wants_camera, 相机实际拿到的增量)` 三元组逐项相等）。
+> 已知残差（只报告不锁）：GL 的 `engine.mouse_rel` 在「本帧被 UI 消费」时仍非 0（脚本可读），
+> VK 因 feed 被 `wants_camera` 门控所以是 0 —— 差的只是「脚本在 UI 消费帧读 mouse_rel」这一面。
 
 ### 4.2 尚无对拍门的面（**按此优先级补**，见 Q-B7-37-1）
 
@@ -178,7 +187,7 @@ GLEngine  /  VkEngine               ← 各自实现 _backend_xxx（GPU 上传 /
 |---|---|---|
 | ~~**P1**~~（已落地 → §4.1） | ~~场景加载/切换的用户可见结果~~ | 门 = `test_scene_load_parity.py`；B7-17（v8 场景 GL 90° vs VK 1.5708°）由本门锁住 |
 | ~~P2~~（已落地 → §4.1） | ~~鼠标锁定与光标捕获~~ **门 = `test_mouse_lock_parity.py`（62 条全绿）**：R1 + F-3（暂停期门控）+ F-1/F-2/F-6/F-7 + Q-B7-40-1（打包播放器路径）全部已修 | — |
-| ~~**P3**~~（已落地 → §4.1） | ~~UI 命中与焦点~~ **门 = `test_ui_hit_parity.py`（81 条）**：点击命中 / hover 集合 / 焦点与键盘 / 滚动消费 / UI 消费对引擎的屏蔽 / 坐标系，六组 | P3-1（滚轮脚本可见值）**已修**（2026-11-18，判据抽共享前置 `loom_ui_input.py`）→ 81 全绿；窗口 resize 的 UI 画布同步、跨帧持按的相机门控 两项未纳入本门（见 §4.1 留痕） |
+| ~~**P3**~~（已落地 → §4.1） | ~~UI 命中与焦点~~ **门 = `test_ui_hit_parity.py`（144 条）**：点击命中 / hover 集合 / 焦点与键盘 / 滚动消费 / UI 消费对引擎的屏蔽 / 坐标系 / 窗口 resize 的画布跟随 / 跨帧持按的相机门控，八组 | P3-1（滚轮脚本可见值）**已修**（2026-11-18，判据抽共享前置 `loom_ui_input.py`）；Q-B7-41-1（VK 补 `ui.resize`，共享前置 `loom_ui_resize.py`）与 Q-B7-41-2（VK 的相机门控对齐 GL 的 `ui_consumed`）**已修**（2026-11-18）→ 144 全绿 |
 | **P4** | **音频播放状态**（play/stop/3D 位置/音量） | 有声卡就能听出来 |
 | **P5** | **相机轨道 / 开发者视角** | 编辑器用户直接感知 |
 | **P6** | **暂停 / 单步的窗口级观感** | 已有数值对拍，缺窗口级 |
