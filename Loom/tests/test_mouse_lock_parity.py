@@ -6,7 +6,8 @@
     一样，不管选择什么后端对用户脚本的表现一致。」
 
 本门验什么（Q-B7-37-1 P2）：**同一串**鼠标锁定/解锁/移动输入喂进两端**生产入口**，
-逐项比对可观察结果（不是"各自为 True"）。十一组（①~⑦ = P2 原面；⑧~⑪ = F-1/F-2/F-6/F-7）：
+逐项比对可观察结果（不是"各自为 True"）。十二组（①~⑦ = P2 原面；⑧~⑪ = F-1/F-2/F-6/F-7；
+⑫ = Q-B7-40-1 打包播放器路径）：
   ① 状态位翻转      set_mouse_locked(True/False) / toggle_mouse_locked() 后
                     (mouse_locked, mouse_unlock_requested, 光标捕获位) 序列逐项相等
   ② 策略闸门        mouse_lock_allowed=False 时 F11 / 解锁键(Tab) / set_mouse_locked(True)
@@ -29,6 +30,9 @@
                     序列逐项相等（旧 VK 每帧都断流成 (0,0)）
   ⑪ F-7 两方向      set_mouse_lock_allowed(True)/(False) 两个方向后
                     (locked, requested, 捕获位) 三元组两端逐项相等
+  ⑫ 打包播放器路径  runtime.PlayerApp（--run / 游戏包 opengl / build_entry 的生产入口）
+                    与 GLEngine / VK **三端**返回值序列逐项相等；被拒分支必须落地后端
+                    （旧 PlayerApp 恒 None + 早退不释放光标 —— Q-B7-40-1）
 
 两端生产入口（真窗口，不拼假对象；§5 反模式 8）：
   GL : engine.GLEngine(640,400) 自建 GLFW 窗口（loom_glfw_window._init_glfw_window）
@@ -49,6 +53,9 @@
        · 锁定回调 → vk_player._apply_cursor_mode:590-606 逐行镜像（_prev 重锚 +
                     runtime.apply_mouse_lock_backend —— 与 GL 播放器同一份后端落地工具）
        · 脚本 API → SceneDriver.set_mouse_locked / toggle_mouse_locked / ...
+  GL 播放器（⑫）: runtime.PlayerApp(None, 640, 400, scene_data=空场景) —— **玩家实际
+       发布**的打包游戏入口（build_entry / game_player / run_player 全走它）。它与
+       GLEngine 必须逐项同值，否则"编辑器能跑、打包版不能"（本组就是这条的牙）。
 
 夹具保真（§5 反模式 8 的牙）：桥必须是生产类 vk_ui.UIInputBridge 且按生产构造式
 （vk_player.py:367 UIInputBridge(getattr(driver,'ui',None))）包 driver.ui；两端窗口都是
@@ -120,6 +127,25 @@ F-1/F-2/F-6/F-7 修后（2026-11-18，Q-B7-40；**只改 VK 侧**，GL 一行未
       （loom_input.py:347-365，test_unlock_key I 段钉过 GL）；VK True→什么都不做、
       False→只解锁**不清 requested**（旧 scene_driver.py:1637-1647）。
 
+Q-B7-40-1 修后（2026-11-18，**只改 GL 侧 runtime.py + 本门**，VK 一行未动）：
+  本门 **62 条全绿**（原 52 条一条未动、基线未移 + 组⑫ 新增 10 条）。
+  · 修法: runtime.PlayerApp.set_mouse_locked 不再自带实现，改为**委托**
+    InputMixin.set_mouse_locked（`return super().set_mouse_locked(locked)`）——
+    拒绝闸门 / 被拒先解锁 / 后端光标落地 / 状态变化才打日志全部只有一份
+    （loom_input.py:367-403）。PlayerApp 的 toggle_mouse_locked /
+    set_mouse_lock_allowed 本来就继承 InputMixin，本次**未新增覆盖**。
+  · 修前红（探针 Loom/tests/_tmp/probe_q_b7_40_1.py，三端同一串脚本 API）:
+      allowed=False set(True)   GLEngine=False PlayerApp=None SceneDriver=False
+      allowed=True  set(True)   GLEngine=True  PlayerApp=None SceneDriver=True
+      幂等重申 set(True)        GLEngine=True  PlayerApp=None SceneDriver=True
+      set(False)                GLEngine=True  PlayerApp=None SceneDriver=True
+      幂等重申 set(False)       GLEngine=True  PlayerApp=None SceneDriver=True
+    被拒分支（锁定中直接关闸再 set(True)）: 捕获位 GLEngine=False PlayerApp=True
+      SceneDriver=False —— PlayerApp 早退没落地后端，光标仍被捕获。
+  · 修后绿: 同上九行三端逐项相等（全 bool）；被拒后捕获位三端都 False。
+  · 用户可感知路径: 打包游戏（用户真正发布的那个 exe）里 `if engine.set_mouse_locked(True):`
+    以前恒走 else；锁定中被拒时"光标出来了但动不了"。
+
 结构断言改名防护（B7-16 复查 P0-1 教训）：结构段用**递归**扫描定位生产文件（排除
 tests/），并同时覆盖当前名与历史名（_poll_unlock_local 必须不存在 = 批2已删的旧拷贝）。
 """
@@ -183,6 +209,7 @@ from loom_glfw_window import _on_cursor_pos_cb                   # noqa: E402  G
 
 ok = True
 _PAIRS = []                                                      # 收尾统一释放光标捕获
+_PLAYER_APPS = []                    # ⑫ 打包播放器（PlayerApp）实例，收尾统一释放
 
 
 def check(label, cond, detail=''):
@@ -840,6 +867,103 @@ check('⑪ False 方向：两端都清 mouse_unlock_requested 且解锁',
 p.allow(True)
 step11('再 set_mouse_lock_allowed(True)')
 seq_check('⑪ 两方向：两端三元组逐项相等（locked / requested / 捕获位）', rows)
+
+# ============================ ⑫ 打包播放器路径返回值（Q-B7-40-1） ============================
+print()
+print("=== ⑫. 打包播放器路径返回值：PlayerApp 与 GLEngine / VK 三端逐项相等（Q-B7-40-1） ===")
+# 为什么必须单独一组（⑨ 咬不到这条）: ⑨ 比的是 **GL 引擎**（编辑器 / GLEngine）与 VK，
+# 但玩家实际发布的是**打包游戏**，它的 GL 路径是 runtime.PlayerApp（--run / 游戏包
+# opengl 分支 / build_entry 直连）。PlayerApp 曾自带**第二份** set_mouse_locked 实现:
+#   ① 恒返回 None —— ⑨ 用 GLEngine，永远看不到；
+#   ② 被拒分支早退不落地后端（锁定中被拒 -> 只写 self.mouse_locked=False，不调后端，
+#      光标仍被 CURSOR_DISABLED / ClipCursor 捕获 -> 玩家"光标出来了但动不了"）。
+# 结果: 修完 VK 之后，打包版 GL 返回 None、VK 返回 True/False —— 在**用户发布路径**上
+# 造出新的分叉（反模式 6「修 A 引入 B」）。本组用真窗口 + 生产入口三端对拍。
+_EMPTY_SCENE = {'version': 10, 'objects': [], 'lights': [], 'ui': None}
+p = Pair()                                                     # GL 引擎 + VK 播放器（生产构造式）
+_app = runtime.PlayerApp(None, 640, 400, scene_data=_EMPTY_SCENE)   # 打包播放器生产入口
+_PLAYER_APPS.append(_app)
+_impls = (('GLEngine', p.gl), ('PlayerApp', _app), ('SceneDriver', p.vk))
+
+
+def allow3(v):
+    """三端同一串策略输入（生产脚本 API）。"""
+    for _n, o in _impls:
+        o.set_mouse_lock_allowed(bool(v))
+
+
+def call3(label, fn):
+    rows.append((label, fn(p.gl), fn(_app), fn(p.vk)))
+
+
+def seq3_check(title, rows3):
+    """rows3 = [(label, GLEngine, PlayerApp, VK), ...]：三端逐行比对。"""
+    bad = [r for r in rows3 if not (r[1] == r[2] == r[3])]
+    for lb, g, a, v in rows3:
+        print('    %-34s GLEngine=%-6s PlayerApp=%-6s VK=%s' % (lb, g, a, v))
+    check(title, not bad,
+          '；'.join('%s: GLEngine=%r PlayerApp=%r VK=%r' % (lb, g, a, v) for (lb, g, a, v) in bad[:3])
+          if bad else '%d 步三端逐项相等' % len(rows3))
+
+
+rows = []
+allow3(False)
+call3('allowed=False set(True)（被拒）', lambda o: o.set_mouse_locked(True))
+allow3(True)
+call3('allowed=True set(True)', lambda o: o.set_mouse_locked(True))
+call3('幂等重申 set(True)', lambda o: o.set_mouse_locked(True))
+call3('set(False)', lambda o: o.set_mouse_locked(False))
+call3('幂等重申 set(False)', lambda o: o.set_mouse_locked(False))
+call3('toggle#1', lambda o: o.toggle_mouse_locked())
+call3('toggle#2', lambda o: o.toggle_mouse_locked())
+allow3(False)
+call3('allowed=False toggle（被拒）', lambda o: o.toggle_mouse_locked())
+allow3(True)
+call3('allowed=True toggle', lambda o: o.toggle_mouse_locked())
+seq3_check('⑫ 打包播放器返回值序列：三端逐项相等（含被拒那两条）', rows)
+_types3 = sorted({type(x).__name__ for (_l, g, a, v) in rows for x in (g, a, v)})
+check('⑫ 三端返回值都是 bool（PlayerApp 旧实现恒 None，脚本 if 会走不同分支）',
+      _types3 == ['bool'], '实测类型=%s' % _types3)
+check('⑫ 「不允许锁」时三端 set_mouse_locked(True) 都返回 False',
+      rows[0][1] is False and rows[0][2] is False and rows[0][3] is False,
+      'GLEngine=%r PlayerApp=%r VK=%r' % (rows[0][1], rows[0][2], rows[0][3]))
+# 被拒分支**不许早退**：锁定中被拒 -> 必须真的把后端光标放出来（玩家可感知）
+for _n, o in _impls:
+    o.set_mouse_lock_allowed(True)
+    o.set_mouse_locked(True)
+_cap_locked = {'GLEngine': _mode_disabled(p.gl._glfw_win), 'PlayerApp': _mode_disabled(_app._glfw_win),
+               'SceneDriver': _mode_disabled(p.vk_win)}
+check('⑫ 前置：三端都真的锁上了（光标捕获位 GLFW 回读 True）',
+      set(_cap_locked.values()) == {True}, _cap_locked)
+_denied3 = []
+for _n, o in _impls:
+    o.mouse_lock_allowed = False       # 直接关闸（不经过 set_mouse_lock_allowed: 模拟脚本误调）
+    _denied3.append((_n, o.set_mouse_locked(True)))
+_cap_denied = {'GLEngine': _mode_disabled(p.gl._glfw_win), 'PlayerApp': _mode_disabled(_app._glfw_win),
+               'SceneDriver': _mode_disabled(p.vk_win)}
+check('⑫ 锁定中被拒：三端都返回 False 且光标捕获位被**真的释放**（不许早退不落地后端）',
+      all(r is False for (_n, r) in _denied3) and set(_cap_denied.values()) == {False},
+      '返回=%r 捕获位=%r' % (_denied3, _cap_denied))
+for _n, o in _impls:
+    o.mouse_lock_allowed = True
+    o.set_mouse_locked(False)
+# 结构锚点: 播放器侧不得再长出第二份实现（docs/guides/开发要求_功能解耦与模块化.md 规则 5/6）
+# 直读 ROOT/runtime.py（不走 _find_src: archive/bench/_bench_stable 与 _bench_ws 各有一份
+# 同名 runtime.py，递归定位会命中 3 份而无法判定"恰好一份"）。
+_rt = open(os.path.join(ROOT, 'runtime.py'), encoding='utf-8').read()
+check('⑫ 结构：PlayerApp.set_mouse_locked 委托 InputMixin（super()），不再另写一套',
+      'return super().set_mouse_locked(locked)' in _rt, 'PlayerApp 只许走这一条实现')
+check('⑫ 结构：runtime.py 的返回契约与 InputMixin:378 一字不差',
+      '返回: True=已应用（或已解锁）; False=因"不允许锁"被拒绝。' in _rt, '与 loom_input.py:378 同一句话')
+check('⑫ 结构：旧的「被拒分支早退不落地后端」实现已不存在',
+      '_lock_denied_logged' not in _rt and "apply_mouse_lock_backend(getattr(self, '_glfw_win'" not in _rt,
+      '旧病灶（早退不落地后端）不得复活')
+check('⑫ 结构：PlayerApp 不自带 toggle_mouse_locked / set_mouse_lock_allowed（继承即唯一实现）',
+      'def toggle_mouse_locked' not in _rt and 'def set_mouse_lock_allowed' not in _rt,
+      '第二份实现不得复活')
+check('⑫ 收尾：打包播放器光标捕获已释放（不把 ClipCursor/隐藏光标带出进程）',
+      _mode_disabled(_app._glfw_win) is False, _mode_disabled(_app._glfw_win))
+
 
 # ============================ 收尾：必须释放光标捕获 ============================
 print()

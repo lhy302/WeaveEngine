@@ -219,35 +219,28 @@ class PlayerApp(GLEngine):
     # (UIManager.dispatch_mouse 是唯一入口; 每帧最多一次, pressed/released 由
     #  GlfwWindowMixin._handle_events 每帧清空)。**不引入任何编辑器交互**。
     # ---- 2026-11-08 鼠标锁定语义重构: 播放器侧的 锁不锁 执行点 ----
+    # 2026-11-18（Q-B7-40-1）: 这里**曾经是第二份实现** —— 打包游戏（--run / 游戏包
+    # opengl 分支 / build_entry 直连）走的正是这条路径，它与 InputMixin 的两处差异让
+    # 「修完 VK 之后」的打包版在**用户实际发布的路径**上分叉（都是用户可感知的）:
+    #   ① 恒返回 None: 脚本 `if engine.set_mouse_locked(True):` 在打包版走 else 分支，
+    #      而 GL 引擎（编辑器 / GLEngine）与 VK 播放器（SceneDriver）走 then 分支；
+    #   ② 被拒分支**早退不落地后端**: 锁定中被拒时只把 self.mouse_locked 写回 False，
+    #      不调后端 —— 光标**仍被捕获**（GLFW CURSOR_DISABLED / ClipCursor 残留），
+    #      玩家表现为「光标出来了但动不了」。
+    # 现在整条语义（拒绝闸门 + 被拒先解锁 + 后端光标落地 + 状态变化才打日志）只有
+    # **一份** = loom_input.InputMixin.set_mouse_locked:367-403；播放器**委托**它，
+    # 不再另写一套（docs/guides/开发要求_功能解耦与模块化.md 规则 5/6）。
     def set_mouse_locked(self, locked):
-        """锁定/解锁鼠标（播放器语义）.
+        """锁定/解锁鼠标（播放器语义）—— 委托 InputMixin 唯一实现，不另写一套。
 
-        与旧实现的差别（人类裁决 2026-11-08）:
-          ① `allowed=False` 时**任何**锁请求都不生效（脚本调 set_mouse_locked(True)
-             也锁不住玩家），并只报一次原因；
-          ② 后端落地统一走 apply_mouse_lock_backend（GLFW 模式 + 回读校验 +
-             Win32 兜底 + 一行日志），不再 `except: pass` 静默失败。
+        2026-11-08 人类裁决的两条语义（`allowed=False` 时任何锁请求无效 / 后端落地走
+        GLFW 模式 + 回读校验 + Win32 兜底）与 2026-11-18 的返回值契约都只在
+        loom_input.InputMixin.set_mouse_locked 一处维护；本方法只保留播放器侧的入口名
+        （打包版 / `--run` / 游戏包 opengl 分支 / build_entry 都调它）。
+
+        返回: True=已应用（或已解锁）; False=因"不允许锁"被拒绝。
         """
-        locked = bool(locked)
-        if locked and not getattr(self, 'mouse_lock_allowed', False):
-            if not getattr(self, '_lock_denied_logged', False):
-                self._lock_denied_logged = True
-                print('[鼠标] mouse_lock_allowed=False -> 忽略 set_mouse_locked(True) (本局只报一次)')
-            self.mouse_locked = False
-            return
-        self.mouse_locked = locked
-        if getattr(self, '_external_ctx', False):
-            view = getattr(self, 'view', None)
-            if view is not None and hasattr(view, 'set_mouse_locked'):
-                try:
-                    view.set_mouse_locked(locked)
-                except Exception as e:
-                    if not getattr(self, '_lock_view_err_logged', False):
-                        self._lock_view_err_logged = True
-                        print('[鼠标] 宿主视图 set_mouse_locked 失败 (%r), 本局不再报' % (e,))
-            return
-        apply_mouse_lock_backend(getattr(self, '_glfw_win', None), locked,
-                                 tag='GL 播放器')
+        return super().set_mouse_locked(locked)
     def _dispatch_ui_mouse(self):
         """把本帧新按下/松开 + 光标位置 + 滚轮交给 UI。返回 consumed。
 
