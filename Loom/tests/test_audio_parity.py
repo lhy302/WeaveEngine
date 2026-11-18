@@ -650,13 +650,17 @@ check("观测代理保真：存在的属性转发到**生产**绑定方法（loa
       _p0.spy['GL'].load(_WAV['a']) is not None
       and (_WAV['a'], None) in _p0.spy['GL']._real._backend._handles,
       'load 返回值=%r' % (_p0.spy['GL'].load(_WAV['a']),))
+# P4-1 修后（2026-11-19）：play_spatial 已是 AudioSystem 的公开方法 —— 修前它只是本断言
+# 借用的「缺失方法」示例。这里换成**永远不存在**的名字，断言的意图与强度完全不变：验的是
+# 「spy 不替生产对象兜底，异常文案与生产逐字相同」，而不是「play_spatial 缺失」。
+_MISSING_NAME = 'p4_no_such_audio_method'
 _msg_real = _msg_spy = None
 try:
-    _p0.spy['GL']._real.play_spatial
+    getattr(_p0.spy['GL']._real, _MISSING_NAME)
 except AttributeError as e:
     _msg_real = str(e)
 try:
-    _p0.spy['GL'].play_spatial('x', (0, 0, 0))
+    getattr(_p0.spy['GL'], _MISSING_NAME)('x', (0, 0, 0))
 except AttributeError as e:
     _msg_spy = str(e)
 check("观测代理保真：spy 对缺失方法的异常文案 == 生产对象自己的文案（不替生产兜底）",

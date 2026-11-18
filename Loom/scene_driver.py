@@ -656,9 +656,17 @@ class SceneDriver(VkWindowMixin, EngineCore):
         self._split_enable = split_enabled(_s_clock)   # 设置面 logic_fps<=0 判定
         self._clock = clock_from_settings(_s_clock) if self._split_enable else None
         # ---- B7-26: 逻辑帧后三段所需状态 ----
-        self.audio = None                 # 惰性建（_ensure_audio），与 GL 同一个 AudioSystem 类
+        # P4-3 修（2026-11-19）：音频门面**在 __init__ 就建**（与 GL engine.py:405
+        #   self.audio = AudioSystem() 同位置、同语义、同一个类）。修前是 self.audio = None +
+        #   首帧惰性建 → 脚本在 on_start 里调 engine.audio.play_sound(...)（用户脚本最常这么用）
+        #   时 VK 抛 AttributeError → 引擎判成坏脚本（_script_broken=True）→ 该脚本整局不再运行
+        #   （静默失效）；GL 同一份脚本正常返回 None。
+        #   初值仍写 None：构造失败时它就是本场最终值（可见降级，见 _ensure_audio），
+        #   紧接着的 _ensure_audio() 成功即把它换成 AudioSystem —— 与 GL 一致。
+        self.audio = None
         self._audio_disabled = False      # 建失败后本场不再重试（可见降级，只警告一次）
         self._audio_warned = False
+        self._ensure_audio()              # P4-3：与 GL 同位置（__init__）就建出音频门面
         self._prep_pairs = None           # 本逻辑帧的碰撞对（_logic_prep 产出）
         self._prep_err_logged = False
         self._coll_cache = {}             # 包围盒顶点缓存（按 id(mesh)）
