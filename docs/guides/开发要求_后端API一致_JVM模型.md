@@ -139,8 +139,9 @@ GLEngine  /  VkEngine               ← 各自实现 _backend_xxx（GPU 上传 /
 | beam 灯像素对拍 | `test_beam_light_backend_parity.py` | 8 |
 | A/B 像素（26 场景） | `test_ab_gl_vk.py` | 26 场景 |
 | 鼠标锁定与光标捕获 | `test_mouse_lock_parity.py` | 62（**全绿**；R1/F-3 + F-1/F-2/F-6/F-7 + Q-B7-40-1 打包播放器路径 已修） |
-| **P1 场景加载/切换的用户可见结果**（load_scene / clear_scene / 版本迁移 / 相对资源路径） | `test_scene_load_parity.py` | 69 |
+| **P1 场景加载/切换的用户可见结果**（load_scene / clear_scene / 版本迁移 / 相对资源路径） | `test_scene_load_parity.py` | 76（2026-11-19 实测 76 PASS / 0 FAIL；本行旧记 69 已过期） |
 | **P3 UI 命中与焦点**（点击命中 / hover 集合 / 焦点与键盘 / 滚动消费 / UI 消费对引擎的屏蔽 / 坐标系 / **窗口 resize 的画布跟随** / **跨帧持按的相机门控**） | `test_ui_hit_parity.py` | 144（**全绿**；P3-1 滚轮门控 2026-11-18 已修，Q-B7-41-1/41-2 2026-11-18 已修 → 81→144） |
+| **P4 音频播放状态**（播放状态机 / 3D 听者同步 / 每帧更新时序 / 暂停期行为 / 无音频设备降级 / 脚本 API 面） | `test_audio_parity.py` | 105（**修前红：90 PASS / 15 FAIL** —— 四条缺陷 P4-1~P4-4，见下） |
 
 > **P1 门当前状态（2026-11-18，B7-16/B7-17 修后）**：`test_scene_load_parity.py` **69 条全绿**
 > （修前 = 52 PASS / 17 FAIL，红证据见该门文件头 R1~R8 留痕）。修法：场景契约独立成模块
@@ -181,6 +182,46 @@ GLEngine  /  VkEngine               ← 各自实现 _backend_xxx（GPU 上传 /
 > 已知残差（只报告不锁）：GL 的 `engine.mouse_rel` 在「本帧被 UI 消费」时仍非 0（脚本可读），
 > VK 因 feed 被 `wants_camera` 门控所以是 0 —— 差的只是「脚本在 UI 消费帧读 mouse_rel」这一面。
 
+> **P4 门当前状态（2026-11-19，HEAD=7567f34 实测）**：`test_audio_parity.py` = **90 PASS / 15 FAIL**
+> （**修前红**，照 P1/P2/P3 先例提交：本任务只交门 + 红证据，业务代码一行未改）。六组：
+> ① 播放状态机（播/停/暂停/恢复/换 clip/改音量：两端实例状态 + 后端调用序列 + **独立判据**
+> pygame 通道占用）、② 3D 听者同步（set_listener 的 position/forward/up 逐项相等且 = 由场景
+> 文件手算的期望表；玩家相机路径 + 轨道相机路径；每逻辑帧同步一次）、③ 每帧更新时序（实例级
+> 插桩记录**实际**段序与音频段位置/次数；N 帧 → N 次；**绑死模式 logic_fps<=0** 下每渲染帧次数）、
+> ④ 暂停期（logic_paused 时两端同决策冻结 / 暂停期置 playing 不抢跑不积压 / 恢复首帧恰好 1 帧
+> 1 次 1 播 / F10 单步 1 帧）、⑤ 无音频设备（SDL 驱动不可用 = 生产 AudioBackend 真实降级路径：
+> 两端都不崩、句柄缓存 None、脚本 API 返回值相同、状态机照走）、⑥ 脚本 API 面（engine.audio.*
+> 与 add_audio_source/remove_audio_source 的存在性/返回值/副作用/「资源不存在」失败路径 +
+> **真实注册脚本在 on_start 里调音频 API**）。
+> **门红点 = 四条缺陷（只报告不修，均归 P4 新项）**：
+> · **P4-1（两端同坏，用户可感知 = 3D 音效根本不播）**：`loom_components.AudioSystem`（:1015）
+>   只有 load/play/stop/play_sound/shutdown，**没有** `play_spatial` / `set_listener` /
+>   `update_sound_position`，而 `loom_frame_components.update_audio`:71 与
+>   `sync_audio_listener`:44 正是调这三个 —— category 为 sfx/voice（**默认 sfx**）且
+>   playing=True 时音频段抛 AttributeError（GL engine.py:1218 / VK scene_driver.py:902 一路抛到
+>   宿主）；set_listener 的异常被 `sync_audio_listener` 的 except 吞掉 → 监听器**永不生效**。
+>   2D（music）路径正常。归属：`loom_components.py:1015`（缺 3 个委托方法）。
+> · **P4-2（VK 听者不跟随相机）**：GL 的 `self.camera` 每渲染帧由 `loom_render.py:1053`
+>   `apply_orbit_camera()` 更新（`runtime.py:174` 加载时也调）；VK **全仓 0 处**
+>   `apply_orbit_camera` 调用点，`self.camera` 恒为 `scene_driver.py:616` 的初始 (0,0,-5)，
+>   朝向取 `camera_yaw/camera_pitch`（:617 恒 0）而轨道相机实际用 `yaw/pitch`
+>   （`render_pose:1257`）。实测：GL 听者 =(-7.658,6.673,-3.870)/fwd=(-0.721,0.389,-0.573)，
+>   VK =(0,0,-5)/fwd=(0,0,-1)。归属：`scene_driver.py:616-619` + 缺 apply_orbit_camera 调用点。
+> · **P4-3（VK 首帧前 engine.audio 是 None）**：GL 在 `__init__` 就建 AudioSystem
+>   （engine.py:405），VK 是 `self.audio = None`（scene_driver.py:659）+ 首帧惰性建。脚本在
+>   on_start 里调 `engine.audio.play_sound(...)` → GL 返回 None，VK 抛 AttributeError →
+>   引擎判成坏脚本（`_script_broken=True`）→ **该脚本在 VK 上整局不再运行**（实测：GL 8 个
+>   脚本 0 个坏、VK 4 个 `p4_audio_api_raw` 全坏且 update 再未执行）。
+> · **P4-4（绑死模式 VK 没有音频段）**：用户设置 `logic_fps<=0`（`core_clock.split_enabled`）
+>   时两端都进旧绑死模式。GL 两条绑死路径都调 update_audio（engine.py:1504 /
+>   loom_render.py:1126 `_escape_door_step`），VK 的 `advance_logic:1109-1115` 与
+>   `_step_one_logic_frame:1133-1137` 都没有 → 实测 3 个渲染帧：GL 3 次 / VK 0 次（F10 单步
+>   同理）。归属：`scene_driver.py:1109-1115 / :1133-1137`。
+> **未核（留痕）**：设备级 3D 声像（需 game_audio + 真声卡；本门固定
+> `LOOM_AUDIO_BACKEND=pygame` + `SDL_AUDIODRIVER=dummy` 以保证无设备可跑，只验 3D **参数面**）；
+> 播放进度（秒）—— 两端生产代码都没有该 API，故以「3D 空间位置」作位置面；
+> game_audio 的 per-file 回退路径（ogg/opus → pygame）。
+
 ### 4.2 尚无对拍门的面（**按此优先级补**，见 Q-B7-37-1）
 
 | 优先级 | 面 | 为什么用户能感知 |
@@ -188,7 +229,7 @@ GLEngine  /  VkEngine               ← 各自实现 _backend_xxx（GPU 上传 /
 | ~~**P1**~~（已落地 → §4.1） | ~~场景加载/切换的用户可见结果~~ | 门 = `test_scene_load_parity.py`；B7-17（v8 场景 GL 90° vs VK 1.5708°）由本门锁住 |
 | ~~P2~~（已落地 → §4.1） | ~~鼠标锁定与光标捕获~~ **门 = `test_mouse_lock_parity.py`（62 条全绿）**：R1 + F-3（暂停期门控）+ F-1/F-2/F-6/F-7 + Q-B7-40-1（打包播放器路径）全部已修 | — |
 | ~~**P3**~~（已落地 → §4.1） | ~~UI 命中与焦点~~ **门 = `test_ui_hit_parity.py`（144 条）**：点击命中 / hover 集合 / 焦点与键盘 / 滚动消费 / UI 消费对引擎的屏蔽 / 坐标系 / 窗口 resize 的画布跟随 / 跨帧持按的相机门控，八组 | P3-1（滚轮脚本可见值）**已修**（2026-11-18，判据抽共享前置 `loom_ui_input.py`）；Q-B7-41-1（VK 补 `ui.resize`，共享前置 `loom_ui_resize.py`）与 Q-B7-41-2（VK 的相机门控对齐 GL 的 `ui_consumed`）**已修**（2026-11-18）→ 144 全绿 |
-| **P4** | **音频播放状态**（play/stop/3D 位置/音量） | 有声卡就能听出来 |
+| ~~**P4**~~（已落地 → §4.1） | ~~音频播放状态（play/stop/3D 位置/音量）~~ **门 = `test_audio_parity.py`（105 条，修前红 90 PASS / 15 FAIL）**：播放状态机 / 3D 听者同步 / 每帧更新时序 / 暂停期行为 / 无音频设备降级 / 脚本 API 面，六组 | 有声卡就能听出来 → 已量化为「两端音频实例状态 + 后端调用序列 + 设备通道占用」逐项相等；四条缺陷 **P4-1~P4-4 待修**（P4-1 3D 音效两端都不播 / P4-2 VK 听者不跟随相机 / P4-3 VK 首帧前 engine.audio 为 None / P4-4 绑死模式 VK 无音频段） |
 | **P5** | **相机轨道 / 开发者视角** | 编辑器用户直接感知 |
 | **P6** | **暂停 / 单步的窗口级观感** | 已有数值对拍，缺窗口级 |
 
