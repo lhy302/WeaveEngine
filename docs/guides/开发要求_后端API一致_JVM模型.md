@@ -140,7 +140,7 @@ GLEngine  /  VkEngine               ← 各自实现 _backend_xxx（GPU 上传 /
 | A/B 像素（26 场景） | `test_ab_gl_vk.py` | 26 场景 |
 | 鼠标锁定与光标捕获 | `test_mouse_lock_parity.py` | 62（**全绿**；R1/F-3 + F-1/F-2/F-6/F-7 + Q-B7-40-1 打包播放器路径 已修） |
 | **P1 场景加载/切换的用户可见结果**（load_scene / clear_scene / 版本迁移 / 相对资源路径） | `test_scene_load_parity.py` | 69 |
-| **P3 UI 命中与焦点**（点击命中 / hover 集合 / 焦点与键盘 / 滚动消费 / UI 消费对引擎的屏蔽 / 坐标系） | `test_ui_hit_parity.py` | 81（**修前红 1 条**：P3-1 滚轮脚本可见值；其余 80 绿） |
+| **P3 UI 命中与焦点**（点击命中 / hover 集合 / 焦点与键盘 / 滚动消费 / UI 消费对引擎的屏蔽 / 坐标系） | `test_ui_hit_parity.py` | 81（**全绿**；P3-1 滚轮门控已修 2026-11-18，修前 80 PASS / 1 FAIL） |
 
 > **P1 门当前状态（2026-11-18，B7-16/B7-17 修后）**：`test_scene_load_parity.py` **69 条全绿**
 > （修前 = 52 PASS / 17 FAIL，红证据见该门文件头 R1~R8 留痕）。修法：场景契约独立成模块
@@ -152,21 +152,25 @@ GLEngine  /  VkEngine               ← 各自实现 _backend_xxx（GPU 上传 /
 > （相对资源按场景目录解析）。契约模块自身的门 = `test_scene_contract.py`（36 条，含「单独
 > import 不拉 engine/GPU」的子进程断言）。
 
-> **P3 门当前状态（2026-11-18，HEAD=bac4c14 实测）**：`test_ui_hit_parity.py` = **80 PASS / 1 FAIL（81 条）**。
-> 六组：① 点击命中（按钮/空白/重叠/画布外 + on_click 派发次数）、② 焦点与键盘、③ hover 集合、
-> ⑤ UI 消费对引擎的屏蔽、⑥ 坐标系一致性 **全绿**；④ 滚动消费 **红 1 条 = P3-1**：
-> 滚轮停在**可滚 ScrollView** 上时 GL `engine.mouse_wheel=-3` / VK `driver.mouse_wheel=0`
-> （同一串输入 + 同一棵树）—— 脚本读 `mouse_wheel` 做镜头缩放时两端表现不同。
-> 归属（**只报告不修**）：`Loom/runtime.py:244-279` `_dispatch_ui_mouse` 把 wheel 交给
-> `dispatch_mouse` 后不回收 + `Loom/loom_glfw_window.py:441/475-477` 无条件写
-> `self.mouse_wheel`；参照实现（正确一侧）= `Loom/vk_player.py:656-666` +
-> `Loom/vk_ui.py` `UIInputBridge.begin_frame` 的 `last_wheel_consumed` /
-> `_wheel_taken_by_scrollview`（2026-11-07 P-09 修复）。按 P1/P2 先例「修前红」提交，
-> **GL 侧未改一行**；红原文见该门文件头与提交信息。
-> 两项**未纳入本门**（留痕）：① VK 侧没有 `ui.resize` 调用点（窗口 resize 后 UI 画布不跟随，
-> GL 在 `loom_glfw_window.py:258-263` 有）→ anchor/pivot 布局与「画布外」判定会分叉；
-> ② 「按住 UI 控件 / 在空白区按下未松开」时 VK `wants_camera()=False` 而 GL `ui_consumed=False`
-> （`vk_ui.py:899-903` 已显式声明该差异）→ 需人类裁决以哪一侧为准。
+> **P3 门当前状态（2026-11-18，P3-1 修后实测）**：`test_ui_hit_parity.py` = **81 PASS / 0 FAIL（81 条全绿）**。
+> 六组：① 点击命中、② 焦点与键盘、③ hover 集合、④ 滚动消费、⑤ UI 消费对引擎的屏蔽、
+> ⑥ 坐标系一致性 —— **全绿**。
+> ④ 组曾红 1 条 = **P3-1（已修，2026-11-18）**：滚轮停在**可滚 ScrollView** 上时 GL
+> `engine.mouse_wheel=-3` / VK `driver.mouse_wheel=0`（同一串输入 + 同一棵树）—— 脚本读
+> `mouse_wheel` 做镜头缩放时，GL 在滚动列表的同时还会缩放，VK 不会。
+> **修法（只改 GL 侧滚轮门控；VK 行为零变化）**：判据抽成共享前置 `Loom/loom_ui_input.py`
+> （`wheel_taken_by_scrollview` = 滚轮专属判据；`wheel_consumed_by_ui` = P-09 组合规则），
+> 三处 import **同一份**（解耦规则 3）：`runtime.PlayerApp._dispatch_ui_mouse`（GL —— 判据在
+> dispatch **之前**取，只有滚轮本身被 ScrollView 吃掉才把 `self.mouse_wheel` 清 0；同帧
+> 「点按钮 + 滚轮」仍把滚轮留给脚本）、`vk_ui.UIInputBridge.begin_frame` 与 `vk_player.draw`
+> （VK —— 行为不变，只把两处同体拷贝换成共享实现，保留 `_wheel_taken_by_scrollview` 历史名字的
+> 别名，调用点与既有门不动）。
+> 修前红原文：`FAIL ④ 滚动消费：消费位 + 脚本可见滚轮 + scroll_pos，两端逐项相等
+> 可滚 ScrollView 上滚轮(-3) ·脚本可见滚轮: GL=-3 VK=0`（80 PASS / 1 FAIL）→ 修后 81 PASS / 0 FAIL。
+> 两项**未纳入本门**（留痕，已分别排单 Q-B7-41-1 / Q-B7-41-2）：① VK 侧没有 `ui.resize` 调用点
+> （窗口 resize 后 UI 画布不跟随，GL 在 `loom_glfw_window.py:258-263` 有）→ anchor/pivot 布局与
+> 「画布外」判定会分叉；② 「按住 UI 控件 / 在空白区按下未松开」时 VK `wants_camera()=False` 而
+> GL `ui_consumed=False`（`vk_ui.py` 已显式声明该差异）。
 
 ### 4.2 尚无对拍门的面（**按此优先级补**，见 Q-B7-37-1）
 
@@ -174,7 +178,7 @@ GLEngine  /  VkEngine               ← 各自实现 _backend_xxx（GPU 上传 /
 |---|---|---|
 | ~~**P1**~~（已落地 → §4.1） | ~~场景加载/切换的用户可见结果~~ | 门 = `test_scene_load_parity.py`；B7-17（v8 场景 GL 90° vs VK 1.5708°）由本门锁住 |
 | ~~P2~~（已落地 → §4.1） | ~~鼠标锁定与光标捕获~~ **门 = `test_mouse_lock_parity.py`（62 条全绿）**：R1 + F-3（暂停期门控）+ F-1/F-2/F-6/F-7 + Q-B7-40-1（打包播放器路径）全部已修 | — |
-| ~~**P3**~~（已落地 → §4.1） | ~~UI 命中与焦点~~ **门 = `test_ui_hit_parity.py`（81 条）**：点击命中 / hover 集合 / 焦点与键盘 / 滚动消费 / UI 消费对引擎的屏蔽 / 坐标系，六组 | 修前红 1 条 = **P3-1**（滚轮脚本可见值，另派单）；窗口 resize 的 UI 画布同步、跨帧持按的相机门控 两项未纳入本门（见 §4.1 留痕） |
+| ~~**P3**~~（已落地 → §4.1） | ~~UI 命中与焦点~~ **门 = `test_ui_hit_parity.py`（81 条）**：点击命中 / hover 集合 / 焦点与键盘 / 滚动消费 / UI 消费对引擎的屏蔽 / 坐标系，六组 | P3-1（滚轮脚本可见值）**已修**（2026-11-18，判据抽共享前置 `loom_ui_input.py`）→ 81 全绿；窗口 resize 的 UI 画布同步、跨帧持按的相机门控 两项未纳入本门（见 §4.1 留痕） |
 | **P4** | **音频播放状态**（play/stop/3D 位置/音量） | 有声卡就能听出来 |
 | **P5** | **相机轨道 / 开发者视角** | 编辑器用户直接感知 |
 | **P6** | **暂停 / 单步的窗口级观感** | 已有数值对拍，缺窗口级 |

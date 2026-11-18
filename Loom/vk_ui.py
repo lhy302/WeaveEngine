@@ -39,6 +39,10 @@ from collections import OrderedDict
 import numpy as np
 import wgpu
 
+# 2026-11-18 P3-1: 滚轮判据的唯一实现在共享前置 loom_ui_input（GL/VK 同源，
+# docs/guides/开发要求_功能解耦与模块化.md 规则 3）。
+from loom_ui_input import wheel_consumed_by_ui, wheel_taken_by_scrollview
+
 # T3 (2026-11-13): UI 着色器单源化 —— Loom/shaders/ui.vert|ui.frag 经 glslang 产出
 # .spv，屏幕 UI 与 world Canvas **两条管线共用同一对模块**（entry_point 一律 'main'）。
 # 顶点统一 36B: 位置 xyz + uv + 颜色 rgba；屏幕 UI 的 z 恒 0、world 的颜色恒白。
@@ -768,27 +772,11 @@ class VkWorldUIPipeline:
 _PENDING_UP_BUG_WARNED = False
 
 
-def _wheel_taken_by_scrollview(ui, pos):
-    """本帧滚轮是否真被 UI 的 ScrollView 吃掉 (滚轮专属判据).
-
-    与 UIManager.dispatch_mouse 的滚轮分支同一判据: 指针命中的最近
-    ScrollView 存在且可滚动。判不了时保守认为已被消费 (与 vk_player
-    的旧助手同语义), 避免把可能被 UI 吃掉的滚轮再交给相机/脚本。
-    """
-    if ui is None:
-        return False
-    if not hasattr(ui, '_hit_scroll_view'):
-        return True
-    try:
-        sv = ui._hit_scroll_view(pos)
-    except Exception:
-        return True
-    if sv is None:
-        return False
-    try:
-        return bool(sv.can_scroll())
-    except Exception:
-        return True
+# 2026-11-18 P3-1: 判据实现搬到共享前置 loom_ui_input（唯一实现，两端 import 同一份）。
+# 这里只留**历史名字的别名** —— 调用点（begin_frame / vk_player.draw:663）与既有门
+# （test_wheel_backend_semantics / test_scene_driver_lod 里的 vk_ui._wheel_taken_by_scrollview、
+#  VP._wheel_taken_by_scrollview）一律不动，VK 行为零变化。
+_wheel_taken_by_scrollview = wheel_taken_by_scrollview
 
 
 class UIInputBridge:
@@ -894,7 +882,7 @@ class UIInputBridge:
         # last_wheel_consumed 只回答"本帧滚轮是否被 UI 消费", 不再复用
         # 鼠标事件整体的 consumed: 同帧"点按钮 + 滚轮"时 consumed=True
         # 但滚轮并未被 ScrollView 吃掉, 旧语义会把滚轮一起标成已消费.
-        self.last_wheel_consumed = bool(wheel) and consumed and wheel_taken
+        self.last_wheel_consumed = wheel_consumed_by_ui(wheel, consumed, wheel_taken)
         # UI 捕获指针的判据 (任一成立): 本帧事件被消费 / 有元素被按住 /
         # 拖动中 / 有 pointer-down 尚未 up. 与 GL 的 ui_consumed 不同,
         # 这里覆盖"拖动跨帧"的情况, 避免拖动滑条时视角跟着转.

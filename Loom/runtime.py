@@ -15,6 +15,8 @@ import sys
 # 2026-10-18 A2: import pygame 已删（GLFW 窗口剥离；set_caption 改用 glfw）
 from engine import GLEngine, gc_play_enter, gc_play_exit, engine_gc_frozen
 import sceneio
+# 2026-11-18 P3-1: 滚轮门控判据与 VK 同一份（共享前置，解耦规则 3），不在 GL 再写一套。
+from loom_ui_input import wheel_consumed_by_ui, wheel_taken_by_scrollview
 
 
 # ==================== 2026-11-08 鼠标锁定语义重构（人类裁决）====================
@@ -244,6 +246,10 @@ class PlayerApp(GLEngine):
     def _dispatch_ui_mouse(self):
         """把本帧新按下/松开 + 光标位置 + 滚轮交给 UI。返回 consumed。
 
+        2026-11-18 P3-1: 滚轮**门控**也在这里（与 VK 的 P-09 语义逐条对齐）——
+        滚轮被 ScrollView 吃掉时把 self.mouse_wheel 清 0，脚本读 engine.mouse_wheel
+        不再看到它；未被吃掉（含同帧「点按钮 + 滚轮」）时原样留给脚本/相机。
+
         只在**非外部上下文** (自建 GLFW 窗口, 即 --run/打包版 opengl) 调用:
         外部上下文由宿主喂事件, 其 pressed/released 不按帧清空, 在这里重复派发
         会变成"一次点击触发多次"(见 handler 注释)。
@@ -259,6 +265,9 @@ class PlayerApp(GLEngine):
             wheel = int(getattr(self, 'mouse_wheel', 0) or 0)
         except (TypeError, ValueError):      # 只有坏值才回落 (不吞其它异常)
             wheel = 0
+        # 2026-11-18 P3-1: 滚轮专属判据必须在 dispatch **之前**取 —— dispatch 会改
+        # ScrollView.scroll_pos（与 vk_ui.UIInputBridge.begin_frame 的时序说明同源）。
+        wheel_taken = bool(wheel) and wheel_taken_by_scrollview(ui, pos)
         consumed = False
         try:
             consumed = bool(ui.dispatch_mouse(pos, pressed, released, wheel))
@@ -275,6 +284,16 @@ class PlayerApp(GLEngine):
                 if not getattr(self, '_ui_hover_err_logged', False):
                     self._ui_hover_err_logged = True
                     print('[player] UI hover 更新异常 (本局只报一次): %r' % (e,))
+        # 2026-11-18 P3-1: 滚轮被 ScrollView 吃掉 -> **不留给脚本**（用户可感知: 脚本读
+        # engine.mouse_wheel 做镜头缩放时，GL 原先在滚动列表的同时还会缩放，VK 不会）。
+        # 判据与 VK 逐条对齐（P-09 裁决）:
+        #   · 只有「滚轮本身被 ScrollView 吃掉」才清（wheel_consumed_by_ui 三条件）;
+        #   · 同帧「点按钮 + 滚轮」: consumed=True 但 wheel_taken=False -> 滚轮照给脚本;
+        #   · 不在 ScrollView 上 / 没有 UI / 本帧无滚轮 -> 滚轮照给脚本。
+        # 注意: 本方法在 _handle_events（帧首）里调，早于 advance_logic，所以脚本本帧
+        # update_scripts 读到的就是清过的值（VK 侧同口径: vk_player.draw:660-666）。
+        if wheel_consumed_by_ui(wheel, consumed, wheel_taken):
+            self.mouse_wheel = 0
         self.ui_consumed = consumed
         return consumed
 

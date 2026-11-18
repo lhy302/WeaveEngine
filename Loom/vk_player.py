@@ -29,6 +29,8 @@ import rendercanvas.glfw
 
 from vk_renderer import VkRenderer
 from vk_ui import UIInputBridge      # 2026-11-06 R3: 窗口事件 -> driver.ui
+# 2026-11-18 P3-1: 滚轮判据的唯一实现在共享前置 loom_ui_input（GL/VK 同源）。
+from loom_ui_input import wheel_taken_by_scrollview as _wheel_taken_by_scrollview
 # 2026-11-07 scan_05 P-10 修复: 失败按"段"分类 —— 初始化段失败是**可回退信号**
 # (上层 run_player/game_player 据此改走 OpenGL), 渲染循环内失败不可同进程回退,
 # 只能打印原因后非零退出 (原来一律 os._exit, 发布链的兜底也只覆盖 init)。
@@ -142,28 +144,8 @@ def host_key_forward(driver, ui_bridge, pg_key, down, mods=0):
         type='KEYDOWN' if down else 'KEYUP', key=pg_key, mod=mods, unicode='')))
 
 
-def _wheel_taken_by_scrollview(ui, pos):
-    """本帧滚轮是否真被 UI 的 ScrollView 吃掉 (滚轮专属判据, scan_05 P-09).
-
-    UIManager.dispatch_mouse 只在"指针下的 ScrollView 可滚动"时消费滚轮; 而
-    vk_ui.last_wheel_consumed 记录的是**本帧鼠标事件整体**是否被消费 —— 用它对
-    滚轮判一次, 会把"同帧点按钮 + 滚轮"里的滚轮一起丢掉。这里按同一判据复核
-    (只读 UI 树, 不改 UI 实现); 判不了时保守认为已被消费 (保持旧行为)。
-    """
-    if ui is None:
-        return False
-    if not hasattr(ui, '_hit_scroll_view'):
-        return True
-    try:
-        sv = ui._hit_scroll_view(pos)
-    except Exception:
-        return True
-    if sv is None:
-        return False
-    try:
-        return bool(sv.can_scroll())
-    except Exception:
-        return True
+# 2026-11-18 P3-1: 本函数实现已搬到共享前置 loom_ui_input.wheel_taken_by_scrollview
+# （唯一实现；本文件不再自带拷贝，import 别名见文件头）。行为与 P-09 原版逐字相同。
 
 
 def apply_startup_mouse_lock(driver):
