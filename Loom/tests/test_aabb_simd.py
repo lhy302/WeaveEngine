@@ -175,14 +175,32 @@ def main():
                     and all(tuple(x) == tuple(y) for x, y in zip(got, ref)))
             check('入口级 _aabbs_batched 逐位一致 (%s vs scalar)' % impl, bool(same))
 
-    # 性能门禁 (入口级, 2-3x 余量): AVX2 版必须明显快于标量版
-    def _timed(impl, reps=12):
+    # ---------------- 性能门禁 (Q-B7-33-3 = A+B, 2026-11-18 重做) ----------------
+    # 旧门为什么废 (修前实测, 空载 10 轮, 同一台机器):
+    #   入口级 reps=12 单次 scalar->avx2 比较, 单批工作量 ~0.17ms → 总测量 ~2ms,
+    #   **噪声量级 = 效应量级**: 比值 0.666 0.737 0.756 0.772 0.796 0.836 0.839
+    #   0.963 1.042 (中位 0.784 / 最坏 1.042 / 2-10 轮 >0.90 假红)。真实入口级
+    #   加速只有 ~1.2x, 阈值 0.90 仅剩 12% 余量 —— 不是门太严, 是测量方法不成立。
+    # 新方法 (A): reps>=200 (单轮测量拉到百毫秒级) + **交替测 7 轮取中位数**
+    #   (每轮交换 scalar / AVX2 先后顺序: 温漂与突发负载对两侧对称, 不偏置比值;
+    #   中位数滤掉单轮毛刺) + 阈值按实测分布定 (数字见各门注释)。
+    # 新位置 (B): **严格加速门移到批量级** —— 单次内核调用吃整个 (n,V) 批,
+    #   实测 2.28x, 信噪比足够; 入口级只留宽松门「AVX2 不慢于标量」。
+    import statistics as _st
+    _PERF_ROUNDS = 7                  # 交替轮数 (取中位数)
+    _ENTRY_REPS = 300                 # 入口级: 每轮 300 次 (~60ms/轮, 百毫秒级)
+    _BATCH_REPS = 200                 # 批量级: 每轮 200 次 (~200ms/轮)
+
+    def _as_scalar(vh, m3, mn, mx):
+        return fastpath.aabbs_minmax_impl(vh, m3, mn, mx, 'scalar')
+
+    def _entry_ms(scalar, reps=_ENTRY_REPS):
+        """入口级 _aabbs_batched 单次耗时 (ms)。scalar=True 时把生产分派入口临时
+        换成强制标量; False 走**生产分派** (auto = CPUID 选中的实现)。"""
         orig = fastpath.aabbs_minmax
         try:
-            if impl != 'auto':
-                fastpath.aabbs_minmax = (
-                    lambda vh, m3, mn, mx, _i=impl:
-                    fastpath.aabbs_minmax_impl(vh, m3, mn, mx, _i))
+            if scalar:
+                fastpath.aabbs_minmax = _as_scalar
             b._aabb_staging = _th.local()
             for _ in range(3):
                 loom_lighting.LightingMixin._aabbs_batched(b, models, fw)
@@ -193,15 +211,69 @@ def main():
         finally:
             fastpath.aabbs_minmax = orig
 
-    t_scalar = _timed('scalar')
+    # 批量级: 一次内核调用吃整个 (n,V) 批 —— 与 ② 同一真实形状 (n=90, V=2035),
+    # 无逐模型 Python 组装开销, 是 AVX2 跨顶点并行收益真正体现的层级。
+    _bh, _bm3 = make(90, 2035, seed=2035)
+    _bmn = np.empty((_bh.shape[0], 3), dtype=np.float64)
+    _bmx = np.empty((_bh.shape[0], 3), dtype=np.float64)
+
+    def _batch_ms(scalar, reps=_BATCH_REPS):
+        """批量级单次内核耗时 (ms); scalar / 生产分派 与 _entry_ms 同口径。"""
+        orig = fastpath.aabbs_minmax
+        try:
+            if scalar:
+                fastpath.aabbs_minmax = _as_scalar
+            for _ in range(3):
+                fastpath.aabbs_minmax(_bh, _bm3, _bmn, _bmx)
+            t0 = _t.perf_counter()
+            for _ in range(reps):
+                fastpath.aabbs_minmax(_bh, _bm3, _bmn, _bmx)
+            return (_t.perf_counter() - t0) / reps * 1000.0
+        finally:
+            fastpath.aabbs_minmax = orig
+
+    def _ratio_median(measure, rounds=_PERF_ROUNDS):
+        """交替测 scalar / 生产分派, 返回 (每轮比值, 比值中位数, 标量中位数,
+        加速版中位数)。每轮交替先后顺序 —— 消温漂/负载漂移偏置。"""
+        rs, ts, tas = [], [], []
+        for r in range(rounds):
+            if r % 2 == 0:
+                t_s = measure(True)
+                t_a = measure(False)
+            else:
+                t_a = measure(False)
+                t_s = measure(True)
+            ts.append(t_s)
+            tas.append(t_a)
+            rs.append(t_a / max(t_s, 1e-9))
+        return rs, _st.median(rs), _st.median(ts), _st.median(tas)
+
     if fastpath.aabbs_simd_impl() == 1:
-        t_avx = _timed('auto')
-        print('  入口耗时: scalar=%.3f ms  avx2=%.3f ms  (比值 %.2f)'
-              % (t_scalar, t_avx, t_avx / max(t_scalar, 1e-9)))
-        check('性能门禁: 入口级 AVX2 <= 0.90x 标量', t_avx <= t_scalar * 0.90,
-              'ratio=%.2f' % (t_avx / max(t_scalar, 1e-9)))
+        # ---- 入口级: 宽松门 (B) ----
+        # 修后实测中位数分布 0.781~0.845 (空载 17 次 + 8 进程背景负载 2 次)。
+        # 阈值 1.05 → 相对最坏实测 0.845 留 24% 余量; 只挡「AVX2 反而比标量
+        # 慢」, 不在此设严格门 (入口级真实加速仅 ~1.2x, 信噪比不够)。
+        e_rs, e_med, t_scalar, t_avx = _ratio_median(_entry_ms)
+        print('  入口级 (7 轮交替, reps=%d): scalar=%.3f ms  avx2=%.3f ms  比值[%s] 中位数=%.3f'
+              % (_ENTRY_REPS, t_scalar, t_avx,
+                 ' '.join('%.2f' % x for x in e_rs), e_med))
+        check('性能门禁: 入口级 AVX2 不慢于标量 (<= 1.05x, 实测中位数 %.3f)' % e_med,
+              e_med <= 1.05, 'rounds=[%s]' % ' '.join('%.2f' % x for x in e_rs))
+
+        # ---- 批量级: 严格加速门 (B) ----
+        # 修后实测中位数分布 0.427~0.458 (空载 17 次 + 8 进程负载 2 次), 真实
+        # 加速 2.18~2.34x。阈值 0.65 (= 至少 1.54x) → 相对最坏实测 0.458 留 42%
+        # 余量; 真回归 (AVX2 收益掉到 1.54x 以下, 例如分派回退标量 → 比值 ~1.0) 必红。
+        b_rs, b_med, b_s, b_a = _ratio_median(_batch_ms)
+        print('  批量级 (n=90,V=2035; 7 轮交替, reps=%d): scalar=%.3f ms  avx2=%.3f ms  '
+              '比值[%s] 中位数=%.3f (加速 %.2fx)'
+              % (_BATCH_REPS, b_s, b_a, ' '.join('%.2f' % x for x in b_rs),
+                 b_med, 1.0 / max(b_med, 1e-9)))
+        check('性能门禁: 批量级 AVX2 <= 0.65x 标量 (>=1.54x 加速, 实测中位数 %.3f)' % b_med,
+              b_med <= 0.65, 'ratio=%.3f 加速=%.2fx' % (b_med, 1.0 / max(b_med, 1e-9)))
     else:
-        print('  (无 AVX2: 跳过入口级加速门禁, scalar=%.3f ms)' % t_scalar)
+        t_scalar = _entry_ms(True, reps=100)
+        print('  (无 AVX2: 跳过入口级/批量级加速门禁, scalar=%.3f ms)' % t_scalar)
     check('性能门禁: 入口级单批绝对上限 (<=40ms, 实测 %.2f)' % t_scalar, t_scalar <= 40.0)
 
     # LOOM_NO_SIMD=1 -> 强制标量 (子进程验证: 环境在首次探测时读一次)
