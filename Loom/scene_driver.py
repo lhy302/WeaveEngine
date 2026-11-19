@@ -38,6 +38,9 @@ import loom_frame_components as _lfc
 from loom_scene_entities import CameraState
 from scripts import get_script
 from loom_ui import UIManager, Canvas  # 2026-10-18: Canvas UI (替换 _DriverUI 空壳)
+# 2026-11-19 (P4-2): 轨道相机眼睛位置的**唯一实现**（GL 的 apply_orbit_camera 也调它）。
+# 修前 VK 里另有一份同公式拷贝（camera_pos），且 self.camera 从不由轨道相机更新。
+from loom_camera import orbit_camera_eye
 # 2026-11-18 (Q-B7-32-1 = ①): VK 宿主窗口的假全屏（F11）—— 与 GL 的
 # loom_glfw_window.GlfwWindowMixin._set_fullscreen 同语义（三步：去边框/铺桌面/置顶）。
 # 只含下划线成员，不进用户 API 面；GL 侧一行未动。
@@ -613,7 +616,12 @@ class SceneDriver(VkWindowMixin, EngineCore):
         # set_mouse_locked 只在「状态变了」或「后端还没落地成当前状态」时触发回调。
         self._lock_backend_applied = None
         self._pending_mouse_rel = (0.0, 0.0)     # 后端喂入的增量累积 (帧首结算成 mouse_rel)
-        self.camera = Point3D(0, 0, -5)          # 脚本接管相机 (first_person 等)
+        # 脚本接管相机 (first_person 等) 或玩家视角相机的**世界位置**。
+        # 2026-11-19 (P4-2): 轨道模式 (orbit_mode=True) 下它每渲染帧由
+        # _sync_orbit_camera_state() 从 target/yaw/pitch/distance 合成（与 GL
+        # loom_render._prepare_main_pass 每帧 apply_orbit_camera() 同语义同值），
+        # 否则 3D 听者永远钉在这个初始值上。
+        self.camera = Point3D(0, 0, -5)
         self.camera_yaw = 0.0
         self.camera_pitch = 0.0
         self.camera_roll = 0.0                   # 绕视线倾斜 (弧度) — 与 GL camera_roll 同
@@ -845,6 +853,12 @@ class SceneDriver(VkWindowMixin, EngineCore):
             self.apply_camera(_ac)
         else:
             self.orbit_mode = True
+            # 2026-11-19 (P4-2): 与 GL 加载路径同位置同语义（runtime.PlayerApp:
+            #   orbit_mode = True → apply_orbit_camera()）—— 把场景相机段
+            #   (target/yaw/pitch/distance) 合成进 self.camera / camera_yaw /
+            #   camera_pitch。修前这里只置 orbit_mode，self.camera 停在 (0,0,-5)，
+            #   于是 VK 的 3D 听者位置/朝向都是初值（门 ②b 红）。
+            self._sync_orbit_camera_state()
         # B1 (2026-08-30): 场景 'gravity' 字段 (m/s², 负=向下) — 物理桥 R1 用
         self.gravity = float(data.get('gravity', -9.8))
         # 分离批2: 场景加载边界 (首抓=加载位姿, 首帧不插值)
@@ -880,12 +894,10 @@ class SceneDriver(VkWindowMixin, EngineCore):
             c = getattr(self, 'camera', None)
             if c is not None:
                 return (c.x, c.y, c.z)
-        ez = (math.sin(self.yaw) * math.cos(self.pitch),
-              math.sin(self.pitch),
-              math.cos(self.yaw) * math.cos(self.pitch))
-        return (self.target[0] - self.distance * ez[0],
-                self.target[1] - self.distance * ez[1],
-                self.target[2] - self.distance * ez[2])
+        # 2026-11-19 (P4-2): 公式不再在本文件里抄一份 —— 调 loom_camera 的
+        # **唯一实现** orbit_camera_eye（GL 的 apply_orbit_camera 同一份）。数值不变。
+        _e = orbit_camera_eye(self.target, self.yaw, self.pitch, self.distance)
+        return (_e.x, _e.y, _e.z)
 
     # ---------------- 每帧步进 ----------------
     def _logic_frame(self, fixed_dt):
@@ -1055,6 +1067,13 @@ class SceneDriver(VkWindowMixin, EngineCore):
         # 2026-11-18（P0-3 步 1）：帧首把 key_state（键码）派生成 script_keys（键名）。
         # 与 GL 的事件泵/帧头刷新同语义；只增不覆盖 + 原地改，不会打断其它写者。
         self._sync_script_keys_from_state()
+        # 2026-11-19 (P4-2): 渲染帧开始、任何消费相机的地方之前，按 orbit_mode 把轨道
+        #   相机合成进 self.camera / camera_yaw / camera_pitch —— 与 GL
+        #   loom_render._prepare_main_pass 每渲染帧 apply_orbit_camera() 同位置同语义
+        #   （同一份纯函数）。修前 VK 的 self.camera 恒为 __init__ 的 (0,0,-5)、
+        #   camera_yaw/camera_pitch 恒 0 → 3D 听者钉死在原点（门 ②b 三条红）。
+        #   放在暂停分支之前: GL 暂停期渲染帧照跑 apply_orbit_camera（相机状态不冻）。
+        self._sync_orbit_camera_state()
         # 2026-11-06 输入/相机帧首 (与 GL 同序: 鼠标结算 -> 挂父相机重应用 ->
         # 开发者视角鼠标 -> 逻辑步 (脚本)) —— 脚本后写仍覆盖, 契约不变。
         # 2026-11-07 通关暂停: 逻辑帧冻结 (脚本/物理/动画都不走), 渲染继续
@@ -1117,6 +1136,12 @@ class SceneDriver(VkWindowMixin, EngineCore):
         self.update_scripts(render_dt)          # S4: 公共入口（TPS 样本 + 本类 impl）
         self._update_animations(render_dt)      # beta6 C1: 动画先于物理 (同序)
         self._step_physics(render_dt)
+        # 2026-11-19 (P4-4): 绑死模式（设置.json logic_fps<=0）**也必须有音频段** ——
+        #   与 GL 的两条绑死路径同序（engine.advance_logic 的 else 分支四段:
+        #   脚本→动画→物理→**音频**；loom_render._escape_door_step 同四段）：
+        #   物理之后、LateUpdate 之前。修前 VK 这条路径没有 audio 段 → 该配置下
+        #   VK 的 AudioSource 永不 play/stop（门 ③-c 红）。
+        self.update_audio(render_dt)
         # 2026-10-18 阶段1档序11 LateUpdate（绑死模式: update 之后）
         self._dispatch_late_update(render_dt)
         self._end_frame_input()
@@ -1142,6 +1167,15 @@ class SceneDriver(VkWindowMixin, EngineCore):
         self.update_scripts(dt)
         self._update_animations(dt)
         self._step_physics(dt)
+        # 2026-11-19 (P4-4): 无时钟（绑死模式）单步也要有音频段。
+        #   **以 GL 为准的核实结论**：GL **没有**独立的「无时钟单步」代码路径 ——
+        #   step_logic_once() 只置 _step_requested，真正跑帧的仍是 advance_logic 的
+        #   绑死四段（engine.py:1500-1504，含 update_audio）；GL 的 _step_requested
+        #   只在 clk is not None 的分支里被消费，绑死模式根本不看它。所以「绑死 +
+        #   F10 单步」在 GL 上就是 1 个绑死渲染帧 = 1 次音频段（探针实测 GL=1 次/步）。
+        #   VK 这里的分支是 VK 独有的实现路径（GL 无对应物），按 GL 的绑死帧口径
+        #   补同一段、同一位置（物理之后）。
+        self.update_audio(dt)
         return (1, 1)
 
     def _end_frame_input(self):
@@ -1891,6 +1925,37 @@ class SceneDriver(VkWindowMixin, EngineCore):
         cam = self.active_camera_object()
         if cam is not None and cam.parent is not None:
             self.apply_camera(cam)
+
+    def _sync_orbit_camera_state(self):
+        """轨道相机 → self.camera / camera_yaw / camera_pitch（**P4-2 修**，2026-11-19）。
+
+        语义与数值与 GL 的 loom_camera.CameraMixin.apply_orbit_camera **逐位一致**
+        （同一份纯函数 loom_camera.orbit_camera_eye）：
+          · GL: 每渲染帧 loom_render._prepare_main_pass 里按 orbit_mode 调
+                apply_orbit_camera（GL 那个同名方法），把
+                camera_target/camera_yaw/camera_pitch/camera_distance 合成进 self.camera
+                （加载时 runtime.PlayerApp 也调一次）;
+          · VK: 本方法由 advance_logic（渲染帧开始、任何消费相机的地方之前）与
+                load_from_data（轨道分支，与 GL 加载路径同位置）调用。
+
+        为什么还要写 camera_yaw/camera_pitch：VK 把「轨道相机角度」和「玩家相机角度」
+        分成两组字段（轨道用 self.yaw/self.pitch，玩家相机用 camera_yaw/camera_pitch），
+        而 GL 只有一组（轨道与玩家相机共用 camera_yaw/camera_pitch）。共享的
+        loom_frame_components.sync_audio_listener 读的是 camera_yaw/camera_pitch
+        （GL 的轨道角度就在那里），所以 VK 在轨道模式下必须把轨道角度镜像到这两个字段
+        —— 否则听者位置对了、朝向仍钉在 0/0（门 ②b 的 fwd/up 两条）。
+        （这是**最小适配**：VK 的数据结构分两组字段，公式与取值一字不改。）
+
+        玩家相机 / 脚本接管相机（orbit_mode=False）时本方法什么都不做 —— 那时
+        self.camera / camera_yaw/pitch/roll 由 apply_camera / 脚本写入，与 GL 同。
+        """
+        if not getattr(self, 'orbit_mode', True):
+            return
+        self.camera_roll = 0.0            # 与 GL 同不变式: 轨道(开发者)视角 roll 恒 0
+        self.camera_yaw = self.yaw        # 镜像轨道角度 → 听者的朝向输入源
+        self.camera_pitch = self.pitch
+        self.camera = orbit_camera_eye(self.target, self.yaw, self.pitch,
+                                       self.distance)
 
     def player_pitch_limits(self):
         """激活相机的俯仰角限制 (弧度) — 与 loom_camera.player_pitch_limits 同:

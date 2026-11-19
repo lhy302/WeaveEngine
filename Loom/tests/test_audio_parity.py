@@ -136,6 +136,31 @@ def _enforce_fail_exit_code():
     永不播/停（F10 单步同理）。归属：scene_driver.py:1109-1115 / :1133-1137。
   以上四条都是「本门红」的证据，**本任务只报告不修**（照 P1/P2/P3 先例按修前红提交）。
 
+修后（2026-11-19，HEAD=788a998 之上）：**105 PASS / 0 FAIL**（修前 100 PASS / 5 FAIL）。
+  · **P4-2 已修**（VK 听者跟随轨道相机）：轨道相机眼睛位置的公式抽成**唯一实现**
+    `loom_camera.orbit_camera_eye`（GL 的 `CameraMixin.apply_orbit_camera` 与 VK 都调它）；
+    VK 新增 `SceneDriver._sync_orbit_camera_state()`（语义/数值与 GL 的 apply_orbit_camera
+    逐位一致），在两处调用：`load_from_data` 的轨道分支（= GL runtime.PlayerApp 加载路径
+    同位置）与 `advance_logic` 帧首（= GL loom_render._prepare_main_pass 同位置，且在任何
+    消费相机的地方之前、暂停分支之前）。VK 因数据结构差异（轨道角度在 `yaw/pitch`、玩家
+    相机角度在 `camera_yaw/camera_pitch`，GL 两者共用一组）把轨道角度**镜像**到
+    `camera_yaw/camera_pitch` —— 共享的 `sync_audio_listener` 读的正是后者。
+    `sync_audio_listener` 的取源顺序**一行未动**（GL 行为零变化），`camera_pos` 里那份
+    同公式拷贝改为调共享纯函数（数值不变）。
+  · **P4-4 已修**（绑死模式 VK 补音频段）：`advance_logic` 的绑死分支与
+    `_step_one_logic_frame` 的无时钟分支各补 `self.update_audio(...)`，位置与 GL 同
+    （物理之后、LateUpdate/return 之前）。**以 GL 为准的核实**（`tests/_tmp/
+    p44_gl_bound_f10_check.py` 实测）：GL **没有**独立的无时钟单步路径（step_logic_once
+    只置 _step_requested，绑死分支不看它，暂停门控也只在 clk is not None 分支里），
+    「绑死 + F10 单步」在 GL 上 = 1 个绑死渲染帧 = **1 次音频段**（实测 GL=1），
+    故 VK 的无时钟单步分支**也要**调 audio（修前 VK=0）。
+  · **两条「锁住缺陷」的结构探针已随修复翻转**（唯一改动的两条既有断言，行为面断言
+    一条未动、条数 105 不变、无阈值/容差）：〇 段的 `self.update_audio(` 调用点计数
+    5 → 7（VK 1 → 3），以及 `apply_orbit_camera(` 探针改为「公式只有 loom_camera.
+    orbit_camera_eye 一份 + scene_driver 有加载/每渲染帧两处同步调用点」。理由：这两条
+    探针的标题本身就写着缺陷（P4-2 / P4-4），修好后旧断言的前提被证明为假（反模式 4
+    「先证明旧断言错了」），留着它们会把「已修的缺陷」写成「仍然存在」（反模式 10）。
+
 未核（本门不覆盖，留痕）：
   · 设备级 3D 声像（左右声道/距离衰减曲线）：需 game_audio(miniaudio) + 真声卡；本门固定
     LOOM_AUDIO_BACKEND=pygame 以保证无设备可跑 → 3D **参数面**（位置/距离/衰减/监听器）
@@ -270,10 +295,14 @@ src_has('scene_driver.py', 'return _lfc.update_audio(self, dt)', True,
 src_has('scene_driver.py', 'return _lfc.sync_audio_listener(self)', True,
         'VK 的 _sync_audio_listener 也是同一份（:937）')
 _ua_calls = _grep_prod('self.update_audio(')
-check('结构：self.update_audio( 的生产调用点恰好 5 处（GL: engine 逻辑帧 2 + 绑死 1 + '
-      'loom_render 绑死 1；VK: scene_driver 逻辑帧 1）',
+# 2026-11-19 (P4-4 修复后): VK 由 1 处变 3 处 —— 逻辑帧 + **绑死分支** +
+#   **无时钟单步分支**（后两处是本项修法）。本探针由「锁住缺陷」翻转为「锁住修复」:
+#   条数不许再变少（少一处 = 又漏了一条绑死路径），也不许多（多一处 = 音频段重复跑）。
+check('结构：self.update_audio( 的生产调用点恰好 7 处（GL: engine 逻辑帧 2 + 绑死 1 + '
+      'loom_render 绑死 1；VK: scene_driver 逻辑帧 1 + 绑死 1 + 无时钟单步 1）',
       sorted(p for (p, _l) in _ua_calls) == ['engine.py', 'engine.py', 'engine.py',
-                                             'loom_render.py', 'scene_driver.py'],
+                                             'loom_render.py', 'scene_driver.py',
+                                             'scene_driver.py', 'scene_driver.py'],
       _ua_calls)
 _as_cls = _grep_prod('class AudioSystem')
 check('结构：class AudioSystem 只在 loom_components.py（唯一音频门面）',
@@ -293,8 +322,19 @@ check('结构：def stop_sound 在生产代码里 0 处（两端都没有这个�
       not _ss, _ss)
 _aoc = _grep_prod('apply_orbit_camera(')
 _vk_aoc = [h for h in _aoc if h[0].startswith('scene_driver')]
-check('结构：VK（scene_driver.py）没有任何 apply_orbit_camera() 调用点 —— 它的 '
-      'self.camera 不会被轨道相机更新（P4-2）', not _vk_aoc, _vk_aoc)
+# 2026-11-19 (P4-2 修复后): VK **仍然**没有 apply_orbit_camera() 调用点 —— 它复用
+#   的是同一个纯函数（loom_camera.orbit_camera_eye），不是 GL 那个读 camera_yaw/
+#   camera_distance 的 mixin 方法（VK 的轨道角度在 self.yaw/self.pitch，字段不同构）。
+#   本探针由「锁住缺陷」翻转为「锁住修复」: 公式只许有一份实现，且 VK 的
+#   self.camera 必须由「加载 + 每渲染帧」两处同步调用合成。
+_sync_aoc = _grep_prod('self._sync_orbit_camera_state()')
+_eye_defs = _grep_prod('def orbit_camera_eye')
+check('结构：VK 的 self.camera 由轨道相机合成（P4-2 已修）—— 公式只有 loom_camera.'
+      'orbit_camera_eye 一份，scene_driver 有「加载 + 每渲染帧」两处同步调用点',
+      not _vk_aoc
+      and [p for (p, _l) in _eye_defs] == ['loom_camera.py']
+      and sorted(p for (p, _l) in _sync_aoc) == ['scene_driver.py', 'scene_driver.py'],
+      (_vk_aoc, _eye_defs, _sync_aoc))
 src_has('loom_render.py', 'self.apply_orbit_camera()', True,
         'GL 每渲染帧把轨道相机合成到 self.camera（:1053，听者的输入源）')
 src_has('scene_driver.py', 'self.audio = None', True,

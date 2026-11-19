@@ -47,6 +47,25 @@ def clamp_camera_distance(v, default=10.0):
     return max(CAM_DIST_MIN, min(CAM_DIST_MAX, f))
 
 
+def orbit_camera_eye(target, yaw, pitch, distance):
+    """轨道相机眼睛位置 —— **唯一实现**（2026-11-19 P4-2）。
+
+    ez = (sin yaw * cos pitch, sin pitch, cos yaw * cos pitch) 为相机前方 (+z_view),
+    eye = target - distance * ez。
+
+    两个调用方（解耦规则 3：共享前置抽成唯一实现，不许各写一套公式）：
+      · GL  CameraMixin.apply_orbit_camera（每渲染帧合成进 self.camera）;
+      · VK  scene_driver.SceneDriver._sync_orbit_camera_state（每渲染帧 + 加载时合成
+            进 self.camera / camera_yaw / camera_pitch —— 3D 听者的输入源, P4-2）。
+    """
+    ez = (math.sin(yaw) * math.cos(pitch),
+          math.sin(pitch),
+          math.cos(yaw) * math.cos(pitch))
+    return Point3D(target[0] - distance * ez[0],
+                   target[1] - distance * ez[1],
+                   target[2] - distance * ez[2])
+
+
 class CameraMixin:
 
     def apply_orbit_camera(self):
@@ -55,14 +74,10 @@ class CameraMixin:
         M41 修复: 开发者轨道相机恒直立 —— 强制 camera_roll=0 (预览倾斜相机/播放还原
         不会把 roll 残留到轨道视角)."""
         self.camera_roll = 0.0       # 不变式: 轨道(开发者)视角 roll 恒 0
-        yaw, pitch, dist = self.camera_yaw, self.camera_pitch, self.camera_distance
-        ez = (math.sin(yaw) * math.cos(pitch),
-              math.sin(pitch),
-              math.cos(yaw) * math.cos(pitch))
-        t = self.camera_target
-        self.camera = Point3D(t[0] - dist * ez[0],
-                              t[1] - dist * ez[1],
-                              t[2] - dist * ez[2])
+        # 2026-11-19 P4-2: 公式搬进模块级 orbit_camera_eye（VK 的轨道相机同步调
+        # **同一份**，两端不再各写一套）；本方法的语义与数值逐位不变。
+        self.camera = orbit_camera_eye(self.camera_target, self.camera_yaw,
+                                       self.camera_pitch, self.camera_distance)
 
     def move_camera(self, delta_time):
         """根据按键状态移动相机"""
