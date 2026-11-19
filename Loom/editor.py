@@ -26,6 +26,7 @@ from loom_post import post_enabled   # 2B2: LOOM_POST=0 走旧路径
 
 from engine import (GLEngine, Point3D, LightState, CameraState, wrap_deg,
                     gc_play_enter, gc_play_exit)
+from engine_core import EngineCore     # S2 阶段2: _EditorCore 的内核底座（后端无关）
 from matlib import (mat4_perspective, mat4_ortho, mat4_rotation, mat4_scale,
                     mat4_translation, mat4_view_yaw_pitch, decompose_euler)
 from mesh import create_cube, create_plane, create_sphere, spec_to_mesh
@@ -156,146 +157,21 @@ def _editor_skybox_provider(engine, cmd):
         print('[渲染] 天空盒绘制失败: %r' % (_e,))
 
 
-class EditorApp(GLEngine):
-    def __init__(self, width=1280, height=800, scene_path=None, view=None, ctx=None):
-        # ctx 注入 = 嵌入式模式 (Qt 宿主): 见 GLEngine.__init__ 注释 (IME 污染修复)
-        super().__init__(width, height, ctx=ctx)
-        # 2026-11-10 阶段 2A: 天空 pass 的绘制源用编辑器版（失败每帧打印, 与迁移前一致）
-        self._frame_executor.draws['skybox'] = _editor_skybox_provider
-        self.allow_fullscreen = False   # 编辑器禁 F11 全屏 (只留最大化+自由缩放; 2026-08-17)
-        global DEFAULT_SAVE_DIR   # 设置面板改"保存目录"时覆盖模块默认值
-        # ================ 编辑器状态 ================
-        # UI 层 (IEditorView, 见 ui/editor_ui.py) 可注入: 官方 GUI = LoomGUI
-        # (ui/loom_gui.py, Qt 原生, 由入口 run_loom_gui 创建后注入); 换 UI 只需
-        # 传另一个实现 —— 引擎/逻辑零改动. 未注入时的兜底 = MinimalEditorView
-        # (零 Qt/pygame 依赖, 2026-08-28 起; 旧默认 pygame 即时 GUI 已删除).
-        # 注意: self.ui 是引擎 Canvas UI (loom_ui.UIManager), 编辑器视图用 self.view 区分.
-        if view is None:
-            from ui.minimal_editor_view import MinimalEditorView
-            view = MinimalEditorView()
-        self.view = view
-        self.view.attach(self)
-        self.selected_index = 0
-        self.selected_light_index = -1    # 选中光源 (>=0 时优先于 selected_index)
-        self.selected_camera_index = -1   # 选中摄像机 (Unity Camera, 优先于光源/物体)
-        self.gizmo_mode = 'translate'     # 'translate' | 'rotate'
-        self.gizmo_axis = None            # 当前拖拽/高亮的轴 ('X'/'Y'/'Z' 或 None)
-        self.gizmo_drag = None            # 拖拽状态 (axis, start_pos) 或 None
-        self.gizmo_undo_before = None     # 拖拽开始的快照 (结束时压撤销栈)
-        self.scene_name = '场景'          # 场景名 (保存对话框的默认文件名)
-        self._scene_path = None
-        # 状态栏提示 (toast): 命名非法/导入结果/设置项待重启生效等. _msg_until 到期清空.
-        self.msg = ""
-        self.msg_color = (220, 222, 228)
-        self._msg_until = 0.0
-        self.last_dir = load_last_dir()   # 上次保存/打开的目录 (M19)
-        # Q3=A (2026-11-07): 删除仍有子物体的父对象 = 连整棵子树一起删 (Unity 语义).
-        # UI 层可注入 self._confirm_delete_callback(model, n_children) -> bool,
-        # 在删除前弹确认框显示子物体数量; 无注入 (无头测试/最小视图) 直接删.
-        self._confirm_delete_callback = None
-        # 2026-10-19 B2: 旧"保存/"自动迁移为"Projects/"（仅首次，rename 原子操作）
-        try:
-            # 2026-11-06: 迁移前加显式开关。这是**破坏性**操作 (rename 掉受
-            # 版本控制的目录), 测试/CI/批量工具应设 LOOM_NO_SAVE_MIGRATE=1
-            # 关掉, 而不是各自重定向常量 (复核 A 实测: 未重定向的 EditorApp
-            # 一实例化就会把 保存/ 改名成 Projects/)。
-            if (os.environ.get("LOOM_NO_SAVE_MIGRATE") != "1"
-                    and os.path.isdir(_LEGACY_SAVE_DIR)
-                    and not os.path.isdir(DEFAULT_SAVE_DIR)):
-                os.rename(_LEGACY_SAVE_DIR, DEFAULT_SAVE_DIR)
-                print("[编辑器] 项目目录已迁移: 保存/ -> Projects/")
-        except OSError as _e:
-            print("[编辑器] 项目目录迁移失败 (忽略，继续用 保存/): %r" % (_e,))
-        os.makedirs(DEFAULT_SAVE_DIR, exist_ok=True)
-        # 设置面板里改的"保存目录"覆盖默认保存目录 (启动器设置, 2026-08-14)
-        try:
-            import guiloader
-            _sd = guiloader.load_settings('loom').get('save_dir')
-            if _sd:
-                DEFAULT_SAVE_DIR = _sd
-                os.makedirs(DEFAULT_SAVE_DIR, exist_ok=True)
-        except Exception:
-            pass
-        self.prefab_name = 'prefab'       # 存/放 Prefab 用的文件名
-        self.prefab_count = 0             # 实例计数 (每次放置递增避免重叠)
+class _EditorCore(EngineCore):
+    """S2（Q-B7-47-1 五阶段·阶段 2）：编辑器能力的**中间基类**（后端无关）。
 
-        # 撤销/重做 (M15)
-        self.undo = UndoManager()
+    原 EditorApp 类体（除 __init__ 外的全部编辑器方法/类属性）**原样搬入本类，
+    一行不改**（纯搬家，行为零变化）—— MRO 探针与 R6 门（test_editor_field_alias.py ④）
+    已验证装配形状：
 
-        # 检查器拖拽撤销: field_key -> 拖拽开始快照 (M15)
-        self._insp_undo_start = {}
-        self._name_was_focused = False
-        self._name_before = None
-        # 光源检查器撤销 (M21): 光源属性拖拽/名称失焦
-        self._light_undo_start = {}
-        self._li_name_was_focused = False
-        self._li_name_before = None
-        # 摄像机检查器撤销 (Unity Camera): 摄像机属性拖拽/名称失焦
-        self._cam_undo_start = {}
-        self._cam_name_was_focused = False
-        self._cam_name_before = None
-        # 摄像机"用此相机预览" (M41): 编辑器视口切到某摄像机视角; _preview_orbit 记录进入前轨道
-        self.preview_camera = None
-        self._preview_orbit = None
+        EditorApp(_EditorCore, GLEngine)      # GL 编辑器（本文件下方，现有入口）
+        EditorApp → _EditorCore → GLEngine → EngineCore → …内核 mixin… → …GL mixin…
 
-        # 层级拖拽挂父 (M14): (被拖模型) 或 None
-        self._hier_drag = None
+    本类**无自己的 __init__**：EditorApp.__init__ 的 super().__init__(w,h,ctx=ctx)
+    直落 GLEngine.__init__，GL 装配逐位不变。
+    （VK 编辑器占位：S4 建 `VkEditorApp(_EditorCore, SceneDriver)`，本阶段不写实现。）
+    """
 
-        # 资源浏览器 (M24): 选中的资产键 (type, key) 或 None; 拖拽源资产项或 None
-        self._res_selected = None
-        self._res_drag = None
-        self._hier_row_targets = []      # 层级行 (rect, model) 命中表, 资源材质可拖到行上应用
-
-        # 播放模式 (M26): 编辑/播放分离. 播放时快照场景跑脚本, 退出丢弃改动还原.
-        self.is_playing = False
-        self._play_models = None       # 播放开始时模型引用列表 (还原/清理用)
-        self._play_lights = None
-        self._play_snap = None         # {id(m): undo_snapshot} 播放开始时的编辑态快照
-        self._play_light_snap = None
-        self._play_parents = None      # {id(m): parent}
-        self._play_cameras = None      # 播放开始时的摄像机引用列表
-        self._play_camera_snap = None  # {id(c): camera_snapshot}
-        self._play_active_camera = None  # 播放开始时的 active_camera
-        self._play_edit_cam = None     # 播放开始时的编辑器视角 (退出恢复轨道相机)
-
-        # 轨道相机初始姿态
-        self.orbit_mode = True
-        self.camera_target = (0.0, 0.0, 0.0)
-        self.camera_distance = 10.0
-        self.camera_yaw = 0.6
-        self.camera_pitch = -0.35
-        # 2026-11-07 2D: 主相机正交投影 (ortho=True 时用 ortho_size 作为可见高度)
-        self.ortho = False
-        self.ortho_size = 12.0
-        # 2026-11-07 C: Agent 自动聚焦/相机聚焦插值状态 (None = 无动画)
-        self._focus_anim = None
-        self.apply_orbit_camera()
-        self._cam_prev_mouse = (0, 0)   # 相机拖拽的上帧鼠标
-        self._right_drag_view = False   # 2026-08-12: 视口内按下右键即激活视角拖动, 拖出视口仍持续到松开 (Unity 风格)
-
-        # 面板布局状态 (2026-08-14 晚: 分隔条拖动 + 收起, 显示层/交互层共读)
-        self.panel_left_w = 220         # 左列宽 (层级+资源)
-        self.panel_right_w = 280        # 右列宽 (检查器)
-        self.panel_hier_frac = 0.55     # 左列上层级占比
-        self.hier_list_h = None         # 层级面板内"列表"高 (px, 固定; 拖列表/操作横线才改,
-                                        # 2026-08-15 独立于层级面板缩放, 不因拖 hdiv 级联移动)
-        self.panel_left_collapsed = False   # 左列收起 (薄条, 舞台视野更大)
-        self.panel_right_collapsed = False  # 右列收起
-
-        # 清掉 GLEngine 默认场景, 换成编辑器种子场景
-        for m in list(self.models):
-            self.remove_model(m)
-        self._seed_scene()
-        self.mark_saved()        # 种子场景视为"已保存"基线 (未改动时新建不询问)
-
-        # 打开项目 (--open <scene.json>): 启动即加载指定场景.
-        # 由项目管理器"打开项目"调用, 覆盖种子场景进入该项目工作.
-        # (2026-08-18) 无场景时的"自动恢复上次场景"由 Qt 入口层 (run_loom_gui)
-        # 负责 —— 引擎层保持纯净, 无头测试构造不受影响, pygame 版行为不变.
-        if scene_path:
-            self._load_scene(scene_path)
-
-    # ================ 种子场景 ================
     def _seed_scene(self):
         """默认场景: 地面平面 + 立方体 + 球体 (尺寸对齐 Unity 默认: 10/1/0.5)"""
         plane = create_plane(10.0, 10.0); plane.primitive = 'plane'
@@ -2446,7 +2322,7 @@ class EditorApp(GLEngine):
         self._prof_add('mt_mp_camera', _t)
         _t = self._prof_t0()
         # T3c-1: mvp/cam/灯光 全部由 _upload_lights() 一次性写 Scene UBO
-        self._upload_lights()
+        self._backend_upload_lights()
         self._prof_add('mt_mp_uniforms', _t)
         self._t_mp_draws = self._prof_t0()
 
@@ -2517,11 +2393,11 @@ class EditorApp(GLEngine):
         # 批5: 阴影/碰撞 prep 逻辑帧缓存; 编辑态走旧路径分支 (逃生门内)
         # 2026-08-15 8 核均摊: 阴影 VP (只读) 与碰撞检测 (只读, 仅播放期) 池上并行;
         # 编辑期只算阴影缓存 (不跑碰撞事件)
-        self._profile('shadow_prep', lambda: self._parallel_shadow_and_collision(
+        self._profile('shadow_prep', lambda: self._backend_parallel_shadow_and_collision(
             delta_time, with_events=self.is_playing))
         # A2 (2026-08-29): 当帧实例数据准备 (f32 矩阵 + 桶重排 + 桶级实例缓冲),
         # 阴影/主 pass 共享 (逐物体 uniform/upload 循环已取消)
-        self._profile('buckets', lambda: self._prepare_bucket_frame())
+        self._profile('buckets', lambda: self._backend_prepare_bucket_frame())
         # 2026-11-10 阶段 2B1（S3）: 阴影也进 FramePlan（GL 侧是真深度目标；
         # 逐光源/逐面 FBO 仍归 loom_shadow，描述里标 owned_by_provider）。
         self._t_shadow = self._prof_t0()
@@ -2547,8 +2423,8 @@ class EditorApp(GLEngine):
                           include_ui=(getattr(self, 'ui', None) is not None
                                       and self.is_playing),
                           include_post=post_enabled())
-        self._frame_executor.execute(plan, prepare=self._prepare_main_pass,
-                                     after_pass=self._after_pass_prof)
+        self._backend_execute_frame(plan, prepare=self._prepare_main_pass,
+                                    after_pass=self._after_pass_prof)
         # 相机策略见 _prepare_main_pass (S1: 播放态与播放器同源 —— 走
         # _apply_main_pass_camera; 挂父相机跟随在 render 早段 _reapply_parent_camera。
         # 旧「★2026-09-06 播放态=编辑态同一轨道相机」注释已随裁决更新, 见上)。
@@ -2944,3 +2820,152 @@ class EditorApp(GLEngine):
                 self.camera_pitch = max(-1.55, self.camera_pitch - rot)
 
         self._cam_prev_mouse = (px, py)
+
+class EditorApp(_EditorCore, GLEngine):
+    """GL 编辑器入口（Q-B7-47-1 五阶段·阶段 2，行为零变化）。
+
+    编辑器能力在 _EditorCore（后端无关中间基类）；GL 装配在 GLEngine。本类只保留
+    __init__（装配入口），其余成员全部继承自 _EditorCore。
+    VK 编辑器（VkEditorApp(_EditorCore, SceneDriver)）S4 再建 —— 本阶段只留占位。
+    """
+
+    def __init__(self, width=1280, height=800, scene_path=None, view=None, ctx=None):
+        # ctx 注入 = 嵌入式模式 (Qt 宿主): 见 GLEngine.__init__ 注释 (IME 污染修复)
+        super().__init__(width, height, ctx=ctx)
+        # 2026-11-10 阶段 2A: 天空 pass 的绘制源用编辑器版（失败每帧打印, 与迁移前一致）
+        self._frame_executor.draws['skybox'] = _editor_skybox_provider
+        self.allow_fullscreen = False   # 编辑器禁 F11 全屏 (只留最大化+自由缩放; 2026-08-17)
+        global DEFAULT_SAVE_DIR   # 设置面板改"保存目录"时覆盖模块默认值
+        # ================ 编辑器状态 ================
+        # UI 层 (IEditorView, 见 ui/editor_ui.py) 可注入: 官方 GUI = LoomGUI
+        # (ui/loom_gui.py, Qt 原生, 由入口 run_loom_gui 创建后注入); 换 UI 只需
+        # 传另一个实现 —— 引擎/逻辑零改动. 未注入时的兜底 = MinimalEditorView
+        # (零 Qt/pygame 依赖, 2026-08-28 起; 旧默认 pygame 即时 GUI 已删除).
+        # 注意: self.ui 是引擎 Canvas UI (loom_ui.UIManager), 编辑器视图用 self.view 区分.
+        if view is None:
+            from ui.minimal_editor_view import MinimalEditorView
+            view = MinimalEditorView()
+        self.view = view
+        self.view.attach(self)
+        self.selected_index = 0
+        self.selected_light_index = -1    # 选中光源 (>=0 时优先于 selected_index)
+        self.selected_camera_index = -1   # 选中摄像机 (Unity Camera, 优先于光源/物体)
+        self.gizmo_mode = 'translate'     # 'translate' | 'rotate'
+        self.gizmo_axis = None            # 当前拖拽/高亮的轴 ('X'/'Y'/'Z' 或 None)
+        self.gizmo_drag = None            # 拖拽状态 (axis, start_pos) 或 None
+        self.gizmo_undo_before = None     # 拖拽开始的快照 (结束时压撤销栈)
+        self.scene_name = '场景'          # 场景名 (保存对话框的默认文件名)
+        self._scene_path = None
+        # 状态栏提示 (toast): 命名非法/导入结果/设置项待重启生效等. _msg_until 到期清空.
+        self.msg = ""
+        self.msg_color = (220, 222, 228)
+        self._msg_until = 0.0
+        self.last_dir = load_last_dir()   # 上次保存/打开的目录 (M19)
+        # Q3=A (2026-11-07): 删除仍有子物体的父对象 = 连整棵子树一起删 (Unity 语义).
+        # UI 层可注入 self._confirm_delete_callback(model, n_children) -> bool,
+        # 在删除前弹确认框显示子物体数量; 无注入 (无头测试/最小视图) 直接删.
+        self._confirm_delete_callback = None
+        # 2026-10-19 B2: 旧"保存/"自动迁移为"Projects/"（仅首次，rename 原子操作）
+        try:
+            # 2026-11-06: 迁移前加显式开关。这是**破坏性**操作 (rename 掉受
+            # 版本控制的目录), 测试/CI/批量工具应设 LOOM_NO_SAVE_MIGRATE=1
+            # 关掉, 而不是各自重定向常量 (复核 A 实测: 未重定向的 EditorApp
+            # 一实例化就会把 保存/ 改名成 Projects/)。
+            if (os.environ.get("LOOM_NO_SAVE_MIGRATE") != "1"
+                    and os.path.isdir(_LEGACY_SAVE_DIR)
+                    and not os.path.isdir(DEFAULT_SAVE_DIR)):
+                os.rename(_LEGACY_SAVE_DIR, DEFAULT_SAVE_DIR)
+                print("[编辑器] 项目目录已迁移: 保存/ -> Projects/")
+        except OSError as _e:
+            print("[编辑器] 项目目录迁移失败 (忽略，继续用 保存/): %r" % (_e,))
+        os.makedirs(DEFAULT_SAVE_DIR, exist_ok=True)
+        # 设置面板里改的"保存目录"覆盖默认保存目录 (启动器设置, 2026-08-14)
+        try:
+            import guiloader
+            _sd = guiloader.load_settings('loom').get('save_dir')
+            if _sd:
+                DEFAULT_SAVE_DIR = _sd
+                os.makedirs(DEFAULT_SAVE_DIR, exist_ok=True)
+        except Exception:
+            pass
+        self.prefab_name = 'prefab'       # 存/放 Prefab 用的文件名
+        self.prefab_count = 0             # 实例计数 (每次放置递增避免重叠)
+
+        # 撤销/重做 (M15)
+        self.undo = UndoManager()
+
+        # 检查器拖拽撤销: field_key -> 拖拽开始快照 (M15)
+        self._insp_undo_start = {}
+        self._name_was_focused = False
+        self._name_before = None
+        # 光源检查器撤销 (M21): 光源属性拖拽/名称失焦
+        self._light_undo_start = {}
+        self._li_name_was_focused = False
+        self._li_name_before = None
+        # 摄像机检查器撤销 (Unity Camera): 摄像机属性拖拽/名称失焦
+        self._cam_undo_start = {}
+        self._cam_name_was_focused = False
+        self._cam_name_before = None
+        # 摄像机"用此相机预览" (M41): 编辑器视口切到某摄像机视角; _preview_orbit 记录进入前轨道
+        self.preview_camera = None
+        self._preview_orbit = None
+
+        # 层级拖拽挂父 (M14): (被拖模型) 或 None
+        self._hier_drag = None
+
+        # 资源浏览器 (M24): 选中的资产键 (type, key) 或 None; 拖拽源资产项或 None
+        self._res_selected = None
+        self._res_drag = None
+        self._hier_row_targets = []      # 层级行 (rect, model) 命中表, 资源材质可拖到行上应用
+
+        # 播放模式 (M26): 编辑/播放分离. 播放时快照场景跑脚本, 退出丢弃改动还原.
+        self.is_playing = False
+        self._play_models = None       # 播放开始时模型引用列表 (还原/清理用)
+        self._play_lights = None
+        self._play_snap = None         # {id(m): undo_snapshot} 播放开始时的编辑态快照
+        self._play_light_snap = None
+        self._play_parents = None      # {id(m): parent}
+        self._play_cameras = None      # 播放开始时的摄像机引用列表
+        self._play_camera_snap = None  # {id(c): camera_snapshot}
+        self._play_active_camera = None  # 播放开始时的 active_camera
+        self._play_edit_cam = None     # 播放开始时的编辑器视角 (退出恢复轨道相机)
+
+        # 轨道相机初始姿态
+        self.orbit_mode = True
+        self.camera_target = (0.0, 0.0, 0.0)
+        self.camera_distance = 10.0
+        self.camera_yaw = 0.6
+        self.camera_pitch = -0.35
+        # 2026-11-07 2D: 主相机正交投影 (ortho=True 时用 ortho_size 作为可见高度)
+        self.ortho = False
+        self.ortho_size = 12.0
+        # 2026-11-07 C: Agent 自动聚焦/相机聚焦插值状态 (None = 无动画)
+        self._focus_anim = None
+        self.apply_orbit_camera()
+        self._cam_prev_mouse = (0, 0)   # 相机拖拽的上帧鼠标
+        self._right_drag_view = False   # 2026-08-12: 视口内按下右键即激活视角拖动, 拖出视口仍持续到松开 (Unity 风格)
+
+        # 面板布局状态 (2026-08-14 晚: 分隔条拖动 + 收起, 显示层/交互层共读)
+        self.panel_left_w = 220         # 左列宽 (层级+资源)
+        self.panel_right_w = 280        # 右列宽 (检查器)
+        self.panel_hier_frac = 0.55     # 左列上层级占比
+        self.hier_list_h = None         # 层级面板内"列表"高 (px, 固定; 拖列表/操作横线才改,
+                                        # 2026-08-15 独立于层级面板缩放, 不因拖 hdiv 级联移动)
+        self.panel_left_collapsed = False   # 左列收起 (薄条, 舞台视野更大)
+        self.panel_right_collapsed = False  # 右列收起
+
+        # 清掉 GLEngine 默认场景, 换成编辑器种子场景
+        for m in list(self.models):
+            self.remove_model(m)
+        self._seed_scene()
+        self.mark_saved()        # 种子场景视为"已保存"基线 (未改动时新建不询问)
+
+        # 打开项目 (--open <scene.json>): 启动即加载指定场景.
+        # 由项目管理器"打开项目"调用, 覆盖种子场景进入该项目工作.
+        # (2026-08-18) 无场景时的"自动恢复上次场景"由 Qt 入口层 (run_loom_gui)
+        # 负责 —— 引擎层保持纯净, 无头测试构造不受影响, pygame 版行为不变.
+        if scene_path:
+            self._load_scene(scene_path)
+
+    # ================ 种子场景 ================
+

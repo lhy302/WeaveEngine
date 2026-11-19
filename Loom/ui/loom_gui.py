@@ -1148,7 +1148,7 @@ class LoomGUI(QMainWindow):
             # 物体遮挡 (用户实测"拉条被物体挡住无法拖动"); scope enable_only=0
             # 关全部深度测试. enable_only 破坏 GL_LINE_WIDTH 由 draw_lines 内部
             # 每帧重设 2.0 抵消 (2026-08-18 修复), 选中框已同款实践证明有效.
-            with ctl.ctx.scope(framebuffer=ctl._screen_fb(), enable_only=0):
+            with ctl.overlay_scope(framebuffer=ctl._screen_fb(), enable_only=0):
                 ctl.draw_lines(lines, cols)
 
     def _icon_size(self, ctl, p):
@@ -1265,7 +1265,7 @@ class LoomGUI(QMainWindow):
                     lines.append(corners[a]); lines.append(corners[b])
                     cols += [col, col]
         # 2026-08-22: 光源指示线/锥/截面恒可见 (同 gizmo A11 修复)
-        with ctl.ctx.scope(framebuffer=ctl._screen_fb(), enable_only=0):
+        with ctl.overlay_scope(framebuffer=ctl._screen_fb(), enable_only=0):
             ctl.draw_lines(lines, cols)
 
     def _draw_camera_icons(self, ctl):
@@ -1311,7 +1311,7 @@ class LoomGUI(QMainWindow):
                 except Exception:
                     pass
                 # 2026-08-22: 相机朝向线/锥/roll 箭头恒可见 (同 gizmo A11 修复)
-                with ctl.ctx.scope(framebuffer=ctl._screen_fb(), enable_only=0):
+                with ctl.overlay_scope(framebuffer=ctl._screen_fb(), enable_only=0):
                     ctl.draw_lines(lines, cols)
 
     # ---------------- FPS 缓冲: 空窗预画 ----------------

@@ -26,6 +26,7 @@
 """
 import os
 import time
+from contextlib import contextmanager
 
 import numpy as np
 
@@ -421,6 +422,25 @@ class RenderMixin:
             return
         self.ctx.clear(r, g, b, a)
 
+    # ============ S2（Q-B7-47-1 阶段 2）④：叠加层状态作用域钩子 ============
+    # 视图层（ui/loom_gui）的网格/gizmo/图标叠加原来直接摸 `ctl.ctx.scope(...)` +
+    # `ctl.ctx.enable(...)` —— GL 专用 API 渗进了共享视图代码。S2 起改走
+    # `ctl.overlay_scope(...)`：GL 侧原样转发 moderngl（本实现），S3 再加 VK 实现 ——
+    # 两端共用同一份叠加层代码的铺路（同源不同步，规则 5.5）。
+    _OVERLAY_ENABLE_FLAGS = {'depth_test': moderngl.DEPTH_TEST,
+                             'blend': moderngl.BLEND}
+
+    @contextmanager
+    def overlay_scope(self, framebuffer=None, enable_only=None, enable=()):
+        """叠加层 GL 状态作用域（GL 唯一实现；视图层不许再直接摸 ctx.scope）。"""
+        # framebuffer / enable_only 逐字透传 moderngl.Context.scope；enable 是具名
+        # 开关（'depth_test' / 'blend'），进作用域即启用 —— 与迁移前「scope 进入后
+        # 紧接 ctx.enable(...)」**同一顺序**，行为零变化。
+        with self.ctx.scope(framebuffer=framebuffer, enable_only=enable_only):
+            for flag in enable:
+                self.ctx.enable(self._OVERLAY_ENABLE_FLAGS[flag])
+            yield
+
     def _screen_fb(self):
         """当前渲染目标 FBO. pygame 模式 = ctx.screen (窗口默认 FBO);
         嵌入式模式 (Qt QOpenGLWidget) = 宿主缓存的 widget FBO (qt_view.paintGL
@@ -529,6 +549,21 @@ class RenderMixin:
         else:
             rad = np.empty(0, dtype=np.float64)
         return self._spheres_in_frustum(centers, rad, planes)
+
+    # ============ S2（Q-B7-47-1 阶段 2）：B 类方法的后端钩子（GL 原样转发） ============
+    # 共享渲染路径（editor.render / loom_render.render）只许调 `_backend_*` 钩子
+    # （契约口径：后端差异只许出现在钩子里）；GL 钩子**原样转发**给本 mixin 的现行
+    # 实现 —— 转发体一行不改，行为零变化。不许在 EngineCore 写同名空实现
+    # （反模式 2：MRO 会遮住 GL 的实现）。VK 侧钩子 S4 再建。
+    def _backend_prepare_bucket_frame(self):
+        """钩子（GL）：每帧桶实例数据准备，原样转发 _prepare_bucket_frame。"""
+        return self._prepare_bucket_frame()
+
+    def _backend_execute_frame(self, plan, prepare=None, before_pass=None, after_pass=None):
+        """钩子（GL）：FramePlan 执行，原样转发 _frame_executor.execute（GLFrameExecutor）。"""
+        return self._frame_executor.execute(plan, prepare=prepare,
+                                            before_pass=before_pass,
+                                            after_pass=after_pass)
 
     def _prepare_bucket_frame(self):
         """A2 (2026-08-29) 每帧一次: 当帧世界矩阵 f32 化 + 按 mesh 桶重排 +
@@ -1081,7 +1116,7 @@ class RenderMixin:
         self._vp = V @ P                                      # 供 draw_lines / 射线拾取
         # T3c-1: u_view_proj / u_view_pos / 灯光数组 / 全局标量 全部进 Scene UBO，
         # 由 _upload_lights() 一次 pack + write + bind 完成（单点表）。
-        self._upload_lights()
+        self._backend_upload_lights()
 
     # ---- 2026-11-10 阶段 2B1: 剖面分段（阶段名与迁移前一致，口径也一致）----
     def _before_pass_prof(self, spec):
@@ -1233,12 +1268,12 @@ class RenderMixin:
         # 批5: 阴影/碰撞 prep 在逻辑帧尾已缓存; 渲染帧只派发事件+挂 VP
         # (旧路径逐位保留在 _parallel_shadow_and_collision 逃生门/编辑态分支)
         self._profile('shadow_prep',
-                      lambda: self._parallel_shadow_and_collision(delta_time,
-                                                                  with_events=True))
+                      lambda: self._backend_parallel_shadow_and_collision(
+                          delta_time, with_events=True))
         # A2: 当帧实例数据准备 (f32 矩阵 + 桶重排 + 桶级实例缓冲写入), 阴影/
         # 主 pass 共享同一批桶 (旧逐物体 uniform/upload 循环已取消)
         # 2026-09-01 组8 插桩: buckets 子阶段 (原未插桩, 残段口径闭合用)
-        self._profile('buckets', lambda: self._prepare_bucket_frame())
+        self._profile('buckets', lambda: self._backend_prepare_bucket_frame())
         # 2026-11-10 阶段 2B1（S3+S4）: 阴影 -> 主 pass -> 天空 -> World UI -> HUD/UI
         # 全部收进**同一个** FramePlan。
         #   · 阴影：描述里是「真深度目标 + 深度写 + 不剔除」，但逐光源/逐面 FBO 仍归
@@ -1253,9 +1288,9 @@ class RenderMixin:
                           include_world_canvas=True, include_hud=True,
                           include_ui=getattr(self, 'ui', None) is not None,
                           include_post=post_enabled())
-        self._frame_executor.execute(plan, prepare=self._prepare_main_pass,
-                                     before_pass=self._before_pass_prof,
-                                     after_pass=self._after_pass_prof)
+        self._backend_execute_frame(plan, prepare=self._prepare_main_pass,
+                                    before_pass=self._before_pass_prof,
+                                    after_pass=self._after_pass_prof)
         self._close_frame_prof()
         _t = self._prof_t0()
         self._update_fps()

@@ -4,9 +4,11 @@
 从 engine.py 抽出 (作为 LightingMixin 供 GLEngine 继承):
   _backend_light_removed / find_model_by_guid / _uniform / _upload_lights
   (S4: add_light / remove_light 的公共面已搬进 engine_core.EngineCore)
-  _scene_light_bounds / _model_aabbs_par / _aabbs_batched / _scene_light_bounds_par
+  _scene_light_bounds / _aabbs_batched / _scene_light_bounds_par
   _dir_light_vp / _parallel_shadow_and_collision / _pipeline_light_vps
   _compute_light_vps / _point_light_vp
+  (S2 阶段2: _model_aabbs_par 已搬进 engine_core.EngineCore —— 纯 numpy AABB 归约,
+  一行 GL 都没有; 本 mixin 只剩真正的 GL 面与 _backend_* 钩子转发)
 
 ★行为红线 (2026-10-13 上一轮 Agent 确认): 本块含分离模式/旧绑死模式双分支
   (_parallel_shadow_and_collision 的批5 缓存路径 + 编辑态旧路径),
@@ -62,6 +64,15 @@ class LightingMixin:
         if u is None:
             u = self._u[name] = self.prog[name]
         return u
+
+    # ============ S2（Q-B7-47-1 阶段 2）：B 类方法的后端钩子（GL 原样转发） ============
+    # 共享渲染路径（editor.render / loom_render.render）只许调 `_backend_*` 钩子
+    # （契约口径：后端差异只许出现在钩子里）；GL 钩子**原样转发**给本 mixin 的现行
+    # GL 实现 —— 转发体一行不改，行为零变化。不许在 EngineCore 写同名空实现
+    # （反模式 2：MRO 会遮住 GL 的实现）。
+    def _backend_upload_lights(self):
+        """钩子（GL）：光源 uniform/Scene UBO 上传，原样转发 _upload_lights。"""
+        return self._upload_lights()
 
     def _upload_lights(self):
         """把场景光源写到着色器 uniform 数组 + 绑定阴影贴图 (render 每帧调用).
@@ -214,202 +225,6 @@ class LightingMixin:
         # getattr 防御: 测试桩 (__new__ 无 __init__) 无 _stage_times (test_parallel 抓过)
         return self._scene_light_bounds_par(
             view, aabbs, times=getattr(self, '_stage_times', None))
-
-    def _model_aabbs_par(self, models, fw=None, visible_only=True):
-        """模型世界 AABB (用当帧矩阵), 与 models 下标对齐 (visible_only=False 全量对齐).
-        2026-08-15 8 核均摊: 逐模型 get_bounding_box 是 numpy 重活 (高面数球体 = 几万顶点
-        批量变换), 池上分块 -> 释放 GIL 真并行; 结果按序拼接, 与逐模型串行逐位一致.
-        visible_only=False: 返回全部模型 (含不可见, 下标与 models 对齐) —— 阴影与碰撞
-        共享一次包围盒计算用 (阴影再过滤可见).
-        组3层3 (2026-08-31): 逐模型 Python 循环改批量化 _aabbs_batched —— 按顶点数
-        分组堆叠, 每组一次批量归约 (消每模型 3 次 numpy 调用开销); 每模型仍是同参数
-        matmul (k=4 求和序不变) + min/max 纯比较 -> 与逐模型串行逐位一致 (对拍
-        aabb_par_check.py). 池路径 (n>=阈值) 分块内同款批量化.
-        ★行级缓存层级修正 (2026-09-06 编译版 9FPS 定案): 行级缓存**只在本层**
-        (整 fw 查/写, 池分块路径禁用) —— 旧设计把缓存放进 _aabbs_batched, 池分块
-        时每个 worker 拿 fw 切片当"整表"判/写: ①切片行数≠缓存行数恒 miss;
-        ②多 worker 写回互相覆盖; ③播放态 fw 每帧新对象雪上加霜 → 编译版
-        (numpy 全量慢) 恒 miss 26-37ms/帧 9FPS, 源码 numba 快被掩盖。
-        现在本层: 缓存命中 (含 fw 值全等) → 直接返回上帧 out (零计算快路径);
-        未命中 → 池分块/串行照旧, 算完写回整缓存。行级变化=值比较 (身份无关)。
-        LOOM_PROFILE: 阶段名 'aabbs' (shadow_prep 内部大头, 单独观测)."""
-        n = len(models)
-        if n == 0:
-            return []
-        _p = os.environ.get('LOOM_PROFILE') == '1'
-        if _p:
-            t0 = time.time()
-        fw = fw if fw is not None else getattr(self, '_frame_world', None)
-        fw_ok = (fw is not None and hasattr(fw, 'ndim') and fw.ndim == 3
-                 and fw.shape[1:] == (4, 4) and fw.shape[0] == n)
-        stamp3 = (getattr(self, '_struct_gen', 0), GameObject._appearance_gen,
-                  bool(visible_only))
-        # 2026-11-09 (01 号性能 Q7=B/Q8=A): visible_only=True 的**同帧记忆化**。
-        # 现场取证 (beta5_p01_pool_gate.py): visible_only=True 不入行级缓存, 每个
-        # 调用点全量重算 —— 504 物体实测 15.3 ms/次 且走 8-worker 池; 灯光的
-        # shadow_prep / 每盏灯的 AABB 请求都各自触发一次, 是渲染主线程持 GIL 的
-        # 最大单点 (逻辑线程因此被饿到 ~10 次/秒调度)。播放态同一个 _frame_world
-        # 会被多个 call site 共享 -> 按 (fw 对象本体, n, stamp3, 可见性序列) 记忆化,
-        # 命中直接返回上次的 list 本体: 不重算, 数值与首次逐位相同。
-        # ★键里持 fw 强引用 (活对象 id 唯一, 不会与后建数组 id 复用)。
-        _vis_key = None
-        if visible_only and fw_ok:
-            _vis_key = tuple(bool(getattr(m, 'visible', True)) for m in models)
-            _vc = getattr(self, '_aabb_vis_cache', None)
-            if (_vc is not None and _vc[0] is fw and _vc[1] == n
-                    and _vc[2] == stamp3 and _vc[3] == _vis_key):
-                if _p:
-                    self._stage_calls['aabb_vis_hit'] =                         self._stage_calls.get('aabb_vis_hit', 0) + 1
-                return _vc[4]
-        cache = getattr(self, '_aabb_row_cache', None)
-        if (visible_only is False and fw_ok and cache is not None
-                and cache[1] == stamp3 and cache[2] == n
-                and cache[3] is not None
-                and cache[4] is not None and len(cache[4]) == n):
-            # 行级复用仅 visible_only=False (全量下标对齐; 播放态 prep 用)。
-            # visible_only=True 时 out 长度=可见数与 fw 行数不对齐, 不入缓存
-            # (走下方原路径全算, 语义与旧版逐位一致)。
-            # 行级变化判定: 值比较 (对象身份无关 — 播放态 fw 每帧新对象)
-            changed = np.any(fw != cache[3], axis=(1, 2))
-            c_aabbs = cache[4]
-        else:
-            changed = None
-            c_aabbs = None
-        pool = getattr(self, '_frame_pool', None)
-        use_pool = pool is not None and n >= self._AABB_POOL_THRESHOLD
-        if changed is not None:
-            # 行级复用路径: 静止行直接抄上帧, 只把 changed 行 (可见的) 送去算
-            out = list(c_aabbs)
-            dirty = [i for i in range(n) if changed[i]]
-            if _p:
-                # ★M3 观测量: 脏行占比 (决定池内实际工作量) —— 计数类, 非耗时
-                self._stage_calls['aabb_calls'] = self._stage_calls.get('aabb_calls', 0) + 1
-                self._stage_calls['aabb_rows'] = self._stage_calls.get('aabb_rows', 0) + n
-                self._stage_calls['aabb_dirty'] = self._stage_calls.get('aabb_dirty', 0) + len(dirty)
-            # 直通行发布 (2026-09-07): rows_full 与 out 按下标对齐 (值配对, 身份
-            # 无关 —— 上帧表行值=上帧 out 行值, list() 浅拷贝不改行值); prev
-            # 形状匹配即复用, 免每帧 501 行 Point3D 回填。
-            prev = getattr(self, '_aabb_shadow_rows', None)
-            prev_ok = (prev is not None and prev.shape == (n, 6)
-                       and prev.dtype == np.float64)
-            rows_full = prev if prev_ok else np.empty((n, 6), dtype=np.float64)
-            if not dirty:
-                self._aabb_shadow_rows = rows_full if prev_ok else None
-                self._aabb_shadow_gen = ((id(out), n) if prev_ok else None)
-                if _p:
-                    # ★M3: 原写 'aabbs' 与外层 _profile('aabbs') 重复计数 → 改名
-                    self._stage_times['aabbs_inner'] = \
-                        self._stage_times.get('aabbs_inner', 0.0) + (time.time() - t0) * 1000.0
-                return out
-            sub_models = [models[i] for i in dirty]
-            sub_fw = fw[dirty]
-            if (use_pool and len(dirty) >= self._AABB_POOL_THRESHOLD
-                    and len(dirty) >= self._AABB_DIRTY_POOL_MIN):
-                d_segs = []                      # 连续段 [(起,止) in dirty 域]
-                s0 = 0
-                for q in range(1, len(dirty) + 1):
-                    if q == len(dirty) or dirty[q] != dirty[q - 1] + 1:
-                        d_segs.append((s0, q)); s0 = q
-                def _chunk(idx_iter):
-                    idxs = list(idx_iter)
-                    # dirty 连续段 -> rows_full **位置切片视图** (map_indexed 恒产
-                    # range(a,b) 连续块; 块落在单段内时写回零拷贝)。★勿用
-                    # rows_full[dirty[a:b]] —— 列表下标是 fancy indexing 产副本,
-                    # 写副本即丢行 (跨段块直接走无行表回退 + 出口按需回填)。
-                    a, b = idxs[0], idxs[-1] + 1
-                    seg = next((s for s in d_segs if s[0] <= a and b <= s[1]), None)
-                    if seg is not None:
-                        rc = rows_full[seg[0] + a:seg[0] + b]
-                        part = self._aabbs_batched([sub_models[i] for i in idxs],
-                                                   sub_fw[idxs],
-                                                   False, _row_cache=False,
-                                                   out_rows=rc)
-                    else:
-                        part = self._aabbs_batched([sub_models[i] for i in idxs],
-                                                   sub_fw[idxs],
-                                                   False, _row_cache=False)
-                    return part
-                part = pool.map_indexed(len(dirty), _chunk, batches_per_thread=2)
-                for i, aabb in zip(dirty, part):
-                    out[i] = aabb
-                # 段未覆盖 (块跨段) 的行: 从 out 回填 (罕见)
-                if not any(s[0] == 0 and s[1] == len(dirty) for s in d_segs):
-                    for q, i in enumerate(dirty):
-                        mn_, mx_ = out[i]
-                        rows_full[i, 0] = mn_.x; rows_full[i, 1] = mn_.y
-                        rows_full[i, 2] = mn_.z
-                        rows_full[i, 3] = mx_.x; rows_full[i, 4] = mx_.y
-                        rows_full[i, 5] = mx_.z
-            else:
-                rc = np.empty((len(dirty), 6), dtype=np.float64)
-                part = self._aabbs_batched(sub_models, sub_fw, False,
-                                           _row_cache=False, out_rows=rc)
-                for i, aabb in zip(dirty, part):
-                    out[i] = aabb
-                rows_full[dirty] = rc
-            if not prev_ok:
-                # 首帧无配对上帧表: 静止行从 out 回填 (首帧 changed≈全量, 罕见)
-                for j in range(n):
-                    if changed[j]:
-                        continue
-                    mn_, mx_ = out[j]
-                    rows_full[j, 0] = mn_.x; rows_full[j, 1] = mn_.y
-                    rows_full[j, 2] = mn_.z
-                    rows_full[j, 3] = mx_.x; rows_full[j, 4] = mx_.y
-                    rows_full[j, 5] = mx_.z
-            self._aabb_shadow_rows = rows_full
-            self._aabb_shadow_gen = (id(out), n)
-            if _p:
-                # ★M3: 同上, 避免与外层 _profile('aabbs') 重复计数
-                self._stage_times['aabbs_inner'] = \
-                    self._stage_times.get('aabbs_inner', 0.0) + (time.time() - t0) * 1000.0
-            return out
-        if pool is not None and n >= self._AABB_POOL_THRESHOLD:
-            if visible_only is False:
-                # 行表只在全量对齐路径分发 (visible_only=True 时 sel=可见子集,
-                # 按 sel 下标散写会与 models 下标错位 —— 该路径消费者走属性链回退)。
-                rows_full = np.empty((n, 6), dtype=np.float64)
-                def _chunk(idx_iter):
-                    idxs = list(idx_iter)
-                    # map_indexed 恒产连续 range(a,b) (parallel._split_bounds), 行表按
-                    # 连续切片视图分发, worker 各写互斥段 (与 out 分块拼接同构)。
-                    a, b = idxs[0], idxs[-1] + 1
-                    return self._aabbs_batched([models[i] for i in idxs],
-                                               [fw[i] for i in idxs] if fw is not None else None,
-                                               visible_only, _row_cache=False,
-                                               out_rows=rows_full[a:b])
-            else:
-                rows_full = None
-                def _chunk(idx_iter):
-                    idxs = list(idx_iter)
-                    return self._aabbs_batched([models[i] for i in idxs],
-                                               [fw[i] for i in idxs] if fw is not None else None,
-                                               visible_only, _row_cache=False)
-            out = pool.map_indexed(n, _chunk, batches_per_thread=2)
-            self._aabb_shadow_rows = rows_full
-            self._aabb_shadow_gen = ((id(out), n) if rows_full is not None else None)
-        else:
-            if visible_only is False:
-                rows_full = np.empty((n, 6), dtype=np.float64)
-                out = self._aabbs_batched(models, fw, visible_only,
-                                          _row_cache=False, out_rows=rows_full)
-                self._aabb_shadow_rows = rows_full
-                self._aabb_shadow_gen = (id(out), n)
-            else:
-                out = self._aabbs_batched(models, fw, visible_only,
-                                          _row_cache=False)
-                self._aabb_shadow_rows = None
-                self._aabb_shadow_gen = None
-        if fw_ok and visible_only is False:
-            self._aabb_row_cache = (None, stamp3, n, fw, out)
-        if _vis_key is not None:
-            # 记忆化发布 (与 _aabb_row_cache 同层; 只对 visible_only=True 生效)
-            self._aabb_vis_cache = (fw, n, stamp3, _vis_key, out)
-        if _p:
-            # ★M3: 同上, 避免与外层 _profile('aabbs') 重复计数
-            self._stage_times['aabbs_inner'] = self._stage_times.get('aabbs_inner', 0.0) \
-                + (time.time() - t0) * 1000.0
-        return out
 
     def _aabbs_batched(self, models, fw, visible_only=True, _row_cache=True,
                        out_rows=None):
@@ -708,6 +523,10 @@ class LightingMixin:
             bottom, top = float(mn[1]) - pad, float(mx[1]) + pad
             near, far = min(0.0, float(mn[2]) - 2.0), max(float(mx[2]) + 2.0, 1.0)
         return view @ mat4_ortho(np, left, right, bottom, top, near, far)
+
+    def _backend_parallel_shadow_and_collision(self, dt, with_events=True):
+        """钩子（GL）：阴影 prep / 碰撞事件批5 路径，原样转发 _parallel_shadow_and_collision。"""
+        return self._parallel_shadow_and_collision(dt, with_events=with_events)
 
     def _parallel_shadow_and_collision(self, dt, with_events=True):
         """批5 重构: A 类 prep (AABB/光源 VP/碰撞对) 已挪进逻辑帧尾缓存

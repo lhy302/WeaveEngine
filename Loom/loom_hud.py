@@ -6,7 +6,8 @@
   _draw_hud                        (HUD 文本行绘制)
   _surf_to_tex / _get_font / _render_text / _measure_text  (文字纹理管线)
   draw_text_quad / draw_screen_rect / blit_texture  (屏幕四边形绘制)
-  _hud_lines / _update_fps / get_frame_jitter  (HUD 内容 + 帧统计)
+  _hud_lines / get_frame_jitter  (HUD 内容 + 帧统计)
+  (S2 阶段2: _update_fps 已搬进 engine_core.EngineCore —— 纯计时器, 无 GL 依赖)
 
 依赖宿主 GLEngine 运行时提供:
   self.ctx / self.hud_prog / self._quad_vao / self._screen_fb
@@ -305,26 +306,6 @@ class HudMixin:
                 " (点击窗口使其获得键盘焦点; 若仍无效请切换输入法为英文)",
             ]
         return lines
-
-    def _update_fps(self):
-        """每秒更新一次 FPS + 帧长滑窗统计 (方案一② 帧长方差观测, 2026-09-05):
-        _frame_dt deque(120, maxlen 固定=长寿命不换对象, GC 冻结兼容) 记录
-        每渲染帧墙钟; std/max 量化"抖不抖" (Panda3D calc_frame_rate_deviation
-        同款 chugginess 指标) — 双峰/限帧器抖动从体感变数字.
-        FPS 缓冲预画帧跳过 (不虚计 FPS/不污染帧长窗)."""
-        if getattr(self, '_preframing', False):
-            return
-        self.frame_count += 1
-        now = time.perf_counter()   # 高精度单调钟 (帧长滑窗; 与帧 dt 同源)
-        # 帧长滑窗: deque 持久 (初始化建, 此处只 append; 窗 120 帧 ≈ 高帧率 1-2s)
-        fdt = now - self._last_frame_stamp
-        self._last_frame_stamp = now
-        if 0.0 < fdt < 0.5:            # 滤掉首帧/窗口拖动冻结的伪长帧
-            self._frame_dt.append(fdt)
-        if now - self.last_time >= 1.0:
-            self.fps = self.frame_count
-            self.frame_count = 0
-            self.last_time = now
 
     def get_frame_jitter(self):
         """帧长统计 (方案一②): 返回 (std_ms, max_ms, n) — 滑窗 120 帧;

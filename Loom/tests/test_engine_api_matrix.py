@@ -29,6 +29,9 @@ beta7 批 0（B7-24）要定一份两端都必须实现的 IEngineAPI。在契�
   FrameComponent/Profiler/LogicThread/Raycast）的 ~100 个方法两端共享，另有 3 个统一宿主事件入口
   handle_key_event / handle_text_input / handle_quit_request。
   → GL 112 / VK 82 / 共同 **72** / GL 独有 **40** / VK 独有 10。
+- **v3.4（2026-11-20 S2 阶段2 ④，Q-B7-47-1）**：GL 新增公开钩子 overlay_scope
+  （叠加层状态作用域；GL 原样转发 moderngl，S3 再补 VK 实现）→ GL 112 → **113**，
+  GL 独有 40 → **41**；登记 test_user_api_parity.BACKEND_ONLY_GL。VK / 共同计数不变。
 - **v3.1（2026-11-17 S2-2 部分完成）**：11 个纯数据查询方法（Layer/Tag/查找/SendMessage/设置层标签）
   从 GLEngine 搬进 loom_scene_query.SceneQueryMixin（无 GPU 依赖）→ VK 82 → **93**，
   GL 独有 40 → **29**，共同 72 → **83**。
@@ -188,6 +191,7 @@ EXPECTED_GL_ONLY = frozenset({
     'blit_texture', 'draw_lines',
     'draw_screen_lines', 'draw_screen_polygon', 'draw_screen_rect', 'draw_text_quad',
     'draw_texture_quad', 'get_frame_jitter',
+    'overlay_scope',
     'pop_scissor', 'present_health', 'push_scissor',
     'render', 'reset_sky_state',
     'run', 'should_fallback_remote',
@@ -200,7 +204,9 @@ EXPECTED_VK_ONLY = frozenset({
 })
 
 # 计数断言（防「两端同时改名」这种集合差异看不出来的漂移）
-EXPECTED_GL_TOTAL = 112
+# v3.4（2026-11-20 S2 阶段2 ④）: GL +1 = overlay_scope（叠加层状态作用域钩子，
+# GL 原样转发 moderngl；S3 补 VK 实现 —— 已登记 test_user_api_parity.BACKEND_ONLY_GL）
+EXPECTED_GL_TOTAL = 113
 EXPECTED_VK_TOTAL = 107      # v3.3: +9 条用户 API 进内核（两端同一份实现）
 
 

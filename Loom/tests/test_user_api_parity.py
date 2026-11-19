@@ -113,6 +113,9 @@ BACKEND_ONLY_GL = {
     'get_frame_jitter': 'GL 帧长统计（诊断；VK 走 engine_metrics 命令）',
     'should_fallback_remote': 'GL 上屏失败回退诊断',
     'reset_sky_state': 'GL 天空盒渲染状态失效（后端内部）',
+    # S2（Q-B7-47-1 阶段 2）④: 叠加层状态作用域钩子 —— GL 原样转发 moderngl
+    # Context.scope；S3 补 VK 实现后升为两端共有（两端共用同一份叠加层代码的铺路）。
+    'overlay_scope': 'GL 叠加层状态作用域钩子（视图层 overlay 状态；S3 补 VK 实现）',
 }
 BACKEND_ONLY_VK = {
     'render_pose': 'VK 帧循环入口（= GL 的 render；宿主驱动一帧，非用户 API）',
