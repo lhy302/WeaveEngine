@@ -474,6 +474,9 @@ class Pair:
         Q-B7-43-1（夹具竞态）：物理光标落地是**异步**的，所以注入前必须先 settle_cursor()
         把落点与消息队列都排空（见该函数注释），否则按下帧的 mouse_pos 会被写成上一帧
         的位置（假红）。这只建前提，不动任何断言。
+        Q-B7-43-2（P0-1）：settle 的收敛判据已收成「只看回读」（旧判据在 ⑧ 组的
+        CURSOR_DISABLED 下永不收敛，每帧空转 40 次重落，重落位移会泄进 engine.mouse_rel）。
+        所有重落都发生在 self.gl._handle_events()（= pump）**之前**；断言帧不额外 settle。
         """
         win = self.gl._glfw_win
         glfw.set_cursor_pos(win, x, y)
@@ -586,7 +589,9 @@ class Pair:
 _SETTLED_AT = {}          # id(win) -> 上一次已排空到位的注入点（pyglfw 的 window 不可哈希）
 
 
-def settle_cursor(win, eng, x, y, maxit=40, dt=0.002, stable=2):
+def settle_cursor(win, eng, x, y, maxit=40, dt=0.002, stable=3):
+    # stable=3（Q-B7-43-2）：比原来多一轮静默确认 = 多一个「吸收帧」，把重落/迟到
+    # 的 WM_MOUSEMOVE 全部排空在 pump 之前；重落本身仍只发生在 pump 之前。
     """把物理光标真的落到 (x,y)，并把这次移动产生的 WM_MOUSEMOVE 全部派发干净。
 
     **这是夹具的输入前提，不是断言、不是重跑**（不碰任何 check 的表达式，不改任何被测
@@ -607,12 +612,33 @@ def settle_cursor(win, eng, x, y, maxit=40, dt=0.002, stable=2):
       修前本门用「set_cursor_pos + 两次 poll_events」代替这一步 —— 少的就是这一拍。
 
     判据（两个阶段合成一个循环）：
-      · 窗口内坐标：要求 glfw.get_cursor_pos 与 engine.mouse_pos 都**等于**注入点；
+      · 窗口内坐标：要求 glfw.get_cursor_pos（= 物理/虚拟光标的**回读**）等于注入点；
+        **不看** engine.mouse_pos（★Q-B7-43-2，理由见下）；
       · 画布外坐标（如 (-50,-50)）：物理光标会被桌面边界钳住，回读永远 != 注入点，
         退而求其次要求「回读已经真的动过（!= 注入前的值，或上一帧就注入的同一坐标）」
         且随后连续 stable 次不再变化（= 这次投递已落地、队列已静默）。
     返回 True = 排空到位；False = 到上限仍未到位（此时照旧往下走，红不红由断言决定 ——
     夹具**不**吞掉任何判定）。
+
+    ★Q-B7-43-2（P0-1，2026-11-19）：判据从「回读 == 注入点 **且** engine.mouse_pos ==
+    注入点」收成「回读 == 注入点」。为什么必须收（实测，不是推测）：
+      · 生产读光标的两个地方读的都是 glfw.get_cursor_pos —— _on_mouse_button_cb
+        （loom_glfw_window.py:657-661）与 _update_mouse_rel（:537），**不是** mouse_pos；
+        mouse_pos 由 gl_frame 随后显式注入的 _on_cursor_pos_cb(win, x, y) 兜底；
+      · CURSOR_DISABLED（⑧ 组 lock_both 之后）下 set_cursor_pos 只把**虚拟坐标**置为
+        (x,y)、物理光标回窗口中心，**不派发** cursor_pos 回调 -> engine.mouse_pos 停在
+        上一帧的值 -> 旧判据在本组**永不收敛**，每帧空转满 40 次重落。
+        实测（_tmp 探针，1 次运行）：settle 调用 64 次，命中 maxit(40) 15 次，其中 ⑧ 组
+        12 帧**全部**命中 = 每帧 40 次重落 = 480 次/次运行。
+      · 这 480 次重落是**夹具自己造的物理位移**（不是玩家输入）。它们产生的
+        WM_MOUSEMOVE 一旦晚于 settle 返回才被 poll 派发，就会在 CURSOR_DISABLED 下把
+        虚拟光标顶偏，而 ⑧ 组把 engine.mouse_rel 当「相机实际拿到的增量」的取值来源 ->
+        **夹具副作用被测成被测值**（§5 反模式 3/8）。审核实测签名（连跑 35 次红 1 次）：
+          FAIL ⑧ 空白持按第 2 帧 右下移 (540,370)：GL=(134,137) VK=(20,10)
+          FAIL ⑧ 空白区松开：GL=(-114,-127)
+        两条正好是「顶偏 (+114,+127) 再原样回吐 (-114,-127)」的一对。
+      · 收成只看回读后：⑧ 组每帧重落 1~2 次（收敛即停），夹具不再自造位移；
+        判据本身没放宽（回读 == 注入点仍是硬前提，排空/静默仍要连续 stable 次确认）。
     """
     t = (int(x), int(y))
     try:
@@ -635,10 +661,13 @@ def settle_cursor(win, eng, x, y, maxit=40, dt=0.002, stable=2):
         except Exception:
             rb, mp = None, None
         if reachable:
-            same = (rb == t and mp == t)
+            # ★Q-B7-43-2：判据只看**回读**（见函数注释）。旧写法 (rb == t and mp == t)
+            # 在 CURSOR_DISABLED 下永不收敛 -> 每帧空转 40 次重落 -> 夹具自造位移。
+            same = (rb == t)
             if not same:
                 # 切 CURSOR_DISABLED 后的首个轮询，GLFW 3.4 会把虚拟坐标重置为物理
                 # 光标位置；这里再落一次 = 玩家把鼠标又移回注入点，直到回读收敛。
+                # **只在回读没到位时才落**：每落一次都是夹具自造的物理位移，越少越好。
                 try:
                     glfw.set_cursor_pos(win, x, y)
                 except Exception:

@@ -830,8 +830,14 @@ check('① 3D 移动：两端都**成功**向同一份后端要了 update_sound_
       and o[0][0][1] == ('p4_tone_b.wav', (5.0, 0.0, 0.0)), (o[0], o[1]))
 
 o, c, d, b, errs = step1('J sfx.playing=False（3D 停）', _target='sfx_one', playing=False)
-check('① 3D 停：两端表现逐项相等（P4-1 让 play_spatial 抛 → _key 不推进 → 不产生 stop；'
-      '两端同）',
+# 2026-11-19（P1-5）：本行原括注写的是**修前**状态（「P4-1 让 play_spatial 抛 -> _key 不推进
+# -> 不产生 stop」），与修后事实不符（反模式 10）。P4-1 修好后 play_spatial 已是
+# AudioSystem 的公开方法，_key 照常推进，两端**都**产生同一条 stop：
+#   GL=('stop', ('p4_tone_b.wav',), (('owner', 'sfx_one'),), 'OK')
+#   VK=('stop', ('p4_tone_b.wav',), (('owner', 'sfx_one'),), 'OK')
+# 只改文案，check() 的表达式一字未动。
+check('① 3D 停：两端表现逐项相等（P4-1 修后：play_spatial 可用 → _key 照常推进 → '
+      '两端都产生同一条 stop；两端同）',
       o[0] == o[1] and errs[0] is None and errs[1] is None
       and c[0]['sfx_one']['key'] == c[1]['sfx_one']['key'] == ('p4_tone_b.wav', False),
       (o[0], o[1], errs, c[0]['sfx_one']['key'], c[1]['sfx_one']['key']))

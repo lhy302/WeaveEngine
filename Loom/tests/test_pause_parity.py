@@ -182,7 +182,12 @@ MAE_GATE = 0.0002
 
 def check(label, cond, detail=''):
     global ok
-    print(('PASS ' if cond else 'FAIL ') + label + ('  ' + str(detail) if detail else ''))
+    # 2026-11-19（P1-6）：detail 只在**失败**时打印，且冠以「失败详情:」前缀。
+    # 修前无论成败都打 detail，于是 PASS 行后面挂着一串 GL/VK 快照，读起来像
+    # 「PASS 却说两端不一致」（本门多数 check 的 detail 是 GL/VK 双列快照）。
+    # 只改打印逻辑，断言表达式一字未动。
+    print(('PASS ' if cond else 'FAIL ') + label
+          + (('  失败详情: ' + str(detail)) if (not cond and detail) else ''))
     if not cond:
         ok = False
 
