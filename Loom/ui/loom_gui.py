@@ -1089,13 +1089,16 @@ class LoomGUI(QMainWindow):
                 # 对齐旧版GUI: 显式绑定 FBO + 开深度/混合 (网格线 alpha 淡出,
                 # 物体在前遮挡网格). 2026-08-18: 不用 scope 的 enable_only ——
                 # Qt 外部模式下 enable_only 会破坏 GL_LINE_WIDTH (线宽 0 线不可见),
-                # 手动 enable + draw_lines 内部重设线宽 (engine.py).
+                # 具名 enable + draw_lines 内部重设线宽 (engine.py).
                 # 深度测试: 依赖 _clear_main_fbo 每帧 ctx.clear 清深度到 far
                 # (缓存 FBO 绑定后 clear 有效) -> 网格线 vs far 恒通过, 静止不
                 # 自剔除; 物体深度更近时正确遮挡网格 (对齐 pygame 语义).
-                with ctl.ctx.scope(framebuffer=ctl._screen_fb()):
-                    ctl.ctx.enable(moderngl.DEPTH_TEST)
-                    ctl.ctx.enable(moderngl.BLEND)
+                # S3 (Q-B7-47-1 阶段 3): 叠加层状态走 overlay_scope 钩子（与 gizmo/
+                # 选中框同一条同源路径）—— GL 侧原样转发 scope+enable（作用顺序与
+                # 迁移前逐位一致，行为零变化）；VK 侧映射为「深度开(less+写) +
+                # alpha 混合」的 flush 批次（loom_pass_vk）。
+                with ctl.overlay_scope(framebuffer=ctl._screen_fb(),
+                                       enable=('depth_test', 'blend')):
                     ctl.draw_lines(verts, cols)
         ctl._draw_selection_box()
         self._draw_gizmo(ctl)

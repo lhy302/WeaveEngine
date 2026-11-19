@@ -46,6 +46,11 @@ from loom_camera import orbit_camera_eye
 # 只含下划线成员，不进用户 API 面；GL 侧一行未动。
 from loom_vk_window import VkWindowMixin
 
+# 2026-11-20 (S3, Q-B7-47-1 阶段 3): VK 侧叠加层绘制原语 + FramePlan 执行器 ——
+# overlay_scope / draw_lines / _backend_execute_frame 与 loom_render.RenderMixin
+# 的 GL 钩子同签名（同源契约，规则 5.5）；线宽按 1px（待 Q-B7-48-1 裁决）。
+from loom_pass_vk import VkEditorRenderMixin
+
 # B1: 物理桥 (零 GL; 缺失/导入失败 -> physb=None -> 无物理步进)
 try:
     import physics_bridge as physb
@@ -489,7 +494,7 @@ _ORBIT_ANGLE_ALIAS = {'camera_yaw': 'yaw', 'camera_pitch': 'pitch',
 # 它继承 EngineCore（后端无关内核），自己只保留「VK 侧装配 + 后端驱动」的部分。
 # MRO: SceneDriver 自己的定义优先（保持现有行为），EngineCore 补上 VK 侧原先缺的能力。
 # 用户视角判据：同一份脚本 + 同一场景 + 同一输入 → 两端事件/状态序列逐条相等。
-class SceneDriver(VkWindowMixin, EngineCore):
+class SceneDriver(VkWindowMixin, VkEditorRenderMixin, EngineCore):
     """播放器中间层: 场景 + 每帧步进 (脚本/物理/动画/轨道相机) + VP 计算.
 
     帧循环 (后端调用):  vp, cam_pos = world.step(dt)  → 后端画 world.models/world.lights

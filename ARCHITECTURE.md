@@ -179,15 +179,16 @@ flowchart LR
 
 > 读法：这一张图说明「引擎」不是一个类，而是 **14 个文件拼成的同一个对象** —— 所以任何 mixin 都能读写别人的字段。
 
-## 图 2b SceneDriver 是怎么拼出来的（VK 侧 = 2 个文件，与 GL 形状不同）
+## 图 2b SceneDriver 是怎么拼出来的（VK 侧 = 3 个文件，与 GL 形状不同）
 
 ```mermaid
 flowchart LR
   S["SceneDriver<br/>scene_driver.py"]:::facade
   S ==>|拼装| K["EngineCore<br/>engine_core.py 720<br/>★后端无关的公共实现"]:::contract
   S ==>|拼装| W["VkWindowMixin<br/>loom_vk_window.py 273<br/>★F11 假全屏（去边框/铺桌面/置顶）"]:::impl
-  S -->|持有| R["VkRenderer<br/>vk_renderer.py 2127"]:::impl
-  S -.->|与 GL 同一份| K
+  S ==>|拼装| V["VkEditorRenderMixin<br/>loom_pass_vk.py 458<br/>★overlay_scope / draw_lines / VkFrameExecutor<br/>（S3，线宽 1px 待 Q-B7-48-1）"]:::impl
+  V -->|VkFrameExecutor 转 draw_frame| R["VkRenderer<br/>vk_renderer.py 2127"]:::impl
+  V -.->|与 GL RenderMixin 同签名钩子| K
   classDef facade fill:#ede9fe,stroke:#7c3aed,color:#4c1d95
   classDef impl fill:#dcfce7,stroke:#16a34a,color:#14532d
   classDef contract fill:#ffedd5,stroke:#ea580c,color:#7c2d12
@@ -195,7 +196,7 @@ flowchart LR
 
 > **为什么形状不同**（这是本仓库最重要的一条架构事实）：
 > - `GLEngine` = **14 个 GL 专属 mixin** 拼成（渲染/光照/阴影/窗口/输入… 每个都是 GL 实现）；
-> - `SceneDriver` = **`EngineCore`（后端无关）+ `VkWindowMixin`（VK 窗口）+ 一个渲染器对象**。
+> - `SceneDriver` = **`EngineCore`（后端无关）+ `VkWindowMixin`（VK 窗口）+ `VkEditorRenderMixin`（S3 叠加层原语/帧执行器钩子）+ 一个渲染器对象**。
 >
 > 也就是说：**公共语义在 `EngineCore`，后端差异在 mixin/钩子里**。
 > 门 `test_user_api_parity.py` 要求两端 97 个用户 API 是**同一个函数对象**（`getattr(GLEngine,n) is getattr(SceneDriver,n)`）。
@@ -216,6 +217,8 @@ flowchart LR
   F2["loom_pass.py<br/>257 行"]:::file
   R3["执行器 execute(plan)"]:::impl
   F3["loom_pass_gl.py<br/>254 行"]:::file
+  R3b["VK 执行器 draw_frame(plan)<br/>+ 叠加层线批 VkLineBatch"]:::impl
+  F3b["loom_pass_vk.py<br/>458 行"]:::file
   R4["各 pass 绘制源<br/>主pass / 天空 / 阴影 / 后处理"]:::impl
   F4["loom_post_gl.py 214<br/>loom_shadow.py 117"]:::file
   R5["UBO 打包 pack_arrays"]:::contract
@@ -234,6 +237,9 @@ flowchart LR
   R3 -->|取源码+宏| R6
   R6 -->|实现于| F6
   F2 -.->|被 VK 也复用| R3
+  R1 -->|VK 播放器调用| R3b
+  R3b -->|实现于| F3b
+  F2 -.->|消费同一份 frame_plan| R3b
   classDef impl fill:#dcfce7,stroke:#16a34a,color:#14532d
   classDef contract fill:#ffedd5,stroke:#ea580c,color:#7c2d12
   classDef file fill:#f1f5f9,stroke:#64748b,color:#334155
@@ -601,6 +607,7 @@ sequenceDiagram
 |---|---|---|
 | `loom_pass.py` | 258 | 渲染 Pass 描述层（FramePlan / PassSpec），**纯数据，无后端依 |
 | `loom_pass_gl.py` | 255 | FramePlan 的 moderngl 执行器（2026-11-10 批次 A / 阶 |
+| `loom_pass_vk.py` | 458 | VK 侧执行器 + 叠加层原语（S3，Q-B7-47-1 阶段 3）：VkFrameExecutor 消费同一份 plan、VkLineBatch（draw_lines 的 VK 实现，线宽 1px 待 Q-B7-48-1）、VkEditorRenderMixin（overlay_scope 与 GL 同签名）。 |
 | `loom_scene_ubo.py` | 177 | T3c-1：场景参数**单一来源**（字段表 + std140 打包）。 |
 | `loom_post.py` | 73 | 后处理链的开关与参数（tonemap + bloom，2026-11-10 阶段 2B2 |
 | `loom_post_gl.py` | 215 | GL 侧后处理链（HDR 目标 + bloom + tonemap，2026-11-10 |

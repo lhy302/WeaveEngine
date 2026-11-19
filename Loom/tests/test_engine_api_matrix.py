@@ -32,6 +32,11 @@ beta7 批 0（B7-24）要定一份两端都必须实现的 IEngineAPI。在契�
 - **v3.4（2026-11-20 S2 阶段2 ④，Q-B7-47-1）**：GL 新增公开钩子 overlay_scope
   （叠加层状态作用域；GL 原样转发 moderngl，S3 再补 VK 实现）→ GL 112 → **113**，
   GL 独有 40 → **41**；登记 test_user_api_parity.BACKEND_ONLY_GL。VK / 共同计数不变。
+- **v3.5（2026-11-20 S3，Q-B7-47-1 阶段 3）**：VK 补齐叠加层绘制原语 ——
+  loom_pass_vk.VkEditorRenderMixin 进 SceneDriver（overlay_scope / draw_lines 与
+  GL 同签名；VkLineBatch = draw_lines 的 VK 实现，线宽 1px 待 Q-B7-48-1 裁决）→
+  共同 +2，GL 独有 41 → **39**（删 'overlay_scope' / 'draw_lines' 两行基线），
+  VK 107 → **109**。GL 计数不变。
 - **v3.1（2026-11-17 S2-2 部分完成）**：11 个纯数据查询方法（Layer/Tag/查找/SendMessage/设置层标签）
   从 GLEngine 搬进 loom_scene_query.SceneQueryMixin（无 GPU 依赖）→ VK 82 → **93**，
   GL 独有 40 → **29**，共同 72 → **83**。
@@ -188,10 +193,9 @@ def api_matrix():
 # 每一项 = 今天「一端有、另一端没有」的公开方法。修完一条就从这里删掉一条，并写进 IEngineAPI 契约；
 # 新增一条 = 门红。
 EXPECTED_GL_ONLY = frozenset({
-    'blit_texture', 'draw_lines',
+    'blit_texture',
     'draw_screen_lines', 'draw_screen_polygon', 'draw_screen_rect', 'draw_text_quad',
     'draw_texture_quad', 'get_frame_jitter',
-    'overlay_scope',
     'pop_scissor', 'present_health', 'push_scissor',
     'render', 'reset_sky_state',
     'run', 'should_fallback_remote',
@@ -207,7 +211,7 @@ EXPECTED_VK_ONLY = frozenset({
 # v3.4（2026-11-20 S2 阶段2 ④）: GL +1 = overlay_scope（叠加层状态作用域钩子，
 # GL 原样转发 moderngl；S3 补 VK 实现 —— 已登记 test_user_api_parity.BACKEND_ONLY_GL）
 EXPECTED_GL_TOTAL = 113
-EXPECTED_VK_TOTAL = 107      # v3.3: +9 条用户 API 进内核（两端同一份实现）
+EXPECTED_VK_TOTAL = 109      # v3.5 (S3): +2 叠加层原语 overlay_scope/draw_lines 进 SceneDriver
 
 
 def _call_groups():

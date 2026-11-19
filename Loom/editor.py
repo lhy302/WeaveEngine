@@ -2487,7 +2487,7 @@ class _EditorCore(EngineCore):
         for a, b in edges:
             lines.append(corners[a]); lines.append(corners[b])
         col = (1.0, 0.85, 0.2)
-        with self.ctx.scope(framebuffer=self._screen_fb(), enable_only=0):
+        with self.overlay_scope(framebuffer=self._screen_fb(), enable_only=0):
             self.draw_lines(lines, [col] * len(lines))
 
     # ================ 主循环 ================
