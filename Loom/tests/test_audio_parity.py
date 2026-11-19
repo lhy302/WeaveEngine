@@ -806,7 +806,7 @@ check('① 换 clip：两端 key 都变成新 clip',
       (c[0]['music_one']['key'], c[1]['music_one']['key']))
 
 o, c, d, b, errs = step1('H sfx.playing=True（3D 音效）', _target='sfx_one', playing=True)
-check('① 3D 播：两端音频段都**不抛异常**（P4-1：AudioSystem 缺 play_spatial）',
+check('① 3D 播：两端音频段都**不抛异常**（P4-1 修后（原缺陷：AudioSystem 缺 play_spatial））',
       errs[0] is None and errs[1] is None, errs)
 check('① 3D 播：两端都**成功**向同一份后端要了 3D 播放 play_spatial'
       '(位置/距离/衰减/循环/音量)',

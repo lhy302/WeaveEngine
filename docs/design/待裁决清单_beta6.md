@@ -130,6 +130,9 @@
 
 | **Q-B7-48-1** | **编辑器叠加线宽：VK 只能 1px，GL 是 2px**（调研实测）：wgpu-py 0.33 的 `PrimitiveState` **没有 `line_width` 字段**（传 `line_width=2.0` 直接 `ValueError: Invalid keys in PrimitiveState`），`topology='line-list'` 可用但只有 1px；GL 侧 `ctx.line_width = 2.0`（`engine.py:671`） | **两选**：**(A) 接受 VK 1px**，记入像素门例外（0 人天，但两端叠加层粗细不同，属「用户可感知差异」）；**(B) 两端统一改 shader 扩 quad**（+2 人天，GL 画面也会变细/变粗，但两端真一致） | gizmo/网格/选中框在 VK 编辑器里比 GL 细一半 | **待裁决** |
 
+| **Q-B7-49-1** | **v1 场景 `obj.guid` 两端不同**（独立审核实测）：`loom_scene_contract.py:176/253` 用 `uuid4().hex` **每次加载新生成** → 同一场景两次加载 guid 都不同（GL=`e732f763…` VK=`36fa5459…`），且门 `test_scene_load_parity.py:530` 只验「非空字符串」。**脚本读 `obj.guid` 在两端必然不同**；若脚本用 guid 做存档/网络同步，会直接坏 | **主审建议**：迁移期 guid 分配应**确定性**（如按「场景内容 hash + 序号」派生，或迁移时从旧字段保留），并补门「同一场景加载两次 guid 逐值相等」 | 脚本跨端读 guid 不同 | **待裁决（需人类定分配策略）** |
+| **Q-B7-49-2** | **GL 的 `engine._asset_errors` 比 VK 多一条**（⑥-8 实测：GL 记录 `('materials.albedo', None, '旧路径引用（beta6 兼容期…）')`、VK `[]`）—— 资产问题告警面两端不同，且**未进 KNOWN_DIFFS、未进门、未进裁决清单**（独立审核判定为「静默差异」） | **主审建议**：归入「资产告警面」对拍；GL/VK 应统一「哪些进告警表」的口径 | 脚本/开发者看资产问题表，两端条数不同 | **待修（已登记）** |
+
 > 证据与逐条表：`docs/audit/impl_B7-24_API矩阵_20261117.md`（§3 全 77 条 / §4 VK 独有 10 条 / §6 这四个问题）。
 
 ## B. 已关闭（不再需要回答，留痕备查）
