@@ -142,7 +142,7 @@ GLEngine  /  VkEngine               ← 各自实现 _backend_xxx（GPU 上传 /
 | **P1 场景加载/切换的用户可见结果**（load_scene / clear_scene / 版本迁移 / 相对资源路径） | `test_scene_load_parity.py` | 76（2026-11-19 实测 76 PASS / 0 FAIL；本行旧记 69 已过期） |
 | **P3 UI 命中与焦点**（点击命中 / hover 集合 / 焦点与键盘 / 滚动消费 / UI 消费对引擎的屏蔽 / 坐标系 / **窗口 resize 的画布跟随** / **跨帧持按的相机门控**） | `test_ui_hit_parity.py` | 144（**全绿**；P3-1 滚轮门控 2026-11-18 已修，Q-B7-41-1/41-2 2026-11-18 已修 → 81→144） |
 | **P4 音频播放状态**（播放状态机 / 3D 听者同步 / 每帧更新时序 / 暂停期行为 / 无音频设备降级 / 脚本 API 面） | `test_audio_parity.py` | 105（**105 PASS / 0 FAIL（2026-11-19 修后实测）**；修前红 = 90 PASS / 15 FAIL —— 四条缺陷 P4-1~P4-4 已全部修完，见下） |
-| **P5 相机轨道 / 开发者视角**（轨道相机位姿 / 脚本写角度字段 / 玩家相机模式 / 开发者视角鼠标 / 相机挂父的运行时传播 / 投影参数） | `test_camera_parity.py` | 195（**修前红 = 189 PASS / 6 FAIL（2026-11-19 实测）**；红点 = Q-B7-45-1，见下） |
+| **P5 相机轨道 / 开发者视角**（轨道相机位姿 / 脚本写角度字段 / 玩家相机模式 / 开发者视角鼠标 / 相机挂父的运行时传播 / 投影参数） | `test_camera_parity.py` | 195（**195 PASS / 0 FAIL（2026-11-19 修后实测）**；修前红 = 189 PASS / 6 FAIL，红点 Q-B7-45-1 **已修**，见下） |
 
 > **P1 门当前状态（2026-11-18，B7-16/B7-17 修后）**：`test_scene_load_parity.py` **69 条全绿**
 > （修前 = 52 PASS / 17 FAIL，红证据见该门文件头 R1~R8 留痕）。修法：场景契约独立成模块
@@ -252,8 +252,9 @@ GLEngine  /  VkEngine               ← 各自实现 _backend_xxx（GPU 上传 /
 >   轨道角度 → 该帧逻辑帧的听者朝向」：GL 立刻生效（读活的 camera_yaw），VK 滞后到下一个
 >   渲染帧（帧首镜像）。
 
-> **P5 门当前状态（2026-11-19，HEAD=f8239f2 实测）**：`test_camera_parity.py` = **189 PASS / 6 FAIL**
-> （**修前红**，照 P1/P2/P3/P4 先例提交：本任务只交门 + 红证据，业务代码一行未改）。
+> **P5 门当前状态（2026-11-19，Q-B7-45-1 修后实测）**：`test_camera_parity.py` = **195 PASS / 0 FAIL**
+> （修前红 = 189 PASS / 6 FAIL，红证据见下段「门红点」；业务代码改动只在 VK 侧
+> `scene_driver.py`，GL 一行未动）。
 > **统一判据**：不论哪条路径，两端「相机位姿」必须逐值相等 —— 位姿 = 三元组 (眼睛位置, 前向,
 > 上方向)，且**两端都要等于手算期望表**（期望值不取自任何一端，否则两端一致地错也测不出）。
 > 六组：① 轨道相机（target/yaw/pitch/distance 八种组合：负 yaw / 负 target / 入口最小距离 0.5 /
@@ -274,7 +275,7 @@ GLEngine  /  VkEngine               ← 各自实现 _backend_xxx（GPU 上传 /
 > **有牙证明**：把唯一实现 `loom_camera.orbit_camera_eye` 的 y 分量符号临时改掉 → **36 条
 > 当场红**；还原后回到 189/6。注意此时「两端相等」仍成立（两端调同一份函数）—— 正是
 > 「只比两端会漏掉两端同坏、必须同时比手算期望」的同一教训（§4.1 P1 那段的判据）。
-> **门红点 = Q-B7-45-1（证实，只报告不修）**：GL 只有一组角度字段（轨道与玩家相机共用
+> **门红点 = Q-B7-45-1（已修，2026-11-19）**：GL 只有一组角度字段（轨道与玩家相机共用
 > `camera_yaw/camera_pitch`，`loom_camera.CameraMixin.apply_orbit_camera` 读它）；VK 有两组
 > （轨道用 `self.yaw/self.pitch` —— `scene_driver.render_pose:1298` / `camera_pos:899` /
 > `_sync_orbit_camera_state:1955` 全读它；`camera_yaw/camera_pitch` 是**玩家相机**角度）。
@@ -283,6 +284,34 @@ GLEngine  /  VkEngine               ← 各自实现 _backend_xxx（GPU 上传 /
 > =(-8.939,-3.753,-0.480) / fwd=(0.828,0.479,0.290)（= 按新角度手算的期望表），VK 仍是场景
 > 初值 =(-7.658,6.673,-3.870) / fwd=(0.721,-0.389,0.573)；两端 VP max|Δ|=3.544。
 > 归属：`scene_driver.py:624-633 / :899 / :1298 / :1952-1958`（字段分两组）；GL 是基准，未改。
+> **修法（Q-B7-45-1 已修，2026-11-19，方案 A = 按模式别名，复刻 GL 的单组语义）**：
+> `scene_driver.SceneDriver.__setattr__` 加一张模块级别名表 `_ORBIT_ANGLE_ALIAS` ——
+> **orbit_mode=True** 时 `camera_yaw/camera_pitch` 与 `yaw/pitch` 是**同一份值**（双向：
+> 写哪个都等于写轨道角度，读哪个都读到轨道角度）；**orbit_mode=False** 时两组互不相干
+> （`camera_yaw` 仍是玩家相机角度，修前行为逐位不变）。VK 内部 13 处 `self.yaw/self.pitch`
+> **一行未改**，`yaw/pitch` 两个名字**保留**（现有 VK 脚本反向兼容）。
+> 帧首 `_sync_orbit_camera_state` 不再可能覆盖脚本写的角度：正常路径两者已相等（别名保证）
+> 故**不写**，只在「确实不等」（有人绕过 `__setattr__` 直写）时才补镜像。
+> 为什么用 `__setattr__` 而不是 `@property`：属性名一旦在类体里 def，会被
+> `test_engine_api_matrix`（AST 扫类体）与 `test_user_api_parity`（`dir(SceneDriver)`）
+> 记成「VK 独有的公开成员」→ 两张差异名单都会变大（本任务明令不许）；`__setattr__` 是
+> dunder，不进这两张表，且是唯一能拦住用户脚本直接赋值 `engine.camera_yaw = x` 的钩子。
+> **修后证据**：门 195 PASS / 0 FAIL（组 ② 6 条红全绿）；探针
+> `Loom/tests/_tmp/qb745_script_probe.py`（15/15）—— 同一份脚本写 `camera_yaw=1.234` /
+> `camera_pitch=0.5`，两端位姿 = ((-8.939340825701304, -3.753106463250436,
+> -0.48012499388361096), (0.8282784021417753, 0.479425538604203, 0.2900104161569676),
+> (-0.4524905533738882, 0.8775825618903728, -0.15843341242718523)) 逐值相等且 = 手算期望，
+> 两端生产 VP max|Δ|=0；反向兼容：`engine.yaw/engine.pitch` 老写法仍驱动轨道相机
+> （位姿 = 手算期望），且与 `camera_yaw` 双向同步；回归：玩家相机模式下写 `camera_yaw`
+> 不污染 `yaw/pitch`、帧首同步不覆盖脚本写的相机角度。
+> 相关门全绿（修后实测）：`test_input_chain_parity` 106 / `test_mouse_lock_parity` 62 /
+> `test_ui_hit_parity` 144 / `test_scene_load_parity` 76 / `test_audio_parity` 105 /
+> `test_vk_camera_align` 85 / `test_user_api_parity` 8 / `test_engine_api_matrix` 6；
+> `run_all` 全绿 228.4s；`tools/smoke.py` EXIT 0。
+> **残留（只报告不锁，本单范围外）**：① `vk_renderer.orbit_camera` 的第三份公式拷贝仍是
+> 死代码待清理（解耦规则 3）；② 边界情形「玩家相机模式下写 `camera_yaw` 后脚本再把
+> `orbit_mode` 置 True」两端仍可能不同（GL 用刚写的值，VK 帧首以 `yaw` 为准）—— 修前同样
+> 存在，不是本次引入，**未核**（无门覆盖，需人类决定是否补）。
 > **稳定性**：本门连跑 20 次，**20/20 完全一致**（每次 189 PASS / 6 FAIL，FAIL 标签签名同一），
 > 无偶发红（单次约 3.8s）。
 > **已知残差（只报告不锁）**：`vk_renderer.orbit_camera:284-291` 是轨道相机眼睛位置公式的
@@ -306,7 +335,7 @@ GLEngine  /  VkEngine               ← 各自实现 _backend_xxx（GPU 上传 /
 | ~~P2~~（已落地 → §4.1） | ~~鼠标锁定与光标捕获~~ **门 = `test_mouse_lock_parity.py`（62 条全绿）**：R1 + F-3（暂停期门控）+ F-1/F-2/F-6/F-7 + Q-B7-40-1（打包播放器路径）全部已修 | — |
 | ~~**P3**~~（已落地 → §4.1） | ~~UI 命中与焦点~~ **门 = `test_ui_hit_parity.py`（144 条）**：点击命中 / hover 集合 / 焦点与键盘 / 滚动消费 / UI 消费对引擎的屏蔽 / 坐标系 / 窗口 resize 的画布跟随 / 跨帧持按的相机门控，八组 | P3-1（滚轮脚本可见值）**已修**（2026-11-18，判据抽共享前置 `loom_ui_input.py`）；Q-B7-41-1（VK 补 `ui.resize`，共享前置 `loom_ui_resize.py`）与 Q-B7-41-2（VK 的相机门控对齐 GL 的 `ui_consumed`）**已修**（2026-11-18）→ 144 全绿 |
 | ~~**P4**~~（已落地 → §4.1） | ~~音频播放状态（play/stop/3D 位置/音量）~~ **门 = `test_audio_parity.py`（105 条，修前红 90 PASS / 15 FAIL）**：播放状态机 / 3D 听者同步 / 每帧更新时序 / 暂停期行为 / 无音频设备降级 / 脚本 API 面，六组 | 有声卡就能听出来 → 已量化为「两端音频实例状态 + 后端调用序列 + 设备通道占用」逐项相等；四条缺陷 **P4-1~P4-4 已全部修完**（105 PASS / 0 FAIL，2026-11-19） |
-| ~~**P5**~~（已落地 → §4.1） | ~~相机轨道 / 开发者视角~~ **门 = `test_camera_parity.py`（195 条，修前红 189 PASS / 6 FAIL）**：轨道相机 / 脚本写角度字段 / 玩家相机模式 / 开发者视角鼠标 / 相机挂父运行时传播 / 投影参数，六组 | 编辑器用户直接感知 → 已量化为「两端相机位姿三元组（眼睛位置 / 前向 / 上方向）逐值相等且 = 手算期望表」；**Q-B7-45-1 已由本门证实**（VK 的轨道角度在 `yaw/pitch`，脚本写 `camera_yaw` 在 VK 上不生效），**待修** |
+| ~~**P5**~~（已落地 → §4.1） | ~~相机轨道 / 开发者视角~~ **门 = `test_camera_parity.py`（195 条，195 PASS / 0 FAIL）**：轨道相机 / 脚本写角度字段 / 玩家相机模式 / 开发者视角鼠标 / 相机挂父运行时传播 / 投影参数，六组 | 编辑器用户直接感知 → 已量化为「两端相机位姿三元组（眼睛位置 / 前向 / 上方向）逐值相等且 = 手算期望表」；**Q-B7-45-1 已修**（2026-11-19：VK 的 `camera_yaw/camera_pitch` 按 `orbit_mode` 与 `yaw/pitch` 互为别名，脚本写 `camera_yaw` 两端都转轨道相机；修前红 189/6 → 修后 195/0） |
 | **P6** | **暂停 / 单步的窗口级观感** | 已有数值对拍，缺窗口级 |
 
 ---

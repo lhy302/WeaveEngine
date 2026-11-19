@@ -458,6 +458,33 @@ def link_camera_parents(cameras, cam_dicts, models):
             parent.camera_children.append(cam)
 
 
+# ============ Q-B7-45-1（2026-11-19）: 轨道角度字段的「按模式别名」 ============
+# 判据（以 GL 为准，人类 2026-11-18「两个后端没有用户可感知的差异」）：
+#   GL 只有**一组**角度字段 camera_yaw/camera_pitch —— 轨道相机
+#   （loom_camera.CameraMixin.apply_orbit_camera 读它）与玩家相机
+#   （apply_camera / loom_render 写它）**共用**，所以用户脚本
+#   「engine.camera_yaw = 1.2 转轨道相机」在 GL 上一定生效。
+#   VK 历史上是**两组**：轨道用 yaw/pitch（render_pose / camera_pos /
+#   _sync_orbit_camera_state 全读它），camera_yaw/camera_pitch 是**玩家相机**角度
+#   → 同一份脚本在 VK 上「写了等于没写」（P5 门组 ② 六条红，Q-B7-45-1）。
+#
+# 修法 = 方案 A（按模式别名，复刻 GL 的单组语义；VK 内部 13 处 self.yaw/self.pitch
+#   一行未改）：
+#     orbit_mode=True  → camera_yaw/camera_pitch 与 yaw/pitch 是**同一份值**（双向别名，
+#                        写哪个都等于写轨道角度，读哪个都读到轨道角度）；
+#     orbit_mode=False → 两组互不相干（camera_yaw 仍是玩家相机角度，修前行为不变）。
+#   于是「帧首同步把脚本写的角度覆盖回 yaw」这个缺陷自然消失：同步写的就是同一个值。
+#
+# 为什么用 __setattr__ 而不是 @property（决策留痕）：
+#   属性名一旦在类体里 def，就会被 tests/test_engine_api_matrix.py（AST 扫类体）与
+#   tests/test_user_api_parity.py（dir(SceneDriver)）记成「VK 独有的公开成员」→
+#   两张差异名单都会**变大**（本任务明令不许）。__setattr__ 是 dunder，不进这两张表；
+#   同时它是唯一能拦住用户脚本直接赋值 `engine.camera_yaw = x` 的钩子。
+#   （GL 侧一行未动：它是基准。）
+_ORBIT_ANGLE_ALIAS = {'camera_yaw': 'yaw', 'camera_pitch': 'pitch',
+                      'yaw': 'camera_yaw', 'pitch': 'camera_pitch'}
+
+
 # 2026-11-17 (S2-3 门面收敛 / JVM 模型): SceneDriver 不再是「第二个引擎」——
 # 它继承 EngineCore（后端无关内核），自己只保留「VK 侧装配 + 后端驱动」的部分。
 # MRO: SceneDriver 自己的定义优先（保持现有行为），EngineCore 补上 VK 侧原先缺的能力。
@@ -622,6 +649,10 @@ class SceneDriver(VkWindowMixin, EngineCore):
         # loom_render._prepare_main_pass 每帧 apply_orbit_camera() 同语义同值），
         # 否则 3D 听者永远钉在这个初始值上。
         self.camera = Point3D(0, 0, -5)
+        # Q-B7-45-1 (2026-11-19): 这两个名字在**轨道模式**下与 yaw/pitch 是同一份值
+        # （按模式双向别名，见 __setattr__）；玩家相机模式（orbit_mode=False）下它们是
+        # 玩家相机角度，与修前逐位相同。__init__ 里逐字段直写（此刻 orbit_mode 尚未
+        # 建立 → 别名不生效，也不会去碰 yaw/pitch，与 GL 的初值 0/0 对齐）。
         self.camera_yaw = 0.0
         self.camera_pitch = 0.0
         self.camera_roll = 0.0                   # 绕视线倾斜 (弧度) — 与 GL camera_roll 同
@@ -1938,13 +1969,17 @@ class SceneDriver(VkWindowMixin, EngineCore):
           · VK: 本方法由 advance_logic（渲染帧开始、任何消费相机的地方之前）与
                 load_from_data（轨道分支，与 GL 加载路径同位置）调用。
 
-        为什么还要写 camera_yaw/camera_pitch：VK 把「轨道相机角度」和「玩家相机角度」
-        分成两组字段（轨道用 self.yaw/self.pitch，玩家相机用 camera_yaw/camera_pitch），
-        而 GL 只有一组（轨道与玩家相机共用 camera_yaw/camera_pitch）。共享的
-        loom_frame_components.sync_audio_listener 读的是 camera_yaw/camera_pitch
-        （GL 的轨道角度就在那里），所以 VK 在轨道模式下必须把轨道角度镜像到这两个字段
-        —— 否则听者位置对了、朝向仍钉在 0/0（门 ②b 的 fwd/up 两条）。
-        （这是**最小适配**：VK 的数据结构分两组字段，公式与取值一字不改。）
+        为什么还要写 camera_yaw/camera_pitch：共享的 loom_frame_components.
+        sync_audio_listener 读的是 camera_yaw/camera_pitch（GL 的轨道角度就在那里），
+        所以 VK 在轨道模式下这两个字段必须等于轨道角度 —— 否则听者位置对了、朝向
+        仍钉在 0/0（门 ②b 的 fwd/up 两条）。
+
+        ★Q-B7-45-1（2026-11-19，本方法的**覆盖缺陷**已修）：轨道模式下两组角度字段
+        由 __setattr__ 的按模式别名保证**同一份值**，所以脚本刚写的 camera_yaw 就是
+        yaw 本身 —— 本方法不再（也不可能）把脚本写的角度覆盖回旧值。下面的镜像只在
+        「两者确实不等」时才补写，即只可能是有人绕过了 __setattr__（object.__setattr__
+        直写）时才发生；这是防御，不是常规路径，且方向恒为「轨道角度 yaw/pitch 权威」
+        （轨道模式下 yaw/pitch 是 GL 那唯一一组字段的等价物）。
 
         玩家相机 / 脚本接管相机（orbit_mode=False）时本方法什么都不做 —— 那时
         self.camera / camera_yaw/pitch/roll 由 apply_camera / 脚本写入，与 GL 同。
@@ -1952,8 +1987,11 @@ class SceneDriver(VkWindowMixin, EngineCore):
         if not getattr(self, 'orbit_mode', True):
             return
         self.camera_roll = 0.0            # 与 GL 同不变式: 轨道(开发者)视角 roll 恒 0
-        self.camera_yaw = self.yaw        # 镜像轨道角度 → 听者的朝向输入源
-        self.camera_pitch = self.pitch
+        # Q-B7-45-1: 正常路径两者已相等（别名保证）→ 不写，绝不覆盖脚本写的角度。
+        if self.camera_yaw != self.yaw:
+            object.__setattr__(self, 'camera_yaw', self.yaw)
+        if self.camera_pitch != self.pitch:
+            object.__setattr__(self, 'camera_pitch', self.pitch)
         self.camera = orbit_camera_eye(self.target, self.yaw, self.pitch,
                                        self.distance)
 
@@ -1964,6 +2002,23 @@ class SceneDriver(VkWindowMixin, EngineCore):
         if cam is None or not getattr(cam, 'pitch_lock', False):
             return None
         return (math.radians(cam.pitch_min), math.radians(cam.pitch_max))
+
+    # ---- Q-B7-45-1: 轨道角度字段的按模式别名（实现，语义见模块级 _ORBIT_ANGLE_ALIAS） ----
+    def __setattr__(self, name, value):
+        """轨道模式下 camera_yaw/camera_pitch ≡ yaw/pitch（双向别名，Q-B7-45-1）。
+
+        语义与 GL 的**单组字段**逐位一致：
+          · orbit_mode=True  → 写 camera_yaw 就是写轨道角度（脚本 `engine.camera_yaw = 1.2`
+            真的转轨道相机，GL 上就是这么工作的）；写 yaw（开发者视角鼠标）也立刻让
+            camera_yaw 同步 —— 与 GL「只有一个字段」完全等价，不留帧内滞后。
+          · orbit_mode=False → 两组互不相干：camera_yaw/camera_pitch 就是玩家相机角度
+            （apply_camera / 脚本接管相机），行为与修前**逐位相同**。
+        yaw/pitch 两个名字继续存在（VK 现有脚本/内部代码零改动，反向兼容）。
+        """
+        partner = _ORBIT_ANGLE_ALIAS.get(name)
+        if partner is not None and getattr(self, 'orbit_mode', False):
+            object.__setattr__(self, partner, value)
+        object.__setattr__(self, name, value)
 
     # ---- 相机 (脚本读写; 轨道相机与脚本视角分离) ----
     @property

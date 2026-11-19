@@ -126,7 +126,17 @@ def _enforce_fail_exit_code():
     后果：同一份脚本写 engine.camera_yaw 想转轨道相机 → GL 生效、**VK 不生效**
     （VK 下一渲染帧帧首 _sync_orbit_camera_state 还会把 camera_yaw 覆盖回 yaw）。
     归属：scene_driver.py:624-633 / :899 / :1298 / :1952-1958（字段两组）；GL 是基准，未改。
-  · 本任务**只报告不修**（照 P1~P4 先例按修前红提交），业务代码一行未改。
+
+修后绿（2026-11-19，Q-B7-45-1 已修，本门 **195 PASS / 0 FAIL**）：
+  · 修法（方案 A = 按模式别名，复刻 GL 的单组语义）：SceneDriver.__setattr__ 按
+    _ORBIT_ANGLE_ALIAS 表把 camera_yaw/camera_pitch 与 yaw/pitch 在 **orbit_mode=True**
+    时变成同一份值（双向）；玩家相机模式（orbit_mode=False）下两组互不相干（修前行为不变）。
+    帧首 _sync_orbit_camera_state 正常路径不再写这两个字段（两者已相等），只防御
+    「绕过 __setattr__ 直写」的情形 —— 脚本刚写的角度不可能被帧首同步覆盖。
+  · 业务代码只改 scene_driver.py（VK 侧）；**GL 一行未动**；本门断言/夹具**一行未改**
+    （原本绿的 189 条逐条未动，只把 6 条红点变绿）。
+  · 反向兼容：VK 的 yaw/pitch 两个名字保留且仍驱动轨道相机（探针
+    tests/_tmp/qb745_script_probe.py 15/15：老写法 engine.yaw=x 的位姿 == 手算期望）。
 """
 
 import math
