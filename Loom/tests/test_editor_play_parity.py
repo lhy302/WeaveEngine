@@ -101,17 +101,32 @@ def _enforce_fail_exit_code():
   修后绿：**291 PASS / 0 FAIL**（84 条红全部转绿 + 结构段锁定同源形状）。
   稳定性：连跑 20 次，**20/20 全绿一致**（单次约 3.2s），无偶发红。
 
+⑦ 增补（2026-11-20，Q-B7-48-2 修后收口；本段只新增断言，既有断言一字未动）：
+  修前红（tests/_tmp/qb7482_disable_probe.py 实测，HEAD=7d3dc83）：编辑器播放 5 帧 → 退出，
+    5 轮退出期 on_disable 全 0（期望各 +1）；Lua VM 关闭 100% 走 script_glue.__del__ 兜底
+    （on_disable 契约路径 0 次）；播放器对照：load_scene 切场景 on_destroy 照常派发。
+  修后绿：5 轮退出各恰 +1 disable；VM 关闭 100% 走 on_disable 契约路径；本门新增 ⑧ 条
+    （2 结构 + 3 用例 × 2 行为）后全绿（299 PASS / 0 FAIL；修前红实测 = ⑦ 组 4 条红：3 条行为 + 1 条结构，见上）。
+
 已知差异登记表：**必须为空**（KNOWN_DIFFS）。任何「差不多」/阈值/容差都不许。
 
 已知残差（只报告不锁，**S1 范围外、单独立项**，2026-11-19 实测留痕）：
-  · **Q-B7-48-2（新发现，非 S1 四失真）**：编辑器「退出播放」的 on_disable 从未触发 ——
-    toggle_play 退出分支第 2 步 apply_snapshot（undo.py:164-167）先 clear_scripts()+
-    add_script() **重建**全部脚本组件，第 6 步的派发循环（editor.py:2251-2256）遍历到的
-    已是 _script=None 的新组件 → scripts.py:73-75 的契约（"停止播放: 释放/复位脚本
-    持有的外部资源"）是死代码（Lua VM 的停止释放路径同断链，见其 on_disable）。
-    实测：门探针脚本（on_disable 有记录）播放 5 帧 → 退出 → 记录表无 'disable'，
-    退出本身无错（playing=False, _play_exit_error=None）。本门**不锁**此缺陷态
-    （反模式：不许把缺陷写成断言），修复后应在本门补「退出追加一次 on_disable」断言。
+  · **Q-B7-48-2（新发现，非 S1 四失真）→ 已修（2026-11-20，Q-B7-48-2 单独收口）**：
+    编辑器「退出播放」的 on_disable 曾从未触发 —— toggle_play 退出分支第 2 步
+    apply_snapshot（undo.py:164-167）先 clear_scripts()+add_script() **重建**全部脚本
+    组件，原第 6 步的派发循环（editor.py:2251-2256）遍历到的已是 _script=None 的新
+    组件 → scripts.py 的契约（"停止播放: 释放/复位脚本持有的外部资源"）是死代码
+    （Lua VM 的停止释放路径同断链，见其 on_disable）。
+    修法（同源不同步）：把**全仓唯一**一份 on_disable 派发循环前移到退出分支第 1.5 步
+    （apply_snapshot 重建组件**之前**），只挪位置不改派发语义；同源复核修正：生产代码
+    inst.on_disable( 派发点全仓恰 1 处，播放器入口 0 处 —— 建门时的「播放器会触发
+    on_disable」经复核**不成立**：播放器（GL PlayerApp / VK SceneDriver）无退出播放
+    边界，其释放契约经换场景 load_scene→clear_scene→remove_model→on_destroy 派发
+    （实测照常，VM 走契约路径关闭）。修前红（tests/_tmp/qb7482_disable_probe.py）：
+    编辑器播放 5 帧 → 退出，5 轮 on_disable 全 0、Lua VM 关闭 100% 走 __del__ 兜底
+    （契约路径 0 次）；修后绿：5 轮退出各恰 +1 disable、VM 关闭 100% 走 on_disable
+    契约路径（存活恒 0 —— 修前「疑似泄漏」实测为兜底即时回收，非线性泄漏）。
+    本门 ⑦ 组锁定：退出追加恰一次 on_disable + 全仓唯一派发点在组件重建之前的结构锁。
 """
 
 import hashlib
@@ -655,7 +670,8 @@ def run_case(tag, scene_data, cam_case, host_name='物体box'):
               s['e_hooks'] == exp_hooks, s['e_hooks'])
         check('%s 帧%d ③ 两端钩子序逐项相等' % (tag, k), s['g_hooks'] == s['e_hooks'],
               (s['g_hooks'], s['e_hooks']))
-    # 退出播放的 on_disable 断言**不在本门**（已知缺陷, 见文件头「已知残差」; S1 不修, 单独立项）
+    # 退出播放的 on_disable 断言在下方 ⑦ 组（Q-B7-48-2, 2026-11-20 修后收口；建门时
+    # 该路径是已知缺陷 —— 反模式：不许把缺陷写成断言，故 S1 建门时未锁）
     # ---- ④ 时钟 ----
     for k, s in enumerate(snaps, 1):
         check('%s 帧%d ④ 时钟 steps/alpha/累计 两端逐项相等' % (tag, k),
@@ -705,6 +721,39 @@ check('⑥ 用例 C 生效天空盒 = 引擎默认蓝天（相机级未覆盖；
       snapsC[0]['g']['sky'] == snapsC[0]['e']['sky']
       and snapsC[0]['g']['sky'][1] == [58, 155, 213, 255],
       (snapsC[0]['g']['sky'], snapsC[0]['e']['sky']))
+
+
+# ---- ⑦ 退出播放 on_disable（Q-B7-48-2, 2026-11-20 修后收口） ----
+# 口径：退出播放 = 脚本实例禁用，编辑器每个脚本组件恰追加 1 次 on_disable；
+# 播放器（GL PlayerApp）无「退出播放」边界（会话内恒播放，释放契约在换场景
+# load_scene→clear_scene→remove_model→on_destroy），故 ⑦ 只锁编辑器侧 + 结构锁。
+print()
+print("=== ⑦. 退出播放 on_disable（Q-B7-48-2）：退出追加恰一次/脚本组件 + 全仓唯一派发点结构锁 ===")
+
+with open(os.path.join(ROOT, 'editor.py'), 'r', encoding='utf-8') as _f7:
+    _ed_src7 = _f7.read()
+_no_dis7 = {fn: open(os.path.join(ROOT, fn), 'r', encoding='utf-8').read().count('inst.on_disable(')
+            for fn in ('runtime.py', 'engine.py', 'engine_core.py', 'scene_driver.py',
+                       'loom_model_gpu.py', 'vk_player.py', 'game_player.py',
+                       'loom_player_window.py')}
+check('⑦ 结构：inst.on_disable( 生产派发点全仓恰 1 处（editor.py 第 1.5 步）+ 播放器入口 0 处',
+      _ed_src7.count('inst.on_disable(') == 1 and set(_no_dis7.values()) == {0},
+      (_ed_src7.count('inst.on_disable('), _no_dis7))
+_i_dis7 = _ed_src7.index('inst.on_disable(')
+_i_snap7 = _ed_src7.index('apply_snapshot(m, self._play_snap[id(m)])')
+check('⑦ 结构：唯一派发点在源码序上位于 apply_snapshot 重建组件之前（toggle_play 退出分支内）',
+      0 < _i_dis7 < _i_snap7, (_i_dis7, _i_snap7))
+
+for _t7, _pair7 in (('用例 A', pairA), ('用例 B', pairB), ('用例 C', pairC)):
+    _rec7 = REC.setdefault(id(_pair7.ed), [])
+    _n7 = len(_rec7)
+    _pair7.ed.toggle_play()          # 生产退出入口 toggle_play
+    _tail7 = _rec7[_n7:]
+    check('%s ⑦ 退出播放追加恰 1 次 on_disable（每脚本组件一次; 本场景恒 1 组件）+ 回到编辑态' % _t7,
+          _tail7 == ['disable'] and _pair7.ed.is_playing is False, (_tail7, _pair7.ed.is_playing))
+    check('%s ⑦ 退出后编辑态脚本组件 _script 全为 None（重建组件不带旧实例）' % _t7,
+          all(sc._script is None for m in _pair7.ed.models for sc in m.scripts),
+          [(m.name, [sc.script_id for sc in m.scripts]) for m in _pair7.ed.models])
 
 print()
 print('=== ⏸ SKIP：VK 对拍面（S4 未实现 —— 未实现要可见，不许静默放过） ===')

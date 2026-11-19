@@ -1091,7 +1091,10 @@ try:
 finally:
     LFC.update_audio = orig
 rows.append(('③-c 绑死模式 3 个渲染帧音频段次数', len(_c['GL']), len(_c['VK'])))
-check('③-c 绑死模式：每渲染帧音频段调用次数两端相等（P4-4：VK 绑死路径没有 update_audio）',
+# 2026-11-20（独立审核 P1-5 的姊妹括注，test_audio_parity.py:809 同类）：本行及 ⑥-1/⑥-6 的
+# 括注原写的是**修前**缺陷状态（P4-3/P4-4 已于 f8239f2/788a998 修完），与修后事实不符（反模式 10）。
+# 只改文案，check() 表达式一字未动。
+check('③-c 绑死模式：每渲染帧音频段调用次数两端相等（P4-4 修后（原缺陷：VK 绑死路径没有 update_audio））',
       len(_c['GL']) == len(_c['VK']) == 3, (len(_c['GL']), len(_c['VK'])))
 seq_check('③-c 绑死模式：音频段调用次数，两端逐项相等', rows)
 p.shutdown()
@@ -1193,7 +1196,7 @@ rows.append(('⑥-1 首帧前 engine.audio 的公开 API 面',
               if p.api_before_first_frame[0] is not None else '<None>'),
              (tuple(p.api_before_first_frame[1])
               if p.api_before_first_frame[1] is not None else '<None>')))
-check('⑥-1 首帧前两端 engine.audio 都是同一套公开 API（P4-3：VK 首帧前是 None）',
+check('⑥-1 首帧前两端 engine.audio 都是同一套公开 API（P4-3 修后（原缺陷：VK 首帧前是 None））',
       p.api_before_first_frame[0] == p.api_before_first_frame[1]
       and p.api_before_first_frame[0] is not None, p.api_before_first_frame)
 _gl_api = sorted(n for n in dir(p.spy['GL']._real) if not n.startswith('_'))
@@ -1294,7 +1297,7 @@ rows.append(('⑥-6 脚本 on_start 调音频 API 的结果（聚合）', _gl_ag
 rows.append(('⑥-6 脚本是否被引擎判成坏脚本', tuple(_gl_broken), tuple(_vk_broken)))
 check('⑥-6 同一份脚本在 on_start 里调 audio.play_sound/stop/load：两端结果逐项相等'
       '（聚合口径，不依赖脚本派发顺序）', _gl_agg == _vk_agg, (_gl_agg, _vk_agg))
-check('⑥-6 脚本健康度：两端都不把脚本判成坏脚本（P4-3：VK 上 on_start 抛 AttributeError）',
+check('⑥-6 脚本健康度：两端都不把脚本判成坏脚本（P4-3 修后（原缺陷：VK 上 on_start 抛 AttributeError））',
       _gl_broken == _vk_broken and all(not b for (_n, _s, b) in _gl_broken),
       (_gl_broken, _vk_broken))
 for _h in (_gl6, _vk6):

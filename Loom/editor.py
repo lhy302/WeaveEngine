@@ -2204,6 +2204,35 @@ class EditorApp(GLEngine):
             for l in list(self.lights):
                 if l not in self._play_lights:
                     self.remove_light(l)
+            # 1.5) 派发 on_disable (Q-B7-48-2 修复, 2026-11-20): 停止播放 = 脚本实例
+            #      禁用 (C1 契约)。★必须在第 2 步 apply_snapshot **之前** ——
+            #      apply_snapshot (undo.py:164-167) 会 clear_scripts()+add_script()
+            #      **重建**全部脚本组件, 旧组件 (持有播放期脚本实例) 被丢弃; 旧版把
+            #      本循环放在第 6 步, 遍历到的已是 _script=None 的新组件 -> on_disable
+            #      从未触发 (scripts.py 的 on_disable 契约成死代码, Lua VM 的停止
+            #      释放同断链, 只剩 script_glue 的 __del__ 兜底)。本循环 = 全仓唯一
+            #      一份 on_disable 派发实现, 只挪位置不改派发语义 (on_disable ->
+            #      stop_all_coroutines -> 清实例); 时序仍在第 1 步 on_destroy (播放
+            #      期新增物体) 之后, 与原意图一致; 且脚本此刻仍持播放期终态
+            #      (obj 可读终态, 与 on_destroy 同口径)。
+            for m in self._play_models:
+                for sc in m.scripts:
+                    inst = getattr(sc, '_script', None)
+                    if inst is not None and not getattr(sc, '_script_broken', False):
+                        try:
+                            inst.on_disable()   # C1: 停止播放 = 脚本实例禁用
+                        except Exception as e:
+                            print("[脚本] %s.on_disable 出错: %r" % (m.name, e))
+                        # 2026-10-18 协程：on_disable 后显式清理（generator 里的
+                        # try/finally 在此触发，避免停止播放时泄漏资源）
+                        if hasattr(inst, 'stop_all_coroutines'):
+                            try:
+                                inst.stop_all_coroutines()
+                            except Exception as e:
+                                print("[脚本] %s.stop_all_coroutines 出错: %r"
+                                      % (m.name, e))
+                    sc._script = None
+                    sc._script_broken = False
             # 2) 还原原物体: 字段快照 + 挂回列表 (若被删) + 重建 GPU
             for m in self._play_models:
                 if m not in self.models:
@@ -2244,28 +2273,15 @@ class EditorApp(GLEngine):
             self._play_cameras = self._play_camera_snap = None
             self._play_active_camera = self._play_edit_cam = None
             self._play_edit_proj = None
-            # 6) 清脚本实例 + 全部运行时状态 (2026-08-30 用户实测铁律:
+            # 6) 清全部运行时状态 (2026-08-30 用户实测铁律:
             # "停止播放清除所有状态(包括运动和下落速度)":
             # apply_snapshot 已清 rb.velocity/_colliding + 动画/音频运行态,
-            # 此处对无快照体再兜底清一遍 (断链/防御, 含模型的 _colliding 属性)
+            # 此处对无快照体再兜底清一遍 (断链/防御, 含模型的 _colliding 属性)。
+            # 脚本 on_disable 派发 + 清实例已前移到第 1.5 步 (Q-B7-48-2, 2026-11-20):
+            # 必须发生在 apply_snapshot 重建脚本组件**之前** —— 旧版放在这里,
+            # 遍历到的恒是 _script=None 的新组件 (死代码缺陷; 修前红/修后绿留痕
+            # 见 tests/_tmp/qb7482_disable_probe.py 与 test_editor_play_parity.py ⑦)。
             for m in self._play_models:
-                for sc in m.scripts:
-                    inst = getattr(sc, '_script', None)
-                    if inst is not None and not getattr(sc, '_script_broken', False):
-                        try:
-                            inst.on_disable()   # C1: 停止播放 = 脚本实例禁用
-                        except Exception as e:
-                            print("[脚本] %s.on_disable 出错: %r" % (m.name, e))
-                        # 2026-10-18 协程：on_disable 后显式清理（generator 里的
-                        # try/finally 在此触发，避免停止播放时泄漏资源）
-                        if hasattr(inst, 'stop_all_coroutines'):
-                            try:
-                                inst.stop_all_coroutines()
-                            except Exception as e:
-                                print("[脚本] %s.stop_all_coroutines 出错: %r"
-                                      % (m.name, e))
-                    sc._script = None
-                    sc._script_broken = False
                 rb = getattr(m, 'rigidbody', None)
                 if rb is not None:
                     rb.velocity = Point3D(0.0, 0.0, 0.0)
