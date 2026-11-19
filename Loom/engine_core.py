@@ -272,7 +272,28 @@ class EngineCore(TransformMixin, PhysicsMixin, InputMixin, CameraMixin,
 
     def set_logic_paused(self, paused):
         """暂停/恢复逻辑时钟（GL 侧实现；VK 有同名实现会覆盖本方法）。
-        暂停边界：清 accumulator 余量 + 清墙钟锚点 + 插值对齐 + 渲染世界缓存失效。"""
+        暂停边界：清 accumulator 余量 + 清墙钟锚点 + 渲染世界缓存失效。
+
+        ★Q-B7-46-1（P6-1，2026-11-19 人类裁决「暂停不得跳变」）：暂停分支**不做**
+        `_interp.align()`。align() 的语义是「边界强制对齐」= prev←curr + alpha=0
+        = 把画面拉到 curr；而暂停**不改任何位姿**，只停时间 —— 所以那一步是纯粹的
+        **画面向前跳**：实测（P6 门 ④/⑥）按 F9 的瞬间 GL 画面 == 「正常推进 1 帧」
+        的画面（MAE 2.3e-7），而暂停前最后一帧 == 「正常 0 帧」（MAE 2.96e-4）→
+        玩家看到画面向前窜一个逻辑帧。VK 的覆盖版 `SceneDriver.set_logic_paused`
+        只 `clk.reset()`（不 align、不清 `_render_world`），画面**就地冻结** ——
+        那是正确行为（人类裁定 VK 对），GL 去掉这一句即两端同构。
+        副产物修复：去掉 align 后，暂停后第一次 F10 的画面真的前进 1 帧（旧实现
+        里那一帧已在暂停瞬间预支，F10 首步画面几乎不动）。
+
+        其它 5 处 `align()` 调用点**仍然正确、一行不动**：加载场景
+        （loom_model_gpu:298）/ 进出播放（runtime:189、editor:2184/:2306）/
+        VK 加载（scene_driver:901）/ 变换失效重抓（loom_transform:197）——
+        那些边界的位姿**本身就跳变**了（换场景/换会话/直接改位姿），必须把 prev
+        钉到新位姿，否则首帧会从旧位姿插值过来（「第一帧从原点飞过来」）。
+        暂停是唯一「位姿不变、只有时间停」的边界，prev 必须保留。
+
+        `_render_world = None` 保留：`clk.reset()` 把 alpha 归 0，缓存的渲染矩阵是
+        暂停前那个 alpha 的产物，必须重算。"""
         self._logic_paused = bool(paused)
         if self._logic_paused:
             clk = self._ensure_logic_clock()
@@ -282,12 +303,6 @@ class EngineCore(TransformMixin, PhysicsMixin, InputMixin, CameraMixin,
                 except Exception:
                     pass
             self._logic_wall_last = None
-            it = getattr(self, '_interp', None)
-            if it is not None:
-                try:
-                    it.align()
-                except Exception:
-                    pass
             self._render_world = None
         return self._logic_paused
 

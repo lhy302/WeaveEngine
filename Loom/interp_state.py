@@ -7,7 +7,9 @@ InterpState = prev/curr 两个 (N,3) 平面快照 (position/rotation_euler/scale
     _transform_snapshot 的 id 钉住三件对象模式, R6);
   - render_pose(alpha): 全 numpy 向量化插值平面 (pos/scl lerp, rot 小角度
     angdiff), 只喂渲染矩阵管道, **不回写 GameObject** (R3);
-  - align(): curr=prev 强制对齐 (暂停/加载/toggle_play 边界, alpha=0);
+  - align(): curr=prev 强制对齐 (加载/进出播放/变换重抓边界, alpha=0);
+    **不用于暂停** (Q-B7-46-1, 2026-11-19 人类裁决「暂停不得跳变」): 暂停
+    不改位姿, align 会把画面从 prev 拉到 curr = 向前跳一个逻辑帧;
   - 新增物体: prev 缺行用 curr 行填 (首帧不插值);
   - 缓冲 grow-only (R8): 按 2x 容量复用, 扩容只在物体数增长帧。
 
@@ -170,7 +172,11 @@ class InterpState:
         self._n = n
 
     def align(self):
-        """边界强制对齐 (暂停/加载/进出播放): prev=curr, alpha=0 (无插值)."""
+        """边界强制对齐 (加载/进出播放/变换重抓): prev=curr, alpha=0 (无插值).
+        ★**暂停不用本方法** (Q-B7-46-1): 暂停不改位姿, prev←curr 会让画面向前跳
+        一个逻辑帧; 暂停要的是「就地冻结」= 保留 prev/curr 原样。
+        适用判据: 调用点是否**刚刚换掉了位姿**(换场景/进出播放/直接改位姿)。
+        是 → align; 只是时间停 → 不 align。"""
         if self._curr is not None and self._n:
             self._prev[:self._n] = self._curr[:self._n]
             self._prev_rot[:self._n] = self._curr_rot[:self._n]
