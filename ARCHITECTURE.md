@@ -73,14 +73,14 @@
 
 ```mermaid
 flowchart TB
-  subgraph EDENT["编辑器入口（只有 GL 一条腿）"]
+  subgraph EDENT["编辑器入口（GUI 用 GL；播放经 run_player 可选双后端）"]
     A1["Loom.py<br/>源码入口"]:::entry
     A2["build_entry.py<br/>编译入口"]:::entry
   end
-  subgraph PLENT["播放器入口（两条腿，可切）"]
-    A3["run_player.py<br/>后端选择 resolve_backend"]:::entry
-    A4["game_player.py<br/>打包游戏"]:::entry
-    A5["vk_player.py<br/>VK 窗口循环"]:::entry
+  subgraph PLENT["★ 后端选择组件（三个入口共用同一份）"]
+    A3["run_player.py<br/>resolve_backend：--backend > 设置 render_api > 默认<br/>屏蔽「选哪个后端」这个差异"]:::contract
+    A4["game_player.py<br/>打包游戏（复用 run_player）"]:::entry
+    A5["vk_player.py<br/>VK 窗口循环（resolve_backend 的 vulkan 分支）"]:::impl
   end
   subgraph TOOL["构建器"]
     A6["build_game.py"]:::entry
@@ -105,12 +105,13 @@ flowchart TB
     E1["场景/装配<br/>sceneio.py"]:::file
     E2["资产库 guid<br/>loom_assets.py"]:::file
   end
-  A1 -->|创建| B1
-  A2 -->|创建| B1
-  A1 -->|--run 分支调用| A3
+  A1 -->|编辑器 GUI| B1
+  A2 -->|编辑器 GUI| B1
+  A1 -->|--run / 播放| A3
+  A2 -->|--run / 播放| A3
   A4 -->|复用后端选择| A3
-  A3 -->|opengl 分支<br/>经 runtime.PlayerApp| B1
-  A3 -->|vulkan 分支| A5
+  A3 -->|★ 统一后端选择<br/>resolve_backend：opengl| B1
+  A3 -->|★ resolve_backend：vulkan| A5
   A5 -->|创建| B2
   A6 -->|读场景| E1
   B1 ==>|拼装| C1
@@ -138,11 +139,32 @@ flowchart TB
 > **这张图 v1 画错过**：原来把 `run_player.py` 画在入口层中间、还画了一条 `run_player → game_player`，方向反了（是 game_player 调 run_player）。
 > 现在按「谁创建谁」重画：编辑器入口直连 GLEngine；播放器入口经 run_player 分叉到 GL（runtime.PlayerApp）或 VK（vk_player → SceneDriver）。
 
+## ★ 图 1 的判读要点：三个入口共用同一份「后端选择 + 后端屏蔽」
+
+> **人类 2026-11-19 澄清（原文）**：
+> 「编译入口和源码入口和打包游戏一样，**全部走 run_player.py 后端选择组件**，打包的游戏用的播放器和编辑器用的完全一致就不会出现表现差异了，
+> 同时播放器还屏蔽了后端 API 之间的差异，不管选择哪种后端都不会影响执行效果
+> （保证不同后端执行效果一致的工作我们来做，也就是反复提到的 **JVM 虚拟机一样屏蔽后端指令集差异**那样）。」
+
+落到这张图上，有**两条必经之路**：
+
+| 必经之路 | 是什么 | 现状 |
+|---|---|---|
+| **① 后端选择**：三个入口（源码 / 编译 / 打包游戏）的「跑场景」全部走 `run_player.resolve_backend` | `--backend` > 游戏/引擎设置 `render_api` > 默认 —— 单一事实源 | ✅ 播放器/打包已统一；编辑器 GUI 视口**未统一**（`EditorApp(GLEngine)`，见 Q-B7-47-1，beta7 修） |
+| **② 后端屏蔽**：选定后端后，`EngineCore` + 后端钩子 + 共享前置库保证「同一份脚本 + 同一串输入 → 同一串可观察结果」 | 这是我们的工作：把后端差异**挡在 `EngineCore` 之下**，用户脚本永远看不到 | ✅ 机制已建（图 2/2b + 契约单源）；**证据** = 六面对拍门 653 条（图 19）；剩余缺口见图 19.3 |
+
+> **一句话**：入口可以千差万别（编辑器 / 播放器 / 打包游戏），但「选后端」只许有一条路（run_player），
+> 「后端差异」只许出现在一个地方（`EngineCore` 之下的钩子层）—— 这样无论用户从哪个入口进来、选哪个后端，
+> **执行效果一致**是结构保证的，不是靠自觉。
+
+---
+
 ## 图 1.1 谁能选后端、不能选时怎么办（这张表比图更说明问题）
 
 | 场景 | 能选后端吗 | 依据 | 环境不支持时 |
 |---|---|---|---|
-| **编辑器**（`Loom.py` / `Loom.exe`） | **不能**。编辑器 = `EditorApp(GLEngine)`，只有 GL 一条腿 | `editor.py:159` 继承 `GLEngine` | GL 4.3 不满足 → 明确失败并提示「改用 Vulkan 后端」（但它自己用不了 Vulkan）：`loom_gl_version.py:68` |
+| **编辑器 GUI 视口**（`Loom.py` / `Loom.exe`） | **暂不能**（**beta7 修，Q-B7-47-1**）：`EditorApp(GLEngine)` 只有 GL 一条腿 | `editor.py:159` 继承 `GLEngine` | GL 4.3 不满足 → 明确失败：`loom_gl_version.py:68` |
+| **编辑器里的「播放」→ 用 VK 验证**（中间方案） | ✅ beta7：编辑器加「用 VK 预览」按钮 → `run_player.run_backend('vulkan', 当前场景)` 外部播放器 | Q-B7-47-2 | — |
 | 编辑器里点「播放」 | **不能**。就在编辑器自己的 GL 引擎里跑 | `editor.toggle_play` 只置 `is_playing`，不起外部播放器 | 同上 |
 | 独立播放器（`--run`） | **能**：`--backend` > 游戏设置 > 引擎设置 > 默认 vulkan | `run_player.resolve_backend:133` | `auto`：VK 初始化失败 → 诊断+弹窗+**同进程转 GL**，并把用户层 `render_api` 写成 opengl（`run_player.py:415-430`、`_persist_backend:186`）；显式 `--backend vulkan` 失败只报错不改配置 |
 | 打包游戏（`game_player.py`） | **能**：同播放器一套逻辑（复用 `run_player`） | `game_player.py:169-235` | 同播放器 |
