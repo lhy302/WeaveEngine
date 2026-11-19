@@ -6,7 +6,7 @@
 
 ## 1 架构认知：看 Mermaid 结构图，**不要**看纯文字架构描述
 
-**唯一权威架构文档**：[docs/design/结构图_功能与文件_20261117.md](docs/design/结构图_功能与文件_20261117.md)
+**唯一权威架构文档**：[ARCHITECTURE.md](ARCHITECTURE.md) —— **就在仓库根，23 张 Mermaid 图**
 
 为什么是 Mermaid 而不是文字表格（人类 2026-11-18 裁定）：
 
