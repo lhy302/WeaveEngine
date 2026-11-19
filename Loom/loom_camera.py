@@ -79,6 +79,16 @@ class CameraMixin:
         self.camera = orbit_camera_eye(self.camera_target, self.camera_yaw,
                                        self.camera_pitch, self.camera_distance)
 
+    def _reapply_parent_camera(self):
+        """挂父激活相机每帧重应用（2026-08-16 相机物体化；播放器与编辑器播放态
+        **同源唯一实现**，S1 / Q-B7-48-1）：父物体运行期移动/旋转后相机世界位姿
+        随父走（Unity 父子语义）。仅挂父相机触发；根相机/无激活相机不动作；
+        脚本在 update 里后写相机仍覆盖（玩家控制器契约不变）。
+        历史缺陷（修前）：这三行只存在于 loom_render.render，编辑器 render 无对应
+        调用 -> 相机挂父时编辑器播放态不跟随父物体移动（对拍门用例 C 修前红）。"""
+        _cam = self.active_camera_object()
+        if _cam is not None and _cam.parent is not None:
+            self.apply_camera(_cam)
     def move_camera(self, delta_time):
         """根据按键状态移动相机"""
         # 2026-08-19: 引擎设置项 cam_speed 倍率 (0.5-2.0, 默认 1.0) ——

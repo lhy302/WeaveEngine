@@ -93,8 +93,8 @@ class MinimalEditorView(IEditorView):
             g.render(target=_tgt)
         else:
             g.render()
-        if getattr(ctl, 'ui', None) is not None:
-            ctl.ui.draw_all(ctl)   # Canvas UI 游戏 HUD 仍画在最上层
+        # Canvas 游戏 UI 不在这里画: 由 FramePlan 的 screen_ui pass (include_ui)
+        # 绘制, 与播放器同一条路径 (S1 / Q-B7-48-1 同源裁决 2026-11-19)。
 
     def _draw_grid(self, ctl):
         """无限网格 (2026-08-14): 跟随相机, 远处淡出, 可 show_grid 开关."""

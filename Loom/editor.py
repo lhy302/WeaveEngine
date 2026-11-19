@@ -2404,11 +2404,17 @@ class EditorApp(GLEngine):
         _t = self._prof_t0()
         # MVP (轨道相机已由 engine.render 逻辑处理, 但此处复算供 gizmo/拾取用)
         # M41: "用此相机预览"时每帧重应用该摄像机 (含 roll), 拖 gizmo 实时跟
-        # ★2026-09-06 相机统一 (用户定案): 播放态 = 编辑态同一轨道相机。
+        # ★S1 (Q-B7-48-1, 人类 2026-11-19 裁决「播放组件完全可以两边用一样的代码,
+        # 只要两边一直同源就不会出现差别」): 播放态相机策略与播放器**同源** ——
+        # 共用 loom_render.RenderMixin._apply_main_pass_camera (orbit_mode 才合成)。
+        # 旧「★2026-09-06 相机统一: 播放态=编辑态同一轨道相机」裁决已被 beta7
+        # 「编辑器试播放的表现也要和播放器同步」裁决推翻; 旧拷贝在
+        # elif 分支里多了 is_playing 半个条件, 让播放态每帧被陈旧轨道参数
+        # 覆盖并抹掉 roll (对拍门修前红 3/3 例), 已删。
         if self.preview_camera is not None:
             self.apply_camera(self.preview_camera)
-        elif self.is_playing or self.orbit_mode:
-            self.apply_orbit_camera()
+        else:
+            self._apply_main_pass_camera()
         V = mat4_view_yaw_pitch(np, (self.camera.x, self.camera.y, self.camera.z),
                                 self.camera_yaw, self.camera_pitch, self.camera_roll)
         if getattr(self, 'ortho', False):
@@ -2452,6 +2458,14 @@ class EditorApp(GLEngine):
         # ★M3 插桩: 帧计数 + render() 总耗时 (EditorApp 覆写了基类 render, 必须在此插)
         self._stage_frames = getattr(self, '_stage_frames', 0) + 1
         _t_render = self._prof_t0()
+        # 2026-08-16 相机物体化 (S1 补齐, Q-B7-48-1): 挂父激活相机每帧重应用 ——
+        # 与 loom_render.render 同序同源 (共享 loom_camera.CameraMixin.
+        # _reapply_parent_camera, 不复制三行)。仅播放态生效 (编辑态轨道视角不受
+        # 影响); "用此相机预览"由 _prepare_main_pass 每帧 apply_camera 覆盖
+        # (含父链), 不在此重复。修前编辑器无此调用 -> 播放态相机不随父移动
+        # (对拍门用例 C 修前红)。
+        if self.is_playing and self.preview_camera is None:
+            self._reapply_parent_camera()
         # 核心任务流水线彻底解耦 (2026-10-01):
         # 仅在 Qt 宿主激活异步线程 (_external_ctx=True) 时由独立逻辑流水线推进;
         # 无头探针/直调测试环境 (_external_ctx=False) 由主线程同步推进 (防无头死锁)。
@@ -2461,6 +2475,11 @@ class EditorApp(GLEngine):
             self.advance_logic(delta_time)
             self._prof_add('mt_render_advance', _t)
         self._advanced_this_frame = False   # 消费本帧标记
+        # 2026-10-18 阶段1档序11 LateUpdate (S1 补齐, Q-B7-48-1): 与
+        # loom_render.render 同序 —— 逻辑帧跑完后、世界矩阵重算前派发;
+        # 共享 mixin 方法 _dispatch_late_update (engine.py) 即播放器同一条实现。
+        # 修前编辑器 0 处调用, 脚本 on_late_update 在编辑器播放态死掉。
+        self._dispatch_late_update(delta_time)
         # 编辑态插值失同步修复 (2026-09-06): 物体被直接改位 → 快照对齐
         self._consume_xform_gen()
 
@@ -2501,21 +2520,24 @@ class EditorApp(GLEngine):
         _has_world_canvas = any(
             getattr(c, 'canvas_type', 'screen') == 'world'
             for c in (getattr(_ui, 'canvases', None) or ()))
+        # S1 (Q-B7-48-1): Canvas 游戏 UI 走 FramePlan 的 screen_ui pass —— 与播放器
+        # (loom_render.render 的 include_ui=...) 同一条绘制路径 (同源)。此前编辑器
+        # 不传 include_ui、改在 view.draw 里自画 (同一函数、不同状态上下文) ——
+        # 视图层自画已删 (ui/loom_gui.py 与 ui/minimal_editor_view.py)。编辑态不画
+        # (is_playing 门控, 与旧行为一致: 游戏 HUD 不盖编辑视图)。
         plan = frame_plan(include_shadow=bool(self.lights),
                           include_sky=(self.effective_skybox() is not None),
                           include_world_canvas=_has_world_canvas,
+                          include_ui=(getattr(self, 'ui', None) is not None
+                                      and self.is_playing),
                           include_post=post_enabled())
         self._frame_executor.execute(plan, prepare=self._prepare_main_pass,
                                      after_pass=self._after_pass_prof)
-        # MVP (轨道相机已由 engine.render 逻辑处理, 但此处复算供 gizmo/拾取用)
-        # M41: "用此相机预览"时每帧重应用该摄像机 (含 roll), 拖 gizmo 实时跟
-        # ★2026-09-06 相机统一 (用户定案): 播放态 = 编辑态同一轨道相机 —
-        # 除"用此相机预览"外全部走 apply_orbit_camera 从
-        # (target, yaw, pitch, distance) 合成。旧播放态三分支 (挂父相机盖回/
-        # _dev_cam_moved 保护/开发者轨道接管) 随双轨制一并删除 — 玩家脚本
-        # 不再写相机, 无双驱动源, WASD/滚轮/右键语义与编辑态完全一致。
-        # 相机/VP/uniform/绘制/天空全部由 FramePlan 执行（见 _prepare_main_pass 与
-        # loom_pass_gl 的绘制源）。这里只补记迁移前同名的阶段耗时。
+        # 相机策略见 _prepare_main_pass (S1: 播放态与播放器同源 —— 走
+        # _apply_main_pass_camera; 挂父相机跟随在 render 早段 _reapply_parent_camera。
+        # 旧「★2026-09-06 播放态=编辑态同一轨道相机」注释已随裁决更新, 见上)。
+        # 相机/VP/uniform/绘制/天空/Canvas UI 全部由 FramePlan 执行（见
+        # _prepare_main_pass 与 loom_pass_gl 的绘制源）。这里只补记迁移前同名的阶段耗时。
         self._prof_add('mt_mp_draws', getattr(self, '_t_mp_draws', 0))
         self._prof_add('mt_main_pass', getattr(self, '_t_mp', 0))
 

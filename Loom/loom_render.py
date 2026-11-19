@@ -1040,6 +1040,23 @@ class RenderMixin:
         return self._white_tex
 
     # ============ 2026-11-10 阶段 2A: FramePlan 的 prepare / 绘制源 ============
+
+    def _apply_main_pass_camera(self):
+        """主 pass 相机策略 —— 播放器与编辑器播放态**同源唯一实现**（S1 / Q-B7-48-1,
+        人类 2026-11-19 裁决「播放组件完全可以两边用一样的代码……只要两边一直同源
+        就不会出现差别」）：
+
+          · orbit_mode=True  -> apply_orbit_camera()（轨道不变式含 roll=0）；
+          · orbit_mode=False -> 不动（场景相机已由 apply_camera 写入，含 roll/fov/挂父
+            世界位姿，每帧由 _reapply_parent_camera 跟随父链）。
+
+        历史缺陷（修前）：editor._prepare_main_pass 自带一份
+        「elif self.is_playing or self.orbit_mode:」拷贝（2026-09-06「播放态=编辑态
+        同一轨道相机」旧裁决残留，已被 beta7 推翻）—— 播放态每帧被陈旧的
+        camera_target/camera_distance 覆盖、roll 被强制抹 0（对拍门修前红 3/3 例）。
+        现两端同调本方法，不再有第二份条件。"""
+        if self.orbit_mode:
+            self.apply_orbit_camera()
     def _prepare_main_pass(self):
         """主 pass 的 CPU 侧准备（相机 / VP / uniform 上传）。
 
@@ -1049,8 +1066,7 @@ class RenderMixin:
         # MVP: 每帧 CPU 算一次 view_proj, 每模型 model.
         # uniform 上传: matlib 是行向量约定 v@M (numpy M 存的是标准矩阵的转置),
         # 要 GLSL 的 u*v 等价 numpy 的 v@M, GPU 需得 M^T = 行主序 M 直接 tobytes (不转置).
-        if self.orbit_mode:
-            self.apply_orbit_camera()
+        self._apply_main_pass_camera()
         V = mat4_view_yaw_pitch(np, (self.camera.x, self.camera.y, self.camera.z),
                                 self.camera_yaw, self.camera_pitch, self.camera_roll)
         # 2026-11-07 2D: 播放器 (PlayerApp/GL) 也要支持正交投影 (与编辑器播放同源)
@@ -1143,6 +1159,8 @@ class RenderMixin:
         # 2026-08-16 相机物体化: 挂父激活相机每帧重应用 -> 世界位姿随父移动
         # (Unity 父子语义). 仅挂父相机触发; 根相机/无激活相机行为不变; 脚本在
         # _run_scripts 里后写仍覆盖 (玩家控制器契约不变).
+        # S1 (Q-B7-48-1): 三行抽成 loom_camera.CameraMixin._reapply_parent_camera
+        # (同源唯一实现), 编辑器播放态同调 —— 行为零变化.
         # ★F-3 (Q-B7-39-4, 2026-11-18): 暂停期**逻辑帧不跑** → update_scripts 首行的
         #   解锁键轮询不执行 → 暂停期按解锁键没反应（输入逃生通道被"暂停"冻掉）。
         #   VK 侧是"双保险"（advance_logic 暂停分支 poll 一次 + vk_player 每渲染帧再
@@ -1152,9 +1170,7 @@ class RenderMixin:
         #   run() 主循环（render 自己推进时钟, 不经过 advance_logic）的唯一轮询点。
         if getattr(self, '_logic_paused', False):
             self.poll_unlock()
-        _cam = self.active_camera_object()
-        if _cam is not None and _cam.parent is not None:
-            self.apply_camera(_cam)
+        self._reapply_parent_camera()
         if self._ensure_split() is not None:
             # 分离模式: 宿主已推进 (批3 advance_logic) 则跳过; 否则在此推进
             # (批1: run()/--bench/测试直调一处生效). 输入采集已在渲染帧.

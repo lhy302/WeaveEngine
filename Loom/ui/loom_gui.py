@@ -1075,11 +1075,12 @@ class LoomGUI(QMainWindow):
         """每帧 GL 视口叠加: 网格/选中框/gizmo/光源相机图标/播放期游戏 HUD.
         (原生面板由 Qt 自己画, 不进这里.)"""
         if ctl.is_playing:
-            # 播放期: 光源/相机图标仍画 (对齐旧版GUI), 游戏 HUD 最上层
+            # 播放期: 光源/相机图标仍画 (对齐旧版GUI). Canvas 游戏 UI **不在这里画** ——
+            # S1 (Q-B7-48-1, 2026-11-19 同源裁决): 它由 FramePlan 的 screen_ui pass
+            # (include_ui) 绘制, 与播放器同一条路径; 本方法只画编辑器叠加层,
+            # 且在 plan 之后 (叠加层在最上)。旧自画 (2026-10-18 注) 已删。
             self._draw_light_icons(ctl)
             self._draw_camera_icons(ctl)
-            if getattr(ctl, 'ui', None) is not None:
-                ctl.ui.draw_all(ctl)   # 2026-10-18: Canvas UI (游戏 HUD) 最上层
             return
         if getattr(ctl, 'show_grid', True):
             out = ctl.grid_geometry()
