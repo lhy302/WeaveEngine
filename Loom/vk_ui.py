@@ -39,6 +39,9 @@ from collections import OrderedDict
 import numpy as np
 import wgpu
 
+# Q-B7-48-1 裁决 B：线段扩宽的垂直偏移数学唯一一份（与 engine.draw_lines 同源）
+from loom_line_geometry import expand_segment
+
 # 2026-11-18 P3-1: 滚轮判据的唯一实现在共享前置 loom_ui_input（GL/VK 同源，
 # docs/guides/开发要求_功能解耦与模块化.md 规则 3）。
 from loom_ui_input import wheel_consumed_by_ui, wheel_taken_by_scrollview
@@ -273,17 +276,13 @@ class VkUIEngine:
         hw = max(0.5, float(width) * 0.5)
         verts = []
         for (p0, p1) in segs:
-            x0, y0 = float(p0[0]), float(p0[1])
-            x1, y1 = float(p1[0]), float(p1[1])
-            dx, dy = x1 - x0, y1 - y0
-            ln = (dx * dx + dy * dy) ** 0.5
-            if ln < 1e-6:
+            # Q-B7-48-1 裁决 B：垂直偏移数学**只许一份** —— 用 loom_line_geometry
+            # 的 expand_segment（与编辑器叠加层线宽的 build_line_quads 同一个函数）。
+            # 输出角点/绕序与旧实现逐位相同（本函数的历史 A/B 结论不受影响）。
+            quad = expand_segment(p0, p1, hw)
+            if quad is None:                 # 退化段（长度 ~0）：无线段方向
                 continue
-            nx, ny = -dy / ln * hw, dx / ln * hw
-            a = (x0 + nx, y0 + ny)
-            b = (x1 + nx, y1 + ny)
-            d = (x1 - nx, y1 - ny)
-            e = (x0 - nx, y0 - ny)
+            a, b, d, e = quad
             for tri in ((a, b, d), (a, d, e)):
                 for (px, py) in tri:
                     verts.append((px, py, 0.0, 0.0,

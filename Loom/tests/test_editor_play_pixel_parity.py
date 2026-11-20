@@ -55,16 +55,15 @@ float64 指标 / MAE 阈值 mae_abs=2e-4 —— 与 test_ab_gl_vk.DEFAULT_GATE �
      判据：MAE <= 2e-4 且 NCC >= 0.999（P6 门 ⑥ 组同口径）；另锁「暂停期画面
      逐像素稳定（两端各自 MAE=0）」。
   ② 编辑器叠加层场景（编辑态，gizmo / 选中框 / 网格）：GL vs VK。
-     线宽 GL=2px（ctx.line_width=2.0）vs VK=1px（wgpu 0.33 的 PrimitiveState 无
-     line_width，传 2.0 直接 ValueError；Q-B7-48-1 待人类裁决，未裁前 VK 按 1px
-     实现）→ **不比逐像素 MAE**，按 S3 单元门口径比「中心线重合度」：
-       · 两端各取线像素掩码（亮度 > 0.06）；
-       · 对每端每个线像素取到另一端最近线像素的棋盘距离（8 邻域扩散）；
-       · 判据（= test_vk_overlay_primitives.S3 单元门同款阈值）：
-         双向 mean <= 1.2px 且 max <= 3.0px，无孤点（32px 扩散半径外 = 0），
-         且两端覆盖像素比在 [0.25, 4]（线宽 1px vs 2px 的天然比例内）；
-       · MAE / NCC 只打印留证，不判红绿（口径来源：S3 门 test_vk_overlay_primitives
-         「★ 线宽口径（待 Q-B7-48-1 人类裁决…）」段）。
+     ★ Q-B7-48-1 人类裁决 2026-11-20「问题一：B」落地后，两端线宽**相等**（都用
+     loom_line_geometry.build_line_quads 在 CPU 侧按屏幕像素扩宽成四边形，GL 画
+     TRIANGLES、VK 画 triangle-list；不再依赖 GL 的 line_width / wgpu 的缺失）。
+     于是本组**不再用「中心线重合度」退让口径**（那是 1px vs 2px 的产物），改为
+     **逐像素 MAE 直接比**（这是收紧，不是放宽）：
+       · 判据：叠加层整帧 MAE <= 2e-4（= test_ab_gl_vk.DEFAULT_GATE.mae_abs）
+         且 NCC >= 0.999，且两端叠加层线像素数比在 [0.95, 1.05]；
+       · 中心线距离/覆盖率比值仍打印留证，但**不判**红绿；
+       · 反例自检：把 VK 画面平移 16px，MAE 判据必须变红（度量有牙）。
      叠加层顶点全部来自**真实编辑器代码路径**（grid_geometry / _draw_selection_box /
      LoomGUI._draw_gizmo 本尊）—— 视图层 draw 与 ui/loom_gui.py LoomGUI.draw 的
      视口叠加段同形（同源调用形状，不是测试自造近似）。
@@ -111,10 +110,13 @@ LOGIC_FPS = 60.0
 SPEED = 2.0
 MAE_ABS = 2e-4          # test_ab_gl_vk.DEFAULT_GATE.mae_abs（同源，不另立阈值）
 NCC_MIN = 0.999         # P6 门 ⑥ 组同口径
-# S3 单元门口径（test_vk_overlay_primitives）：中心线重合度阈值 + 掩码阈值
+# 叠加层线像素掩码阈值（= S3 单元门同款差分口径）
+MASK_THR = 0.06
+# Q-B7-48-1 裁决 B 之后两端同宽：判据用逐像素 MAE（同 MAE_ABS/NCC_MIN）+ 线像素数比
+COV_LO, COV_HI = 0.95, 1.05
+# 中心线距离阈值：**只打印留证**（裁决 B 之前的口径，不再判红绿）
 TH_MEAN = 1.2
 TH_MAX = 3.0
-MASK_THR = 0.06
 
 
 def check(name, cond, detail=''):
@@ -415,7 +417,7 @@ check('① 暂停不跳变（VK：暂停瞬间 == 暂停前最后一帧）', mae
 # ============================ ② 编辑器叠加层场景 ============================
 
 print()
-print('=== ② 编辑器叠加层场景（编辑态：gizmo/选中框/网格；中心线重合度，S3 口径） ===')
+print('=== ② 编辑器叠加层场景（编辑态：gizmo/选中框/网格；两端同宽 -> MAE 口径） ===')
 
 
 def _mk_edit_overlay(backend):
@@ -476,7 +478,7 @@ plain_vk = _render_plain(ov_vk_ed)
 
 img_gl, img_vk = over_gl, over_vk
 _mae, _mx, _ncc = metrics(img_gl, img_vk)
-print('    [留证] 叠加层场景整体 MAE=%.6f MAX=%.4f NCC=%.6f（线宽 1px vs 2px，不判红绿）'
+print('    [留证] 叠加层场景整体 MAE=%.6f MAX=%.4f NCC=%.6f（下面 ② 判据就是它）'
       % (_mae, _mx, _ncc))
 _mae, _mx, _ncc = metrics(plain_gl, plain_vk)
 print('    [留证] 纯 3D 帧（无叠加层）MAE=%.6f MAX=%.4f NCC=%.6f（两端底图逐位一致）'
@@ -516,6 +518,7 @@ mv = _mask(over_vk, plain_vk)
 check('② 叠加层两端都有线像素（gizmo/选中框真的画出来了）',
       int(mg.sum()) >= 200 and int(mv.sum()) >= 200,
       'gl_cov=%d vk_cov=%d' % (int(mg.sum()), int(mv.sum())))
+# 中心线距离：**只打印留证**（Q-B7-48-1 裁决 B 之后两端同宽，不再用它判红绿）
 dg, unc_g = _chess_dist(mg, mv)
 dv, unc_v = _chess_dist(mv, mg)
 mean_g2v = float(dg[mg].mean())
@@ -523,25 +526,22 @@ max_g2v = int(dg[mg].max())
 mean_v2g = float(dv[mv].mean())
 max_v2g = int(dv[mv].max())
 ratio = float(mv.sum()) / max(1, int(mg.sum()))
-print('    [中心线重合度] mean_g2v=%.3f max_g2v=%d mean_v2g=%.3f max_v2g=%d '
-      'uncovered=%d cov比=%.3f（阈值 mean<=%.1f max<=%d 覆盖比[0.25,4]）'
-      % (mean_g2v, max_g2v, mean_v2g, max_v2g, unc_g + unc_v, ratio, TH_MEAN, TH_MAX))
-check('② 中心线重合度（S3 单元门口径：GL 2px vs VK 1px 按中心线判据；'
-      '双向 mean<=%.1f max<=%d 无孤点 覆盖比[0.25,4]）' % (TH_MEAN, TH_MAX),
-      unc_g + unc_v == 0
-      and mean_g2v <= TH_MEAN and max_g2v <= TH_MAX
-      and mean_v2g <= TH_MEAN and max_v2g <= TH_MAX
-      and 0.25 <= ratio <= 4.0,
-      'g2v=(%.3f,%d) v2g=(%.3f,%d) uncovered=%d ratio=%.3f'
+print('    [留证/不判] 中心线重合度 mean_g2v=%.3f max_g2v=%d mean_v2g=%.3f max_v2g=%d '
+      'uncovered=%d cov比=%.3f'
       % (mean_g2v, max_g2v, mean_v2g, max_v2g, unc_g + unc_v, ratio))
+# 判据（收紧）：逐像素 MAE + NCC + 两端线像素数相等
+mae_ov, mx_ov, ncc_ov = metrics(over_gl, over_vk)
+check('② 叠加层两端逐像素一致（MAE<=%.0e 且 NCC>=%.3f 且线像素数相等 [%.2f, %.2f]）'
+      % (MAE_ABS, NCC_MIN, COV_LO, COV_HI),
+      mae_ov <= MAE_ABS and ncc_ov >= NCC_MIN and COV_LO <= ratio <= COV_HI,
+      'MAE=%.7f MAX=%.4f NCC=%.6f cov比=%.3f' % (mae_ov, mx_ov, ncc_ov, ratio))
 
-# 反例自检（度量有牙）：把 VK 画面整体平移 16px → 中心线判据必须变红（S3 B5 同款）。
+# 反例自检（度量有牙）：把 VK 画面整体平移 16px -> MAE 判据必须变红。
 shift = np.roll(over_vk, 16, axis=1)
-ms = _mask(shift, plain_vk)
-ds, unc_s = _chess_dist(mg, ms)
-bad = (unc_g + unc_s > 0) or float(ds[mg].mean()) > TH_MEAN or int(ds[mg].max()) > TH_MAX
-check('② 反例自检：VK 画面平移 16px 后判据必须变红（度量有牙）', bad,
-      'mean=%.3f max=%d uncovered=%d' % (float(ds[mg].mean()), int(ds[mg].max()), unc_s))
+mae_s, mx_s, _ncc_s = metrics(over_gl, shift)
+check('② 反例自检：VK 画面平移 16px 后 MAE 判据必须变红（度量有牙）',
+      mae_s > 10 * MAE_ABS,
+      'MAE=%.6f > 10x%.0e' % (mae_s, MAE_ABS))
 
 print()
 print('总结果:', 'ALL PASS (%d)' % _pass_n if not _fails else '有 FAIL: %s' % _fails)

@@ -190,7 +190,7 @@ flowchart LR
   S["SceneDriver<br/>scene_driver.py"]:::facade
   S ==>|拼装| K["EngineCore<br/>engine_core.py 720<br/>★后端无关的公共实现"]:::contract
   S ==>|拼装| W["VkWindowMixin<br/>loom_vk_window.py 273<br/>★F11 假全屏（去边框/铺桌面/置顶）"]:::impl
-  S ==>|拼装| V["VkEditorRenderMixin<br/>loom_pass_vk.py 518<br/>★overlay_scope / draw_lines / VkFrameExecutor<br/>（S3，线宽 1px 待 Q-B7-48-1）"]:::impl
+  S ==>|拼装| V["VkEditorRenderMixin<br/>loom_pass_vk.py 551<br/>★overlay_scope / draw_lines / VkFrameExecutor<br/>（S3；线宽 = Q-B7-48-1 裁决 B 四边形扩宽）"]:::impl
   V -->|VkFrameExecutor 转 draw_frame| R["VkRenderer<br/>vk_renderer.py 2127"]:::impl
   V -.->|与 GL RenderMixin 同签名钩子| K
   classDef facade fill:#ede9fe,stroke:#7c3aed,color:#4c1d95
@@ -628,7 +628,8 @@ sequenceDiagram
 |---|---|---|
 | `loom_pass.py` | 258 | 渲染 Pass 描述层（FramePlan / PassSpec），**纯数据，无后端依 |
 | `loom_pass_gl.py` | 255 | FramePlan 的 moderngl 执行器（2026-11-10 批次 A / 阶 |
-| `loom_pass_vk.py` | 458 | VK 侧执行器 + 叠加层原语（S3，Q-B7-47-1 阶段 3）：VkFrameExecutor 消费同一份 plan、VkLineBatch（draw_lines 的 VK 实现，线宽 1px 待 Q-B7-48-1）、VkEditorRenderMixin（overlay_scope 与 GL 同签名）。 |
+| `loom_pass_vk.py` | 551 | VK 侧执行器 + 叠加层原语（S3，Q-B7-47-1 阶段 3）：VkFrameExecutor 消费同一份 plan、VkLineBatch（draw_lines 的 VK 实现；线宽由 `loom_line_geometry` 在 CPU 侧扩宽，Q-B7-48-1 裁决 B）、VkEditorRenderMixin（overlay_scope 与 GL 同签名）。 |
+| `loom_line_geometry.py` | 222 | **Q-B7-48-1 裁决 B**：粗线 = 四边形的**唯一一份**扩宽数学（`build_line_quads`：世界→clip→屏幕像素→垂直偏移→回 NDC；`expand_segment`：垂直偏移本体，`vk_ui` UI 描边也用它）。GL `engine.draw_lines` / VK `loom_pass_vk.draw_lines` 两端只画三角形。 |
 | `loom_scene_ubo.py` | 177 | T3c-1：场景参数**单一来源**（字段表 + std140 打包）。 |
 | `loom_post.py` | 73 | 后处理链的开关与参数（tonemap + bloom，2026-11-10 阶段 2B2 |
 | `loom_post_gl.py` | 215 | GL 侧后处理链（HDR 目标 + bloom + tonemap，2026-11-10 |
@@ -757,7 +758,7 @@ flowchart LR
   D2["B Unity 风格查询 API<br/>11 方法 · 78 行"]:::dom
   D3["C 帧调度/时钟<br/>7 方法 · 296 行"]:::dom
   D4["D 脚本生命周期分发<br/>6 方法 · 271 行"]:::dom
-  D5["E 即时模式图元绘制<br/>5 方法 · 150 行"]:::dom
+  D5["E 即时模式图元绘制<br/>5 方法 · 156 行"]:::dom
   D6["F 输入/鼠标锁/键位<br/>5 方法 · 118 行"]:::dom
   D7["G 逻辑控制开关<br/>6 方法 · 66 行"]:::dom
   D8["H 天空盒状态<br/>3 方法 · 37 行"]:::dom
@@ -789,7 +790,7 @@ flowchart LR
 | B Unity 风格查询 API | 11 | 78 | 层/标签注册与查找、`find_by_*`、`SendMessage`、`set_object_layer/tag` |
 | C 帧调度/时钟 | 7 | **296** | `_logic_frame`(96) `advance_logic`(70) `_clock_advance`(53) `_logic_prep`(45) + 预取/物理子步 |
 | D 脚本生命周期分发 | 6 | **271** | `update_scripts`(144) + FixedUpdate/LateUpdate/Application.quitting/可见性 四个 Unity 对齐钩子 |
-| E 即时模式图元绘制 | 5 | 150 | `draw_lines`(63) 世界折线、`draw_screen_lines`(40)/`draw_screen_polygon`(30) 屏幕图元、HUD quad |
+| E 即时模式图元绘制 | 5 | 156 | `draw_lines`(68) 世界折线（Q-B7-48-1 裁决 B：四边形扩宽，数学在 `loom_line_geometry`）、`draw_screen_lines`(40)/`draw_screen_polygon`(30) 屏幕图元、HUD quad |
 | F 输入/鼠标锁/键位 | 5 | 118 | `_poll_mouse_unlock_key`(63) 引擎独占解锁键、键位读写 |
 | G 逻辑控制开关 | 6 | 66 | 暂停/单步/TPS/时间比 |
 | H 天空盒状态 | 3 | 37 | `effective_skybox` 相机级优先、`reset_sky_state` 哨兵复位 |

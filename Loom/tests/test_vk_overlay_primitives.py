@@ -75,8 +75,13 @@ os.environ.setdefault('LOOM_NO_DIALOG', '1')
 import numpy as np
 
 W, H = 480, 320
-TH_MEAN = float(os.environ.get('LOOM_VKPRIM_TH_MEAN', '1.2'))
-TH_MAX = float(os.environ.get('LOOM_VKPRIM_TH_MAX', '3.0'))
+# Q-B7-48-1 裁决 B 之后两端同宽 -> 判据 = 逐像素 MAE（与 test_ab_gl_vk 同源阈值
+# DEFAULT_GATE.mae_abs=2e-4），并锁「两端线像素数相等」（覆盖比 [0.95, 1.05]）。
+# 旧的中心线距离阈值只保留**打印留证**用，不再参与判红绿。
+MAE_ABS = float(os.environ.get('LOOM_VKPRIM_MAE_ABS', '2e-4'))
+COV_LO, COV_HI = 0.95, 1.05
+TH_MEAN = float(os.environ.get('LOOM_VKPRIM_TH_MEAN', '1.2'))   # 仅打印留证
+TH_MAX = float(os.environ.get('LOOM_VKPRIM_TH_MAX', '3.0'))     # 仅打印留证
 MASK_THR = 0.06
 _fails = []
 
@@ -253,24 +258,40 @@ def _vk_read(device, tex):
 # ---------------- VK 渲染（生产路径 VkEditorRenderMixin 本尊） ----------------
 
 
-class _VkLineHost:
-    """最小 VK 叠加层宿主桩：只提供 mixin 需要的东西（设备/格式/视图/视口尺寸）。
+_VK_HOST_CLS = None
 
-    ★ 走的是**生产代码**（loom_pass_vk.VkEditorRenderMixin.overlay_scope +
-    draw_lines），不是绕过 mixin 直调 VkLineBatch —— 这样本门测的是两端真实
-    绘制路径（线宽扩宽发生在 mixin 的 draw_lines 里）。
-    宿主协议新增 width/height（视口像素尺寸，扩宽数学需要），与真实宿主
-    （EditorApp / VkEditorApp）同名同语义。
-    """
 
-    def __init__(self, device, view, depth_view, width, height,
-                 fmt="rgba8unorm"):
-        self._vk_line_device = device
-        self._vk_line_format = fmt
-        self._vk_overlay_view = view
-        self._vk_overlay_depth_view = depth_view
-        self.width = int(width)
-        self.height = int(height)
+def _vk_host_cls():
+    """惰性构造宿主桩类（基类 = loom_pass_vk.VkEditorRenderMixin，生产代码）。
+
+    惰性是为了保住「loom_pass_vk 不存在 -> 本门构造段即红」的修前红语义
+    （模块顶层不 import 它）。"""
+    global _VK_HOST_CLS
+    if _VK_HOST_CLS is None:
+        import loom_pass_vk as lpv
+
+        class _VkLineHost(lpv.VkEditorRenderMixin):
+            """最小 VK 叠加层宿主桩：只提供 mixin 需要的东西
+            （设备/格式/视图/视口尺寸）。
+
+            ★ 走的是**生产代码**（VkEditorRenderMixin.overlay_scope +
+            draw_lines），不是绕过 mixin 直调 VkLineBatch —— 这样本门测的是
+            两端真实绘制路径（线宽扩宽发生在 mixin 的 draw_lines 里）。
+            宿主协议新增 width/height（视口像素尺寸，扩宽数学需要），与真实
+            宿主（EditorApp / VkEditorApp）同名同语义。
+            """
+
+            def __init__(self, device, view, depth_view, width, height,
+                         fmt="rgba8unorm"):
+                self._vk_line_device = device
+                self._vk_line_format = fmt
+                self._vk_overlay_view = view
+                self._vk_overlay_depth_view = depth_view
+                self.width = int(width)
+                self.height = int(height)
+
+        _VK_HOST_CLS = _VkLineHost
+    return _VK_HOST_CLS
 
 
 def _vk_render_lines(device, verts, cols, vp, depth_on=False, blend=False,
@@ -296,7 +317,7 @@ def _vk_render_lines(device, verts, cols, vp, depth_on=False, blend=False,
             'depth_store_op': wgpu.StoreOp.store})
     rp.end()
     device.queue.submit([enc.finish()])
-    host = _VkLineHost(device, view, dview, W, H)
+    host = _vk_host_cls()(device, view, dview, W, H)
     flags = tuple(f for f, on in (("depth_test", depth_on), ("blend", blend)) if on)
     kw = {"enable": flags} if flags else {"enable_only": 0}
     with host.overlay_scope(framebuffer=view, **kw):
@@ -361,14 +382,18 @@ def _compare(gl_img, vk_img):
     return res
 
 
-def _centerline_ok(res):
-    return (res.get("gl_cov", 0) >= 30 and res.get("vk_cov", 0) >= 30
-            and res.get("uncovered", 1) == 0
-            and res.get("mean_g2v", 1e9) <= TH_MEAN
-            and res.get("mean_v2g", 1e9) <= TH_MEAN
-            and res.get("max_g2v", 1e9) <= TH_MAX
-            and res.get("max_v2g", 1e9) <= TH_MAX
-            and 0.25 <= res["vk_cov"] / max(1, res["gl_cov"]) <= 4.0)
+def _parity_ok(res):
+    """两端逐像素判据（Q-B7-48-1 裁决 B 后两端同宽，故**不再**用中心线退让口径）。
+
+    判据：MAE <= 2e-4（= test_ab_gl_vk.DEFAULT_GATE.mae_abs，同源不另立阈值）
+          且两端线像素数比在 [0.95, 1.05]（= 线宽像素数相等）。
+    中心线距离/覆盖率比值仍在 _metrics_text 里打印留证，但**不判**红绿。
+    """
+    gl_cov = res.get("gl_cov", 0)
+    vk_cov = res.get("vk_cov", 0)
+    return (gl_cov >= 30 and vk_cov >= 30
+            and res.get("mae", 1.0) <= MAE_ABS
+            and COV_LO <= vk_cov / max(1, gl_cov) <= COV_HI)
 
 
 def _metrics_text(res):
@@ -429,8 +454,10 @@ def section_a():
     check("A5b loom_gui.draw 网格走 ctl.overlay_scope（叠加层调用点不区分后端）",
           src_gui.count("ctl.overlay_scope") >= 4 and "ctl.ctx.scope" not in src_gui)
     src_vk = inspect.getsource(lpv)
-    check("A6 loom_pass_vk 源码标注「线宽待 Q-B7-48-1 裁决；若裁决 2px 需 shader 扩 quad」",
-          "Q-B7-48-1" in src_vk and "2px" in src_vk)
+    # Q-B7-48-1 裁决 B 落地后：源码必须标注「裁决 B = 四边形扩宽」并指向共享实现
+    check("A6 loom_pass_vk 源码标注「Q-B7-48-1 裁决 B：四边形模拟粗线 + build_line_quads」",
+          "Q-B7-48-1" in src_vk and "build_line_quads" in src_vk
+          and "问题一：B" in src_vk)
 
 
 def section_a7(device):
@@ -494,7 +521,7 @@ FIXTURE_ORDER = ("grid", "selection", "gizmo_translate", "gizmo_rotate")
 
 def section_b():
     print("=" * 60)
-    print("B. 像素门：同一组顶点/颜色数组，GL 离屏 vs VK 离屏（中心线重合度）")
+    print("B. 像素门：同一组顶点/颜色数组，GL 离屏 vs VK 离屏（MAE，两端同宽）")
     print("=" * 60)
     try:
         import loom_pass_vk  # noqa: F401
@@ -518,7 +545,8 @@ def section_b():
         v = _vk_render_lines(device, verts, cols, vp, depth_on=depth_on, blend=blend)
         res = _compare(g, v)
         print("  [%s] %s" % (name, _metrics_text(res)))
-        check("B 像素门(中心线重合度): " + name, _centerline_ok(res), _metrics_text(res))
+        check("B 像素门(MAE<=%.0e 且线像素数相等): %s" % (MAE_ABS, name),
+              _parity_ok(res), _metrics_text(res))
 
 
 def section_b5():
@@ -548,10 +576,10 @@ def section_b5():
     r1 = _compare(g, v1)
     print("  [对齐] %s" % _metrics_text(r0))
     print("  [平移16px] %s" % _metrics_text(r1))
-    check("B5a 恒等 VP 下中心线重合", _centerline_ok(r0), _metrics_text(r0))
-    check("B5b 平移 16px 的重合度显著劣化（门会真红）",
-          r1.get("mean_g2v", 0) >= 4.0 and r1.get("mean_v2g", 0) >= 4.0,
-          _metrics_text(r1))
+    check("B5a 恒等 VP 下两端逐像素一致", _parity_ok(r0), _metrics_text(r0))
+    check("B5b 平移 16px 的 MAE 显著劣化（门会真红）",
+          r1.get("mae", 0.0) > 10 * MAE_ABS,
+          "mae=%.6f > 10x%.0e" % (r1.get("mae", 0.0), MAE_ABS))
 
 
 def section_b6():
@@ -590,20 +618,14 @@ def section_b6():
     rp.end()
     device.queue.submit([enc.finish()])
 
-    class _VkHost(lpv.VkEditorRenderMixin):
-        def __init__(self, device, view, depth_view):
-            self._vk_line_device = device
-            self._vk_line_format = "rgba8unorm"
-            self._vk_overlay_view = view
-            self._vk_overlay_depth_view = depth_view
-
-    host = _VkHost(device, view, dtex.create_view())
+    # 宿主桩与 B 段同一份（_vk_host_cls = VkEditorRenderMixin 子类，带视口尺寸）
+    host = _vk_host_cls()(device, view, dtex.create_view(), W, H)
     with host.overlay_scope(framebuffer=view, enable_only=0):
         host.draw_lines(sel_v, sel_c, view_proj=vp)
     v = _vk_read(device, tex)
     res = _compare(g, v)
     print("  [selection/overlay_scope] %s" % _metrics_text(res))
-    check("B6 overlay_scope 端到端像素一致（中心线重合度）", _centerline_ok(res),
+    check("B6 overlay_scope 端到端逐像素一致（MAE 口径）", _parity_ok(res),
           _metrics_text(res))
 
 
@@ -637,10 +659,11 @@ def section_b7():
                   int(mg.sum()) <= 5 and int(mv.sum()) <= 5,
                   (int(mg.sum()), int(mv.sum())))
         else:
-            check("B7 %s: 两端都可见且线像素量级一致" % tag,
+            _r = int(mv.sum()) / max(1, int(mg.sum()))
+            check("B7 %s: 两端都可见且线像素数相等（覆盖比 [%.2f, %.2f]）" % (tag, COV_LO, COV_HI),
                   int(mg.sum()) >= 200 and int(mv.sum()) >= 200
-                  and 0.25 <= int(mv.sum()) / max(1, int(mg.sum())) <= 4.0,
-                  (int(mg.sum()), int(mv.sum())))
+                  and COV_LO <= _r <= COV_HI,
+                  (int(mg.sum()), int(mv.sum()), round(_r, 4)))
 
 
 def _line_width_px(img):
@@ -694,13 +717,13 @@ def section_b8():
         ratio = res["vk_cov"] / max(1, res["gl_cov"])
         print("  [%s] gl_cov=%d vk_cov=%d 覆盖比=%.3f mae=%.6f"
               % (name, res["gl_cov"], res["vk_cov"], ratio, res["mae"]))
-        check("B8b 两端线宽像素数相等: " + name, 0.95 <= ratio <= 1.05,
+        check("B8b 两端线宽像素数相等: " + name, COV_LO <= ratio <= COV_HI,
               "gl_cov=%d vk_cov=%d 比=%.3f" % (res["gl_cov"], res["vk_cov"], ratio))
 
 
 def main():
     print("=" * 60)
-    print("S3 门：VK 绘制原语补齐（中心线重合度口径；线宽待 Q-B7-48-1 裁决）")
+    print("S3 门：VK 绘制原语补齐（MAE 口径；线宽 = Q-B7-48-1 裁决 B 四边形扩宽）")
     print("=" * 60)
     section_a()
     device = None

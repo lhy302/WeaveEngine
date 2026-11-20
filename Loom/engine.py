@@ -48,6 +48,8 @@ from loom_shaders import (  # noqa: E402
     _LINE_VERT, _LINE_FRAG,
     _WORLD_UI_VERT, _WORLD_UI_FRAG,
 )
+# Q-B7-48-1 裁决 B：粗线 = 四边形（扩宽数学的唯一一份实现，两端共用）
+from loom_line_geometry import build_line_quads   # noqa: E402
 from engine_core import EngineCore   # S2-1: 后端无关的引擎内核 (JVM 模型)
 from loom_shadow import ShadowMixin   # M29 阴影子系统 (已抽出)
 from loom_frame_components import FrameComponentMixin   # 每帧组件推进 (音频/动画/碰撞回调)
@@ -654,23 +656,24 @@ class GLEngine(EngineCore, ShadowMixin, HudMixin, RenderMixin, ModelGpuMixin, Li
         """
         渲染世界空间折线 (逐顶点颜色). verts: (N,3), colors: (N,3) 或 (N,4) 0..1.
         用独立 line 着色器 (不光照, 不深度).
+
+        ★ 2026-11-20 (Q-B7-48-1 人类裁决 B「问题一：B」) **线宽改造：粗线 = 四边形**：
+          不再用 GL 的 ctx.line_width —— 线段由 loom_line_geometry.build_line_quads
+          在**屏幕空间按像素宽度**膨胀成 2 个三角形，本函数只画 TRIANGLES。
+          理由：wgpu 0.33 的 PrimitiveState **没有 line_width 字段**（传 2.0 ->
+          ValueError），VK 只能 1px，两端实测 2:1（GL 864 像素 vs VK 432）。裁决要
+          两端真一致，于是两端都放弃「画线」这个原语能力（**GL 画面也会变**，
+          这是裁决明知的代价；视觉粗细仍≈2px）。
+          保持不变的语义：逐顶点颜色、深度开关（由调用方 overlay_scope 决定）、
+          view_proj 传入方式、mode 参数（LINES / LINE_STRIP / TRIANGLES）。
+          line_width 现在 = **像素宽度**（默认 2.0 = 改造前视觉粗细）。
+          旧的 `self.ctx.line_width = float(line_width)` 重设已删除：不再有
+          GL_LINES 光栅化，2026-08-18 那个「Qt 外部模式下 GL_LINE_WIDTH 被破坏成 0
+          -> 网格/选中框全部不可见」的坑随之消失（不再依赖该状态）。
         D10 (2026-08-30) 缓冲复用: VBO/VAO 持久缓存 (容量按需生长重建), 每帧
         6+ 次调用 (gizmo/图标/选中框) 不再逐次建+毁 GL 对象 (旧实现每次
-        ctx.buffer+vertex_array+双 release 的 GL churn); 字节布局/着色器/渲染
-        语义逐位不变 ('3f 4f' 交错, 同 program, 同 uniform, render vertices=N).
-
-        2026-10-20 沙盘支持: 加 line_width 参数（默认 2.0 保持旧行为）。
-        UI Shape 元素用该参数配置描边宽度。
+        ctx.buffer+vertex_array+双 release 的 GL churn).
         """
-        if mode == moderngl.LINES:
-            # 2026-08-18 关键修复: Qt 外部模式下 moderngl scope 的 C 层会把
-            # GL_LINE_WIDTH 破坏为 0 (pygame 模式正常) -> scope 内 LINES 线宽 0
-            # 光栅化失败, 网格/选中框等一切线全部不可见 (空场景黑屏 + 网格闪烁根因).
-            # 每次画线前显式重设线宽, 与 scope 内外无关; pygame 模式无副作用.
-            try:
-                self.ctx.line_width = float(line_width)
-            except Exception:
-                pass
         # 2026-08-18: 外部模式绘制前绑定缓存 widget FBO (scope 退出会把绑定
         # 破坏成 0, 无 scope 的调用直接画会画到 0 不可见). pygame 模式绑定
         # ctx.screen 无副作用.
@@ -680,16 +683,19 @@ class GLEngine(EngineCore, ShadowMixin, HudMixin, RenderMixin, ModelGpuMixin, Li
             self._line_prog = self.ctx.program(vertex_shader=_LINE_VERT,
                                                fragment_shader=_LINE_FRAG)
         vp = view_proj if view_proj is not None else self._vp
-        verts = np.asarray(verts, dtype='f4')
-        colors = np.asarray(colors, dtype='f4')
-        if colors.shape[1] == 3:
-            colors = np.concatenate([colors, np.ones((colors.shape[0], 1), dtype='f4')],
-                                    axis=1)
+        # 线宽扩宽（唯一一份数学，见 loom_line_geometry）：
+        #   LINES/LINE_STRIP -> 屏幕空间四边形（返回 NDC 顶点 + 恒等 VP）
+        #   TRIANGLES        -> 原样直通（draw_screen_polygon 等，不需要扩宽）
+        q_verts, q_colors, q_vp = build_line_quads(
+            verts, colors, vp, width_px=line_width,
+            viewport_size=(self.width, self.height), mode=mode)
+        if len(q_verts) == 0:
+            return
         packed = np.ascontiguousarray(
-            np.concatenate([verts, colors], axis=1), dtype='f4')     # (N,7)
+            np.concatenate([q_verts, q_colors], axis=1), dtype='f4')     # (M,7)
         # D10: 持久 VBO/VAO (容量生长; 换缓冲必须重建 VAO — moderngl VAO 绑定
         # 缓冲对象). 测试桩无 _line_vbo 属性时惰性建. 余量区旧字节无害:
-        # render(vertices=N) 只读前 N 个顶点.
+        # render(vertices=M) 只读前 M 个顶点.
         n_bytes = packed.nbytes
         vbo = getattr(self, '_line_vbo', None)
         if vbo is None or vbo.size < n_bytes:
@@ -710,8 +716,8 @@ class GLEngine(EngineCore, ShadowMixin, HudMixin, RenderMixin, ModelGpuMixin, Li
         # 组6件3: line program uniform 句柄缓存 + write 直吃 f4 数组 (消 tobytes 拷贝)
         if not hasattr(self, '_line_u_vp'):
             self._line_u_vp = self._line_prog['u_view_proj']
-        self._line_u_vp.write(np.asarray(vp, dtype='f4'))
-        vao.render(mode, vertices=len(packed))
+        self._line_u_vp.write(np.asarray(q_vp, dtype='f4'))
+        vao.render(moderngl.TRIANGLES, vertices=len(packed))
 
     # ============ 2026-10-20 沙盘 2D 绘制助手（供 UI Shape 元素用）============
     def _px_to_ndc(self, px, py):

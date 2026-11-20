@@ -34,7 +34,8 @@ beta7 批 0（B7-24）要定一份两端都必须实现的 IEngineAPI。在契�
   GL 独有 40 → **41**；登记 test_user_api_parity.BACKEND_ONLY_GL。VK / 共同计数不变。
 - **v3.5（2026-11-20 S3，Q-B7-47-1 阶段 3）**：VK 补齐叠加层绘制原语 ——
   loom_pass_vk.VkEditorRenderMixin 进 SceneDriver（overlay_scope / draw_lines 与
-  GL 同签名；VkLineBatch = draw_lines 的 VK 实现，线宽 1px 待 Q-B7-48-1 裁决）→
+  GL 同签名；VkLineBatch = draw_lines 的 VK 实现；线宽已按 Q-B7-48-1 裁决 B 两端
+  统一为「四边形扩宽」，API 面不变）→
   共同 +2，GL 独有 41 → **39**（删 'overlay_scope' / 'draw_lines' 两行基线），
   VK 107 → **109**。GL 计数不变。
 - **v3.1（2026-11-17 S2-2 部分完成）**：11 个纯数据查询方法（Layer/Tag/查找/SendMessage/设置层标签）

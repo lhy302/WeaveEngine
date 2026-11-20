@@ -12,7 +12,7 @@
 
 修前必红：VkViewport / VkEditorApp 不存在时本门 import 段即红。
 
-线宽：沿用 S3 的 1px（待 Q-B7-48-1 裁决；wgpu 0.33 无原生线宽）。
+线宽：两端统一 = 像素宽度（Q-B7-48-1 裁决 B：四边形扩宽，见 loom_line_geometry）。
 """
 import atexit
 import json

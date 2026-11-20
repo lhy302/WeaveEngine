@@ -48,7 +48,8 @@ from loom_vk_window import VkWindowMixin
 
 # 2026-11-20 (S3, Q-B7-47-1 阶段 3): VK 侧叠加层绘制原语 + FramePlan 执行器 ——
 # overlay_scope / draw_lines / _backend_execute_frame 与 loom_render.RenderMixin
-# 的 GL 钩子同签名（同源契约，规则 5.5）；线宽按 1px（待 Q-B7-48-1 裁决）。
+# 的 GL 钩子同签名（同源契约，规则 5.5）；线宽两端统一 = 像素宽度（Q-B7-48-1
+# 裁决 B：loom_line_geometry.build_line_quads 屏幕空间扩宽，不再依赖后端线宽）。
 from loom_pass_vk import VkEditorRenderMixin
 
 # B1: 物理桥 (零 GL; 缺失/导入失败 -> physb=None -> 无物理步进)

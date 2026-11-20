@@ -12,11 +12,13 @@
                             GLFrameExecutor 同源：plan 是共享描述，GL/VK 各有执行器），
                             内部转 vk_renderer.VkRenderer.draw_frame(...)。
 
-★ 线宽（待 Q-B7-48-1 人类裁决；未裁前按 1px 实现）：
-  wgpu 0.33 的 PrimitiveState **没有 line_width 字段**（实测传 line_width=2.0 ->
-  ValueError），GL 管线是 line_width=2.0。这是 wgpu 唯一原生能力（1px）。
-  **若裁决 2px：需两端 shader 扩 quad（把线段膨胀成面向相机的四边形），本阶段不自行决定。**
-  因此本模块所有线一律 1px 光栅化；线宽参数照单全收但不生效（语义留痕）。
+★ 线宽（Q-B7-48-1 人类裁决 2026-11-20「问题一：B」= 两端统一改成「用四边形
+  模拟粗线」）：wgpu 0.33 的 PrimitiveState **没有 line_width 字段**（实测传 2.0 ->
+  ValueError），GL 原本是 ctx.line_width=2.0 —— 两端实测 2:1。裁决后两端都**不再依赖
+  任何后端的线宽光栅化能力**：线段在 CPU 侧由 loom_line_geometry.build_line_quads
+  按**屏幕空间像素宽度**膨胀成 2 个三角形（扩宽数学唯一一份，GL 侧 engine.draw_lines
+  调的是同一个函数），本模块只负责把三角形画出来（triangle-list）。
+  于是 line_width 参数在两端**真的生效**（单位 = 像素，默认 2.0）。
 
 与 GL 的语义差异（诚实边界，别假装统一了）：
   · GL 的立即模式 draw_lines 在调用时立刻画；VK 命令流是一次性录制的，叠加层
@@ -34,6 +36,8 @@ import numpy as np
 import wgpu
 
 from loom_shaders import CLEAR_COLOR_RGBA
+# Q-B7-48-1 裁决 B：粗线 = 四边形（扩宽数学的唯一一份实现，与 GL engine.draw_lines 同源）
+from loom_line_geometry import build_line_quads
 
 
 # ---------------- WGSL：线批着色器（镜像 loom_shaders._LINE_VERT/_LINE_FRAG）----------------
@@ -60,7 +64,8 @@ struct VSOut {
 """
 
 # 顶点模式映射：GL 的 mode 是 int 常量（moderngl.LINES==1 / TRIANGLES==4，GL 枚举值）；
-# 接受 GL 枚举值与字符串两种形态。线宽待 Q-B7-48-1 裁决（见模块头）。
+# 接受 GL 枚举值与字符串两种形态。线宽由 loom_line_geometry 在 CPU 侧扩宽成
+# 三角形（Q-B7-48-1 裁决 B），本映射只决定「扩宽前」的段分组（lines/line-strip）。
 _TOPOLOGY = {
     1: 'line-list', 'lines': 'line-list', 'line-list': 'line-list',
     4: 'triangle-list', 'triangles': 'triangle-list', 'triangle-list': 'triangle-list',
@@ -87,7 +92,9 @@ def _pack_lines(verts, colors):
 class VkLineBatch:
     """draw_lines 的 VK 实现（line-list 管线 + 动态 VBO + u_view_proj + 深度开关）。
 
-    线宽：1px（wgpu 无原生线宽；**待 Q-B7-48-1 裁决，若裁决 2px 需 shader 扩 quad**）。
+    线宽：不在这里决定 —— 扩宽（屏幕空间像素宽度 -> 四边形）由
+    loom_line_geometry.build_line_quads 在 CPU 侧完成，本类只按 triangle-list
+    画三角形（Q-B7-48-1 裁决 B：两端同一份扩宽数学）。
     """
 
     def __init__(self, device, format='rgba8unorm'):
@@ -194,7 +201,7 @@ class VkLineBatch:
     # ---------- 绘制 ----------
     def draw(self, rp, verts, colors, view_proj, mode=1,
              depth_test=False, blend=False, has_depth=True):
-        """单批次直画（已有活动 render pass）。线宽按 1px（待 Q-B7-48-1 裁决）。
+        """单批次直画（已有活动 render pass）。顶点模式由调用方给（扩宽后= triangle-list）。
 
         has_depth：当前 render pass 是否挂了 depth32float 附件（挂了就必须声明，
         见 _pipeline 的 V2-01 注）。
@@ -421,13 +428,34 @@ class VkEditorRenderMixin:
         return batch
 
     # ---- ①：draw_lines（与 engine.draw_lines 同签名；GL 立即模式，VK 收集）----
+    def _overlay_viewport_size(self):
+        """叠加层渲染目标的像素尺寸 (W, H) —— 线宽扩宽的屏幕空间基准。
+
+        宿主协议：优先 self.width/self.height（EditorApp / VkEditorApp 同名同语义），
+        其次 _vk_ctx.physical_size（rendercanvas 上下文）；都没有就报错可见
+        （静默用 0 会把扩宽算成 0 像素 = 线消失，属不可接受的假绿）。
+        """
+        w = int(getattr(self, 'width', 0) or 0)
+        h = int(getattr(self, 'height', 0) or 0)
+        if w > 0 and h > 0:
+            return (w, h)
+        ctx = getattr(self, '_vk_ctx', None)
+        ps = getattr(ctx, 'physical_size', None) if ctx is not None else None
+        if ps:
+            return (int(ps[0]), int(ps[1]))
+        raise RuntimeError(
+            'VK draw_lines 缺少视口像素尺寸（宿主需提供 width/height 或 '
+            '_vk_ctx.physical_size）—— 线宽扩宽必须有屏幕空间基准')
+
     def draw_lines(self, verts, colors, mode=1, view_proj=None, line_width=2.0):
         """渲染世界空间折线（逐顶点颜色，不光照）。
 
         签名与 GL engine.draw_lines(verts, colors, mode, view_proj, line_width)
         完全一致 —— 编辑器叠加层代码不改就能两端跑（同源）。
-        ★ 线宽：按 1px 实现（wgpu 唯一原生能力；**待 Q-B7-48-1 裁决；若裁决 2px
-        需两端 shader 扩 quad**）—— line_width 参数照单收下但不生效（语义留痕）。
+        ★ 线宽（Q-B7-48-1 裁决 B）：**line_width 是像素宽度且真的生效** —— 线段由
+        loom_line_geometry.build_line_quads（与 GL 同一份扩宽数学）在 CPU 侧膨胀成
+        屏幕空间四边形，这里收集的就是 triangle-list（mode=4）+ 恒等 VP。
+        旧实现「wgpu 只能 1px、line_width 收下不生效」的语义留痕到此结束。
         """
         if getattr(self, '_vk_pending', None) is None:
             raise RuntimeError(
@@ -436,9 +464,14 @@ class VkEditorRenderMixin:
         vp = view_proj if view_proj is not None else getattr(self, '_vp', None)
         if vp is None:
             raise ValueError('VK draw_lines 缺少 view_proj（宿主也未提供 _vp）')
-        mode_n = int(mode) if isinstance(mode, int) else mode
+        q_verts, q_colors, q_vp = build_line_quads(
+            verts, colors, vp, width_px=line_width,
+            viewport_size=self._overlay_viewport_size(), mode=mode)
+        if len(q_verts) == 0:
+            return
+        # 扩宽后一律 triangle-list（TRIANGLES 直通的也还是三角形）
         self._vk_pending['draws'].append(
-            (_pack_lines(verts, colors), vp, mode_n, self._vk_pending['depth']))
+            (_pack_lines(q_verts, q_colors), q_vp, 4, self._vk_pending['depth']))
 
     # ---- ③：帧执行钩子（与 loom_render.RenderMixin._backend_execute_frame 同签名）----
     def _backend_execute_frame(self, plan, prepare=None, before_pass=None,
