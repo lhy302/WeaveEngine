@@ -102,7 +102,6 @@ BACKEND_ONLY_GL = {
     'run': 'GL 主运行循环；嵌入式宿主不进入（VK 播放器有自己的循环）',
     'draw_screen_lines': 'GL 立即模式屏幕绘制原语',
     'draw_screen_polygon': 'GL 立即模式屏幕绘制原语',
-    'draw_screen_rect': 'GL 立即模式屏幕绘制原语',
     'draw_text_quad': 'GL 立即模式文字绘制原语',
     'draw_texture_quad': 'GL 立即模式纹理绘制原语',
     'push_scissor': 'GL 立即模式状态栈（VK 走 pass 状态）',

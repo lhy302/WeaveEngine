@@ -194,7 +194,7 @@ def api_matrix():
 # 新增一条 = 门红。
 EXPECTED_GL_ONLY = frozenset({
     'blit_texture',
-    'draw_screen_lines', 'draw_screen_polygon', 'draw_screen_rect', 'draw_text_quad',
+    'draw_screen_lines', 'draw_screen_polygon', 'draw_text_quad',   # v3.6(S4): draw_screen_rect 删行（VK 补齐）
     'draw_texture_quad', 'get_frame_jitter',
     'pop_scissor', 'present_health', 'push_scissor',
     'render', 'reset_sky_state',
@@ -211,7 +211,7 @@ EXPECTED_VK_ONLY = frozenset({
 # v3.4（2026-11-20 S2 阶段2 ④）: GL +1 = overlay_scope（叠加层状态作用域钩子，
 # GL 原样转发 moderngl；S3 补 VK 实现 —— 已登记 test_user_api_parity.BACKEND_ONLY_GL）
 EXPECTED_GL_TOTAL = 113
-EXPECTED_VK_TOTAL = 109      # v3.5 (S3): +2 叠加层原语 overlay_scope/draw_lines 进 SceneDriver
+EXPECTED_VK_TOTAL = 110      # v3.6 (S4): +1 draw_screen_rect 进 VkEditorRenderMixin（109+1）
 
 
 def _call_groups():

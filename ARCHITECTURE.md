@@ -142,7 +142,7 @@ flowchart TB
 
 | 场景 | 能选后端吗 | 依据 | 环境不支持时 |
 |---|---|---|---|
-| **编辑器**（`Loom.py` / `Loom.exe`） | **不能**。编辑器 = `EditorApp(GLEngine)`，只有 GL 一条腿 | `editor.py:159` 继承 `GLEngine` | GL 4.3 不满足 → 明确失败并提示「改用 Vulkan 后端」（但它自己用不了 Vulkan）：`loom_gl_version.py:68` |
+| **编辑器**（`Loom.py` / `Loom.exe`） | **部分能**（S4，Q-B7-47-1 阶段 4）：缺省仍 GL（`EditorApp(_EditorCore, GLEngine)`，零变化）；**显式 `--backend vulkan`** → `VkEditorApp(_EditorCore, SceneDriver)` + `ui/vk_viewport.VkViewport`（QRenderWidget bitmap present） | `Loom.py` 编辑器分支走 `run_player.resolve_backend` 单一事实 | VK 不可用 → `VkViewport.init_error` 报错可见（不静默降级） |
 | 编辑器里点「播放」 | **不能**。就在编辑器自己的 GL 引擎里跑 | `editor.toggle_play` 只置 `is_playing`，不起外部播放器 | 同上 |
 | 独立播放器（`--run`） | **能**：`--backend` > 游戏设置 > 引擎设置 > 默认 vulkan | `run_player.resolve_backend:133` | `auto`：VK 初始化失败 → 诊断+弹窗+**同进程转 GL**，并把用户层 `render_api` 写成 opengl（`run_player.py:415-430`、`_persist_backend:186`）；显式 `--backend vulkan` 失败只报错不改配置 |
 | 打包游戏（`game_player.py`） | **能**：同播放器一套逻辑（复用 `run_player`） | `game_player.py:169-235` | 同播放器 |
@@ -186,7 +186,7 @@ flowchart LR
   S["SceneDriver<br/>scene_driver.py"]:::facade
   S ==>|拼装| K["EngineCore<br/>engine_core.py 720<br/>★后端无关的公共实现"]:::contract
   S ==>|拼装| W["VkWindowMixin<br/>loom_vk_window.py 273<br/>★F11 假全屏（去边框/铺桌面/置顶）"]:::impl
-  S ==>|拼装| V["VkEditorRenderMixin<br/>loom_pass_vk.py 458<br/>★overlay_scope / draw_lines / VkFrameExecutor<br/>（S3，线宽 1px 待 Q-B7-48-1）"]:::impl
+  S ==>|拼装| V["VkEditorRenderMixin<br/>loom_pass_vk.py 518<br/>★overlay_scope / draw_lines / VkFrameExecutor<br/>（S3，线宽 1px 待 Q-B7-48-1）"]:::impl
   V -->|VkFrameExecutor 转 draw_frame| R["VkRenderer<br/>vk_renderer.py 2127"]:::impl
   V -.->|与 GL RenderMixin 同签名钩子| K
   classDef facade fill:#ede9fe,stroke:#7c3aed,color:#4c1d95
@@ -218,7 +218,7 @@ flowchart LR
   R3["执行器 execute(plan)"]:::impl
   F3["loom_pass_gl.py<br/>254 行"]:::file
   R3b["VK 执行器 draw_frame(plan)<br/>+ 叠加层线批 VkLineBatch"]:::impl
-  F3b["loom_pass_vk.py<br/>458 行"]:::file
+  F3b["loom_pass_vk.py<br/>518 行"]:::file
   R4["各 pass 绘制源<br/>主pass / 天空 / 阴影 / 后处理"]:::impl
   F4["loom_post_gl.py 214<br/>loom_shadow.py 117"]:::file
   R5["UBO 打包 pack_arrays"]:::contract
@@ -404,9 +404,9 @@ flowchart TB
 
 ```mermaid
 flowchart LR
-  ED["EditorApp<br/>editor.py 2905"]:::facade
+  ED["EditorApp<br/>editor.py 3128"]:::facade
   GE["GLEngine<br/>engine.py"]:::facade
-  V["Qt 视图<br/>ui/loom_gui.py 4325"]:::file
+  V["Qt 视图<br/>ui/loom_gui.py 4338"]:::file
   U["撤销/重做<br/>undo.py 1391"]:::file
   EAI["EAI 命令面<br/>agent_commands.py 4048"]:::entry
   FD["文件对话框<br/>filedialog.py 294"]:::file
@@ -414,6 +414,13 @@ flowchart LR
   S["场景 I/O<br/>sceneio.py"]:::file
   ED ==>|继承| GE
   ED -->|通知/刷新| V
+  VKE["VkEditorApp<br/>editor.py（S4）"]:::facade
+  SDV["SceneDriver<br/>scene_driver.py"]:::facade
+  VKV["VkViewport<br/>ui/vk_viewport.py 292"]:::file
+  VKE ==>|继承（同一 _EditorCore）| ED
+  VKE ==>|继承| SDV
+  VKE -->|由宿主装配| VKV
+  VKV -->|QRenderWidget bitmap| VKW["rendercanvas.qt"]:::file
   ED -->|记录命令| U
   EAI -->|调用编辑器方法| ED
   ED -->|打开/保存| FD
@@ -667,7 +674,7 @@ sequenceDiagram
 ### G 编辑器
 | 文件 | 行数 | 职责 |
 |---|---|---|
-| `editor.py` | 2906 | EditorApp: 3D 游戏引擎编辑器 (Unity/Godot 风格) |
+| `editor.py` | 3128 | EditorApp/VkEditorApp: 3D 游戏引擎编辑器（GL/VK 双装配，S4） |
 | `agent_commands.py` | 4049 | Engine Agent 接口 EAI (2026-08-27) |
 | `undo.py` | 1392 | 撤销/重做 (M15, 命令模式) |
 | `gui.py` | 586 | 即时模式 GUI (ImGui 风格, moderngl 手写, 零新依赖) |
@@ -693,11 +700,12 @@ sequenceDiagram
 ### J ui/ 子目录
 | 文件 | 行数 | 职责 |
 |---|---|---|
-| `ui/loom_gui.py` | 4326 | Loom 编辑器 PySide6 原生 Qt 视图 (IEditorView 实现) |
+| `ui/loom_gui.py` | 4338 | Loom 编辑器 PySide6 原生 Qt 视图 (IEditorView 实现) |
 | `ui/editor_ui.py` | 67 | IEditorView 契约: Loom 编辑器 UI 接口标准 (UI 模块化 202 |
 | `ui/grid.py` | 104 | 无限网格纯几何 (2026-08-14) |
 | `ui/qt_console.py` | 187 | Loom 编辑器内嵌命令行坞 (2026-08-27, EAI P2①) |
 | `ui/qt_uitree.py` | 354 | Loom 编辑器 UI 树编辑器 dock (2026-10-18 阶段5) |
+| `ui/vk_viewport.py` | 292 | VK 编辑器视口：QRenderWidget(bitmap) + 事件桥（S4，Q-B7-47-1 阶段 4） |
 | `ui/minimal_editor_view.py` | 110 | MinimalEditorView: Loom 编辑器第二 UI 实现 (极简只读) |
 | `ui/__init__.py` | 11 | Loom 编辑器 UI 层 (UI 模块化 2026-08-13) |
 

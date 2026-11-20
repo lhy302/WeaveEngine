@@ -918,7 +918,9 @@ class DragBlock(QWidget):
 # LoomGUI — 主窗口 + 全部原生面板 (IEditorView 实现)
 # =====================================================================
 class LoomGUI(QMainWindow):
-    def __init__(self, scene_path=None, width=1280, height=800):
+    # S4（Q-B7-47-1 阶段 4）: backend='vulkan' 时视口用 VkViewport（显式 --backend 才走；
+    # 缺省 'gl' = 原路径一行不差）。
+    def __init__(self, scene_path=None, width=1280, height=800, backend='gl'):
         super().__init__()
         self.editor = None
         self._scene_path = scene_path
@@ -955,6 +957,11 @@ class LoomGUI(QMainWindow):
         if _remote:
             print('[Qt] 远程/虚拟显示模式启用（离屏 GL readback）')
             self.viewport = RemoteViewport(self, scene_path, width, height)
+        elif backend == 'vulkan':
+            # S4（Q-B7-47-1 阶段 4）: 显式 --backend vulkan 的编辑器走 VK 视口
+            # （QRenderWidget bitmap present；GL 路径分支原样保留，缺省零变化）
+            from ui.vk_viewport import VkViewport
+            self.viewport = VkViewport(self, scene_path, width, height)
         else:
             self.viewport = GLViewport(self, scene_path, width, height)
 
@@ -4204,9 +4211,11 @@ def _confirm_core_plugins(win):
                 print("[插件] 「%s」信任记录写入失败" % info['id'])
 
 
-def run_loom_gui(scene_path=None, width=1280, height=800):
+def run_loom_gui(scene_path=None, width=1280, height=800, backend='gl'):
     """PySide6 编辑器入口 (Loom.py --ui qt 调用). QApplication + 主窗口 + 事件循环.
-    支持 --auto-close N: N 秒后自动关闭 (冒烟测试用, 交互使用不要带)."""
+    支持 --auto-close N: N 秒后自动关闭 (冒烟测试用, 交互使用不要带).
+    S4: backend='vulkan' -> 编辑器视口走 VK（Loom.py 编辑器分支在 --backend 显式
+    为 vulkan 时传入；缺省 'gl' 与修前逐位一致）。"""
     fmt = QSurfaceFormat()
     # 2026-11-09 A0 (D1=B): GL 地板 4.3 core（Qt 里请求不到时由各视口的版本门明确报错）
     fmt.setVersion(GL_MIN_MAJOR, GL_MIN_MINOR)
@@ -4239,7 +4248,7 @@ def run_loom_gui(scene_path=None, width=1280, height=800):
             pass
 
     app = QApplication(sys.argv)
-    win = LoomGUI(scene_path=scene_path, width=width, height=height)
+    win = LoomGUI(scene_path=scene_path, width=width, height=height, backend=backend)
     # 2026-08-27 EAI: --agent 启动命令桥 (Http 127.0.0.1 + 端口文件) +
     # 主线程 QTimer 轮询命令队列 (与 UI 一致执行); Agent 经 /cmd /logs 驱动
     agent = None

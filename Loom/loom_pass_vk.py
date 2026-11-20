@@ -67,6 +67,9 @@ _TOPOLOGY = {
 }
 _LINE_BYTES = 7 * 4          # 每顶点 28 字节（pos3f + color4f），与 GL '3f 4f' 一致
 
+# 恒等 VP（draw_screen_rect 的顶点已预算成 NDC，屏幕空间原语用它直出）
+_IDENTITY4 = np.eye(4, dtype=np.float32)
+
 
 def _pack_lines(verts, colors):
     """(N,3)+(N,3|4) -> 交错 (N,7) f4（与 engine.draw_lines 的 packed 同一规则）。"""
@@ -455,3 +458,61 @@ class VkEditorRenderMixin:
         if r is None:
             raise RuntimeError('VK 宿主未装配 _vk_renderer（S4 接线）')
         return r
+
+    # ---- ④（S4）：屏幕空间原语 + 渲染目标（与 GL loom_hud/loom_render 同名同语义）----
+    def _screen_fb(self):
+        """当前渲染目标（VK）—— 与 loom_render.RenderMixin._screen_fb 同签名同语义。
+
+        GL 语义 = "叠加层画到当前帧的屏幕目标"；VK 的等价物 = 交换链当前帧纹理视图。
+        rendercanvas 语义保证：同一次 draw 回调内 get_current_texture() 返回同一张
+        帧纹理（帧末 present 才轮换），所以主 pass / 叠加层 flush 画到同一张图上。
+        """
+        ctx = getattr(self, '_vk_ctx', None)
+        if ctx is None:
+            raise RuntimeError('VK 宿主未提供 _vk_ctx（rendercanvas wgpu 上下文）')
+        return ctx.get_current_texture().create_view()
+
+    def draw_screen_rect(self, rect, color):
+        """屏幕像素填充矩形（VK）—— 与 loom_hud.HudMixin.draw_screen_rect 同签名同语义。
+
+        GL：ctx.scope(framebuffer=fb, enable_only=BLEND) + u_origin/u_size quad
+        （调用即画，无深度测试，alpha 生效）。VK：矩形两三角形，屏幕像素 -> NDC
+        （y 翻转）后配恒等 VP 走 VkLineBatch 的 triangle-list + blend 批次：
+          · 已在 overlay_scope 内 -> 收进 pending（随 scope flush，同批同语义）；
+          · scope 外 -> 临时 pending 立即 flush（保持 GL「调用即画」时序，目标 =
+            _screen_fb()，无深度附件 = 不测不写，与 GL enable_only=BLEND 等价）。
+        """
+        x, y, w, h = rect
+        if w <= 0 or h <= 0:
+            return
+        a = (color[3] / 255.0) if len(color) > 3 else 1.0
+        rgba = (color[0] / 255.0, color[1] / 255.0, color[2] / 255.0, a)
+        W = float(getattr(self, 'width', 0) or 0)
+        H = float(getattr(self, 'height', 0) or 0)
+        if W <= 0 or H <= 0:
+            return
+        # 屏幕像素（左上原点，y 向下）-> NDC（[-1,1]，y 向上）。z=0（GL quad
+        # 无深度写入，深度比较对无深度附件无意义；带附件的 scope 内由管线
+        # always+不写表达「不测不写」，见 _pipeline 的 depth_on=False 语义）。
+        x0 = 2.0 * x / W - 1.0
+        x1 = 2.0 * (x + w) / W - 1.0
+        y0 = 1.0 - 2.0 * y / H
+        y1 = 1.0 - 2.0 * (y + h) / H
+        verts = [(x0, y0, 0.0), (x1, y0, 0.0), (x1, y1, 0.0),
+                 (x0, y0, 0.0), (x1, y1, 0.0), (x0, y1, 0.0)]
+        cols = [rgba] * 6
+        pend = getattr(self, '_vk_pending', None)
+        if pend is not None:
+            pend['draws'].append((_pack_lines(verts, cols), _IDENTITY4, 4, False))
+            return
+        # scope 外：临时 pending 立即 flush（GL 调用即画语义；深度批次不存在，
+        # 不需要 _vk_overlay_depth_view —— 临时 pass 不挂深度附件）。
+        self._vk_pending = {'view': self._screen_fb(), 'depth': False,
+                            'blend': True, 'draws': []}
+        try:
+            self._vk_pending['draws'].append(
+                (_pack_lines(verts, cols), _IDENTITY4, 4, False))
+        finally:
+            pend = self._vk_pending
+            self._vk_pending = None
+            self._flush_overlay(pend)

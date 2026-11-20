@@ -491,8 +491,17 @@ if __name__ == "__main__":
                 # 玩家模式不加锁，允许同时开多个游戏实例）。防止连点开 N 个编辑器。
                 from loom_single_instance import ensure_editor_single_instance
                 ensure_editor_single_instance(scene_path=open_scene)
+                # S4（Q-B7-47-1 阶段 4）: 编辑器后端选择 —— 复用 run_player.resolve_backend
+                # 单一事实（不另写选择逻辑）。只有**显式 --backend vulkan**才走 VK 视口;
+                # 不带 --backend（或缺省 opengl/auto）= GL, 与修前逐位一致(零风险)。
+                _cli = _cli_backend(sys.argv)
+                _edit_backend = 'gl'
+                if _cli is not None:
+                    from run_player import resolve_backend as _resolve_backend
+                    if _resolve_backend(_cli) == 'vulkan':
+                        _edit_backend = 'vulkan'
                 from ui.loom_gui import run_loom_gui
-                run_loom_gui(scene_path=open_scene)
+                run_loom_gui(scene_path=open_scene, backend=_edit_backend)
                 sys.exit(0)
     except Exception as e:
         print(f"[错误] 无法启动渲染引擎: {e}")
