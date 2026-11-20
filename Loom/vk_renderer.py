@@ -44,7 +44,7 @@ except Exception as _ph_e:      # 不能静默: 退化成"没有降级判据"必
 
 import wgpu
 
-from matlib import (mat4_view_yaw_pitch, mat4_view_forward, mat4_perspective,
+from mathlib.matlib import (mat4_view_yaw_pitch, mat4_view_forward, mat4_perspective,
                     mat4_ortho, mat4_rotation)
 from vk_ui import (VkUIEngine, VkUIPipeline,   # 2026-11-06 Canvas UI / HUD (独立管线)
                    VkWorldUIPipeline)          # 2026-11-06 R1 world Canvas

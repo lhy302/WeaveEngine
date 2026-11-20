@@ -151,7 +151,7 @@ class T3_InterpAlignedAfterAlign(unittest.TestCase):
     """端到端语义: align 后插值输出 = 现读值 (画面跟手)."""
 
     def test_render_pose_matches_after_move(self):
-        from interp_state import InterpState
+        from core.interp import InterpState
         m = GameObject(None, (0, 0, 0), (0, 0, 0), name='t')
         models = [m]
         it = InterpState(models)

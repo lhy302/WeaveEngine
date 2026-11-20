@@ -63,7 +63,7 @@ import numpy as np                                      # noqa: E402
 
 from editor import EditorApp                            # noqa: E402
 from engine import GameObject, Point3D                  # noqa: E402
-from interp_state import InterpState                    # noqa: E402
+from core.interp import InterpState                    # noqa: E402
 
 ok = True
 

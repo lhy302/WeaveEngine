@@ -76,7 +76,7 @@ import scene_driver as SD
 import undo as U
 import loom_components as C
 import loom_frame_components as LFC
-from mesh import create_cube
+from mathlib.mesh import create_cube
 
 E.GLEngine._build_gpu = lambda self, m: None
 

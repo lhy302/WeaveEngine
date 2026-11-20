@@ -55,7 +55,7 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import numpy as np
 import math
-from matlib import mat4_rotation, decompose_euler
+from mathlib.matlib import mat4_rotation, decompose_euler
 
 rng = np.random.default_rng(7)
 worst = 0.0

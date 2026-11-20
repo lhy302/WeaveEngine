@@ -29,10 +29,10 @@ import os
 
 import numpy as np
 
-import fastpath
-from fastpath import ancestry_dfs as _fp_ancestry
+import kernels.fastpath as fastpath
+from kernels.fastpath import ancestry_dfs as _fp_ancestry
 from loom_components import physics_disabled_by_env as _physics_disabled_by_env
-from loom_types import Point3D
+from core.primitives import Point3D
 
 
 # 2026-11-08 beta3 scan_06 P-06-02: 盒-球"球心在盒内"分支的**同分判定阈值**.
@@ -698,7 +698,7 @@ class PhysicsMixin:
         if self._collision_pool is None:
             try:
                 from concurrent.futures import ThreadPoolExecutor
-                from parallel import pin_current_thread
+                from kernels.parallel import pin_current_thread
                 pol = self.parallel.get('policy') if self.parallel else None
                 pmask = (pol or {}).get('pool_mask') or 0
 

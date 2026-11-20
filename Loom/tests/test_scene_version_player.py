@@ -174,7 +174,7 @@ def t_game_player(tmp):
 
 def t_no_dialog(tmp):
     print('=== D. LOOM_NO_DIALOG=1 只打印不阻塞 ===')
-    from loom_backend_guard import show_blocking_dialog
+    from hostenv.backend_guard import show_blocking_dialog
     os.environ['LOOM_NO_DIALOG'] = '1'
     ret = show_blocking_dialog('t', 'x')
     check('D1 禁用弹窗时立即返回 False（不阻塞）', ret is False, ret)

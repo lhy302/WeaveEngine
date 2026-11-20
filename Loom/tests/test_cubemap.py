@@ -127,7 +127,7 @@ editor_mod.DEFAULT_SAVE_DIR = os.path.join(_SAVE_ROOT, "Projects")
 editor_mod._LEGACY_SAVE_DIR = os.path.join(_SAVE_ROOT, "保存")
 import engine as E
 import agent_commands as ac
-from mesh import create_cube
+from mathlib.mesh import create_cube
 ctx2 = moderngl.create_standalone_context()
 ed = editor_mod.EditorApp(320, 240, ctx=ctx2)
 ed._external_fb = ctx2.detect_framebuffer()

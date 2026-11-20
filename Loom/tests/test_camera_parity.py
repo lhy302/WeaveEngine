@@ -164,8 +164,8 @@ import moderngl                                                   # noqa: E402
 import runtime                                                    # noqa: E402  GL 打包播放器（生产入口）
 import scene_driver as SD                                         # noqa: E402  VK 播放器（生产入口）
 from loom_scene_entities import wrap_deg                          # noqa: E402  相机角度环绕（唯一实现）
-from loom_types import Point3D                                    # noqa: E402  脚本写相机的唯一数据形态
-from matlib import (mat4_ortho, mat4_perspective, mat4_rotation,   # noqa: E402
+from core.primitives import Point3D                                    # noqa: E402  脚本写相机的唯一数据形态
+from mathlib.matlib import (mat4_ortho, mat4_perspective, mat4_rotation,   # noqa: E402
                     mat4_scale, mat4_translation, mat4_view_yaw_pitch,
                     view_basis_to_angles)
 from scripts import Script, register                              # noqa: E402  脚本生产注册路径
@@ -283,10 +283,10 @@ src_has('scene_driver.py', 'mat4_view_yaw_pitch(np, cam_pos, self.yaw, self.pitc
         'VK 不得再硬编码 self.yaw/self.pitch 组 VP（那样玩家相机角度永远进不了 view）')
 _bva = _grep_prod('def view_basis_to_angles')
 check('结构：基->角度 的逆映射只有 matlib.view_basis_to_angles 一份（两端 apply_camera 共用）',
-      [p for (p, _l) in _bva] == ['matlib.py'], _bva)
+      [p for (p, _l) in _bva] == ['mathlib/matlib.py'], _bva)
 _wrap = _grep_prod('def wrap_deg')
-check('结构：相机角度环绕只有 loom_scene_entities.wrap_deg 一份',
-      [p for (p, _l) in _wrap] == ['loom_scene_entities.py'], _wrap)
+check('结构：相机角度环绕只有 mathlib.mathutil.wrap_deg 一份（B1 批 P1 前置自 loom_scene_entities）',
+      [p for (p, _l) in _wrap] == ['mathlib/mathutil.py'], _wrap)
 _dev_defs = _grep_prod('def apply_dev_camera_mouse')
 check('结构：def apply_dev_camera_mouse 只在 scene_driver.py（VK 侧唯一实现；GL 侧对应'
       '能力是 editor._update_camera）',

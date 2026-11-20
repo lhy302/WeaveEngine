@@ -23,7 +23,7 @@ import numpy as np
 
 from loom_game_object import GameObject
 from loom_material import Material
-from loom_color import _hex_rgba
+from core.color import _hex_rgba
 
 
 class ModelGpuMixin:

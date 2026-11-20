@@ -62,7 +62,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 
 import engine as E
-from mesh import create_cube
+from mathlib.mesh import create_cube
 import undo as U
 import agent_commands as ac
 

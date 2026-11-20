@@ -199,7 +199,7 @@ class GLViewport(QOpenGLWidget):
                                     scene_path=self._scene_path,
                                     view=self._window, ctx=self.ctx)
             self._window.bind_editor(self.editor)
-            from loom_log import verbose
+            from core.log import verbose
             verbose("[Qt] EditorApp 创建成功 (嵌入式 ctx 模式)")
         except Exception as _e:
             import traceback
@@ -579,7 +579,7 @@ class RemoteViewport(QWidget):
                                 view=self._window, ctx=self.ctx)
         self.editor._external_fb = self._fbo
         self._window.bind_editor(self.editor)
-        from loom_log import verbose
+        from core.log import verbose
         verbose('[Remote] EditorApp 创建成功 (离屏 GL readback 模式)')
 
     # ---------------- 渲染循环 ----------------
@@ -3001,7 +3001,7 @@ class LoomGUI(QMainWindow):
             lambda: e.rename(m, name_edit.text(), m.name) if name_edit.text() != m.name else None)
         lay.addRow("名称", name_edit)
         # ---- Layer / Tag (2026-10-18, 契约 §7) ----
-        import layer_tag
+        import kernels.layer_tag as layer_tag
         lay_combo = QComboBox()
         for i in range(32):
             nm = e.layer_name(i)

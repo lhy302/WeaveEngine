@@ -23,13 +23,13 @@ import os
 import sys
 import threading
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-_CC = os.path.join(_HERE, 'core_components')
-for _p in (_CC, _HERE):
+# B1 批搬家: 本文件在 <root>/kernels/ 下; 旧口径 _HERE=安装根
+# (源码=Loom/, 冻结=dist/) 由上跳一层保持不变
+_ENGINE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_CC = os.path.join(_ENGINE_ROOT, 'core_components')
+for _p in (_CC, _ENGINE_ROOT):
     if _p not in sys.path:
         sys.path.insert(0, _p)
-
-_ENGINE_ROOT = os.path.dirname(_HERE)
 
 LOCK = threading.Lock()
 _STATE = {'tried': False, 'handle': None, 'error': None}

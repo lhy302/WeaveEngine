@@ -55,7 +55,7 @@ import sys, os
 import tempfile, json, tempfile
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import engine as E
-from mesh import create_cube, create_plane, create_sphere
+from mathlib.mesh import create_cube, create_plane, create_sphere
 import sceneio as S
 
 eng = E.GLEngine.__new__(E.GLEngine)

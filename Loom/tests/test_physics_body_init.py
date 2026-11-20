@@ -82,7 +82,7 @@ import numpy as np                 # noqa: E402
 import physics_bridge as B          # noqa: E402
 import physics_glue as pg           # noqa: E402
 import engine as E                  # noqa: E402
-from mesh import create_cube, create_sphere, create_plane   # noqa: E402
+from mathlib.mesh import create_cube, create_sphere, create_plane   # noqa: E402
 
 DT = 1.0 / 60.0
 ok = True

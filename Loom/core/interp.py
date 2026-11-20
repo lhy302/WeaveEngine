@@ -246,7 +246,7 @@ class InterpState:
         n = len(models)
         if self._curr is None or n == 0 or not self._n:
             return None
-        import pipeline_glue as pg
+        import kernels.pipeline_glue as pg
         cur_ids = np.fromiter((id(m) for m in models), dtype=np.int64, count=n)
         known = self._ids[:self._n]
         _okey = (id(self._ids), self._n)
@@ -282,7 +282,7 @@ class InterpState:
         新物体 (known[loc] != cur_ids) 罕见: 停泊到自由行后重跑一次 C。
         ★B2 退役 (2026-10-16): 删 _pose_dll_off / pg.disabled() 门。
         """
-        import pipeline_glue as pg
+        import kernels.pipeline_glue as pg
         loc = self._loc_buf
         if loc is None or loc.shape[0] < n:
             loc = self._loc_buf = np.empty(max(64, n), dtype=np.int64)

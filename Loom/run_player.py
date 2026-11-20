@@ -28,7 +28,7 @@ run_player.py — 播放器渲染 API 选择入口 (2026-08-29 P5)
 import os
 import sys
 
-from loom_backend_guard import show_blocking_dialog   # 2026-11-09 A: 换后端前的可见失败
+from hostenv.backend_guard import show_blocking_dialog   # 2026-11-09 A: 换后端前的可见失败
 
 
 # 2026-11-07 scan_05 P-10 / Q6: 失败按"段"分类, 供上层决定能不能回退。

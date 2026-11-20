@@ -43,8 +43,8 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 os.environ.setdefault('LOOM_NO_DIALOG', '1')
 
-from engine_core import EngineCore                             # noqa: E402
-from loom_types import Point3D                                 # noqa: E402
+from core.engine_core import EngineCore                             # noqa: E402
+from core.primitives import Point3D                                 # noqa: E402
 import scene_driver as SD                                      # noqa: E402
 
 ok = True

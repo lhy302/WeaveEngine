@@ -185,7 +185,7 @@ class TestExtrapolate(unittest.TestCase):
         """恒速物体: 外推输出 - 真实未来 = 速度×fdt×(a'-1) 误差 (验收 1e-7).
         prev=0, curr=30Hz 位移 v×fdt; alpha=0.5 → a'=1.5 → 输出 = v×fdt×1.5,
         真实位置 (渲染时刻=curr+0.5fdt) = v×fdt×1.5 — 零误差 (恒速下外推精确)."""
-        from interp_state import InterpState
+        from core.interp import InterpState
         v, fdt = 10.0, 1.0 / 30.0
         models = [_M(p=(0.0, 0.0, 0.0))]
         it = InterpState(models)
@@ -200,7 +200,7 @@ class TestExtrapolate(unittest.TestCase):
 
     def test_cap_15(self):
         """封顶: alpha→1 时 a' = min(2, 1.5) = 1.5 (输出不越过 curr+0.5 帧)."""
-        from interp_state import InterpState
+        from core.interp import InterpState
         v, fdt = 10.0, 1.0 / 30.0
         models = [_M(p=(0.0, 0.0, 0.0))]
         it = InterpState(models)
@@ -214,7 +214,7 @@ class TestExtrapolate(unittest.TestCase):
 
     def test_static_frame_identity(self):
         """静止帧: prev==curr → 外推恒等 curr (零风险)."""
-        from interp_state import InterpState
+        from core.interp import InterpState
         models = [_M(p=(3.0, 4.0, 5.0))]
         it = InterpState(models)
         it.advance()
@@ -226,7 +226,7 @@ class TestExtrapolate(unittest.TestCase):
 
     def test_interp_mode_unchanged(self):
         """默认 INTERP_LERP 行为不变 (回归): a=0.5 → 中点, 不受外推改动影响."""
-        from interp_state import InterpState
+        from core.interp import InterpState
         models = [_M(p=(0.0, 0.0, 0.0))]
         it = InterpState(models)
         it.advance()
@@ -237,7 +237,7 @@ class TestExtrapolate(unittest.TestCase):
 
     def test_angdiff_extrap(self):
         """旋转外推同式: prev=0.1, curr=0.2, alpha=0.5 → a'=1.5 → 0.25 (短弧同源)."""
-        from interp_state import InterpState
+        from core.interp import InterpState
         models = [_M(r=(0.1, 0, 0))]
         it = InterpState(models)
         it.advance()

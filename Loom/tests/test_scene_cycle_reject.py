@@ -11,7 +11,7 @@ os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 """sceneio 父链成环: 加载拒绝 + 保存前拒绝 (不静默丢对象)."""
 import engine as E
-from mesh import create_cube
+from mathlib.mesh import create_cube
 import sceneio as S
 
 E.GLEngine._build_gpu = lambda self, m: None

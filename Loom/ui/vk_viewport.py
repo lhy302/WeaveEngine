@@ -203,7 +203,7 @@ class VkViewport(_ViewportEventBridge, rq.QRenderWidget):
             adapter = wgpu.gpu.request_adapter_sync(power_preference='high-performance')
             if adapter is None:
                 raise RuntimeError('无可用 Vulkan 适配器 (request_adapter_sync 返回 None)')
-            from loom_backend_guard import (adapter_info_dict, adapter_backend,
+            from hostenv.backend_guard import (adapter_info_dict, adapter_backend,
                                             require_vulkan_api)
             _dev_info = adapter_info_dict(adapter)
             _be = adapter_backend(_dev_info)
@@ -227,7 +227,7 @@ class VkViewport(_ViewportEventBridge, rq.QRenderWidget):
             self._window.bind_editor(self.editor)
             self.configured = True
             self.request_draw(self._draw_frame)
-            from loom_log import verbose
+            from core.log import verbose
             verbose('[VkViewport] VkEditorApp 创建成功 (QRenderWidget bitmap 模式, '
                     'format=%s)' % fmt)
             print('[VkViewport] VK 编辑器就绪: device=%s | format=%s'

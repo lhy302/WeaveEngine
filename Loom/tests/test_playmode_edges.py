@@ -57,7 +57,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import engine as E
 import editor
 import undo
-from mesh import create_cube
+from mathlib.mesh import create_cube
 
 E.GLEngine._build_gpu = lambda self, m: None
 

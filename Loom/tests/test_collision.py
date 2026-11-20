@@ -54,7 +54,7 @@ def _enforce_fail_exit_code():
 import sys, os, math
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import engine as E
-from mesh import create_cube, create_sphere, create_plane
+from mathlib.mesh import create_cube, create_sphere, create_plane
 import scripts
 
 # 不开窗口的引擎桩 (碰撞系统是纯数学, 不碰 GPU)

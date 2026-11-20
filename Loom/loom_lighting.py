@@ -35,9 +35,9 @@ import time
 
 import numpy as np
 
-from matlib import (mat4_ortho, mat4_perspective, mat4_view_forward)
-import fastpath   # AABB 批量归约 (aabbs_minmax 串行 / aabbs_minmax_par 逃生门)
-from loom_types import Point3D
+from mathlib.matlib import (mat4_ortho, mat4_perspective, mat4_view_forward)
+import kernels.fastpath as fastpath   # AABB 批量归约 (aabbs_minmax 串行 / aabbs_minmax_par 逃生门)
+from core.primitives import Point3D
 from loom_game_object import GameObject
 from loom_scene_entities import LightState
 
@@ -594,7 +594,7 @@ class LightingMixin:
         (矩阵乘法 ≤1 ULP), 见 tests/_tmp/pipeline_val_check.py 15/15。
         """
         # ★B2 退役 (2026-10-16): 删 LOOM_NO_PIPELINE / pg.disabled() 门。
-        import pipeline_glue as pg
+        import kernels.pipeline_glue as pg
         lights = [l for l in self.lights[:8] if l.shadow]
         if not lights:
             return False

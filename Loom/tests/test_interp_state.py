@@ -59,7 +59,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'
 
 import numpy as np
 
-from interp_state import InterpState
+from core.interp import InterpState
 
 
 class _M:

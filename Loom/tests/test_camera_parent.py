@@ -59,8 +59,8 @@ import numpy as np
 import engine as E
 import undo as U
 import sceneio as S
-from matlib import mat4_view_yaw_pitch, view_basis_to_angles
-from mesh import create_cube
+from mathlib.matlib import mat4_view_yaw_pitch, view_basis_to_angles
+from mathlib.mesh import create_cube
 
 E.GLEngine._build_gpu = lambda self, m: None
 

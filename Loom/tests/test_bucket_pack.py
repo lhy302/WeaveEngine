@@ -27,7 +27,7 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 os.chdir(ROOT)
 
-import fastpath                                              # noqa: E402
+import kernels.fastpath as fastpath                                              # noqa: E402
 
 ok = True
 

@@ -55,7 +55,7 @@ import sys, os, math
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import engine as E
 import scripts
-from mesh import create_cube, create_plane
+from mathlib.mesh import create_cube, create_plane
 
 E.GLEngine._build_gpu = lambda self, m: None
 

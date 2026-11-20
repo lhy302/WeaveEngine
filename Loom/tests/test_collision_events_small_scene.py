@@ -65,7 +65,7 @@ os.environ['LOOM_NO_PARALLEL'] = '1'   # 确定性: 不建帧池/脚本线程
 import moderngl                                          # noqa: E402
 import engine as E                                       # noqa: E402
 from engine import GLEngine, Point3D                     # noqa: E402
-from mesh import create_cube                             # noqa: E402
+from mathlib.mesh import create_cube                             # noqa: E402
 
 E.GLEngine._build_gpu = lambda self, m: None             # 无头: 不建 VBO/VAO
 

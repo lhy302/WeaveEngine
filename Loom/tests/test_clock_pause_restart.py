@@ -30,7 +30,7 @@ sys.path.insert(0, ROOT)
 os.environ.setdefault('LOOM_NO_PARALLEL', '1')
 
 import engine as E                                # noqa: E402
-from core_clock import clock_from_settings        # noqa: E402
+from core.clock import clock_from_settings        # noqa: E402
 
 _fails = []
 

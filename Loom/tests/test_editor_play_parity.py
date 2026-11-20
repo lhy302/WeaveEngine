@@ -179,7 +179,7 @@ import moderngl                                                   # noqa: E402
 import runtime                                                    # noqa: E402  GL 打包播放器（生产入口）
 import scene_driver as _sd                                       # noqa: E402  VK 播放器（生产类，S5 四面对拍）
 from loom_scene_entities import wrap_deg                          # noqa: E402  相机角度环绕（唯一实现）
-from matlib import (mat4_ortho, mat4_perspective, mat4_rotation,   # noqa: E402
+from mathlib.matlib import (mat4_ortho, mat4_perspective, mat4_rotation,   # noqa: E402
                     mat4_scale, mat4_translation, mat4_view_yaw_pitch,
                     view_basis_to_angles)
 from scripts import Script, register                              # noqa: E402  脚本生产注册路径
@@ -1059,7 +1059,7 @@ print("=== ⑦. 退出播放 on_disable（Q-B7-48-2）：退出追加恰一次/�
 with open(os.path.join(ROOT, 'editor.py'), 'r', encoding='utf-8') as _f7:
     _ed_src7 = _f7.read()
 _no_dis7 = {fn: open(os.path.join(ROOT, fn), 'r', encoding='utf-8').read().count('inst.on_disable(')
-            for fn in ('runtime.py', 'engine.py', 'engine_core.py', 'scene_driver.py',
+            for fn in ('runtime.py', 'engine.py', 'core/engine_core.py', 'scene_driver.py',
                        'loom_model_gpu.py', 'vk_player.py', 'game_player.py',
                        'loom_player_window.py')}
 check('⑦ 结构：inst.on_disable( 生产派发点全仓恰 1 处（editor.py 第 1.5 步）+ 播放器入口 0 处',

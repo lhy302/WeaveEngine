@@ -66,7 +66,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import engine as E
 import editor
-from mesh import create_cube
+from mathlib.mesh import create_cube
 from undo import UndoManager
 from editor import EditorApp
 from ui.editor_ui import IEditorView

@@ -203,7 +203,7 @@ def _local_matrices_batch(models):
         p[i, 0] = po.x; p[i, 1] = po.y; p[i, 2] = po.z
     # pipeline.dll 原生 C 批量 (唯一路径; ★B2 退役: 删 numpy S@R@T 回退段)
     out = np.empty((M, 4, 4), dtype=np.float64)
-    import pipeline_glue as _pg
+    import kernels.pipeline_glue as _pg
     _pg.local_matrices(r, s, p, out)   # rc != 0 已由 glue 硬 raise
     return out
 
@@ -1095,7 +1095,7 @@ class PhysicsWorldBridge:
         pidx = [id2idx.get(pidd, -1) for pidd in parents]
 
         # pipeline.dll 原生 C 脏检测与拓扑传播 (唯一路径; ★B2 退役: 删 numpy 回退)
-        import pipeline_glue as _pg
+        import kernels.pipeline_glue as _pg
         out_mask = np.zeros(n, dtype=np.uint8)
         cur_flat = cur.reshape(n, 6)
         old_flat = old.reshape(n, 6)

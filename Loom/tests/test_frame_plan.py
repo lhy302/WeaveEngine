@@ -424,7 +424,7 @@ def t_scene_ubo():
 def t_profiler_defaults():
     print('=== G. Q-D1-3=A: RenderMixin 的 profiler 默认空实现 ===')
     from loom_render import RenderMixin
-    from loom_profiler import ProfilerMixin
+    from core.profiler import ProfilerMixin
 
     class OnlyRender(RenderMixin):
         pass

@@ -93,7 +93,7 @@ class NgilPool:
     def _loop(self):
         if self._mask:
             try:
-                from parallel import pin_current_thread
+                from kernels.parallel import pin_current_thread
                 pin_current_thread(self._mask)
             except Exception:
                 pass

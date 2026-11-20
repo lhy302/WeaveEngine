@@ -57,7 +57,7 @@ import engine as E
 from engine import AnimationClip
 import sceneio as S
 import undo as U
-from mesh import create_cube
+from mathlib.mesh import create_cube
 
 ok = True
 def check(label, cond, detail=""):

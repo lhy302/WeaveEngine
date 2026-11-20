@@ -55,7 +55,7 @@ import sys, os, tempfile
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import engine as E
 import sceneio as S
-from mesh import load_obj
+from mathlib.mesh import load_obj
 
 ok = True
 def check(label, cond, detail=""):
@@ -157,7 +157,7 @@ check("sceneio obj 文件失效兜底立方体", m3.mesh is not None
       and len(m3.mesh.faces) == 12, str(len(m3.mesh.faces) if m3.mesh else None))
 
 # 2026-08-20 安全加固 (Qoder 报告低危5): OBJ 资源上限 (内存 DoS 防护)
-import mesh as _mesh_mod
+import mathlib.mesh as _mesh_mod
 _old_v = _mesh_mod._OBJ_MAX_VERTS
 _mesh_mod._OBJ_MAX_VERTS = 3
 try:

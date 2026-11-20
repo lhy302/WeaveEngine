@@ -219,13 +219,13 @@ def user_index_path(root):
         pid = None
     if not pid:
         try:
-            import userpaths
+            import hostenv.userpaths as userpaths
             pid = 'dir-' + userpaths.sha1_short(os.path.realpath(root))
         except Exception:
             pid = 'dir-' + hashlib.sha1(
                 os.path.realpath(root).encode('utf-8', 'replace')).hexdigest()[:8]
     try:
-        import userpaths
+        import hostenv.userpaths as userpaths
         return os.path.join(userpaths.user_root(), 'projects', pid, INDEX_FILE)
     except Exception:
         return os.path.join(root, '.loom', INDEX_FILE)

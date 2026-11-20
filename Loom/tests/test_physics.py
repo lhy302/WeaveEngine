@@ -58,7 +58,7 @@ import engine as E
 import scripts
 import undo as U
 import sceneio as S
-from mesh import create_cube, create_sphere, create_plane
+from mathlib.mesh import create_cube, create_sphere, create_plane
 
 eng = E.GLEngine.__new__(E.GLEngine)   # 不开窗口桩 (碰撞纯数学)
 eng.models = []; eng.materials = []; eng.lights = []

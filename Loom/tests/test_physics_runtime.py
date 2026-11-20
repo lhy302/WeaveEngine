@@ -59,7 +59,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import engine as E
 import undo as U
-from mesh import create_sphere
+from mathlib.mesh import create_sphere
 
 ok = True
 

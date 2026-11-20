@@ -166,7 +166,7 @@ import runtime                                                    # noqa: E402  
 import scene_driver as SD                                         # noqa: E402  VK 播放器（生产入口）
 import vk_renderer as VR                                          # noqa: E402  VK 渲染器（生产绘制）
 import wgpu                                                       # noqa: E402
-from loom_types import Point3D                                    # noqa: E402  脚本写位姿的唯一数据形态
+from core.primitives import Point3D                                    # noqa: E402  脚本写位姿的唯一数据形态
 from scripts import Script, register                              # noqa: E402  脚本生产注册路径
 
 ok = True
@@ -270,20 +270,20 @@ print("=== 〇. 结构：暂停/单步的唯一实现 + 三条暂停分支 + 历
 # 1) 暂停/步进语义只有一份（内核 EngineCore），两端继承同一份函数对象
 _step_defs = _grep_prod('def step_logic_once')
 check('结构：def step_logic_once 只有 engine_core.py 一份（两端同一个函数对象）',
-      [p for (p, _l) in _step_defs] == ['engine_core.py'], _step_defs)
+      [p for (p, _l) in _step_defs] == ['core/engine_core.py'], _step_defs)
 check('结构：GLEngine.step_logic_once is SceneDriver.step_logic_once（同一份实现，不是各写一遍）',
       E.GLEngine.step_logic_once is SD.SceneDriver.step_logic_once,
       (E.GLEngine.step_logic_once, SD.SceneDriver.step_logic_once))
 _toggle_defs = _grep_prod('def toggle_logic_paused')
 check('结构：def toggle_logic_paused 只有 engine_core.py 一份',
-      [p for (p, _l) in _toggle_defs] == ['engine_core.py'], _toggle_defs)
+      [p for (p, _l) in _toggle_defs] == ['core/engine_core.py'], _toggle_defs)
 _state_defs = _grep_prod('def _logic_paused_state')
 check('结构：def _logic_paused_state 只有 engine_core.py 一份（两端同读一处判定）',
-      [p for (p, _l) in _state_defs] == ['engine_core.py'], _state_defs)
+      [p for (p, _l) in _state_defs] == ['core/engine_core.py'], _state_defs)
 # set_logic_paused：内核版 + VK 的显式覆盖（VK 有 logic_paused 字段，覆盖是登记在案的）
 _pause_defs = sorted(p for (p, _l) in _grep_prod('def set_logic_paused'))
 check('结构：def set_logic_paused 只在内核 + VK 驱动两处（内核版为 GL 基准，VK 覆盖登记在案）',
-      _pause_defs == ['engine_core.py', 'scene_driver.py'], _pause_defs)
+      _pause_defs == ['core/engine_core.py', 'scene_driver.py'], _pause_defs)
 # 2) 一个逻辑帧的唯一组织点：两端各一份（段序一致由 test_vk_logic_frame_parity 覆盖）
 _lf_defs = sorted(p for (p, _l) in _grep_prod('def _logic_frame'))
 check('结构：def _logic_frame 恰好两端各一份（engine.py / scene_driver.py，没有第三份拷贝）',
@@ -298,9 +298,9 @@ for _f, _why in (('engine.py', 'GL 宿主同步路径的暂停分支（advance_l
             _why + '：暂停/恢复边界重锚墙钟（不补暂停期欠账）')
 src_has('loom_render.py', 'self._logic_steps = 0', True,
         'GL 暂停且无步进请求：本渲染帧零逻辑（世界冻结、渲染照跑）')
-src_has('engine_core.py', 'self._step_requested = True', True,
+src_has('core/engine_core.py', 'self._step_requested = True', True,
         'F10 请求标志的唯一置位点（仅暂停态生效）')
-src_has('engine_core.py', "if not self._logic_paused_state():", True,
+src_has('core/engine_core.py', "if not self._logic_paused_state():", True,
         'step_logic_once 仅在暂停态生效（播放态按 F10 不跳帧）')
 # 4) 历史名 / 拷贝名不得回来（真·历史名实测不存在；这里把它们钉住）
 for _hist in ('def _step_one_frame', 'def step_frame', 'def _advance_one_logic_frame',
@@ -581,7 +581,7 @@ class Pair:
         vp, cam_pos = d.render_pose(aspect=W / H)        # vk_player.py:681
         _yaw, _pitch, _roll = ((d.yaw, d.pitch, 0.0) if getattr(d, 'orbit_mode', True)
                                else (d.camera_yaw, d.camera_pitch, d.camera_roll))
-        import matlib
+        import mathlib.matlib as matlib
         V = matlib.mat4_view_yaw_pitch(np, tuple(cam_pos), _yaw, _pitch, _roll)
         cam_basis = ((float(V[0, 0]), float(V[0, 1]), float(V[0, 2])),
                      (float(V[1, 0]), float(V[1, 1]), float(V[1, 2])))

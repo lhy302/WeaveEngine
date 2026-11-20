@@ -24,7 +24,7 @@ import math
 import numpy as np
 
 try:
-    from loom_types import Point3D
+    from core.primitives import Point3D
 except ImportError:
     Point3D = None
 

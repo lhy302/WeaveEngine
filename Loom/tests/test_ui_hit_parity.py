@@ -301,10 +301,10 @@ src_has('loom_glfw_window.py', 'e.mouse_pos = (int(x), int(y))', True,
 src_has('scene_driver.py', 'self.mouse_pos = (int(x), int(y))', True,
         'VK 的 mouse_pos 也是 int 像素（scene_driver.py:1762，F-6）')
 # ⑤ 键/文本的 UI 派发唯一写者在内核（两端同一份）
-src_has('engine_core.py', 'ui.dispatch_key(k, getattr(ev, \'mod\', 0) or 0)', True,
-        '内核第③步是键的 UI 派发唯一写者（engine_core.py:193）')
-src_has('engine_core.py', 'ui.dispatch_text(text)', True,
-        '内核 handle_text_input 是文本的 UI 派发唯一写者（engine_core.py:235）')
+src_has('core/engine_core.py', 'ui.dispatch_key(k, getattr(ev, \'mod\', 0) or 0)', True,
+        '内核第③步是键的 UI 派发唯一写者（core/engine_core.py:193）')
+src_has('core/engine_core.py', 'ui.dispatch_text(text)', True,
+        '内核 handle_text_input 是文本的 UI 派发唯一写者（core/engine_core.py:235）')
 check('已知差异登记表为空（不许登记任何容差）', not KNOWN_DIFFS, KNOWN_DIFFS)
 
 # ⑥ ⑦/⑧ 两面的**生产调用点**锚点（漂移 = 门失真，必须当场红）

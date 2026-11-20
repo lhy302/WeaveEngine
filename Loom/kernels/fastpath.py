@@ -110,7 +110,9 @@ def ckernels_search_dirs():
         _add(os.path.dirname(os.path.abspath(sys.executable)))
     except Exception:
         pass
-    _add(os.path.dirname(os.path.abspath(__file__)))
+    # B1 批搬家: 本文件在 <root>/kernels/ 下, 上跳一层仍指安装根
+    # (源码=Loom/, 冻结=dist/; 与旧 <root>/fastpath.py 的 dirname 同口径)
+    _add(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     return dirs, dll_env
 
 
@@ -321,7 +323,7 @@ def _aabbs_minmax_np(vh, m3, out_mn, out_mx):
 #   (n=节点数, 500 物体 ~0.2ms 级, 不是热点).
 # ★B2 退役 (2026-10-16): 删 numba/Python 兜底分派 (pipeline 官方件唯一路径)。
 # _depths_impl / _ancestry_dfs_impl 保留为纯 Python 参考 (测试基准用, 不进生产)。
-from pipeline_glue import depths, ancestry_dfs   # noqa: E402  (C 唯一路径)
+from kernels.pipeline_glue import depths, ancestry_dfs   # noqa: E402  (C 唯一路径)
 
 
 # ---------------------------------------------------------------------------

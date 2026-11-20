@@ -1838,7 +1838,7 @@ def cmd_set_lod(win, args):
     lo = None
     thr = max(0.0, min(1.0, as_float(args.get('screen'), 0.1)))
     if not want_off:
-        import mesh as _mesh
+        import mathlib.mesh as _mesh
         lo = _mesh.create_sphere(
             params.get('radius', 0.5),
             max(3, int(params.get('stacks', 14)) // 2),
@@ -2713,7 +2713,7 @@ def cmd_set_tag(win, args):
         return {'error': '需要 tag'}
     if isinstance(tg, str):
         tg = tg.strip()
-    import layer_tag
+    import kernels.layer_tag as layer_tag
     ok, reason = layer_tag.validate_tag(tg)
     if not ok:
         return {'error': reason}
@@ -2743,7 +2743,7 @@ def cmd_get_layer_tag(win, args):
 
 @command('list_tags', '列出所有已注册 Tag')
 def cmd_list_tags(win, args):
-    import layer_tag
+    import kernels.layer_tag as layer_tag
     return {'tags': layer_tag.get_tags()}
 
 
@@ -3654,16 +3654,16 @@ def cmd_settings_set(win, args):
 
 # ====================================================================
 # 2026-10-20 网络助手命令（供 Agent/MCP 直接调 HTTP API）
-# 底层复用 loom_net.py（纯标准库），与游戏脚本共用同一套实现。
+# 底层复用 net/net.py（纯标准库），与游戏脚本共用同一套实现。
 # ====================================================================
 @command('http_get', 'HTTP GET: {url, headers?, timeout?} 返回 {ok,status,body,error}')
 def cmd_http_get(win, args):
     url = args.get('url')
     if not url:
         return {'error': '需要 url'}
-    import loom_net
+    from net.net import http_get
     timeout = as_float(args.get('timeout'), 10.0)
-    return loom_net.http_get(url, headers=args.get('headers'),
+    return http_get(url, headers=args.get('headers'),
                              timeout=max(1.0, min(60.0, timeout)))
 
 
@@ -3675,9 +3675,9 @@ def cmd_http_post_json(win, args):
     body = args.get('body')
     if body is None:
         return {'error': '需要 body (JSON 对象)'}
-    import loom_net
+    from net.net import http_post_json
     timeout = as_float(args.get('timeout'), 10.0)
-    return loom_net.http_post_json(url, body, headers=args.get('headers'),
+    return http_post_json(url, body, headers=args.get('headers'),
                                    timeout=max(1.0, min(60.0, timeout)))
 
 
@@ -3687,9 +3687,9 @@ def cmd_http_request(win, args):
     url = args.get('url')
     if not method or not url:
         return {'error': '需要 method 和 url'}
-    import loom_net
+    from net.net import http_request
     timeout = as_float(args.get('timeout'), 10.0)
-    return loom_net.http_request(method, url,
+    return http_request(method, url,
                                  headers=args.get('headers'),
                                  body=args.get('body'),
                                  timeout=max(1.0, min(60.0, timeout)))

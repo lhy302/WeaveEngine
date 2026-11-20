@@ -49,7 +49,7 @@ from loom_input import InputMixin
 from loom_logic_thread import LogicThreadMixin
 from loom_model_data import ModelDataMixin
 from loom_physics import PhysicsMixin
-from loom_profiler import ProfilerMixin
+from core.profiler import ProfilerMixin
 from loom_raycast import RaycastMixin
 from loom_scene_entities import LightState   # S4: 光源实体（纯数据, 无 GPU 依赖）
 from loom_scene_query import SceneQueryMixin
@@ -114,7 +114,7 @@ class EngineCore(TransformMixin, PhysicsMixin, InputMixin, CameraMixin,
         self._init_input_state()
         # ---- 事件总线（loom_events 的用户 API，原先只有 GL 有） ----
         try:
-            from loom_events import EventBus
+            from core.events import EventBus
             self.events = EventBus()
         except Exception:
             self.events = None

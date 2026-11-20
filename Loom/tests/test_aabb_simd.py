@@ -29,7 +29,7 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 os.chdir(ROOT)
 
-import fastpath                                              # noqa: E402
+import kernels.fastpath as fastpath                                              # noqa: E402
 
 ok = True
 
@@ -184,7 +184,7 @@ def main():
     # ---------------- 入口级 (V-02 补): loom_lighting._aabbs_batched 真实入口 ----------------
     import time as _t
     import threading as _th
-    from loom_types import Point3D
+    from core.primitives import Point3D
     import loom_lighting
 
     class _Mesh:
@@ -382,7 +382,7 @@ def main():
     # LOOM_NO_SIMD=1 -> 强制标量 (子进程验证: 环境在首次探测时读一次)
     import subprocess
     code = ("import os,sys;sys.path.insert(0,%r);os.chdir(%r);"
-            "import fastpath;print(fastpath.aabbs_simd_impl())" % (ROOT, ROOT))
+            "from kernels import fastpath;print(fastpath.aabbs_simd_impl())" % (ROOT, ROOT))
     env_no = dict(os.environ); env_no['LOOM_NO_SIMD'] = '1'
     out_no = subprocess.run([sys.executable, '-c', code], capture_output=True,
                             text=True, env=env_no, timeout=120)

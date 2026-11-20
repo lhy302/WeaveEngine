@@ -52,15 +52,17 @@ def check(name, cond, extra=""):
 # A (P-11): mask 存储 + worker 亲和调用
 # ====================================================================
 def t_mask_stored_and_pinned():
-    saved = sys.modules.get('parallel')
-    fake = types.ModuleType('parallel')
+    # B1 批搬家: scheduler 现从 kernels.parallel 取 pin_current_thread,
+    # 注入点随之改为 'kernels.parallel' (注入机制本身不变, 仍拦 sys.modules)
+    saved = sys.modules.get('kernels.parallel')
+    fake = types.ModuleType('kernels.parallel')
     pinned = []
 
     def pin(mask):
         pinned.append((threading.current_thread().name, mask))
 
     fake.pin_current_thread = pin
-    sys.modules['parallel'] = fake
+    sys.modules['kernels.parallel'] = fake
     pool = None
     try:
         pool = NgilPool(n_workers=2, mask=0b101)
@@ -78,9 +80,9 @@ def t_mask_stored_and_pinned():
         if pool is not None:
             pool.shutdown()
         if saved is not None:
-            sys.modules['parallel'] = saved
+            sys.modules['kernels.parallel'] = saved
         else:
-            sys.modules.pop('parallel', None)
+            sys.modules.pop('kernels.parallel', None)
 
     # mask=0 (默认): 不绑核, 也不应报错
     pool = NgilPool(n_workers=1)

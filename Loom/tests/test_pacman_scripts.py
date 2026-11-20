@@ -50,7 +50,7 @@ def _enforce_fail_exit_code():
 
 import sys, os, io, math, random, contextlib, importlib.util
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from loom_types import Point3D
+from core.primitives import Point3D
 
 LOOM = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 

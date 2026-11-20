@@ -71,7 +71,7 @@ _SAVE_ROOT = _tf_save.mkdtemp(prefix="loom_test_save_")
 editor_mod.DEFAULT_SAVE_DIR = os.path.join(_SAVE_ROOT, "Projects")
 editor_mod._LEGACY_SAVE_DIR = os.path.join(_SAVE_ROOT, "保存")
 import engine as E
-from mesh import create_sphere
+from mathlib.mesh import create_sphere
 
 _fails = []
 

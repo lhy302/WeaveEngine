@@ -54,7 +54,7 @@ def _enforce_fail_exit_code():
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import engine as E
-from mesh import create_cube
+from mathlib.mesh import create_cube
 import undo as U
 
 # 不开窗口的引擎桩: 替换 _build_gpu 为 no-op

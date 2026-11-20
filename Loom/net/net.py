@@ -50,7 +50,8 @@ DEFAULT_TIMEOUT = 10.0           # 秒
 DEFAULT_MAX_BYTES = 10 * 1024 * 1024  # 10 MB
 
 # ---- CA 证书 ----
-_CA_PATH = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '_cacert.pem')
+# B1 批搬家: 本文件在 <root>/net/ 下, 证书仍在安装根 <root>/_cacert.pem
+_CA_PATH = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), '_cacert.pem')
 
 
 def _make_ssl_context(verify=True):

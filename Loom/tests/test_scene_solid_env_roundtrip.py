@@ -11,7 +11,7 @@ os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 """sceneio 纯色 env / 天空盒往返: solid_color 不丢."""
 import engine as E
-from mesh import create_cube
+from mathlib.mesh import create_cube
 import sceneio as S
 from loom_cubemap import Cubemap
 

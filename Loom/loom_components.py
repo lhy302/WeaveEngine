@@ -15,7 +15,7 @@ import os
 
 import numpy as np
 
-from loom_types import Point3D
+from core.primitives import Point3D
 from loom_material import Material
 
 

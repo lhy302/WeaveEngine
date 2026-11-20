@@ -21,22 +21,22 @@ class SceneQueryMixin:
     # (GUI commit_model / EAI _commit) 负责 —— 基座层不依赖编辑器概念.
     def tag_exists(self, tag):
         """标签是否已注册 (不区分大小写)."""
-        import layer_tag
+        import kernels.layer_tag as layer_tag
         return layer_tag.tag_exists(tag)
 
     def layer_name(self, layer_id):
         """层编号 -> 层名 (未命名/越界返回空串)."""
-        import layer_tag
+        import kernels.layer_tag as layer_tag
         return layer_tag.layer_name(layer_id)
 
     def layer_id(self, name):
         """层名 -> 层编号 (找不到返回 -1)."""
-        import layer_tag
+        import kernels.layer_tag as layer_tag
         return layer_tag.layer_id(name)
 
     def register_tag(self, tag):
         """注册新标签 (幂等); 已存在返回 False, 非法抛 ValueError."""
-        import layer_tag
+        import kernels.layer_tag as layer_tag
         return layer_tag.register_tag(tag)
 
     # ---- 2026-10-18 阶段1档序8 对象查找（用户拍板 1=C 双 API / 2=A 物体列表）----

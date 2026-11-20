@@ -3,10 +3,11 @@
 
 原属 engine.py（"光源状态" + CameraState 段）。
 内容：
-  wrap_deg / direction_to_angles（角度工具）
+  direction_to_angles（角度工具）；wrap_deg 已前置 mathlib.mathutil
+  （Q-B7-38-1 B1 批 P1 前置项），此处 re-export 维持旧引用面
   LightState（光源实体）
   CameraState（摄像机实体）
-依赖：math / uuid / loom_types.Point3D。
+依赖：math / uuid / core.primitives.Point3D。
 engine.py 通过 from loom_scene_entities import ... 重导出。
 
 2026-10-18: RuntimeUI 已删除 (C3 决策: 脚本直接用 loom_ui.Canvas API).
@@ -16,19 +17,11 @@ engine.py 通过 from loom_scene_entities import ... 重导出。
 import math
 import uuid
 
-from loom_types import Point3D
+from core.primitives import Point3D
+from mathlib.mathutil import wrap_deg   # noqa: F401  P1 前置: 实现唯一份在 mathlib.mathutil, 此处 re-export
 
 
 # ================ 光源状态 ================
-def wrap_deg(v, lo=0.0, hi=360.0):
-    """角度环绕: 把 v 环绕进 [lo, hi). 用于 朝向/俯仰/倾斜 拖拽越过边界后继续转.
-    已在范围内则原样返回 (避免取模引入 ~1e-13 浮点噪声)."""
-    if lo <= v < hi:
-        return v
-    span = hi - lo
-    return lo + ((v - lo) % span)
-
-
 def direction_to_angles(d):
     """平行光行进方向向量 -> (azimuth, elevation) 度.
     引擎 Y-up (高度=y, 前方=+z): az=0,el=0 -> +z 前; el=+90 -> +y 上; el=-90 -> -y 下.

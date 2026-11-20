@@ -55,13 +55,13 @@ import math
 # 这会为了两个纯数据/纯数学符号把**整个编辑器引擎**拖进 import 图（engine.py 在模块级
 # import numpy/pygame/moderngl），导致 `build_game` 的打包产物白白背上 pygame 9MB、
 # moderngl/glfw 与一大批渲染模块。改为直接从定义处导入，二者都不依赖引擎：
-#   · Point3D     在 loom_types（只依赖 collections.namedtuple）
-#   · wrap_deg    在 loom_scene_entities（只依赖 math/uuid/loom_types）
+#   · Point3D     在 core.primitives（只依赖 collections.namedtuple）
+#   · wrap_deg    实现在 mathlib.mathutil（B1 P1 前置；loom_scene_entities re-export）
 # 场景 I/O 里其余所有 `engine.` 引用都是**函数参数**名（Engine 实例），不是模块。
-from loom_types import Point3D
+from core.primitives import Point3D
 from loom_scene_entities import wrap_deg
 from loom_components import animator_from_dict, animator_to_dict
-from mesh import create_cube, spec_to_mesh
+from mathlib.mesh import create_cube, spec_to_mesh
 
 # ============================================================================
 # B7-16（2026-11-18）：场景契约独立成模块 `loom_scene_contract.py`
@@ -569,7 +569,7 @@ def _make_mesh(obj):
     params = obj.get('params', {})
     if t == 'obj' and isinstance(params.get('obj'), str) and params['obj']:
         try:
-            from mesh import load_obj
+            from mathlib.mesh import load_obj
             return load_obj(params['obj'])     # M36: 重读 .obj 文件
         except (ValueError, OSError):
             return create_cube(1.0)            # 文件失效 -> 立方体兜底
@@ -626,7 +626,7 @@ def _apply_object(engine, obj, ctx=None):
     if not isinstance(tg, str) or not tg.strip():
         tg = 'Untagged'
     tg = tg.strip()
-    import layer_tag
+    import kernels.layer_tag as layer_tag
     if not layer_tag.tag_exists(tg):
         try:
             layer_tag.register_tag(tg)

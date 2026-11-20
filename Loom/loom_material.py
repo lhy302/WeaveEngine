@@ -12,7 +12,7 @@ import uuid
 import numpy as np
 
 import loom_appearance
-from loom_color import _hex_rgba
+from core.color import _hex_rgba
 
 
 # ================ 材质资产 (M23) ================

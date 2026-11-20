@@ -25,15 +25,15 @@ import os
 
 import numpy as np
 
-from matlib import (mat4_scale, mat4_rotation, mat4_translation, decompose_euler)
-from fastpath import depths as _fp_depths
+from mathlib.matlib import (mat4_scale, mat4_rotation, mat4_translation, decompose_euler)
+from kernels.fastpath import depths as _fp_depths
 # 2026-11-10 V-03: pipeline_glue.depths 的契约是「失败返回 None」（见其 docstring），
 # 但本文件以前直接 depth.max() -> 一旦 C 路径返回 None 就 AttributeError 崩渲染帧。
 # 这里接上"失败回退"到纯 Python 参考实现（同口径），符合调用方应尽的义务。
-from fastpath import _depths_impl as _fp_depths_py
-from loom_types import Point3D
+from kernels.fastpath import _depths_impl as _fp_depths_py
+from core.primitives import Point3D
 from loom_components import TransformComponent
-from interp_state import InterpState
+from core.interp import InterpState
 
 
 class TransformMixin:
@@ -163,7 +163,7 @@ class TransformMixin:
         # n=501 链长 12 = 7.4e-16, 深链 199: 1.1e-15); 对拍 pipeline_world_check。
         # ★B2 退役 (2026-10-16): 删 LOOM_NO_PIPELINE 门 + numpy 回退 + _sched_wm_local
         # 死代码 (pipeline 官方件唯一路径; 见 docs/design/逃生门退役设计.md §6)。
-        import pipeline_glue as _pg
+        import kernels.pipeline_glue as _pg
         _wm = _pg.world_matrices(rot, scl, pos, parent, depth)
         # 组6件4: 入缓存 (stamp + keys + parent + 矩阵本体; keys 已在 _soa_snap
         # 钉住对象本体, id 不可能复用)
@@ -274,7 +274,7 @@ class TransformMixin:
         #   数学与数值口径完全一致 (pipeline_world_check 7/7, ≤ depth×1e-15)。
         # ★B2 退役 (2026-10-16): 删 LOOM_NO_INTERP_DLL 门 + numpy S@R@T 回退 +
         #   LOOM_VERIFY_INTERP 对拍块 (pipeline 官方件唯一路径)。
-        import pipeline_glue as _pg
+        import kernels.pipeline_glue as _pg
         _t = self._prof_t0()
         _wm = _pg.world_matrices(rot, scl, pos, parent, depth)
         self._prof_add('mt_interp_wm_call', _t)

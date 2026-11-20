@@ -114,7 +114,7 @@ def gui_folder(program, base=None):
 def _userpaths():
     """用户目录收口模块（契约 §2）。不可用时退回旧语义（LoomHub 单独分发时）。"""
     try:
-        import userpaths
+        import hostenv.userpaths as userpaths
         return userpaths
     except Exception:
         return None

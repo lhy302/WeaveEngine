@@ -166,7 +166,7 @@ def _calls(kind):
 print("=== 〇. 真实 SceneDriver 默认允许 F11（修前：属性根本不存在） ===")
 _d0 = SD.SceneDriver()
 check('SceneDriver 有 allow_fullscreen 属性', hasattr(_d0, 'allow_fullscreen'),
-      '缺失 -> 内核 engine_core.py:163 的判据恒 False -> F11 死键')
+      '缺失 -> 内核 core/engine_core.py:163 的判据恒 False -> F11 死键')
 check('SceneDriver.allow_fullscreen is True（与 GL 的 engine.py:229 同值）',
       getattr(_d0, 'allow_fullscreen', None) is True, getattr(_d0, 'allow_fullscreen', None))
 check('SceneDriver 有 fullscreen 状态位（与 GL 同名）', hasattr(_d0, 'fullscreen'),

@@ -9,7 +9,7 @@ engine.py 通过 `from loom_game_object import GameObject` 重导出。
 """
 
 import loom_appearance   # 组6件1: 外观代计数器 (原类属性 _appearance_gen 的真身)
-from loom_types import Point3D
+from core.primitives import Point3D
 from loom_components import (
     TransformComponent, MeshRendererComponent, ScriptComponent,
     ColliderComponent, RigidbodyComponent, AudioSourceComponent,
@@ -148,7 +148,7 @@ class GameObject(metaclass=_AppearanceGenMeta):
         return self._tag
     @tag.setter
     def tag(self, v):
-        import layer_tag          # 惰性 import: 构造热路径零开销
+        import kernels.layer_tag as layer_tag          # 惰性 import: 构造热路径零开销
         ok, reason = layer_tag.validate_tag(v)
         if not ok:
             raise ValueError(reason)

@@ -72,7 +72,7 @@ editor_mod.DEFAULT_SAVE_DIR = os.path.join(_SAVE_ROOT, "Projects")
 editor_mod._LEGACY_SAVE_DIR = os.path.join(_SAVE_ROOT, "保存")
 import engine as E
 import sceneio
-from mesh import create_cube
+from mathlib.mesh import create_cube
 from loom_texture import Texture
 from loom_material import Material
 

@@ -37,7 +37,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))            # Loom\
 
-from loom_events import EventBus
+from core.events import EventBus
 
 _FAILS = []
 

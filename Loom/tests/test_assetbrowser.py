@@ -57,8 +57,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import numpy as np
 import engine as E
 import sceneio
-from mesh import create_cube
-from matlib import mat4_perspective, mat4_view_yaw_pitch
+from mathlib.mesh import create_cube
+from mathlib.matlib import mat4_perspective, mat4_view_yaw_pitch
 from undo import UndoManager
 from editor import EditorApp
 

@@ -37,7 +37,7 @@ MOUSE_LOCK_INITIAL_DEFAULT = False
 
 def _userpaths():
     try:
-        import userpaths
+        import hostenv.userpaths as userpaths
         return userpaths
     except Exception:
         return None

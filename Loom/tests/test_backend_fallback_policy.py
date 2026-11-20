@@ -38,7 +38,7 @@ os.environ.setdefault('LOOM_NO_SAVE_MIGRATE', '1')
 os.environ['LOOM_NO_DIALOG'] = '1'      # 弹窗在测试里被 stub，这里再兜一层防阻塞
 
 import run_player
-import loom_backend_guard as G
+import hostenv.backend_guard as G
 from loom_gl_version import GLVersionError
 
 _fails = []

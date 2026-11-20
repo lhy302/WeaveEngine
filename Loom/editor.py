@@ -26,13 +26,13 @@ from loom_post import post_enabled   # 2B2: LOOM_POST=0 走旧路径
 
 from engine import (GLEngine, Point3D, LightState, CameraState, wrap_deg,
                     gc_play_enter, gc_play_exit)
-from engine_core import EngineCore     # S2 阶段2: _EditorCore 的内核底座（后端无关）
+from core.engine_core import EngineCore     # S2 阶段2: _EditorCore 的内核底座（后端无关）
 from loom_render import RenderMixin  # S4: VkEditorApp 绑定 GL 同一份 _apply_main_pass_camera（同源唯一实现）
 from loom_lighting import LightingMixin  # S4: VkEditorApp 绑定 GL 同一份 _aabbs_batched（S2 留痕的纯 numpy 归位未做）
 from scene_driver import SceneDriver # S4: VK 编辑器装配基类（VkEditorApp(_EditorCore, SceneDriver)）
-from matlib import (mat4_perspective, mat4_ortho, mat4_rotation, mat4_scale,
+from mathlib.matlib import (mat4_perspective, mat4_ortho, mat4_rotation, mat4_scale,
                     mat4_translation, mat4_view_yaw_pitch, decompose_euler)
-from mesh import create_cube, create_plane, create_sphere, spec_to_mesh
+from mathlib.mesh import create_cube, create_plane, create_sphere, spec_to_mesh
 # 2026-10-18 选项1: from gui import GUI 已删（EditorApp 零依赖 MinimalEditorView 兜底路径
 # 已随 pygame 窗口剥离一起删除；gui.py 本身保留供 tests 使用）。
 # 2026-08-28: 默认视图不再引用 ui.loom_gui (Qt 视图需 QApplication, 由入口
@@ -620,7 +620,7 @@ class _EditorCore(EngineCore):
         """
         if self.is_playing:
             return None
-        from mesh import create_cube, create_plane, create_sphere
+        from mathlib.mesh import create_cube, create_plane, create_sphere
         # 基元尺寸对齐 Unity 默认 (2026-10-13): Cube 边长 1 / Sphere 半径 0.5
         # (直径 1) / Plane 10x10 —— 同一操作序列在两引擎得到同尺寸物体。
         mesh = {'cube': create_cube(1.0), 'sphere': create_sphere(0.5),
@@ -649,7 +649,7 @@ class _EditorCore(EngineCore):
         if not path:
             return
         try:
-            from mesh import load_obj
+            from mathlib.mesh import load_obj
             mesh = load_obj(path)
         except ValueError as e:
             self._notify("导入失败: %s" % e, (235, 90, 90))
@@ -2982,7 +2982,7 @@ class _EditorCore(EngineCore):
         # models 列表对象是 EngineCore.__init__ 建的稳定引用（只 clear 不换），
         # 与 GL 同一构造式。
         if getattr(self, '_interp', None) is None and getattr(self, '_split_enable', False):
-            from interp_state import InterpState
+            from core.interp import InterpState
             self._interp = InterpState(self.models)
 
         # 打开项目 (--open <scene.json>): 启动即加载指定场景.

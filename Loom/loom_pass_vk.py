@@ -37,7 +37,7 @@ import wgpu
 
 from loom_shaders import CLEAR_COLOR_RGBA
 # Q-B7-48-1 裁决 B：粗线 = 四边形（扩宽数学的唯一一份实现，与 GL engine.draw_lines 同源）
-from loom_line_geometry import build_line_quads
+from mathlib.line_geometry import build_line_quads
 
 
 # ---------------- WGSL：线批着色器（镜像 loom_shaders._LINE_VERT/_LINE_FRAG）----------------

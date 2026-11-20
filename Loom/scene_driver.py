@@ -17,15 +17,15 @@ import os
 
 import numpy as np
 
-from matlib import (mat4_view_yaw_pitch, mat4_perspective, mat4_ortho, mat4_scale,
+from mathlib.matlib import (mat4_view_yaw_pitch, mat4_perspective, mat4_ortho, mat4_scale,
                     mat4_rotation, mat4_translation, view_basis_to_angles)
-from mesh import spec_to_mesh
+from mathlib.mesh import spec_to_mesh
 from engine import GameObject, Point3D, LightState, DEFAULT_ACTIONS
 # 2026-11-07 (_fix_summary §5 遗留): LOD 配置代 —— 只在 renderer.lod_* 变化时
 # 重建"配了 LOD 的模型"集合, 无 LOD 场景每帧 O(1) 早退 (不再全量扫描).
 import weakref
 
-from engine_core import EngineCore   # S2-3: 后端无关的引擎内核（与 GLEngine 同一个）
+from core.engine_core import EngineCore   # S2-3: 后端无关的引擎内核（与 GLEngine 同一个）
 from loom_components import (MeshRendererComponent, animator_from_dict,
                             evaluate_animations, physics_disabled_by_env,
                             AudioSystem)
@@ -691,8 +691,8 @@ class SceneDriver(VkWindowMixin, VkEditorRenderMixin, EngineCore):
         #   不只是性能不同)。打包游戏默认后端是 vulkan(game_player.py), 所以打包产物也中招。
         #   改法: 与 engine.py:469-480 逐条一致 —— 读同一份设置, 走同一个构造函数。
         #   门: tests/test_clock_settings_propagation.py (同一设置 → 两端时钟参数逐项相等)。
-        from core_clock import clock_from_settings, split_enabled
-        from interp_state import InterpState
+        from core.clock import clock_from_settings, split_enabled
+        from core.interp import InterpState
         try:
             import guiloader as _gl_s
             _s_clock = _gl_s.load_settings('loom')
@@ -900,7 +900,7 @@ class SceneDriver(VkWindowMixin, VkEditorRenderMixin, EngineCore):
         self.gravity = float(data.get('gravity', -9.8))
         # 分离批2: 场景加载边界 (首抓=加载位姿, 首帧不插值)
         if self._split_enable:
-            from interp_state import InterpState
+            from core.interp import InterpState
             if self._interp is None:
                 self._interp = InterpState(self.models)
             self._interp.advance()

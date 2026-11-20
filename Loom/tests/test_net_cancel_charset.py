@@ -11,7 +11,7 @@ os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 """loom_net: cancel 后结果永久丢弃 (A) + 按 Content-Type charset 解码 (A)."""
 import threading
-import loom_net as N
+import net.net as N
 
 ok = True
 def check(label, cond, detail=""):

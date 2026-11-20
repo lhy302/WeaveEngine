@@ -113,7 +113,7 @@ except ValueError:
     check("from_file 缺文件报错", True)
 
 # ---- 2. mesh UV ----
-from mesh import create_cube, create_sphere, create_plane
+from mathlib.mesh import create_cube, create_sphere, create_plane
 
 c = create_cube(1.0)
 check("cube 24 顶点 (每面独立 UV)", len(c.vertices) == 24, "v=%d" % len(c.vertices))
@@ -146,7 +146,7 @@ check("材质清法线贴图", mat.normal_map is None and mat._nrm_guid == '', "
 
 # ---- 4. 桶键含贴图 ----
 import moderngl
-from mesh import create_cube as _cc
+from mathlib.mesh import create_cube as _cc
 import engine as E
 
 ctx = moderngl.create_standalone_context()
@@ -204,7 +204,7 @@ check("set_texture 错误容错", r3.get('ok') is False, "")
 os.remove(tf)
 
 # ---- 6b. LOD 按距离切换 ----
-from mesh import create_sphere as _cs
+from mathlib.mesh import create_sphere as _cs
 hi_m = _cs(0.5, 16, 24)
 lo_m = _cs(0.5, 6, 8)
 lod_m = ed.add_model(hi_m, E.Point3D(0, 0, 0), E.Point3D(0, 0, 0), name='LOD球')
@@ -238,7 +238,7 @@ t_rep = Texture.from_rgba(32, 32, np.zeros((32, 32, 4), dtype=np.uint8), wrap='r
 check("wrap=repeat -> repeat_x True", t_rep.ensure_gl(ctx_i).repeat_x is True, "")
 ctx_i.release()
 # max_size 缩放
-from mesh import create_plane as _cp2
+from mathlib.mesh import create_plane as _cp2
 import pygame as _pg
 _pg.init()
 _surf = _pg.Surface((128, 64)); _surf.fill((9, 9, 9))

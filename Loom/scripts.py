@@ -31,8 +31,8 @@ import types
 
 # 2026-11-13 构建器瘦身: 原 `from engine import Point3D` 会把 engine（模块级
 # import pygame/moderngl）拖进 build_game 的静态 import 图。Point3D 的定义处是
-# loom_types（engine 也是从那里导入的），直接取同一个类，语义不变。
-from loom_types import Point3D
+# core.primitives（engine 也是从那里导入的），直接取同一个类，语义不变。
+from core.primitives import Point3D
 
 # 脚本注册表: script_id -> Script 子类 (dict 保持注册顺序)
 SCRIPTS = {}
@@ -401,28 +401,28 @@ class Script:
         """协程等 1 帧。用法: yield self.wait_frame()"""
         return None
 
-    # ============ 2026-10-20 网络助手（纯标准库，见 loom_net.py）============
+    # ============ 2026-10-20 网络助手（纯标准库，见 net/net.py）============
     def http_get(self, url, headers=None, timeout=10.0, verify=True):
         """同步 HTTP GET（会阻塞当前逻辑帧）。返回 {'ok', 'status', 'body', 'error'}。
 
         推荐在协程里用异步版 http_async，避免卡帧。
         """
-        import loom_net
-        return loom_net.http_get(url, headers=headers,
+        from net.net import http_get
+        return http_get(url, headers=headers,
                                  timeout=timeout, verify=verify)
 
     def http_post_json(self, url, obj, headers=None,
                        timeout=10.0, verify=True):
         """同步 POST JSON（会阻塞当前逻辑帧）。返回同 http_request。"""
-        import loom_net
-        return loom_net.http_post_json(url, obj, headers=headers,
+        from net.net import http_post_json
+        return http_post_json(url, obj, headers=headers,
                                        timeout=timeout, verify=verify)
 
     def http_request(self, method, url, headers=None, body=None,
                      timeout=10.0, verify=True):
         """同步 HTTP 通用请求。"""
-        import loom_net
-        return loom_net.http_request(method, url, headers=headers, body=body,
+        from net.net import http_request
+        return http_request(method, url, headers=headers, body=body,
                                      timeout=timeout, verify=verify)
 
     def http_async(self, method, url, headers=None, body=None,
@@ -437,8 +437,8 @@ class Script:
                 ...
                 self._req = None
         """
-        import loom_net
-        return loom_net.http_async(method, url, headers=headers, body=body,
+        from net.net import http_async
+        return http_async(method, url, headers=headers, body=body,
                                    timeout=timeout, verify=verify)
 
     def _drive_coroutines(self, dt):

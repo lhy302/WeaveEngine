@@ -275,7 +275,7 @@ def render_vk(data, with_ui=False):
         # 反解 yaw/pitch，与 GL 的 mat4_view_yaw_pitch 行向量在符号/roll 上不保证
         # 逐位一致（vk_renderer.py:1138-1145 注释自己要求 A/B 工具显式传）。
         # 这里按 GL 同一函数、同一相机参数构造，避免 world quad 被转成侧面。
-        import matlib as _ml
+        import mathlib.matlib as _ml
         _V = _ml.mat4_view_yaw_pitch(np, drv.camera_pos, drv.yaw, drv.pitch, 0.0)
         kw['cam_basis'] = (
             (float(_V[0, 0]), float(_V[0, 1]), float(_V[0, 2])),
@@ -686,7 +686,7 @@ def _patch_perspective(factor):
     import loom_render  # noqa: F401
     import scene_driver  # noqa: F401
     import vk_renderer  # noqa: F401
-    import matlib
+    import mathlib.matlib as matlib
     orig = matlib.mat4_perspective
 
     def patched(np_mod, fov, aspect, near, far, *a, **k):

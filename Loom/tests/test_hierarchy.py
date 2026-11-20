@@ -56,7 +56,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import numpy as np
 import math
 import engine as E
-from mesh import create_cube
+from mathlib.mesh import create_cube
 
 # 用 __new__ 拿一个不初始化(不开窗口)的 GLEngine 实例当方法容器
 eng = E.GLEngine.__new__(E.GLEngine)

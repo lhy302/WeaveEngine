@@ -16,7 +16,7 @@ sys.path.insert(0, ROOT)
 os.chdir(ROOT)
 
 import build_entry                                        # noqa: E402
-import userpaths                                          # noqa: E402
+import hostenv.userpaths as userpaths                                          # noqa: E402
 
 ok = True
 

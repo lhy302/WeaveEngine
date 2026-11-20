@@ -24,7 +24,7 @@ DLL 化战役 M1 三闸之一 (总纲: D:\\my-project\\DLL化改造可行性方�
    两条路收敛到同一个 _do_dump()。
 
 用法 (引擎启动期, Loom.py 早期接线, 本模块不自行 import 引擎任何件):
-    import crash_reporter
+    import hostenv.crash_reporter as crash_reporter
     crash_reporter.register_scene_backup(备份闭包)   # 可选; fn(reason)->None
     crash_reporter.install()
 
@@ -143,9 +143,10 @@ def register_scene_backup(fn):
 def _do_dump(exc_ptrs, reason):
     """核心落盘: 写一个 .dmp; 返回路径, 失败返回 None (绝不抛异常)。"""
     try:
-        # 引擎根 = 本文件所在目录; 冻结环境 __file__ 在 dist 内, dump 落
-        # exe 同级崩溃日志 (assemble 投放保持相对布局, 口径一致)
-        base = os.path.dirname(os.path.abspath(__file__))
+        # 引擎根 = 安装根（B1 批搬家后本文件在 <root>/hostenv/ 下, 上跳一层;
+        # 冻结环境 __file__ 在 dist 内, dump 落 exe 同级崩溃日志,
+        # assemble 投放保持相对布局, 口径一致）
+        base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         d = os.path.join(base, _DUMP_DIRNAME)
         os.makedirs(d, exist_ok=True)
         ts = time.strftime('%Y%m%d_%H%M%S')

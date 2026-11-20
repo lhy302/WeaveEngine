@@ -210,7 +210,7 @@ def t_roundtrip(tmp, proj, g1, gc):
     mat = ed.add_material(color=None, name='木')
     mat.albedo = tex
     mat.env_map = cube
-    m = ed.add_model(__import__('mesh').create_cube(1.0), E.Point3D(0, 0, 0),
+    m = ed.add_model(__import__('mathlib.mesh', fromlist=('create_cube',)).create_cube(1.0), E.Point3D(0, 0, 0),
                      E.Point3D(0, 0, 0))
     m.renderer.material = mat
     ed._scene_skybox = cube
@@ -485,7 +485,7 @@ def t_p1_1_preserve_refs():
     mat = ed.add_material(color=None, name='m')
     mat.albedo = tex
     mat.env_map = cube
-    m = ed.add_model(__import__('mesh').create_cube(1.0), E.Point3D(0, 0, 0),
+    m = ed.add_model(__import__('mathlib.mesh', fromlist=('create_cube',)).create_cube(1.0), E.Point3D(0, 0, 0),
                      E.Point3D(0, 0, 0))
     m.renderer.material = mat
     ed._scene_skybox = cube
@@ -1295,11 +1295,11 @@ def t_qb13_material_truth():
 
     # 保存只写 guid；未登记材质保存时自动迁移
     ed4 = _ed(os.path.join(proj, 's4.json'))
-    m4 = ed4.add_model(__import__('mesh').create_cube(1.0), E.Point3D(0, 0, 0),
+    m4 = ed4.add_model(__import__('mathlib.mesh', fromlist=('create_cube',)).create_cube(1.0), E.Point3D(0, 0, 0),
                        E.Point3D(0, 0, 0))
     m4.renderer.material = got3
     newm = ed4.add_material(color='#112233', name='新材质')
-    m4b = ed4.add_model(__import__('mesh').create_cube(1.0), E.Point3D(2, 0, 0),
+    m4b = ed4.add_model(__import__('mathlib.mesh', fromlist=('create_cube',)).create_cube(1.0), E.Point3D(2, 0, 0),
                         E.Point3D(0, 0, 0))
     m4b.renderer.material = newm
     ed4.materials = [got3, newm]

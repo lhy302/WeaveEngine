@@ -274,7 +274,7 @@ TOOLS_DEF = [
     {'name': 'loom_skybox_get', 'description': '读当前场景级天空盒信息',
      'inputSchema': {'type': 'object', 'properties': {}}},
     # 2026-10-20 网络助手：供 Agent 直接调外部 API（LLM 服务、游戏服务器等）
-    # 底层走 loom_net.py（纯标准库，内置 CA 证书），与游戏脚本共用同一套实现。
+    # 底层走 net/net.py（纯标准库，内置 CA 证书），与游戏脚本共用同一套实现。
     {'name': 'loom_http_get', 'description': 'HTTP GET（同步，10 秒默认超时）。返回 {ok, status, headers, body, error}',
      'inputSchema': {'type': 'object', 'properties': {
          'url': {'type': 'string', 'description': '完整 URL（http:// 或 https://）'},

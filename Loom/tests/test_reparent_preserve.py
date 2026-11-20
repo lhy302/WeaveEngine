@@ -63,7 +63,7 @@ import uuid
 import numpy as np
 import engine as E
 import undo as U
-from mesh import create_cube
+from mathlib.mesh import create_cube
 
 E.GLEngine._build_gpu = lambda self, m: None   # 无头: add_model 不碰 GL (同 test_sceneio)
 

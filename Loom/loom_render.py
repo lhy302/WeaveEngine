@@ -37,7 +37,7 @@ from loom_post import post_enabled   # 2026-11-10 阶段 2B2: LOOM_POST=0 走旧
 # 2026-10-18 A2: import pygame 已删（GLFW 窗口剥离；本文件不再引用 pygame 常量）
 import moderngl
 
-from matlib import mat4_perspective, mat4_ortho, mat4_view_yaw_pitch
+from mathlib.matlib import mat4_perspective, mat4_ortho, mat4_view_yaw_pitch
 from loom_game_object import GameObject
 
 
@@ -893,7 +893,7 @@ class RenderMixin:
             print('[buckets] LOOM_BUCKET_PACK=0 -> 强制走 Python 打包路径 (A/B 或故障回退)')
             return False
         try:
-            import fastpath
+            import kernels.fastpath as fastpath
             ok = bool(fastpath.bucket_pack_available())
         except Exception as e:
             ok = False
@@ -922,7 +922,7 @@ class RenderMixin:
 
         逐字节等价 = 旧 Python 路径 (同一 gather 源 + 同一 staging 行布局);
         覆盖剔除开/关两档; 桶内 n<=1 由 C 侧同款守卫跳过剔除 (= Python k>1)."""
-        import fastpath
+        import kernels.fastpath as fastpath
         n = int(G_all.shape[0])
         K = len(self._render_buckets)
         offs_np = getattr(self, '_bucket_offs_np', None)

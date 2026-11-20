@@ -101,7 +101,7 @@ class Sandbox:
         return os.path.join(self.exe_dir, '游戏设置.json')
 
 
-import userpaths              # noqa: E402
+import hostenv.userpaths as userpaths              # noqa: E402
 import game_settings as GS    # noqa: E402
 import guiloader              # noqa: E402
 import loom_input as LI       # noqa: E402

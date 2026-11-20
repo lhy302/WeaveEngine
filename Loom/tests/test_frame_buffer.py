@@ -67,7 +67,7 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from core_clock import FixedStepClock
+from core.clock import FixedStepClock
 from frame_buffer import FrameBufferLedger, RenderFrameBuffer
 
 

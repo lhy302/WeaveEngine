@@ -11,7 +11,7 @@
   - 多场景编辑器也算一实例（同一时间只允许一个编辑器）
 
 用法（Loom.py 的编辑器分支）：
-    from loom_single_instance import ensure_editor_single_instance
+    from core.single_instance import ensure_editor_single_instance
     ensure_editor_single_instance(scene_path=open_scene)
     # 若已有编辑器实例：
     #   - 如果第二次启动带了不同场景，会尝试激活已有编辑器并退出

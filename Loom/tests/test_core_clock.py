@@ -57,7 +57,7 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 
-from core_clock import FixedStepClock, clock_from_settings, split_enabled
+from core.clock import FixedStepClock, clock_from_settings, split_enabled
 
 
 class TestFixedStepClock(unittest.TestCase):

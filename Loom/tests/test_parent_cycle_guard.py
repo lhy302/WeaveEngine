@@ -39,7 +39,7 @@ os.environ.setdefault('LOOM_NO_PARALLEL', '1')
 os.environ.setdefault('LOOM_NO_SAVE_MIGRATE', '1')
 
 import engine as E
-from mesh import create_cube
+from mathlib.mesh import create_cube
 
 E.GLEngine._build_gpu = lambda self, m: None
 

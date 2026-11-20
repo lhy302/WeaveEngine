@@ -65,7 +65,7 @@ os.environ.setdefault('LOOM_NO_PARALLEL', '1')
 os.environ.setdefault('LOOM_NO_SAVE_MIGRATE', '1')
 
 import scene_driver as SD
-from loom_types import Point3D
+from core.primitives import Point3D
 
 _fails = []
 
@@ -112,7 +112,7 @@ def t_lod_from_scene_data():
               [t for t, _ in r.lod_levels])
         check("级别里的网格引用解析成 Mesh",
               len(r.lod_levels[0][1].vertices) == len(HI and
-                  __import__('mesh').create_sphere(0.5, 16, 24).vertices),
+                  __import__('mathlib.mesh', fromlist=('create_sphere',)).create_sphere(0.5, 16, 24).vertices),
               len(r.lod_levels[0][1].vertices))
     if r.lod_screen_levels:
         check("屏幕占比级别按降序 (0.1 在前)",

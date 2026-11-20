@@ -41,7 +41,7 @@ os.environ.setdefault('LOOM_NO_SAVE_MIGRATE', '1')
 import numpy as np
 
 import engine as E
-from mesh import create_cube
+from mathlib.mesh import create_cube
 from loom_components import TransformComponent
 
 E.GLEngine._build_gpu = lambda self, m: None

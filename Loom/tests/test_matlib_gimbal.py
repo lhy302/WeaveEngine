@@ -40,7 +40,7 @@ os.environ.setdefault('LOOM_NO_SAVE_MIGRATE', '1')
 
 import numpy as np
 
-from matlib import mat4_rotation, decompose_euler
+from mathlib.matlib import mat4_rotation, decompose_euler
 
 _FAILS = []
 
@@ -103,7 +103,7 @@ def t_gimbal_branch_exact():
 # ====================================================================
 def t_set_parent_gimbal():
     import engine as E
-    from mesh import create_cube
+    from mathlib.mesh import create_cube
 
     E.GLEngine._build_gpu = lambda self, m: None
 

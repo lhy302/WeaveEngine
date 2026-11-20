@@ -55,7 +55,7 @@ def _enforce_fail_exit_code():
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import engine as E
-from mesh import create_cube
+from mathlib.mesh import create_cube
 
 eng = E.GLEngine.__new__(E.GLEngine)
 eng.models = []

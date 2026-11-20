@@ -17,9 +17,9 @@ import math
 
 import numpy as np
 
-from loom_types import Point3D
+from core.primitives import Point3D
 from loom_scene_entities import CameraState, wrap_deg
-from matlib import view_basis_to_angles
+from mathlib.matlib import view_basis_to_angles
 
 # ---- 轨道相机距离的**唯一**合法区间 (2026-11-06 R-03 修正) ----------------
 # 为什么放在这里: 双后端 (GL engine / Vk scene_driver) + 场景加载 + 滚轮

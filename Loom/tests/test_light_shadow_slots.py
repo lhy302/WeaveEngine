@@ -86,7 +86,7 @@ import numpy as np                              # noqa: E402
 import loom_scene_ubo as SU                     # noqa: E402
 from loom_lighting import LightingMixin         # noqa: E402
 from loom_scene_entities import LightState      # noqa: E402
-from loom_types import Point3D                  # noqa: E402
+from core.primitives import Point3D                  # noqa: E402
 
 _fails = []
 

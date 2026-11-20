@@ -56,7 +56,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import engine as E
 import undo as U
 import sceneio as S
-from mesh import create_cube
+from mathlib.mesh import create_cube
 
 ok = True
 def check(label, cond, detail=""):

@@ -69,7 +69,7 @@ editor.DEFAULT_SAVE_DIR = os.path.join(_SAVE_ROOT, "Projects")
 editor._LEGACY_SAVE_DIR = os.path.join(_SAVE_ROOT, "保存")
 import sceneio
 import undo as U
-from mesh import create_cube, create_plane
+from mathlib.mesh import create_cube, create_plane
 
 TMP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_tmp")
 os.makedirs(TMP, exist_ok=True)

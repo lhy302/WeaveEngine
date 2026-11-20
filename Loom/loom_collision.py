@@ -20,7 +20,7 @@
 
 import numpy as np
 
-from fastpath import ancestry_dfs as _fp_ancestry
+from kernels.fastpath import ancestry_dfs as _fp_ancestry
 
 
 # ============ 脚本钩子判定（原 loom_physics 模块级函数，搬来这里共享） ============

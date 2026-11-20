@@ -11,7 +11,7 @@ os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 """sceneio 材质孤儿: 连续 load->save 材质数不增长 (D2=A)."""
 import engine as E
-from mesh import create_cube
+from mathlib.mesh import create_cube
 import sceneio as S
 
 E.GLEngine._build_gpu = lambda self, m: None

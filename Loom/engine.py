@@ -25,22 +25,22 @@ import numpy as np
 import pygame
 import moderngl
 
-from matlib import (mat4_translation, mat4_rotation, mat4_scale,
+from mathlib.matlib import (mat4_translation, mat4_rotation, mat4_scale,
                     mat4_perspective, mat4_view_yaw_pitch,
                     mat4_ortho, mat4_view_forward, decompose_euler,
                     view_basis_to_angles)   # M29: 光源正交投影/任意朝向视图; M41: set_parent 保世界旋转; 2026-08-16: 相机物体化挂父合成反解
 import sys                      # P-06 修复: LOOM_SWITCH_INTERVAL (GIL 切换间隔) 依赖; 原缺失导致配置静默失效
-from fastpath import depths as _fp_depths   # 组3: 深度DP Numba可选加速 (未装numba自动降级纯Python, 数值同源, 见fastpath.py)
-from fastpath import ancestry_dfs as _fp_ancestry   # 组3层2: ancestry DFS Numba可选加速 (未装numba自动降级纯Python, 语义逐位同源, 见fastpath.py)
-import fastpath   # 组3层3: AABB 批量归约 (aabbs_minmax 串行 njit 默认 / _par 逃生门)
-from core_clock import clock_from_settings, split_enabled   # 分离批1: 逻辑帧/渲染帧分离时钟 (零依赖)
-from interp_state import InterpState   # 分离批2: prev/curr 快照 + alpha 插值 (单实现双端共享)
+from kernels.fastpath import depths as _fp_depths   # 组3: 深度DP Numba可选加速 (未装numba自动降级纯Python, 数值同源, 见fastpath.py)
+from kernels.fastpath import ancestry_dfs as _fp_ancestry   # 组3层2: ancestry DFS Numba可选加速 (未装numba自动降级纯Python, 语义逐位同源, 见fastpath.py)
+import kernels.fastpath as fastpath   # 组3层3: AABB 批量归约 (aabbs_minmax 串行 njit 默认 / _par 逃生门)
+from core.clock import clock_from_settings, split_enabled   # 分离批1: 逻辑帧/渲染帧分离时钟 (零依赖)
+from core.interp import InterpState   # 分离批2: prev/curr 快照 + alpha 插值 (单实现双端共享)
 from scheduler import (NgilPool, sched_wm_chunk,       # 调度重构期1: nogil 常驻工作池
                        split_bounds as sched_split_bounds)
 import script_glue as _sg
 
-from loom_types import Point3D   # 已抽出：原 engine.py 内联 namedtuple
-from loom_log import verbose   # 2026-10-19 启动日志开关 (LOOM_QUIET 时抑制)
+from core.primitives import Point3D   # 已抽出：原 engine.py 内联 namedtuple
+from core.log import verbose   # 2026-10-19 启动日志开关 (LOOM_QUIET 时抑制)
 
 # ---- 着色器源码常量（已抽出到 loom_shaders.py，原 45-307 行） ----
 from loom_shaders import (  # noqa: E402
@@ -49,8 +49,8 @@ from loom_shaders import (  # noqa: E402
     _WORLD_UI_VERT, _WORLD_UI_FRAG,
 )
 # Q-B7-48-1 裁决 B：粗线 = 四边形（扩宽数学的唯一一份实现，两端共用）
-from loom_line_geometry import build_line_quads   # noqa: E402
-from engine_core import EngineCore   # S2-1: 后端无关的引擎内核 (JVM 模型)
+from mathlib.line_geometry import build_line_quads   # noqa: E402
+from core.engine_core import EngineCore   # S2-1: 后端无关的引擎内核 (JVM 模型)
 from loom_shadow import ShadowMixin   # M29 阴影子系统 (已抽出)
 from loom_frame_components import FrameComponentMixin   # 每帧组件推进 (音频/动画/碰撞回调)
 from loom_physics import PhysicsMixin   # M28 碰撞 + M31 刚体物理 (已抽出)
@@ -95,10 +95,10 @@ from loom_lighting import LightingMixin   # 光源/光照上传/阴影 VP 子系
 from loom_glfw_window import GlfwWindowMixin   # 2026-10-18: GLFW 窗口 (pygame 已剥离)
 from loom_gl_version import require_gl_version   # 2026-11-09 A0: GL 4.3 core 地板门 (失败必须可见)
 from loom_transform import TransformMixin   # 变换层次子系统 (世界矩阵/父链/包围盒)
-from loom_profiler import ProfilerMixin   # 性能插桩子系统 (LOOM_PROFILE 阶段耗时)
+from core.profiler import ProfilerMixin   # 性能插桩子系统 (LOOM_PROFILE 阶段耗时)
 from loom_logic_thread import LogicThreadMixin   # 逻辑帧线程子系统 (异步逻辑线程启停/主循环)
 from loom_raycast import RaycastMixin   # 2026-10-18: 射线检测 (物理 Culverin + 几何 AABB 兜底)
-from loom_events import EventBus   # 2026-10-18: 全局事件总线 (跨脚本/跨系统解耦通信)
+from core.events import EventBus   # 2026-10-18: 全局事件总线 (跨脚本/跨系统解耦通信)
 
 # ---- 组件化 M25（已抽出到 loom_components.py，原 79-448 行） ----
 from loom_components import (  # noqa: E402,F401
@@ -122,8 +122,8 @@ from loom_scene_entities import (  # noqa: E402,F401
 )
 # ---- 按键绑定配置（已抽出到 loom_input.py，原 98-118 行） ----
 from loom_input import KEY_BINDINGS   # noqa: E402,F401
-# ---- hex→rgba 与缓存（已抽出到 loom_color.py，原 1027-1041 行） ----
-from loom_color import _hex_rgba, _HEX_RGBA_CACHE   # noqa: E402,F401
+# ---- hex→rgba 与缓存（已抽出到 core/color.py，原 1027-1041 行） ----
+from core.color import _hex_rgba, _HEX_RGBA_CACHE   # noqa: E402,F401
 
 
 # ================ GC 生命周期 (2026-09-01 流畅度批, 1% low 帧尖刺治理) ================
@@ -355,7 +355,7 @@ class GLEngine(EngineCore, ShadowMixin, HudMixin, RenderMixin, ModelGpuMixin, Li
         self._text_cache_max = 400
 
         # ================ 模型状态初始化 ================
-        from mesh import create_cube, create_sphere
+        from mathlib.mesh import create_cube, create_sphere
         self.models = []
         self.current_model_index = 0
         # 立方体 (主) — 平直光照 (面法线); 尺寸对齐 Unity (边长 1)
@@ -571,7 +571,7 @@ class GLEngine(EngineCore, ShadowMixin, HudMixin, RenderMixin, ModelGpuMixin, Li
         # LOOM_NO_PARALLEL=1 测试守卫: 测试确定性, 不建脚本线程/不设进程亲和性
         if self.parallel_enable and os.environ.get('LOOM_NO_PARALLEL') != '1':
             try:
-                from parallel import (get_parallel, ScriptRunner, FramePool,
+                from kernels.parallel import (get_parallel, ScriptRunner, FramePool,
                                       frame_workers, MainThreadCoreScheduler)
                 self.parallel = get_parallel(self.script_cores)
                 _m = (self.parallel.get('policy') or {}).get('script_mask')

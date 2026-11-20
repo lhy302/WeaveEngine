@@ -4,8 +4,8 @@
 Loom.py — 入口: 命令行参数 + 数学管线基准 + 启动引擎
 
 模块拆分:
-  matlib.py   4×4 矩阵数学库 (MVP)
-  mesh.py     顶点/索引缓冲 Mesh + cube/sphere 生成器
+  mathlib/matlib.py   4×4 矩阵数学库 (MVP)
+  mathlib/mesh.py     顶点/索引缓冲 Mesh + cube/sphere 生成器
   engine.py   GLEngine 渲染引擎 (moderngl/OpenGL 真 GPU 渲染 + pygame 窗口/输入/HUD)
 
 命令行:
@@ -22,8 +22,8 @@ import sys
 # 2026-11-10: LOOM_FAULTHANDLER=<1|文件路径> 时开启崩溃栈（编译版 release 无控制台,
 # 必须落到文件才能取证）。默认不启用 = 零开销、零行为变化。
 try:
-    import loom_debug
-    loom_debug.enable_if_requested()
+    from core.debug import enable_if_requested
+    enable_if_requested()
 except Exception:
     pass
 
@@ -229,8 +229,8 @@ def _benchmark_math(n_tri=5000, n_iter=100):
     import math
     import time
     import numpy as np
-    import matlib
-    from matlib import mat4_translation, mat4_rotation, mat4_perspective, mat4_view_yaw_pitch
+    import mathlib.matlib as matlib
+    from mathlib.matlib import mat4_translation, mat4_rotation, mat4_perspective, mat4_view_yaw_pitch
 
     print("=" * 60)
     print("Loom - 数学管线基准 (MVP / 顶点索引 / 批量)")
@@ -489,7 +489,7 @@ if __name__ == "__main__":
                 # 2026-10-18 选项1: --ui default/minimal 旧 pygame 视图路径彻底删除.
                 # 2026-10-19 单实例锁：仅编辑器模式加锁（--run / --benchmark / 游戏配置
                 # 玩家模式不加锁，允许同时开多个游戏实例）。防止连点开 N 个编辑器。
-                from loom_single_instance import ensure_editor_single_instance
+                from core.single_instance import ensure_editor_single_instance
                 ensure_editor_single_instance(scene_path=open_scene)
                 # S4（Q-B7-47-1 阶段 4）: 编辑器后端选择 —— 复用 run_player.resolve_backend
                 # 单一事实（不另写选择逻辑）。只有**显式 --backend vulkan**才走 VK 视口;

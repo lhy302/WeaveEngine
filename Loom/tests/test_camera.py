@@ -63,7 +63,7 @@ import numpy as np
 
 from engine import GLEngine, CameraState, Point3D
 import sceneio
-from matlib import mat4_view_yaw_pitch
+from mathlib.matlib import mat4_view_yaw_pitch
 from undo import (AddCameraCommand, CameraStateCommand, DeleteCameraCommand,
                   camera_snapshot, apply_camera_snapshot)
 

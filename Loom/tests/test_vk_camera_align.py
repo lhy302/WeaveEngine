@@ -78,7 +78,7 @@ import engine as E
 import sceneio as S
 import scene_driver as SD
 from loom_camera import clamp_camera_distance, CAM_DIST_MIN, CAM_DIST_MAX
-from matlib import mat4_view_yaw_pitch, mat4_perspective
+from mathlib.matlib import mat4_view_yaw_pitch, mat4_perspective
 
 E.GLEngine._build_gpu = lambda self, m: None    # 无 GL: 只建组件 (同 test_camera_parent)
 

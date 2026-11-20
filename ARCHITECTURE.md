@@ -88,7 +88,7 @@ flowchart TB
   subgraph FACADE["门面（形状不同）"]
     B1["GLEngine<br/>engine.py（GL/moderngl）<br/>= EngineCore + 14 个 GL mixin"]:::facade
     B2["SceneDriver<br/>scene_driver.py（VK/wgpu）<br/>= EngineCore + VkWindowMixin + VkRenderer"]:::facade
-    B0["★ EngineCore<br/>engine_core.py<br/>后端无关的公共实现"]:::contract
+    B0["★ EngineCore<br/>core/engine_core.py<br/>后端无关的公共实现"]:::contract
   end
   subgraph IMPL["子系统 / 渲染器"]
     C1["14 个 GL mixin<br/>渲染/光照/物理/输入/相机/HUD…"]:::impl
@@ -173,7 +173,7 @@ flowchart LR
   G ==>|拼装| M8["CameraMixin<br/>loom_camera.py"]:::impl
   G ==>|拼装| M9["HudMixin<br/>loom_hud.py"]:::impl
   G ==>|拼装| M10["GlfwWindowMixin<br/>loom_glfw_window.py"]:::impl
-  G ==>|拼装| M11["ProfilerMixin<br/>loom_profiler.py"]:::impl
+  G ==>|拼装| M11["ProfilerMixin<br/>core/profiler.py"]:::impl
   G ==>|拼装| M12["LogicThreadMixin<br/>loom_logic_thread.py"]:::impl
   G ==>|拼装| M13["RaycastMixin<br/>loom_raycast.py"]:::impl
   G ==>|拼装| M14["FrameComponentMixin<br/>loom_frame_components.py"]:::impl
@@ -188,7 +188,7 @@ flowchart LR
 ```mermaid
 flowchart LR
   S["SceneDriver<br/>scene_driver.py"]:::facade
-  S ==>|拼装| K["EngineCore<br/>engine_core.py 720<br/>★后端无关的公共实现"]:::contract
+  S ==>|拼装| K["EngineCore<br/>core/engine_core.py 720<br/>★后端无关的公共实现"]:::contract
   S ==>|拼装| W["VkWindowMixin<br/>loom_vk_window.py 273<br/>★F11 假全屏（去边框/铺桌面/置顶）"]:::impl
   S ==>|拼装| V["VkEditorRenderMixin<br/>loom_pass_vk.py 551<br/>★overlay_scope / draw_lines / VkFrameExecutor<br/>（S3；线宽 = Q-B7-48-1 裁决 B 四边形扩宽）"]:::impl
   V -->|VkFrameExecutor 转 draw_frame| R["VkRenderer<br/>vk_renderer.py 2127"]:::impl
@@ -312,7 +312,7 @@ flowchart LR
   M["材质<br/>loom_material.py 135"]:::file
   T["贴图<br/>loom_texture.py 248"]:::file
   C["环境图/天空盒<br/>loom_cubemap.py 238"]:::file
-  G["网格<br/>mesh.py 408"]:::file
+  G["网格<br/>mathlib/mesh.py 408"]:::file
   U1["GL 装配<br/>sceneio._apply_materials"]:::impl
   U2["VK 装配<br/>scene_driver.build_materials"]:::impl
   P -->|读| A
@@ -335,11 +335,11 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-  PY1["几何/光照 VP 快路径<br/>pipeline_glue.py 564"]:::impl
+  PY1["几何/光照 VP 快路径<br/>kernels/pipeline_glue.py 564"]:::impl
   PY2["物理<br/>loom_physics.py 1013"]:::impl
   PY3["物理桥（独立层）<br/>physics_bridge.py 1394"]:::impl
   PY4["脚本<br/>scripts.py 827"]:::impl
-  PY5["数值内核<br/>fastpath.py 635"]:::impl
+  PY5["数值内核<br/>kernels/fastpath.py 635"]:::impl
   C1["core_components/pipeline/<br/>loom_pipeline.c"]:::file
   C2["core_components/physics/<br/>loom_physics.c"]:::file
   C3["core_components/script/<br/>loom_script.c + Lua 5.4"]:::file
@@ -453,7 +453,7 @@ flowchart LR
 flowchart LR
   T["模板层（只读）<br/>Loom/设置.json<br/>Loom/游戏设置.json"]:::external
   U["用户层（可写）<br/>%LOCALAPPDATA%\\Loom\\"]:::external
-  P["userpaths.py 140<br/>唯一收口点"]:::contract
+  P["hostenv/userpaths.py 140<br/>唯一收口点"]:::contract
   G1["guiloader.py 339<br/>引擎设置"]:::file
   G2["game_settings.py 414<br/>游戏设置"]:::file
   R1["run_player.py<br/>读 render_api"]:::entry
@@ -601,7 +601,7 @@ sequenceDiagram
 | `runtime.py` | 309 | Player 运行时 (M17: 引擎/编辑器分层) |
 | `game_player.py` | 305 | 纯 Player 游戏入口 (M38, Unity Build 模型) |
 | `build_game.py` | 507 | 游戏构建器 (Unity BuildPipeline 对齐, 2026-08-22) |
-| `loom_single_instance.py` | 96 | Loom 编辑器单实例锁（2026-10-19） |
+| `core/single_instance.py` | 96 | Loom 编辑器单实例锁（2026-10-19） |
 
 ### B 引擎门面 + 14 mixin
 | 文件 | 行数 | 职责 |
@@ -618,7 +618,7 @@ sequenceDiagram
 | `loom_font.py` | 207 | 多字体回退链 + 字形缓存（HUD/UI 共用） |
 | `loom_camera.py` | 269 | GLEngine 相机控制子系统 (开发者轨道相机 + 键控移动/旋转)。 |
 | `loom_glfw_window.py` | 621 | GLEngine 的 GLFW 窗口子系统 (2026-10-18) |
-| `loom_profiler.py` | 90 | GLEngine 性能插桩子系统 (LOOM_PROFILE 阶段耗时统计)。 |
+| `core/profiler.py` | 90 | GLEngine 性能插桩子系统 (LOOM_PROFILE 阶段耗时统计)。 |
 | `loom_logic_thread.py` | 143 | GLEngine 逻辑帧线程子系统 (异步逻辑线程启停与主循环)。 |
 | `loom_raycast.py` | 328 | 射线检测子系统 (2026-10-18) |
 | `loom_frame_components.py` | 128 | GLEngine 每帧组件推进子系统。 |
@@ -629,7 +629,7 @@ sequenceDiagram
 | `loom_pass.py` | 258 | 渲染 Pass 描述层（FramePlan / PassSpec），**纯数据，无后端依 |
 | `loom_pass_gl.py` | 255 | FramePlan 的 moderngl 执行器（2026-11-10 批次 A / 阶 |
 | `loom_pass_vk.py` | 551 | VK 侧执行器 + 叠加层原语（S3，Q-B7-47-1 阶段 3）：VkFrameExecutor 消费同一份 plan、VkLineBatch（draw_lines 的 VK 实现；线宽由 `loom_line_geometry` 在 CPU 侧扩宽，Q-B7-48-1 裁决 B）、VkEditorRenderMixin（overlay_scope 与 GL 同签名）。 |
-| `loom_line_geometry.py` | 222 | **Q-B7-48-1 裁决 B**：粗线 = 四边形的**唯一一份**扩宽数学（`build_line_quads`：世界→clip→屏幕像素→垂直偏移→回 NDC；`expand_segment`：垂直偏移本体，`vk_ui` UI 描边也用它）。GL `engine.draw_lines` / VK `loom_pass_vk.draw_lines` 两端只画三角形。 |
+| `mathlib/line_geometry.py` | 222 | **Q-B7-48-1 裁决 B**：粗线 = 四边形的**唯一一份**扩宽数学（`build_line_quads`：世界→clip→屏幕像素→垂直偏移→回 NDC；`expand_segment`：垂直偏移本体，`vk_ui` UI 描边也用它）。GL `engine.draw_lines` / VK `loom_pass_vk.draw_lines` 两端只画三角形。 |
 | `loom_scene_ubo.py` | 177 | T3c-1：场景参数**单一来源**（字段表 + std140 打包）。 |
 | `loom_post.py` | 73 | 后处理链的开关与参数（tonemap + bloom，2026-11-10 阶段 2B2 |
 | `loom_post_gl.py` | 215 | GL 侧后处理链（HDR 目标 + bloom + tonemap，2026-11-10 |
@@ -649,9 +649,9 @@ sequenceDiagram
 | `loom_material.py` | 136 | 材质资产 (M23)。 |
 | `loom_texture.py` | 249 | 纹理资产 (M36 贴图体系第一步)。 |
 | `loom_cubemap.py` | 238 | 立方体贴图资产 (M36 贴图体系第5步: 环境反射)。 |
-| `mesh.py` | 409 | 顶点/索引缓冲 (Mesh) 与模型生成器 (cube / sphere / obj 导 |
+| `mathlib/mesh.py` | 409 | 顶点/索引缓冲 (Mesh) 与模型生成器 (cube / sphere / obj 导 |
 | `loom_ui.py` | 1728 | Canvas/UI 系统数据模型与布局 (2026-10-18) |
-| `loom_color.py` | 24 | hex 颜色到 rgba 的转换 + 缓存。 |
+| `core/color.py` | 24 | hex 颜色到 rgba 的转换 + 缓存。 |
 
 ### E VK 后端
 | 文件 | 行数 | 职责 |
@@ -666,25 +666,25 @@ sequenceDiagram
 | `physics_bridge.py` | 1395 | B1: Culverin (Jolt) 物理桥 (零 GL, 可独立导入; 无库自动禁用 |
 | `physics_glue.py` | 134 | 物理 DLL 接线层（M2a，无模块 docstring） |
 | `physics_pipe.py` | 132 | 常驻物理线程 v2 (分离批6 帧内流水线, 2026-09-05) |
-| `pipeline_glue.py` | 565 | 基座 ↔ pipeline.dll 接线层 (M2a-3, 2026-09-08) |
-| `fastpath.py` | 636 | 组3 公共静态化模块 (numba 可选加速, 未安装自动降级纯 Python). |
+| `kernels/pipeline_glue.py` | 565 | 基座 ↔ pipeline.dll 接线层 (M2a-3, 2026-09-08) |
+| `kernels/fastpath.py` | 636 | 组3 公共静态化模块 (numba 可选加速, 未安装自动降级纯 Python). |
 | `scheduler.py` | 274 | NgilPool 常驻 nogil 工作池 (调度重构期1, 2026-09-07) |
-| `parallel.py` | 537 | CPU 拓扑 / 亲和性 / 脚本专用线程 (2026-08-14 多核优化) |
-| `core_clock.py` | 198 | 逻辑帧/渲染帧分离核心时钟 (分离批5 架构重对齐, 2026-09-05) |
-| `interp_state.py` | 368 | 逻辑帧双快照 + 渲染帧 numpy 插值 (分离批2, 2026-09-05) |
+| `kernels/parallel.py` | 537 | CPU 拓扑 / 亲和性 / 脚本专用线程 (2026-08-14 多核优化) |
+| `core/clock.py` | 198 | 逻辑帧/渲染帧分离核心时钟 (分离批5 架构重对齐, 2026-09-05) |
+| `core/interp.py` | 368 | 逻辑帧双快照 + 渲染帧 numpy 插值 (分离批2, 2026-09-05) |
 | `frame_buffer.py` | 345 | 逻辑帧预取缓冲 (TPS 缓冲实验, 2026-09-06) |
 | `scripts.py` | 828 | 物体脚本系统 (M27: 从"摆静态场景"跨到"做能动的游戏") |
 | `script_glue.py` | 221 | 基座 ↔ script.dll 接线层 (M4, 2026-10-01) |
 | `plugin_loader.py` | 836 | Loom 插件加载器 (L1 分级重设计, 2026-08-27) |
 | `plugin_sandbox.py` | 269 | 受限沙箱内核 (2026-08-28 渗透靶场 V06 修复; |
 | `audio_backend.py` | 245 | 音频双后端适配层 (2026-08-30 B2 换库) |
-| `loom_events.py` | 227 | 全局事件总线 (2026-10-18) |
-| `layer_tag.py` | 214 | 层与标签配置 (Layer/Tag 系统, 2026-10-18) |
-| `loom_net.py` | 266 | 网络助手（HTTP / HTTPS），纯标准库实现。 |
-| `crash_reporter.py` | 294 | Loom 崩溃落盘 (dbghelp Minidump + 场景自动备份) |
-| `loom_debug.py` | 32 | 崩溃可见性（2026-11-10 编译版「开后处理必崩」排查用）。 |
-| `loom_log.py` | 37 | 启动日志开关 (2026-10-19) |
-| `loom_backend_guard.py` | 250 | 渲染后端兼容性诊断 + 可见失败（2026-11-09 批次 A / 阶段 1）。 |
+| `core/events.py` | 227 | 全局事件总线 (2026-10-18) |
+| `kernels/layer_tag.py` | 214 | 层与标签配置 (Layer/Tag 系统, 2026-10-18) |
+| `net/net.py` | 266 | 网络助手（HTTP / HTTPS），纯标准库实现。 |
+| `hostenv/crash_reporter.py` | 294 | Loom 崩溃落盘 (dbghelp Minidump + 场景自动备份) |
+| `core/debug.py` | 32 | 崩溃可见性（2026-11-10 编译版「开后处理必崩」排查用）。 |
+| `core/log.py` | 37 | 启动日志开关 (2026-10-19) |
+| `hostenv/backend_guard.py` | 250 | 渲染后端兼容性诊断 + 可见失败（2026-11-09 批次 A / 阶段 1）。 |
 
 ### G 编辑器
 | 文件 | 行数 | 职责 |
@@ -702,15 +702,15 @@ sequenceDiagram
 |---|---|---|
 | `guiloader.py` | 340 | Loom / LoomHub 可插拔 GUI 加载器 (2026-08-14) |
 | `game_settings.py` | 415 | 单游戏设置 (与 Unity PlayerPrefs / UE GameUserSett |
-| `userpaths.py` | 141 | 用户可写配置目录的**唯一**收口点（2026-11-08 用户配置目录契约 §2）。 |
+| `hostenv/userpaths.py` | 141 | 用户可写配置目录的**唯一**收口点（2026-11-08 用户配置目录契约 §2）。 |
 | `game_pack.py` | 138 | 游戏资源包 (2026-08-22 发布链路: Unity Build 对齐) |
 | `loom_appearance.py` | 38 | 外观代计数器（组6件1），不依赖 engine。 |
 
 ### I 零碎
 | 文件 | 行数 | 职责 |
 |---|---|---|
-| `loom_types.py` | 11 | 引擎基础数据类型。 |
-| `matlib.py` | 301 | 4×4 矩阵数学库（行主序，行向量约定） |
+| `core/primitives.py` | 11 | 引擎基础数据类型。B1 批自 `loom_types.py` 改名迁入（避免与 stdlib types 撞名）。 |
+| `mathlib/matlib.py` | 301 | 4×4 矩阵数学库（行主序，行向量约定） |
 
 ### J ui/ 子目录
 | 文件 | 行数 | 职责 |
@@ -1025,7 +1025,7 @@ flowchart TB
     W3["_place_fullscreen_window()<br/>Win32 SetWindowPos + argtypes"]:::impl
   end
   subgraph KERN["内核 F11 步"]
-    K1["handle_key_event ①<br/>engine_core.py<br/>getattr(allow_fullscreen)"]:::contract
+    K1["handle_key_event ①<br/>core/engine_core.py<br/>getattr(allow_fullscreen)"]:::contract
   end
   R1 -->|持有| R2
   R2 -->|经 P1 解析| P1

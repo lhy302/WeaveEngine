@@ -85,7 +85,7 @@ import editor
 import undo as U
 import agent_commands as ac
 import sceneio
-from mesh import create_cube, create_sphere
+from mathlib.mesh import create_cube, create_sphere
 
 _FAILS = []
 ED = None          # 真 EditorApp 桩 (下面 _new_app 建)

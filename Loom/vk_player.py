@@ -17,7 +17,7 @@ os.environ.setdefault('WGPU_BACKEND_TYPE', 'Vulkan')
 import math as _math
 import numpy as np
 import wgpu
-from matlib import mat4_view_yaw_pitch, mat4_perspective  # noqa: F401 (探针兼容)
+from mathlib.matlib import mat4_view_yaw_pitch, mat4_perspective  # noqa: F401 (探针兼容)
 
 # 中间层 (scene_driver) 为单一数据来源
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -39,7 +39,7 @@ from loom_ui_resize import sync_ui_canvas
 # 只能打印原因后非零退出 (原来一律 os._exit, 发布链的兜底也只覆盖 init)。
 from run_player import VkInitError, VkRunError
 # 2026-11-09 批次 A/阶段1: VK 地板（1.1）+ 可读诊断（单点实现见 loom_backend_guard）
-from loom_backend_guard import (VkBackendInitError, adapter_info_dict,
+from hostenv.backend_guard import (VkBackendInitError, adapter_info_dict,
                                 require_vulkan_api, vk_diag_text, vulkan_api_text, adapter_backend)
 
 

@@ -40,7 +40,7 @@ import numpy as np
 import wgpu
 
 # Q-B7-48-1 裁决 B：线段扩宽的垂直偏移数学唯一一份（与 engine.draw_lines 同源）
-from loom_line_geometry import expand_segment
+from mathlib.line_geometry import expand_segment
 
 # 2026-11-18 P3-1: 滚轮判据的唯一实现在共享前置 loom_ui_input（GL/VK 同源，
 # docs/guides/开发要求_功能解耦与模块化.md 规则 3）。

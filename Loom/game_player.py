@@ -44,7 +44,7 @@ def _bootstrap_logging():
         import faulthandler
         import time
         import traceback
-        import userpaths
+        import hostenv.userpaths as userpaths
         path = userpaths.log_path('game')
         userpaths.ensure_parent(path)
         f = open(path, 'a', encoding='utf-8', buffering=1)

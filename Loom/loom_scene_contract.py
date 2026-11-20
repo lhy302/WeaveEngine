@@ -37,7 +37,7 @@ import math
 import os
 import uuid
 
-from loom_scene_entities import wrap_deg   # 纯 math 工具（只依赖 math/uuid/loom_types）
+from loom_scene_entities import wrap_deg   # 纯 math 工具（实现在 mathlib.mathutil）
 
 
 CURRENT_VERSION = 12  # v12 (Q-B1-3=A 材质真相源): 场景 materials[] 只写引用, 定义在资产库

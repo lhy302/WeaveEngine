@@ -95,7 +95,7 @@ class Cubemap:
             if not ok_form:
                 raise ValueError("from_solid 颜色串必须是 #RGB / #RRGGBB / #RRGGBBAA: %r"
                                  % (color,))
-            from loom_color import _hex_rgba
+            from core.color import _hex_rgba
             rf = _hex_rgba(s[:7])
             rgba = [int(round(rf[0] * 255)), int(round(rf[1] * 255)),
                     int(round(rf[2] * 255)), 255]

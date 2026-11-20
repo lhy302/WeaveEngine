@@ -14,7 +14,7 @@ from types import SimpleNamespace
 import numpy as np
 
 import engine as E
-from mesh import create_cube
+from mathlib.mesh import create_cube
 import undo as U
 from loom_texture import Texture
 from loom_cubemap import Cubemap
