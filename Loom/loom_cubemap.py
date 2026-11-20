@@ -9,10 +9,11 @@
 CPU 侧持 6 面 RGBA (numpy uint8)，GPU 侧延迟创建（同 Texture 纪律）。
 """
 import os
-import uuid
 import weakref
 
 import numpy as np
+
+from scene.identity import new_guid   # Q-B7-49-1 P2: guid 唯一真源
 
 try:
     import pygame
@@ -27,7 +28,7 @@ class Cubemap:
 
     def __init__(self, size=0, faces=None, name=None, guid=None, paths=None,
                  mipmaps=True):
-        self.guid = guid or uuid.uuid4().hex
+        self.guid = guid or new_guid()   # Q-B7-49-1 P2: 唯一真源 scene.identity
         self.name = name or '立方体贴图'
         self.size = int(size)
         self._faces = faces if faces is not None else None   # [6 x (H,W,4)]

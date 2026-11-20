@@ -98,11 +98,11 @@ flowchart TB
     D1["FramePlan<br/>loom_pass.py"]:::contract
     D2["场景 UBO<br/>loom_scene_ubo.py"]:::contract
     D3["着色器+compat<br/>loom_shaders / shaders/"]:::contract
-    D4["★ 场景契约<br/>loom_scene_contract.py<br/>gate/migrate/prepare"]:::contract
-    D5["★ 共享前置<br/>loom_ui_input / loom_ui_resize<br/>loom_collision / loom_scene_query"]:::contract
+    D4["★ 场景契约<br/>scene/contract.py<br/>gate/migrate/prepare"]:::contract
+    D5["★ 共享前置<br/>loom_ui_input / loom_ui_resize<br/>loom_collision / scene/query"]:::contract
   end
   subgraph DATA["场景与资产"]
-    E1["场景/装配<br/>sceneio.py"]:::file
+    E1["场景/装配<br/>sceneio.py（薄门面）<br/>→ scene/ 按域拆分"]:::file
     E2["资产库 guid<br/>loom_assets.py"]:::file
   end
   A1 -->|创建| B1
@@ -260,12 +260,12 @@ flowchart TB
   E2["GL 播放器<br/>loom_model_gpu.py:285"]:::entry
   E3["VK 播放器 / 打包游戏<br/>scene_driver.py:742"]:::entry
   E4["EAI 命令<br/>agent_commands.py:549"]:::entry
-  C["★ 场景契约唯一入口<br/>loom_scene_contract.py<br/>prepare(data)"]:::contract
+  C["★ 场景契约唯一入口<br/>scene/contract.py<br/>prepare(data)"]:::contract
   G1["gate(data)<br/>版本闸门"]:::contract
   G2["migrate(data)<br/>v1..v11 → v12"]:::contract
   A1["scene_from_dict<br/>GL 装配入口"]:::facade
   A2["load_from_data<br/>VK 装配入口"]:::facade
-  F1["sceneio.py<br/>2213 行"]:::file
+  F1["sceneio.py（薄门面）<br/>→ scene/io.py 装配等"]:::file
   F2["loom_assets.py"]:::file
   F3["loom_components.py<br/>loom_game_object.py"]:::file
   F4["loom_model_gpu.py<br/>loom_lighting.py"]:::file
@@ -293,9 +293,9 @@ flowchart TB
 > **这张图 v2 曾经是「版本升级被塞进引擎」的证据**：那时 `migrate()` 挂在 `scene_from_dict` 里面，
 > 而 VK 走 `load_from_data`，虚线上写着「只过闸门，不过迁移」→ **v8 老场景在 VK 下相机 yaw 停在 1.5708（弧度当度用）**。
 >
-> **2026-11-19 已收敛**（B7-16）：版本判定与升级独立成 `loom_scene_contract.py`，**唯一入口 `prepare()`**，
+> **2026-11-19 已收敛**（B7-16）：版本判定与升级独立成场景契约模块（现 scene/contract.py，原 loom_scene_contract.py；B2 目录重构归位），**唯一入口 `prepare()`**，
 > 4 条打开场景的路径（编辑器 / GL 播放器 / VK 播放器+打包游戏 / EAI 命令）**全部**在「任何状态变更之前」调它。
-> 闸门调用点从 **5 处散落收敛到 1 处**（`sceneio.py` 只保留 re-export 别名 + prefab 的 2 处只过 gate 不迁移）。
+> 闸门调用点从 **5 处散落收敛到 1 处**（`sceneio.py` 门面只保留 re-export 别名；prefab 的 2 处只过 gate 不迁移，B2 后在 scene/prefab.py）。
 >
 > **设计判据**（值得记住）：场景迁移**只是数据→数据**，不涉及复杂内部操作 → 独立成模块后「特定场景转换有问题时修起来容易」。
 > 门：`test_scene_load_parity.py`（76 条）+ `test_scene_contract.py`（39 条，含「契约模块能单独 import、不拉引擎」）。
@@ -313,7 +313,7 @@ flowchart LR
   T["贴图<br/>loom_texture.py 248"]:::file
   C["环境图/天空盒<br/>loom_cubemap.py 238"]:::file
   G["网格<br/>mathlib/mesh.py 408"]:::file
-  U1["GL 装配<br/>sceneio._apply_materials"]:::impl
+  U1["GL 装配<br/>scene/material._apply_materials<br/>（sceneio 门面同名）"]:::impl
   U2["VK 装配<br/>scene_driver.build_materials"]:::impl
   P -->|读| A
   A -->|guid → 定义| S
@@ -415,7 +415,7 @@ flowchart LR
   EAI["EAI 命令面<br/>agent_commands.py 4048"]:::entry
   FD["文件对话框<br/>filedialog.py 294"]:::file
   PW["播放窗口<br/>loom_player_window.py 312"]:::file
-  S["场景 I/O<br/>sceneio.py"]:::file
+  S["场景 I/O<br/>sceneio.py（薄门面）<br/>→ scene/ 按域拆分"]:::file
   ED ==>|继承| GE
   ED -->|通知/刷新| V
   VKE["VkEditorApp<br/>editor.py（S4）"]:::facade
@@ -513,7 +513,7 @@ sequenceDiagram
   autonumber
   participant U as 用户
   participant ED as editor.py
-  participant SIO as sceneio.py
+  participant SIO as sceneio.py（门面）<br/>scene/io.py
   participant GATE as check_engine_version
   participant MIG as migrate()
   participant AP as _apply_* 装配
@@ -522,7 +522,7 @@ sequenceDiagram
   ED->>GATE: 闸门（editor.py:1242，先过一次）
   GATE-->>ED: 通过 / 抛 SceneVersionError
   ED->>SIO: scene_from_dict(data)
-  SIO->>MIG: 第一步 migrate()（sceneio.py:2033）
+  SIO->>MIG: 第一步 migrate()（scene/contract.py）
   MIG-->>SIO: 已规范化 dict（版本抬到 12）
   SIO->>AP: 建物体/材质/灯光/相机/天空盒/UI
   AP-->>ED: 场景就绪
@@ -641,11 +641,23 @@ sequenceDiagram
 ### D 场景 / 资产 / 数据模型
 | 文件 | 行数 | 职责 |
 |---|---|---|
-| `sceneio.py` | 2379 | 场景/Prefab 序列化 (M18 + M16 + M21) |
+| `sceneio.py` | 96 | **薄门面**：场景/Prefab 序列化的旧引用面（B2 起只 re-export，实现拆进 scene/ 包） |
+| `scene/contract.py` | 295 | 场景契约：版本号 / 闸门 gate / 迁移 migrate / 唯一入口 prepare（原 loom_scene_contract.py）。 |
+| `scene/entities.py` | 204 | 场景实体状态类（原 loom_scene_entities.py）。 |
+| `scene/query.py` | 110 | SceneQueryMixin：Layer·Tag / 查找 / SendMessage（原 loom_scene_query.py）。 |
+| `scene/identity.py` | 41 | ★ guid 唯一真源：new_guid（uuid4）/ derived_guid（迁移期确定性派生，Q-B7-49-1 P2）。 |
+| `scene/asset.py` | 258 | 资产身份层：资产上下文 / 资产问题 / 失效引用保留。 |
+| `scene/object.py` | 710 | 对象 <-> dict：发射/装配/父链校验 + Canvas UI 段。 |
+| `scene/camera.py` | 223 | 相机投影归一 + 摄像机实体序列化。 |
+| `scene/light.py` | 64 | 光源序列化。 |
+| `scene/sky.py` | 284 | 天空盒解析/发射。 |
+| `scene/material.py` | 350 | 材质资产解析/发射。 |
+| `scene/resource.py` | 74 | 独立资产文件（材质/网格）。 |
+| `scene/prefab.py` | 84 | Prefab 序列化/实例化。 |
+| `scene/io.py` | 356 | 场景装配（scene_to_dict / scene_from_dict）+ 存盘/读盘 + 混淆编码。 |
 | `loom_assets.py` | 1194 | 资产身份层（beta6 B1：项目级 Assets/ + assets.json + g |
 | `loom_game_object.py` | 455 | 场景物体 GameObject（M25 组件化容器）。 |
 | `loom_components.py` | 1058 | 组件化 (M25) 与资产类。 |
-| `loom_scene_entities.py` | 212 | 场景实体状态类。 |
 | `loom_material.py` | 136 | 材质资产 (M23)。 |
 | `loom_texture.py` | 249 | 纹理资产 (M36 贴图体系第一步)。 |
 | `loom_cubemap.py` | 238 | 立方体贴图资产 (M36 贴图体系第5步: 环境反射)。 |
@@ -803,7 +815,7 @@ flowchart LR
 | 指标 | engine.py | 全仓第二 |
 |---|---|---|
 | 本项目模块 import 数（出边） | **39** | `scene_driver.py` 19 |
-| 被多少模块 import（入边） | **12** | `sceneio.py` 13 |
+| 被多少模块 import（入边） | **12** | `sceneio.py` 门面 13（B2 起实现拆进 scene/） |
 | 自身方法数（不含继承来的） | **50** | `scene_driver.py` 58（但它同时是门面+装配器+播放器） |
 
 ## 14.3 三个值得注意的点
@@ -958,7 +970,7 @@ flowchart TB
 flowchart TB
   CORE["L0 核心（唯一不可换）<br/>加载器 / 生命周期 / 事件总线 / 服务注册表 / API 契约"]:::core
   REG["服务注册表<br/>provides / requires / api_version"]:::contract
-  M1["L1 场景契约模块<br/>loom_scene_contract"]:::mod
+  M1["L1 场景契约模块<br/>scene.contract"]:::mod
   M2["L1 渲染后端模块 GL<br/>engine + 14 mixin"]:::mod
   M3["L1 渲染后端模块 VK<br/>scene_driver + vk_renderer"]:::mod
   M4["L1 物理模块<br/>loom_physics + physics_bridge"]:::mod

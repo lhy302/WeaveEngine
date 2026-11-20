@@ -39,7 +39,7 @@ from mathlib.matlib import (mat4_ortho, mat4_perspective, mat4_view_forward)
 import kernels.fastpath as fastpath   # AABB 批量归约 (aabbs_minmax 串行 / aabbs_minmax_par 逃生门)
 from core.primitives import Point3D
 from loom_game_object import GameObject
-from loom_scene_entities import LightState
+from scene.entities import LightState
 
 
 class LightingMixin:

@@ -19,7 +19,8 @@ import hashlib
 import os
 import re
 import time
-import uuid
+
+from scene.identity import new_guid   # Q-B7-49-1 P2: 随机身份唯一真源
 
 APP_DIR_NAME = "Loom"        # %LOCALAPPDATA%\Loom
 _FALLBACK_DIR = ".loom"      # 无 LOCALAPPDATA 时 ~/.loom
@@ -113,7 +114,7 @@ def game_id_for(dir_path, title=None):
 
 
 def project_id(project_dir):
-    """编辑器工程标识: <工程>/.loom/project_id（首次生成 uuid4 并落盘）。
+    """编辑器工程标识: <工程>/.loom/project_id（首次生成 scene.identity.new_guid 并落盘）。
 
     读取失败/写失败都上抛由调用方处理（契约 §5-3: 写失败必须可判定）。
     返回 (project_id, created)。
@@ -131,7 +132,7 @@ def project_id(project_dir):
     except OSError:
         # 目录不可读/权限问题: 上抛交给上层决定（不静默造新 id 导致配置分裂）
         raise
-    pid = uuid.uuid4().hex
+    pid = new_guid()   # Q-B7-49-1 P2: 随机身份唯一真源 scene.identity
     ensure_dir(pdir)
     tmp = pfile + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:

@@ -3,7 +3,7 @@
 
 设计依据: docs/design/research_beta6_02_asset_guid.md
   · 资产正文 = 项目根下 Assets/<Type>/…；索引 = Assets/assets.json（唯一真相）
-  · guid = uuid4().hex（沿用 sceneio.generate_guid 语义），全局唯一性由索引校验
+  · guid = uuid4().hex（scene.identity.new_guid，Q-B7-49-1 P2 唯一真源），全局唯一性由索引校验
   · 场景文件只写 guid；路径永不进场景
   · 解析失败一律返回 (obj, valid, reason) —— 与 beta5 skybox 口径一致
   · 热路径只 stat（mtime+size），sha256 只在导入/指纹不符时算
@@ -24,7 +24,8 @@ import re
 import shutil
 import threading
 import time
-import uuid
+
+from scene.identity import new_guid as _new_guid   # Q-B7-49-1 P2: guid 唯一真源
 
 ASSETS_DIR = 'Assets'
 INDEX_FILE = 'assets.json'
@@ -131,8 +132,11 @@ _WARNED = set()
 
 
 def new_guid():
-    """新资产 guid（32 hex，与 sceneio.generate_guid 同格式）。"""
-    return uuid.uuid4().hex
+    """新资产 guid（32 hex，与 scene.generate_guid 同格式）。
+
+    Q-B7-49-1 P2 收敛: 唯一实现 = scene.identity.new_guid（本名保留作旧引用面锚点）。
+    """
+    return _new_guid()
 
 
 _ILLEGAL_NAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')

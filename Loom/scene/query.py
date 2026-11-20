@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
-"""loom_scene_query.py — 场景查询 / Layer·Tag 接口（**后端无关**，两端同一份）。
+"""scene/query.py — 场景查询 / Layer·Tag 接口（**后端无关**，两端同一份；B2 目录重构自 loom_scene_query.py 原样归位）。
 
 2026-11-17（S2-2 门面收敛 / JVM 模型）：这 11 个方法原来长在 `GLEngine` 上，
 但它们**只碰 `self.models` 与 `layer_tag` 模块，不含任何 GPU 依赖** ——
 放在 GL 侧等于让 VK 脚本调不到（VK 下 `AttributeError`），属于「受后端影响」。
-搬进内核后两端共享同一份实现。
+搬进内核后两端共享同一份实现。（原文 loom_scene_query.SceneQueryMixin 即本文件。）
 
 归属判据（可审计）：**方法体里不出现 moderngl / wgpu / 着色器 / VAO / 纹理 / 帧循环**。
 不满足这条的（例如 `add_model` 要上传 VBO）留在后端侧，等 S2-2 的「数据/GPU 拆分」再处理。

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""loom_scene_contract.py — **场景契约**：版本号 / 版本闸门 / 数据迁移（B7-16，2026-11-18）。
+"""scene/contract.py — **场景契约**：版本号 / 版本闸门 / 数据迁移（B7-16，2026-11-18；B2 目录重构自 loom_scene_contract.py 原样归位）。
 
 人类裁决原话：
   「场景迁移功能我好像也明确要求单独一个模块，因为**只是数据到数据的转换，不需要涉及
@@ -9,7 +9,7 @@
   · 输入：场景 dict（json.load / 游戏包解出来的那一份）；
   · 输出：同一份 dict 的**当前版本**形态；
   · 不 import sceneio / engine / moderngl / wgpu / glfw，不建窗口、不碰 GPU、不建引擎实例
-    —— `import loom_scene_contract` 可以单独跑（门：tests/test_scene_contract.py 用子进程
+    —— `import scene.contract` 可以单独跑（门：tests/test_scene_contract.py 用子进程
     断言 sys.modules 里没有引擎/GPU/窗口模块）。
 
 对外契约（外部只用这 5 个名字）：
@@ -31,13 +31,18 @@ VK 播放器、打包游戏、游戏包、Hub 校验**共同的**前置 —— �
 各自写一份（旧状：闸门 5 处重复调用、迁移只有 1 处调用点 -> 两端行为分叉，B7-17）。
 
 纪律（门会检查）：本文件**不许** import sceneio / engine / 任何 GPU/窗口模块。
+
+B2 目录重构（2026-11-21）：本文件自 loom_scene_contract.py 原样搬入 scene/contract.py
+（git mv 保留历史）；除 guid 确定性派生（人类裁决 Q-B7-49-1 P2 ①+③，见 migrate 的
+v1 分支）与 解释器.json 定位上跳一层外，逻辑一字未改。
 """
 import json
 import math
 import os
-import uuid
 
-from loom_scene_entities import wrap_deg   # 纯 math 工具（实现在 mathlib.mathutil）
+from scene.identity import derived_guid   # guid 唯一真源（uuid4 只许在 identity.py）
+
+from scene.entities import wrap_deg   # 纯 math 工具（实现在 mathlib.mathutil）
 
 
 CURRENT_VERSION = 12  # v12 (Q-B1-3=A 材质真相源): 场景 materials[] 只写引用, 定义在资产库
@@ -59,7 +64,8 @@ _ENGINE_VERSION_FALLBACK = '0.1.0.beta6'
 def _read_engine_version():
     """当前引擎版本. 单一事实源 = 引擎目录 解释器.json; 读不到 -> 常量兜底."""
     try:
-        p = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+        # B2: 本文件自 <root>/ 搬进 <root>/scene/，解释器.json 仍在引擎目录（上跳一层同口径）。
+        p = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                          '解释器.json')
         with open(p, 'r', encoding='utf-8') as f:
             v = json.load(f).get('version')
@@ -173,10 +179,6 @@ def gate(data, engine_version=None):
             '请先升级引擎, 或用旧版引擎"导出兼容场景"后重试)' % (need, cur))
     return True
 
-def _new_guid():
-    """新对象 id（32 hex）。与 sceneio.generate_guid 同实现（uuid4().hex）——
-    独立一份是为了让本模块**不 import sceneio**（契约模块必须能单独 import）。"""
-    return uuid.uuid4().hex
 def migrate(data):
     """版本迁移 (原地修改并返回). 旧格式/缺版本一律能加载.
 
@@ -247,12 +249,25 @@ def migrate(data):
         # 真正的"路径 -> guid"补全交给一次性脚本 tools/migrate_scene_assets_v11.py。
         pass
     if v == 1:
-        # v1: 扁平对象, 有 id 无 parent/prefab; 无 id 就生成一个
-        for obj in data.get('objects', []):
+        # v1: 扁平对象, 有 id 无 parent/prefab; 无 id 就**确定性派生**补一个
+        # （Q-B7-49-1 P2 人类裁决 ①+③: 迁移期**不用 uuid4** —— 同输入同输出，
+        #   同一 v1 场景两次迁移 / GL 与 VK 两端加载逐值相等；保存场景后固化为
+        #   永久身份。派生因子 = 'scene-v1' + 物体序号 + 物体内容 JSON（赋 id 前取，
+        #   保证同一物体重复迁移派生值也相同）。唯一实现: scene.identity.derived_guid。
+        # ③ 迁移新分配了 id 就打印一行提示（只打印一行，不打断加载、不弹窗；
+        #   幂等重迁移 id 已在 -> 不打印）。
+        _n_new_guid = 0
+        for _i, obj in enumerate(data.get('objects', [])):
             if not obj.get('id'):
-                obj['id'] = _new_guid()
+                obj['id'] = derived_guid('scene-v1', _i,
+                                         json.dumps(obj, sort_keys=True,
+                                                    ensure_ascii=False))
+                _n_new_guid += 1
             obj.setdefault('parent_id', None)
             obj.setdefault('prefab_ref', None)
+        if _n_new_guid:
+            print('[场景] 迁移：本场景 %d 个物体新分配了 guid，请保存场景以固化'
+                  % (_n_new_guid,))
     data['version'] = CURRENT_VERSION
     return data
 

@@ -115,9 +115,9 @@ from loom_material import Material   # noqa: E402,F401
 # ---- 场景物体 GameObject（已抽出到 loom_game_object.py，原 91-368 行） ----
 from loom_game_object import GameObject   # noqa: E402,F401
 
-# ---- 光源/相机/运行时 UI（已抽出到 loom_scene_entities.py，原 94-319 行） ----
+# ---- 光源/相机/运行时 UI（已抽出到 scene/entities.py（原 loom_scene_entities.py，B2 归位），原 94-319 行） ----
 from loom_ui import UIManager, Canvas  # 2026-10-18: 新 Canvas UI 系统
-from loom_scene_entities import (  # noqa: E402,F401
+from scene.entities import (  # noqa: E402,F401
     wrap_deg, direction_to_angles, LightState, CameraState,
 )
 # ---- 按键绑定配置（已抽出到 loom_input.py，原 98-118 行） ----

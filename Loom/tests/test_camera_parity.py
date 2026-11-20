@@ -159,11 +159,11 @@ import numpy as np                                                # noqa: E402
 
 import editor as editor_mod                                       # noqa: E402  GL 编辑器（组 ④ 的唯一生产实现）
 import loom_camera                                                # noqa: E402  轨道相机唯一纯函数
-import loom_scene_contract                                        # noqa: E402  场景版本号单点（不写死）
+import scene.contract as _scene_contract                                        # noqa: E402  场景版本号单点（不写死）
 import moderngl                                                   # noqa: E402
 import runtime                                                    # noqa: E402  GL 打包播放器（生产入口）
 import scene_driver as SD                                         # noqa: E402  VK 播放器（生产入口）
-from loom_scene_entities import wrap_deg                          # noqa: E402  相机角度环绕（唯一实现）
+from scene.entities import wrap_deg                          # noqa: E402  相机角度环绕（唯一实现）
 from core.primitives import Point3D                                    # noqa: E402  脚本写相机的唯一数据形态
 from mathlib.matlib import (mat4_ortho, mat4_perspective, mat4_rotation,   # noqa: E402
                     mat4_scale, mat4_translation, mat4_view_yaw_pitch,
@@ -285,7 +285,7 @@ _bva = _grep_prod('def view_basis_to_angles')
 check('结构：基->角度 的逆映射只有 matlib.view_basis_to_angles 一份（两端 apply_camera 共用）',
       [p for (p, _l) in _bva] == ['mathlib/matlib.py'], _bva)
 _wrap = _grep_prod('def wrap_deg')
-check('结构：相机角度环绕只有 mathlib.mathutil.wrap_deg 一份（B1 批 P1 前置自 loom_scene_entities）',
+check('结构：相机角度环绕只有 mathlib.mathutil.wrap_deg 一份（B1 批 P1 前置，原 loom_scene_entities，B2 归位 scene/entities.py）',
       [p for (p, _l) in _wrap] == ['mathlib/mathutil.py'], _wrap)
 _dev_defs = _grep_prod('def apply_dev_camera_mouse')
 check('结构：def apply_dev_camera_mouse 只在 scene_driver.py（VK 侧唯一实现；GL 侧对应'
@@ -339,7 +339,7 @@ ORBIT0 = {'target': [1.0, 2.0, 3.0], 'distance': 12.0, 'yaw': 0.9, 'pitch': -0.4
 
 def scene(camera=None, cameras=None, active=None, objects=None):
     """两端同一份场景（同一份用户内容）。"""
-    return {'version': loom_scene_contract.CURRENT_VERSION,
+    return {'version': _scene_contract.CURRENT_VERSION,
             'camera': dict(camera or ORBIT0),
             'cameras': list(cameras or []),
             'active_camera': active,

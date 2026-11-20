@@ -17,7 +17,9 @@
 纪律：本文件**不许**出现 moderngl / wgpu / 着色器 / VBO / VAO / 纹理（门会检查）。
 """
 
-import uuid
+from scene.identity import new_guid   # Q-B7-49-1 P2: guid 唯一真源（uuid4 只许在 identity.py）
+
+
 
 
 class ModelDataMixin:
@@ -58,7 +60,7 @@ class ModelDataMixin:
             model.name = {None: '物体', 'cube': '立方体', 'sphere': '球体',
                           'plane': '平面'}.get(prim, '物体')
         if model.guid is None:
-            model.guid = uuid.uuid4().hex
+            model.guid = new_guid()   # Q-B7-49-1 P2: 唯一真源 scene.identity
         self._backend_upload_model(model)        # ← 唯一 GPU 接触点
         self._register_model_material(model)
         self.models.append(model)

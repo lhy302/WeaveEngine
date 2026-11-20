@@ -50,7 +50,7 @@ def _enforce_fail_exit_code():
 所以本门锁的是「这个模块真的是纯数据 -> 数据」+「它是唯一真源 / 唯一入口」，
 全部**不需要 GPU / 窗口 / 引擎实例**就能跑：
 
-  A. **能单独 import**：子进程 import loom_scene_contract 后 sys.modules 里不得出现
+  A. **能单独 import**：子进程 import scene.contract（B2 前 loom_scene_contract）后 sys.modules 里不得出现
      engine / sceneio / moderngl / wgpu / glfw / pygame / numpy / vk_renderer /
      scene_driver / runtime —— 否则「能单独 import 测试」就是空话（契约模块一旦拖进
      引擎，就再也不能脱离 GPU 环境单测）。
@@ -71,6 +71,14 @@ def _enforce_fail_exit_code():
 结构面「其它文件 0 处 gate( / check_engine_version( / sceneio.gate( / migrate(」在
 tests/test_scene_load_parity.py 的 ③-gate / ③-migrate（那里要两端真实实例，且递归扫
 Loom/**/*.py），本门不重复造。
+
+G. **guid 确定性门**（Q-B7-49-1 P2，2026-11-21 人类裁决 ①+③；B2 批新增）：
+   G1 同一 v1 输入两次迁移 guid 逐值相等（迁移期确定性派生，不用 uuid4 —— 修前红：
+   uuid4 每次不同，tests/_tmp/_b2_guid_gate_probe.py 实测留痕）；G2 已有 id 保留；
+   G3 生产代码 uuid.uuid4 只许 scene/identity.py 1 处（8 处生成点收敛 + 2 处非对象
+   随机身份同格式一并收敛）；G4 derived_guid 同输入同输出；G5 迁移新分配 id 打印
+   「请保存场景以固化」一行（幂等重迁移不打印）。guid 语义 = 永久身份 / 迁移期
+   确定性派生 / 跨端与跨存盘不变（契约 I4 扩展，见 docs/design/契约_IEngineAPI_20261117.md）。
 """
 
 import os
@@ -83,7 +91,7 @@ sys.path.insert(0, ROOT)
 os.environ.setdefault('LOOM_NO_DIALOG', '1')
 os.environ.setdefault('LOOM_NO_PARALLEL', '1')
 
-import loom_scene_contract as C              # noqa: E402
+import scene.contract as C                   # noqa: E402  B2: 原 loom_scene_contract.py 归位 scene/
 import sceneio as S                          # noqa: E402
 
 _fails = []
@@ -101,7 +109,7 @@ _FORBIDDEN_ROOTS = ('engine', 'engine_core', 'sceneio', 'scene_driver', 'runtime
                     'pygame', 'numpy', 'loom_render', 'loom_model_gpu', 'editor')
 
 _PROBE = ("import sys\n"
-          "import loom_scene_contract as C\n"
+          "import scene.contract as C\n"
           "bad = sorted({m.split('.')[0] for m in sys.modules} & set(%r))\n"
           "print('VERSION=%%s' %% (C.CURRENT_VERSION,))\n"
           "print('BAD=%%s' %% (','.join(bad),))\n") % (_FORBIDDEN_ROOTS,)
@@ -124,7 +132,7 @@ def t_standalone_import():
             got_ver = line[len('VERSION='):].strip()
         elif line.startswith('BAD='):
             bad = line[len('BAD='):].strip()
-    check('A1 子进程 import loom_scene_contract 成功（无异常）',
+    check('A1 子进程 import scene.contract 成功（无异常）',
           p.returncode == 0 and got_ver != '', out.strip()[-160:])
     check('A2 子进程读到的 CURRENT_VERSION == 12', got_ver == '12', got_ver)
     check('A3 import 契约模块不拉 engine / sceneio / GPU / 窗口模块',
@@ -134,7 +142,7 @@ def t_standalone_import():
 # ==================== B. CURRENT_VERSION 唯一真源 ====================
 def t_single_source():
     print()
-    print('=== B. CURRENT_VERSION 是唯一真源（sceneio 只 re-export） ===')
+    print('=== B. CURRENT_VERSION 是唯一真源（sceneio 门面只 re-export） ===')
     check('B1 CURRENT_VERSION == 12', C.CURRENT_VERSION == 12, C.CURRENT_VERSION)
     check('B2 sceneio.SCENE_VERSION 是别名（值相同）',
           S.SCENE_VERSION == C.CURRENT_VERSION, (S.SCENE_VERSION, C.CURRENT_VERSION))
@@ -142,7 +150,7 @@ def t_single_source():
     check('B3 sceneio 源码里不再出现 SCENE_VERSION = 12（不许再定义）',
           'SCENE_VERSION = 12' not in src, '')
     check('B4 sceneio 从契约模块 import（唯一真源）',
-          'from loom_scene_contract import' in src, '')
+          'from scene.contract import' in src, '')
 
 
 # ==================== C. gate 语义 ====================
@@ -311,6 +319,120 @@ def t_reexport():
           len(calls) == 1, '被调次数=%d' % (len(calls),))
 
 
+# ==================== G. guid 确定性门（Q-B7-49-1 P2，2026-11-21 人类裁决 ①+③） ====================
+import copy as _copy
+import io as _io
+import re as _re2
+
+
+def t_guid_identity():
+    print()
+    print('=== G. guid 确定性门（scene.identity 唯一真源 / 迁移期确定性派生 / 8 处收敛） ===')
+
+    # G1 同一 v1 输入两次迁移 -> guid 逐值相等（迁移期不用 uuid4）。
+    # 修前红（2026-11-21 实测, tests/_tmp/_b2_guid_gate_probe.py）:
+    #   第一次=['929f4152...','017d6ac9...','bd334de9...']
+    #   第二次=['efd10b3f...','66d5506c...','85bc734f...']  （uuid4 每次不同）
+    v1 = {'version': 1, 'objects': [
+        {'name': '吃豆人', 'type': 'cube', 'position': [0, 0, 0]},
+        {'name': '豆子1', 'type': 'sphere', 'position': [1, 0, 0]},
+        {'name': '豆子2', 'type': 'sphere', 'position': [2, 0, 0]},
+    ]}
+    ids_a = [o.get('id') for o in C.migrate(_copy.deepcopy(v1))['objects']]
+    ids_b = [o.get('id') for o in C.migrate(_copy.deepcopy(v1))['objects']]
+    check('G1 同一 v1 输入两次迁移 guid 逐值相等（确定性派生，不用 uuid4）',
+          ids_a == ids_b, '第一次=%s 第二次=%s' % (ids_a, ids_b))
+    check('G1b 派生 id 形状 = 32 hex',
+          all(isinstance(x, str) and _re2.fullmatch(r'[0-9a-f]{32}', x) for x in ids_a),
+          ids_a)
+    check('G1c 内容相同、序号不同的两个物体不撞同一 id', len(set(ids_a)) == len(ids_a), ids_a)
+
+    # G2 已有 id 保留（keep-me 用例照旧）
+    keep = {'version': 1, 'objects': [{'id': 'keep-me', 'name': 'k', 'type': 'cube'}]}
+    mk = C.migrate(_copy.deepcopy(keep))
+    check('G2 v1 已有 id 原样保留（keep-me）', mk['objects'][0]['id'] == 'keep-me',
+          mk['objects'][0]['id'])
+
+    # G3 8 处生成点收敛：生产代码 uuid.uuid4 只许 scene/identity.py 1 处
+    # （扫描口径与 test_scene_load_parity ③-gate 一致：跳过注释行与 docstring 行。）
+    import ast as _ast2
+
+    def _doc_skip(src):
+        try:
+            tree = _ast2.parse(src)
+        except SyntaxError:
+            return set()
+        out = set()
+        for n in _ast2.walk(tree):
+            if isinstance(n, (_ast2.Module, _ast2.FunctionDef, _ast2.AsyncFunctionDef,
+                              _ast2.ClassDef)):
+                b = n.body[0] if getattr(n, 'body', None) else None
+                if b is not None and isinstance(b, _ast2.Expr) \
+                        and isinstance(getattr(b, 'value', None), _ast2.Constant) \
+                        and isinstance(b.value.value, str):
+                    out.update(range(b.lineno, b.end_lineno + 1))
+        return out
+
+    here = os.path.dirname(os.path.abspath(__file__))
+    root = os.path.dirname(here)
+    hits = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        parts = os.path.relpath(dirpath, root).split(os.sep)
+        if any(p in ('tests', '_tmp', '__pycache__', 'player_runtime', 'archive',
+                     'core_plugins', 'plugins', 'scripts') for p in parts):
+            dirnames[:] = []
+            continue
+        dirnames[:] = sorted(d for d in dirnames if d not in ('__pycache__',))
+        for fn in sorted(filenames):
+            if fn.endswith('.py'):
+                p = os.path.join(dirpath, fn)
+                rel = os.path.relpath(p, root).replace(os.sep, '/')
+                try:
+                    src2 = open(p, encoding='utf-8').read()
+                except OSError:
+                    continue
+                skip2 = _doc_skip(src2)
+                for i, line in enumerate(src2.splitlines(), 1):
+                    s2 = line.strip()
+                    if s2.startswith('#') or i in skip2:
+                        continue
+                    if _re2.search(r'uuid\.uuid4|uuid4\(\)\.hex', line):
+                        hits.append('%s:%d' % (rel, i))
+    check('G3 生产代码 uuid.uuid4 只许 scene/identity.py 1 处（8 处生成点已收敛；唯一实现行号不写死）',
+          len(hits) == 1 and hits[0].startswith('scene/identity.py:'), '实际: %s' % (hits,))
+
+    # G4 derived_guid 同输入同输出（唯一实现在 scene.identity）
+    from scene.identity import derived_guid as _dg
+    check('G4 derived_guid 同输入同输出（32 hex）',
+          _dg('a', 1, 'x') == _dg('a', 1, 'x')
+          and _dg('a', 1, 'x') != _dg('a', 2, 'x')
+          and bool(_re2.fullmatch(r'[0-9a-f]{32}', _dg('a', 1, 'x'))))
+    check('G4b sceneio.new_guid / generate_guid is scene.identity.new_guid',
+          S.new_guid is __import__('scene.identity', fromlist=['new_guid']).new_guid
+          and S.generate_guid() != S.generate_guid())
+
+    # G5 ③ 提示保存：迁移新分配 id 后打印一行（不打断加载；幂等重迁移不打印）
+    buf = _io.StringIO()
+    _old = sys.stdout
+    sys.stdout = buf
+    try:
+        C.migrate(_copy.deepcopy(v1))
+    finally:
+        sys.stdout = _old
+    check('G5 迁移新分配 guid 后打印「请保存场景以固化」提示（只一行，不弹窗）',
+          '请保存场景以固化' in buf.getvalue() and buf.getvalue().count('请保存场景以固化') == 1,
+          repr(buf.getvalue()[-200:]))
+    _once = C.migrate(_copy.deepcopy(v1))            # 捕获窗外先迁一次
+    buf2 = _io.StringIO()
+    sys.stdout = buf2
+    try:
+        C.migrate(_copy.deepcopy(_once))             # 重迁移（id 已在）-> 不得打印
+    finally:
+        sys.stdout = _old
+    check('G5b 幂等重迁移（id 已在）不再打印提示', '请保存场景以固化' not in buf2.getvalue(),
+          repr(buf2.getvalue()[-120:]))
+
+
 def main():
     t_standalone_import()
     t_single_source()
@@ -318,6 +440,7 @@ def main():
     t_migrate()
     t_prepare()
     t_reexport()
+    t_guid_identity()
 
     print()
     print('=== 汇总 ===')

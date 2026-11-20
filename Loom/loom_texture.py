@@ -13,12 +13,13 @@ GL 资源归属创建时的 context (与桶几何同纪律)；release 由引擎�
     tex.gl_tex                                  # moderngl texture (供 use/绑定)
 """
 import os
-import uuid
 import weakref
 
 import numpy as np
 
 import loom_appearance
+
+from scene.identity import new_guid   # Q-B7-49-1 P2: guid 唯一真源
 
 try:
     import pygame
@@ -47,7 +48,7 @@ class Texture:
     def __init__(self, width=0, height=0, rgba=None, name=None, guid=None,
                  path=None, mipmaps=True, wrap='repeat', filter_mode='trilinear',
                  aniso=1.0, max_size=0, compression='none'):
-        self.guid = guid or uuid.uuid4().hex
+        self.guid = guid or new_guid()   # Q-B7-49-1 P2: 唯一真源 scene.identity
         self.name = name or '纹理'
         self.path = path                      # 源文件路径 (序列化重载用)
         self.width = int(width)

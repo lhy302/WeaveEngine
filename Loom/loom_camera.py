@@ -18,7 +18,7 @@ import math
 import numpy as np
 
 from core.primitives import Point3D
-from loom_scene_entities import CameraState, wrap_deg
+from scene.entities import CameraState, wrap_deg
 from mathlib.matlib import view_basis_to_angles
 
 # ---- 轨道相机距离的**唯一**合法区间 (2026-11-06 R-03 修正) ----------------

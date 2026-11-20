@@ -175,7 +175,7 @@ import pygame                                                    # noqa: E402
 
 import loom_ui                                                   # noqa: E402  两端同一个生产 UI 管理器
 import loom_ui_resize                                            # noqa: E402  ⑦ 的共享前置（VK 侧唯一实现）
-import loom_scene_contract                                       # noqa: E402  场景版本号单点（不写死）
+import scene.contract as _scene_contract                                       # noqa: E402  场景版本号单点（不写死）
 import runtime                                                   # noqa: E402  GL 打包播放器（生产入口）
 import scene_driver as SD                                        # noqa: E402
 import vk_player                                                 # noqa: E402
@@ -192,7 +192,7 @@ _PAIRS = []                       # 收尾统一释放
 
 W, H = 640, 400
 FRAME_DT = 1 / 120.0
-_EMPTY_SCENE = {'version': loom_scene_contract.CURRENT_VERSION,
+_EMPTY_SCENE = {'version': _scene_contract.CURRENT_VERSION,
                 'objects': [], 'lights': [], 'ui': None}
 
 KNOWN_DIFFS = []              # 已知差异登记表：必须为空；发现差异 = 红并报告，不许登记糊过去

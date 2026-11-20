@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""loom_scene_entities.py — 场景实体状态类。
+"""scene/entities.py — 场景实体状态类。（B2 目录重构自 loom_scene_entities.py 原样归位）
 
 原属 engine.py（"光源状态" + CameraState 段）。
 内容：
@@ -7,17 +7,17 @@
   （Q-B7-38-1 B1 批 P1 前置项），此处 re-export 维持旧引用面
   LightState（光源实体）
   CameraState（摄像机实体）
-依赖：math / uuid / core.primitives.Point3D。
-engine.py 通过 from loom_scene_entities import ... 重导出。
+依赖：math / core.primitives.Point3D / scene.identity（guid 唯一真源）。
+engine.py 通过 from scene.entities import ... 重导出。
 
 2026-10-18: RuntimeUI 已删除 (C3 决策: 脚本直接用 loom_ui.Canvas API).
 """
 
 
 import math
-import uuid
 
 from core.primitives import Point3D
+from scene.identity import new_guid   # Q-B7-49-1 P2: guid 唯一真源（uuid4 只许在 identity.py）
 from mathlib.mathutil import wrap_deg   # noqa: F401  P1 前置: 实现唯一份在 mathlib.mathutil, 此处 re-export
 
 
@@ -82,7 +82,7 @@ class LightState:
         self.name = name or (
             '平行光' if kind == 'directional'
             else ('点光源' if kind == 'point' else '聚光灯'))
-        self.guid = guid or uuid.uuid4().hex   # 稳定身份 (序列化引用用)
+        self.guid = guid or new_guid()           # 稳定身份 (序列化引用用; Q-B7-49-1 P2 收敛到 scene.identity)
 
     @property
     def direction(self):
@@ -153,7 +153,7 @@ class CameraState:
         self.fov = float(fov)          # 度 (视角广度, 垂直 FOV)
         self.fov_locked = bool(fov_locked)
         self.name = name or '摄像机'
-        self.guid = guid or uuid.uuid4().hex   # 稳定身份 (序列化引用用)
+        self.guid = guid or new_guid()           # 稳定身份 (序列化引用用; Q-B7-49-1 P2 收敛到 scene.identity)
         # 俯仰角限制 (开发者配置; 玩家可调俯仰范围 = [pitch_min, pitch_max] 含两端)
         self.pitch_lock = bool(pitch_lock)
         self.pitch_min = float(pitch_min)

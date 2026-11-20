@@ -98,7 +98,7 @@ os.environ.setdefault('LOOM_USER_ROOT', tempfile.mkdtemp(prefix='loom_s5_pixel_u
 import numpy as np
 
 import editor as editor_mod
-import loom_scene_contract
+import scene.contract as _scene_contract
 import moderngl
 import scene_driver as _sd
 
@@ -270,7 +270,7 @@ class S5PixelProbe(Script):
 
 
 def _scene_dict():
-    return {'version': loom_scene_contract.CURRENT_VERSION,
+    return {'version': _scene_contract.CURRENT_VERSION,
             'camera': {'target': [0.0, 0.5, 0.0], 'distance': 7.0,
                        'yaw': 0.65, 'pitch': -0.35, 'fov': 60.0},
             'cameras': [], 'active_camera': None,

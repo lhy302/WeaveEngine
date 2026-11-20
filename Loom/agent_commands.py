@@ -469,11 +469,11 @@ def cmd_status(win, args):
 @command('screenshot', '视口截图存 PNG, save 返回文件路径 (白名单外拒绝; '
                        'full=true 抓整窗含工具栏/状态栏 FPS|TPS)')
 def cmd_screenshot(win, args):
-    import uuid
+    from scene.identity import new_guid   # Q-B7-49-1 P2: 随机身份唯一真源
     out = args.get('file')
     if not out:
         out = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])),
-                           '保存', 'shot_%s.png' % uuid.uuid4().hex[:8])
+                           '保存', 'shot_%s.png' % new_guid()[:8])
     else:
         ok, full = _safe_write_path(out, 'screenshot', win)
         if not ok:

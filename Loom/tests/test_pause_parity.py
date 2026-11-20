@@ -160,7 +160,7 @@ import numpy as np                                                # noqa: E402
 import pygame                                                     # noqa: E402
 
 import engine as E                                                # noqa: E402
-import loom_scene_contract                                        # noqa: E402  场景版本号单点（不写死）
+import scene.contract as _scene_contract                                        # noqa: E402  场景版本号单点（不写死）
 import moderngl                                                   # noqa: E402
 import runtime                                                    # noqa: E402  GL 打包播放器（生产入口）
 import scene_driver as SD                                         # noqa: E402  VK 播放器（生产入口）
@@ -439,7 +439,7 @@ def _cube(oid, pos, scale=(1.0, 1.0, 1.0), color='#40c0ff', size=1.0, **kw):
 def scene_data():
     """同一份场景：脚本物体（mover）+ 动画物体（anim）+ 自由落体（fall）+ 一盏定向光。"""
     return {
-        'version': loom_scene_contract.CURRENT_VERSION,
+        'version': _scene_contract.CURRENT_VERSION,
         'camera': {'target': [0.0, 0.0, 0.0], 'distance': 9.0, 'yaw': 0.6, 'pitch': -0.3},
         'cameras': [], 'active_camera': None,
         'objects': [

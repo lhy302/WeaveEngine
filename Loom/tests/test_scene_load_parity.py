@@ -73,18 +73,18 @@ def _enforce_fail_exit_code():
     只调 check_engine_version）→ v8 相机 yaw 停在 1.5707963（弧度当度用）。修点 = B7-17
     （"VK 播放器/打包游戏不做场景迁移"）。
   · R2 ③-migrate VK 装配路径经过 sceneio.migrate：migrate() 全仓只有 1 处调用点
-    （sceneio.py 的 scene_from_dict 内），VK 装配路径没经过它 → 迁移不是单一入口。修点 = B7-16。
+    （现 scene/io.py 的 scene_from_dict 内；B2 前 sceneio.py），VK 装配路径没经过它 → 迁移不是单一入口。修点 = B7-16。
   · R3 ③-gate 闸门单一入口：check_engine_version( 有 3 处重复调用
     （agent_commands.py / editor.py / scene_driver.py），没有单一入口。修点 = B7-16
-    （契约模块 loom_scene_contract.py）。**修复方若另起了模块名，改本断言的白名单。**
+    （契约模块 scene/contract.py）。**修复方若另起了模块名，改本断言的白名单。**
     **2026-11-18 独立复查 P0-1（本条曾是假门）**：函数改名为 gate 之后，断言仍只认旧名字
     `check_engine_version(`，于是"在 editor.py 里用**新名字** `gate({})` 插一处重复闸门"
     仍然 69 PASS / 0 FAIL 全绿（复查实测 M1，本地复现）；且 _call_sites 只 glob
     `Loom/*.py` 一层，扫不到 Loom/ui、Loom/core_components。已改为：递归扫
     Loom/**/*.py（跳 tests/、_tmp/、__pycache__、player_runtime/）、按标识符边界匹配、
     跳过注释与 docstring 行，并且**同时**断言新名 `gate(` / 旧名 `check_engine_version(` /
-    限定名 `sceneio.gate(`；白名单按「文件 + 所在函数」锁（契约模块全部 + sceneio.py 的
-    load_prefab / instantiate_prefab 两条 prefab 闸门）。
+    限定名 `sceneio.gate(`；白名单按「文件 + 所在函数」锁（契约模块全部 + scene/prefab.py 的
+    load_prefab / instantiate_prefab 两条 prefab 闸门；B2 前 sceneio.py，B2 拆入 scene/）。
   · R4 ③-v1 VK 物体 guid：v1 老场景物体无 id → GL 迁移后补出 guid，VK 仍为 None。修点 = B7-16/17。
   · R5 ③-newer 失败后当前场景未被破坏：GL 侧**先 clear_scene 再校验**（migrate 在
     scene_from_dict 内），于是"加载失败"在 GL 上把当前场景清空、VK 上保留 → 失败语义不一致。
@@ -535,13 +535,13 @@ def group3_migration(gl, vk, p_v8, p_v1, p_main, p_newer):
 
     print()
     print('--- ③ 结构面：场景契约单一入口（B7-16） ---')
-    contract = 'loom_scene_contract.py'      # 人类裁决 B7-16 的模块名
+    contract = 'scene/contract.py'      # 人类裁决 B7-16 的模块名（B2 目录重构自 loom_scene_contract.py）
     # 白名单按「文件 + 所在函数」锁（不按行号：行号会漂，函数名不会）：
     #   · 契约模块内 = 唯一实现；
-    #   · sceneio.py 只有 prefab 那两条（prefab 数据不迁移，故不走 prepare，只借同一个 gate）。
+    #   · scene/prefab.py 只有 prefab 那两条（prefab 数据不迁移，故不走 prepare，只借同一个 gate；B2 原 sceneio.py 拆入）。
     gate_allow = {(contract, None),
-                  ('sceneio.py', 'load_prefab'),
-                  ('sceneio.py', 'instantiate_prefab')}
+                  ('scene/prefab.py', 'load_prefab'),        # B2: 原 sceneio.py，按域拆进 scene/
+                  ('scene/prefab.py', 'instantiate_prefab')}
     new_sites = _call_sites('gate(')
     bad_new = _unexpected(new_sites, gate_allow)
     check('③-gate 版本闸门（新名 gate(）只由场景契约单一入口调用（其它文件 0 处）',

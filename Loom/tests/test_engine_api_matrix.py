@@ -39,7 +39,7 @@ beta7 批 0（B7-24）要定一份两端都必须实现的 IEngineAPI。在契�
   共同 +2，GL 独有 41 → **39**（删 'overlay_scope' / 'draw_lines' 两行基线），
   VK 107 → **109**。GL 计数不变。
 - **v3.1（2026-11-17 S2-2 部分完成）**：11 个纯数据查询方法（Layer/Tag/查找/SendMessage/设置层标签）
-  从 GLEngine 搬进 loom_scene_query.SceneQueryMixin（无 GPU 依赖）→ VK 82 → **93**，
+  从 GLEngine 搬进 scene.query.SceneQueryMixin（原 loom_scene_query.py，B2 归位）（无 GPU 依赖）→ VK 82 → **93**，
   GL 独有 40 → **29**，共同 72 → **83**。
 - **v3.2（2026-11-17 S2-2 续）**：add_model / attach_model / add_material / find_model_by_guid /
   toggle_logic_paused 也进内核（数据面进内核，GPU 上传走 _backend_upload_model 钩子）

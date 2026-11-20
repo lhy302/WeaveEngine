@@ -7,12 +7,13 @@ Material._bump_appearance 需 bump 外观代计数器 —— 2026-11-13 起写 l
 build_game 的静态 import 图）。engine.py 通过 `from loom_material import Material`
 重新导出。
 """
-import uuid
 
 import numpy as np
 
 import loom_appearance
 from core.color import _hex_rgba
+
+from scene.identity import new_guid   # Q-B7-49-1 P2: guid 唯一真源
 
 
 # ================ 材质资产 (M23) ================
@@ -33,7 +34,7 @@ class Material:
         self.color = color                       # 单色覆盖 (hex 字符串) 或 None=网格面色
         self.saturation = float(saturation)      # 0=灰阶, 1=原始, >1=增艳
         self.name = name or '材质'
-        self.guid = guid or uuid.uuid4().hex
+        self.guid = guid or new_guid()   # Q-B7-49-1 P2: 唯一真源 scene.identity
         # M36 PBR (2026-10-14): 金属度/粗糙度/PBR 开关 (对标 Unity Standard Shader)
         self._metallic = 0.0
         self._roughness = 0.5

@@ -173,12 +173,12 @@ os.environ.setdefault('LOOM_USER_ROOT', tempfile.mkdtemp(prefix='loom_s1_userroo
 import numpy as np                                                # noqa: E402
 
 import editor as editor_mod                                       # noqa: E402  GL 编辑器（生产类）
-import loom_scene_contract                                        # noqa: E402  场景版本号单点
+import scene.contract as _scene_contract                                        # noqa: E402  场景版本号单点
 import loom_ui                                                    # noqa: E402  Canvas UI（事件插桩）
 import moderngl                                                   # noqa: E402
 import runtime                                                    # noqa: E402  GL 打包播放器（生产入口）
 import scene_driver as _sd                                       # noqa: E402  VK 播放器（生产类，S5 四面对拍）
-from loom_scene_entities import wrap_deg                          # noqa: E402  相机角度环绕（唯一实现）
+from scene.entities import wrap_deg                          # noqa: E402  相机角度环绕（唯一实现）
 from mathlib.matlib import (mat4_ortho, mat4_perspective, mat4_rotation,   # noqa: E402
                     mat4_scale, mat4_translation, mat4_view_yaw_pitch,
                     view_basis_to_angles)
@@ -465,7 +465,7 @@ def ui_section():
 
 def scene_a():
     """用例 A：active 相机（roll=15 pitch=30，无父）+ 脚本 + UI + 场景级天空盒。"""
-    return {'version': loom_scene_contract.CURRENT_VERSION,
+    return {'version': _scene_contract.CURRENT_VERSION,
             'camera': {'target': [0.0, 0.0, 0.0], 'distance': 10.0,
                        'yaw': 0.0, 'pitch': -0.35, 'fov': 60.0},
             'cameras': [cam_dict('c1', (2.0, 3.0, -4.0), 35.0, 30.0, 15.0)],
@@ -478,7 +478,7 @@ def scene_a():
 
 def scene_b():
     """用例 B：纯轨道相机（无 active_camera）+ fov=70 + 无天空盒。"""
-    return {'version': loom_scene_contract.CURRENT_VERSION,
+    return {'version': _scene_contract.CURRENT_VERSION,
             'camera': {'target': [1.0, 2.0, 3.0], 'distance': 12.0,
                        'yaw': 0.9, 'pitch': -0.4, 'fov': 70.0},
             'cameras': [], 'active_camera': None,
@@ -489,7 +489,7 @@ def scene_b():
 
 def scene_c():
     """用例 C：active 相机挂在父物体下 + 父每逻辑帧匀速移动（运行期挂父传播）。"""
-    return {'version': loom_scene_contract.CURRENT_VERSION,
+    return {'version': _scene_contract.CURRENT_VERSION,
             'camera': {'target': [0.0, 0.0, 0.0], 'distance': 10.0,
                        'yaw': 0.0, 'pitch': -0.35, 'fov': 60.0},
             'cameras': [cam_dict('c1', (2.0, 3.0, -4.0), 35.0, 30.0, 15.0, parent='par')],

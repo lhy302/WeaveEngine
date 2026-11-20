@@ -35,7 +35,7 @@ import loom_frame_components as _lfc
 # 2026-11-06 相机对齐 (双后端): CameraState 实体 (纯数据类, 无 GL 依赖) ——
 # 场景 cameras/active_camera 在 Vk 侧也要还原, 否则"场景里的 Camera 实体"
 # 在 Vulkan 播放器里完全不存在, 只能看轨道相机。
-from loom_scene_entities import CameraState
+from scene.entities import CameraState
 from scripts import get_script
 from loom_ui import UIManager, Canvas  # 2026-10-18: Canvas UI (替换 _DriverUI 空壳)
 # 2026-11-19 (P4-2): 轨道相机眼睛位置的**唯一实现**（GL 的 apply_orbit_camera 也调它）。
@@ -749,7 +749,11 @@ class SceneDriver(VkWindowMixin, VkEditorRenderMixin, EngineCore):
         ctx = None
         try:
             import sceneio as _sio
-            _sio._CUR_BASE_DIR = base_dir        # 密闭夹具：相对资源路径按场景目录解析
+            import scene.material as _sio_material
+            # B2 拆分: _CUR_BASE_DIR 唯一真源在 scene/material.py（唯一读者
+            # _resolve_scene_rel）；旧实现写 sceneio 模块全局，门面无法转发写 ——
+            # 直写真源，语义逐位不变（sceneio.__getattr__ 读侧惰性转发兜底）。
+            _sio_material._CUR_BASE_DIR = base_dir        # 密闭夹具：相对资源路径按场景目录解析
             if ctx is None:
                 ctx = _sio.asset_context(base_dir)
             self._asset_errors = []

@@ -205,7 +205,7 @@ def t_active_root():
               and abs(d.camera.z + 4.0) < 1e-12,
               (d.camera.x, d.camera.y, d.camera.z))
         # CameraState 存储时把 yaw 环绕进 [0,360) (M41 度制): -120 -> 240
-        from loom_scene_entities import wrap_deg
+        from scene.entities import wrap_deg
         check("2 朝向 度->弧度 (yaw=%.0f pitch=%.0f)" % (yaw, pitch),
               abs(d.camera_yaw - math.radians(wrap_deg(yaw, 0.0, 360.0))) < 1e-12
               and abs(d.camera_pitch
