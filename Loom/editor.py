@@ -161,6 +161,18 @@ def _editor_skybox_provider(engine, cmd):
 
 
 class _EditorCore(EngineCore):
+    # S5（Q-B7-47-1 五阶段·阶段 5）：编辑器形状标记 —— 渲染帧尾的 LateUpdate 由本类
+    # 共享的 editor.render 派发（GL 引擎的 advance_logic 从不派发 LateUpdate）。
+    # VK 的 SceneDriver.advance_logic 会在渲染帧尾派发一次（VK 播放器形状没有渲染帧
+    # 派发点，必须保持原样）；编辑器形状经本标记让它跳过，否则 VK 编辑器播放态每帧
+    # on_late_update **双发**（S5 门 ③ 组修前红：['start','update','late','late']）。
+    _render_dispatches_late = True
+    # 同族的「编辑器形状」标记：SceneDriver.advance_logic 的编辑态零逻辑门（S5）用它
+    # 区分形状 —— 裸 SceneDriver（VK 播放器内核/既有 VK 侧测试直驱）**不看 is_playing、
+    # 恒推进逻辑**（生产行为与既有测试契约）；只有编辑器形状（本类）的编辑态
+    # （is_playing=False）才零逻辑（与 GL advance_logic 第一分支同语义）。
+    _editor_shape = True
+
     """S2（Q-B7-47-1 五阶段·阶段 2）：编辑器能力的**中间基类**（后端无关）。
 
     原 EditorApp 类体（除 __init__ 外的全部编辑器方法/类属性）**原样搬入本类，
@@ -2961,6 +2973,17 @@ class _EditorCore(EngineCore):
             self.remove_model(m)
         self._seed_scene()
         self.mark_saved()        # 种子场景视为"已保存"基线 (未改动时新建不询问)
+
+        # S5（Q-B7-47-1 五阶段·阶段 5）：插值平面（分离批2）。GL 引擎在
+        # GLEngine.__init__ 建 _interp（split 开启时）；VK 编辑器经 SceneDriver
+        # 裸装配没有它，播放态 _refresh_play_matrices 会落到编辑态管线（渲染矩阵 =
+        # 逻辑位姿、无插值），与 GL 编辑器播放态差 1 个逻辑帧的观感（S5 门修前红：
+        # rw 逐帧不等、暂停/单步像素差 1 帧）。GL 已有 -> 本分支不触发，一行不变。
+        # models 列表对象是 EngineCore.__init__ 建的稳定引用（只 clear 不换），
+        # 与 GL 同一构造式。
+        if getattr(self, '_interp', None) is None and getattr(self, '_split_enable', False):
+            from interp_state import InterpState
+            self._interp = InterpState(self.models)
 
         # 打开项目 (--open <scene.json>): 启动即加载指定场景.
         # 由项目管理器"打开项目"调用, 覆盖种子场景进入该项目工作.

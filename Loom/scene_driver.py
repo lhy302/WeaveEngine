@@ -1008,8 +1008,15 @@ class SceneDriver(VkWindowMixin, VkEditorRenderMixin, EngineCore):
         性能口径（明确不做对齐，路线登记 §6.5）：配对走 loom_collision.pairs 的朴素
         O(n²) 候选对；GL 走 SAP + C 内核。**只在本场有脚本时才配对**（没有脚本就没人
         监听碰撞事件），避免无脚本场景白付这份成本。"""
-        self._prep_pairs = None
+        # ★S5（Q-B7-47-1 阶段 5）：逻辑位姿矩阵（_frame_world）每逻辑帧刷新 —— 与 GL
+        # _logic_prep 调**同一份**共享实现（EngineCore._refresh_play_frame_world，P-01；
+        # 同源不同步规则 5.5）。修前 VK 侧不刷新 -> VK 编辑器播放态 _frame_world 冻结在
+        # 进播放位姿（共享编辑器代码/测量面读的就是这个字段；S5 门 ② 组修前红）。
+        # VK 播放器渲染路径仍走自己的 f32 world_matrices（行为零变化；GL 本来就每
+        # 逻辑帧付这份 compute，性能口径见路线登记 §6.5）。
         models = self.models
+        self._refresh_play_frame_world(models)
+        self._prep_pairs = None
         if len(models) < 2:
             return
         if not any(getattr(m, "scripts", None) for m in models):
@@ -1110,6 +1117,21 @@ class SceneDriver(VkWindowMixin, VkEditorRenderMixin, EngineCore):
         #   camera_yaw/camera_pitch 恒 0 → 3D 听者钉死在原点（门 ②b 三条红）。
         #   放在暂停分支之前: GL 暂停期渲染帧照跑 apply_orbit_camera（相机状态不冻）。
         self._sync_orbit_camera_state()
+        # ★S5（Q-B7-47-1 五阶段·阶段 5）：编辑态零逻辑 —— 与 GL advance_logic 的第一
+        # 分支同一条门（engine.advance_logic：非播放态零逻辑、渲染帧照跑、alpha=0）。
+        # 只对**编辑器形状**（_EditorCore._editor_shape）生效：VK 编辑器编辑态
+        # （is_playing=False）修前也在跑逻辑帧（脚本在未播放时被实例化并 update，
+        # 物体在编辑态自己动 —— S5 门修前红）。裸 SceneDriver（VK 播放器内核/既有
+        # VK 侧测试直驱 advance_logic）**一行不变**：不看 is_playing、恒推进逻辑
+        # （vk_player 生产装配 is_playing=True，本门对它同样不触发）。
+        # 相机/键快照的帧首同步在本门**之前**（与 S4 实测的编辑态行为逐位一致）。
+        if (not getattr(self, 'is_playing', True)
+                and getattr(self, '_editor_shape', False)):
+            it = getattr(self, '_interp', None)
+            if it is not None:
+                it.alpha = 0.0
+            self._end_frame_input()
+            return (0, 0)
         # 2026-11-06 输入/相机帧首 (与 GL 同序: 鼠标结算 -> 挂父相机重应用 ->
         # 开发者视角鼠标 -> 逻辑步 (脚本)) —— 脚本后写仍覆盖, 契约不变。
         # 2026-11-07 通关暂停: 逻辑帧冻结 (脚本/物理/动画都不走), 渲染继续
@@ -1165,8 +1187,13 @@ class SceneDriver(VkWindowMixin, VkEditorRenderMixin, EngineCore):
             if it is not None:
                 it._extrap_mode = (1 if (self._interp_mode == 'extrapolate'
                                          and not self._clock.steps) else 0)
-            # 2026-10-18 阶段1档序11 LateUpdate（渲染帧尾, 逻辑步全部跑完之后）
-            self._dispatch_late_update(render_dt)
+            # 2026-10-18 阶段1档序11 LateUpdate（渲染帧尾, 逻辑步全部跑完之后）。
+            # ★S5（Q-B7-47-1 阶段 5）：编辑器形状（_EditorCore，_render_dispatches_late
+            # = True）的渲染帧尾 LateUpdate 由共享 editor.render 派发 —— 这里再派发
+            # 就是每帧双发（S5 门 ③ 组修前红）；播放器形状（本类裸用，无该标记）没有
+            # 渲染帧派发点，保持原样。
+            if not getattr(self, '_render_dispatches_late', False):
+                self._dispatch_late_update(render_dt)
             self._end_frame_input()
             return r
         self.update_scripts(render_dt)          # S4: 公共入口（TPS 样本 + 本类 impl）
@@ -1178,8 +1205,10 @@ class SceneDriver(VkWindowMixin, VkEditorRenderMixin, EngineCore):
         #   物理之后、LateUpdate 之前。修前 VK 这条路径没有 audio 段 → 该配置下
         #   VK 的 AudioSource 永不 play/stop（门 ③-c 红）。
         self.update_audio(render_dt)
-        # 2026-10-18 阶段1档序11 LateUpdate（绑死模式: update 之后）
-        self._dispatch_late_update(render_dt)
+        # 2026-10-18 阶段1档序11 LateUpdate（绑死模式: update 之后）。
+        # ★S5（Q-B7-47-1 阶段 5）：编辑器形状跳过（同上，共享 editor.render 已派发）。
+        if not getattr(self, '_render_dispatches_late', False):
+            self._dispatch_late_update(render_dt)
         self._end_frame_input()
         return (1, 1)
 
@@ -1897,7 +1926,16 @@ class SceneDriver(VkWindowMixin, VkEditorRenderMixin, EngineCore):
         cube = getattr(cam, 'skybox', None) if cam is not None else None
         if cube is not None:
             return cube
-        return getattr(self, 'skybox', None)
+        # ★S5（Q-B7-47-1 阶段 5）：场景级回落。播放器形状的字段 = self.skybox
+        # （load_from_data 写）；编辑器形状（_EditorCore 共享加载路径）写的是 GL
+        # 同名字段 _skybox（editor._refresh_effective_skybox 每次换场景/天空盒都
+        # 同步）—— 与 GL effective_skybox 的回落字段同一份。修前 VK 编辑器播放态
+        # effective_skybox() 恒 None -> 场景天空盒整体消失（S5 门 ⑥ 组修前红）。
+        # 播放器行为零变化：SceneDriver 没有 _skybox 字段，回落次序不变。
+        scene = getattr(self, 'skybox', None)
+        if scene is None:
+            scene = getattr(self, '_skybox', None)
+        return scene
 
     def active_camera_object(self):
         """当前玩家视角摄像机对象 (无则 None)."""

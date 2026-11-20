@@ -738,6 +738,31 @@ class EngineCore(TransformMixin, PhysicsMixin, InputMixin, CameraMixin,
         """
         self._tps_sample()
         return self._update_scripts_impl(delta_time)
+
+    def _refresh_play_frame_world(self, models):
+        """逻辑位姿矩阵（_frame_world）每逻辑帧刷新 —— P-01 的**唯一实现**（GL/VK 共享）。
+
+        P-01（2026-11-07）：播放态每个逻辑帧都必须走一次 compute_world_matrices ——
+        它内部 _fw_cache 在「变换对象未变」时直接返回缓存对象（静止帧 ~0ms），只有
+        动态帧才真算；同时 _transform_snapshot 会刷新 _soa_snap 供 interp.advance
+        翻页。旧实现只在 None/行数不符时赋值，进播放后 _frame_world 与 _soa_snap
+        永久冻结（编辑器画面/阴影/碰撞全停在进播放位姿）。
+
+        ★S5（Q-B7-47-1 五阶段·阶段 5）：本段原是 GLEngine._logic_prep 的内联块；
+        VK 的 _logic_prep（只算碰撞对，VK 渲染侧每帧自算 f32 矩阵）此前不刷新
+        _frame_world -> **VK 编辑器**播放态的逻辑位姿矩阵冻结在进播放位姿（共享
+        编辑器代码与测量面读的是同一个 _frame_world）。按「同源不同步」抽成本方法，
+        GL _logic_prep 与 VK _logic_prep 调**同一份**（规则 5.5）；GL 数值逐位不变
+        （条件/算式/序一字未改，profile 段标签随实现走，GL 记账口径不变）。
+        """
+        fw = getattr(self, '_frame_world', None)
+        if (getattr(self, 'is_playing', False) or fw is None
+                or fw.shape[0] != len(models)):
+            self._frame_world = self._profile(
+                'world_matrices', lambda: self.compute_world_matrices(models))
+            return True
+        return False
+
     # ============ S2（Q-B7-47-1 五阶段·阶段 2）：两个「文件放错」的纯方法归位内核 ============
     # 「B 类」方法 = 文件放在 GL 后端 mixin 里、方法体却一行后端（GL/VK）代码都没有的方法。
     #   · _model_aabbs_par —— 原 loom_lighting.LightingMixin，纯 numpy AABB 批量归约

@@ -73,7 +73,7 @@
 
 ```mermaid
 flowchart TB
-  subgraph EDENT["编辑器入口（只有 GL 一条腿）"]
+  subgraph EDENT["编辑器入口（GL 缺省 / --backend vulkan 走 VkEditorApp，S4/S5）"]
     A1["Loom.py<br/>源码入口"]:::entry
     A2["build_entry.py<br/>编译入口"]:::entry
   end
@@ -136,7 +136,11 @@ flowchart TB
 ```
 
 > **这张图 v1 画错过**：原来把 `run_player.py` 画在入口层中间、还画了一条 `run_player → game_player`，方向反了（是 game_player 调 run_player）。
-> 现在按「谁创建谁」重画：编辑器入口直连 GLEngine；播放器入口经 run_player 分叉到 GL（runtime.PlayerApp）或 VK（vk_player → SceneDriver）。
+> 现在按「谁创建谁」重画：编辑器入口缺省直连 GLEngine（EditorApp(_EditorCore, GLEngine)），
+> S4 起显式 `--backend vulkan` 时改走 VkEditorApp(_EditorCore, SceneDriver)（真窗口双视口可用，ui/vk_viewport.py）；
+> 播放器入口经 run_player 分叉到 GL（runtime.PlayerApp）或 VK（vk_player → SceneDriver）。
+> 编辑器与播放器的播放组件是**同一份**（_EditorCore 中间基类 + 主 pass 相机/挂父相机/LateUpdate/
+> _refresh_play_frame_world 共享实现，「同源不同步」规则 5.5，S5 对拍门四面全绿）。
 
 ## 图 1.1 谁能选后端、不能选时怎么办（这张表比图更说明问题）
 
@@ -417,10 +421,15 @@ flowchart LR
   VKE["VkEditorApp<br/>editor.py（S4）"]:::facade
   SDV["SceneDriver<br/>scene_driver.py"]:::facade
   VKV["VkViewport<br/>ui/vk_viewport.py 292"]:::file
-  VKE ==>|继承（同一 _EditorCore）| ED
+  COR["★ _EditorCore<br/>editor.py（S2 中间基类）<br/>编辑器 ~140 方法唯一实现"]:::contract
+  LPV["loom_pass_vk.py（S3）<br/>VkLineBatch / overlay_scope<br/>VkFrameExecutor（同一份 plan）"]:::contract
+  ED ==>|继承| COR
+  VKE ==>|继承| COR
   VKE ==>|继承| SDV
   VKE -->|由宿主装配| VKV
   VKV -->|QRenderWidget bitmap| VKW["rendercanvas.qt"]:::file
+  ED -->|叠加层原语| LPV
+  VKE -->|叠加层原语/帧执行| LPV
   ED -->|记录命令| U
   EAI -->|调用编辑器方法| ED
   ED -->|打开/保存| FD
@@ -429,7 +438,12 @@ flowchart LR
   classDef entry fill:#dbeafe,stroke:#2563eb,color:#1e3a8a
   classDef facade fill:#ede9fe,stroke:#7c3aed,color:#4c1d95
   classDef file fill:#f1f5f9,stroke:#64748b,color:#334155
+  classDef contract fill:#ffedd5,stroke:#ea580c,color:#7c2d12
 ```
+
+> GL 编辑器与 VK 编辑器的**播放组件同源**：相机策略 / 挂父相机重应用 / LateUpdate 派发 /
+> 逻辑位姿矩阵刷新（_refresh_play_frame_world）/ 进出播放（toggle_play）都是同一份函数对象；
+> 对拍门 = test_editor_play_parity（四面：GL编辑器播放/GL播放器/VK编辑器播放/VK播放器，566 条）。
 
 ---
 
@@ -1041,7 +1055,7 @@ flowchart TB
 > 本轮六面补门一共修出 **17 个真缺陷**，其中 **1 个是「两端一致地坏」**（P4-1：3D 音效从来没响过）——
 > 如果门只做「GL vs VK 对比」，它会全绿。只有「**期望值不取自任何一端**」（手算期望表）才能抓出来。
 
-## 19.1 六面对拍门（653 条断言，全绿）
+## 19.1 七面对拍门（P1~P6 653 条 + P7 编辑器播放态 566+17 条，全绿）
 
 ```mermaid
 flowchart TB
@@ -1052,6 +1066,7 @@ flowchart TB
     F4["P4 音频<br/>播放状态机 · 3D 听者<br/>段序 · 绑死模式"]:::ok
     F5["P5 相机<br/>轨道位姿 · 脚本写角度<br/>挂父 · 投影"]:::ok
     F6["P6 暂停/单步<br/>冻结不跳变 · F10 恰好+1<br/>恢复无欠账 · 截图对拍"]:::ok
+    F7["P7 编辑器播放态（S5）<br/>GL/VK 编辑器播放 vs 各自播放器<br/>四面逐项相等 · 4 时刻像素 · 叠加层"]:::ok
   end
   subgraph GATES["六条门（run_all 自动收集）"]
     G1["test_scene_load_parity<br/>76"]:::gate
@@ -1060,6 +1075,7 @@ flowchart TB
     G4["test_audio_parity<br/>105"]:::gate
     G5["test_camera_parity<br/>195"]:::gate
     G6["test_pause_parity<br/>71"]:::gate
+    G7["test_editor_play_parity 566<br/>test_editor_play_pixel_parity 17<br/>（+S3/S4 门：vk_overlay 18 / editor_smoke 16）"]:::gate
   end
   F1 --> G1
   F2 --> G2
@@ -1067,6 +1083,7 @@ flowchart TB
   F4 --> G4
   F5 --> G5
   F6 --> G6
+  F7 --> G7
   classDef ok fill:#dcfce7,stroke:#16a34a,color:#14532d
   classDef gate fill:#dbeafe,stroke:#2563eb,color:#1e3a8a
 ```
@@ -1086,6 +1103,10 @@ flowchart TB
 | `test_ab_gl_vk` | 26 场景 | A/B 像素（MAE≈0） |
 | `test_scene_contract` | 39 | 场景契约模块（能单独 import、不拉引擎） |
 | `test_fullscreen_vk` | 40 | VK 全屏契约 |
+| `test_editor_play_parity`（S5） | 566 | **P7 编辑器播放态**：GL/VK 编辑器播放 vs GL/VK 播放器 **四面**逐项相等（相机 8 元组+VP / 世界矩阵 f64+f32 / 钩子序 / 时钟 / UI 树 / 生效天空盒）+ 修前红 5 处 VK 播放态真缺陷 |
+| `test_editor_play_pixel_parity`（S5） | 17 | P7 像素面：GL/VK **编辑器**播放 4 时刻（暂停/单步1/单步3/恢复）逐像素（实测 MAE=0.0）+ gizmo/选中框叠加层中心线重合度（S3 口径，线宽 1px vs 2px 待裁决） |
+| `test_vk_overlay_primitives`（S3） | 18 | VK 叠加层原语单元门（像素中心线重合度 0.32~0.49px） |
+| `test_vk_editor_smoke`（S4） | 16 | VK 编辑器视口真窗口冒烟（60 帧 + grab + 选中/拖 gizmo/加物体；子进程隔离，verdict 文件判绿） |
 
 ## 19.3 ★ 还没有对拍门的面（缺口，按优先级）
 
@@ -1094,7 +1115,7 @@ flowchart LR
   subgraph GAP["尚无两端对拍门"]
     N1["物理面<br/>（P6 只当夹具探针）"]:::gap
     N2["动画面<br/>（P6 只当夹具探针）"]:::gap
-    N3["编辑器交互时序<br/>（暂停/滚轮/resize）"]:::gap
+    N3["编辑器滚轮/resize 时序<br/>（暂停/单步观感已由 P7 落地）"]:::gap
     N4["打包产物端到端<br/>（B7-29 末尾一次性）"]:::gap
     N5["绑死模式暂停/单步<br/>（logic_fps<=0）"]:::gap
     N6["高 DPI 下 UI 画布<br/>（非 100% 缩放）"]:::gap
@@ -1106,7 +1127,7 @@ flowchart LR
 |---|---|---|
 | **物理面** | P6 只把物理当「夹具保真探针」（验刚体真下落），没做两端对拍 | 待立项 |
 | **动画面** | 同上（验 animator.time 同值） | 待立项 |
-| **编辑器交互时序** | 六面门全走**播放器入口**；编辑器只由既有回归覆盖 | 待立项 |
+| ~~**编辑器交互时序（暂停/单步观感）**~~ | ~~六面门全走播放器入口~~ | **已落地（S5 P7）**：编辑器播放 4 时刻像素门 + 四面状态门（test_editor_play_parity / test_editor_play_pixel_parity）；**滚轮/resize 时序仍缺口**（待立项，B7-28 滚轮已另立） |
 | **打包产物端到端** | `smoke` 的 [5/7][6/7][7/7] 恒 SKIP（源码模式无产物） | **B7-29**（beta7 末尾做一次） |
 | **绑死模式暂停/单步** | P6 文件头自认「未核 ③」 | 待立项（P4 ③-c 已有绑死模式音频段先例可复用） |
 | **高 DPI UI 画布** | 本机 100% 缩放，`loom_ui_resize.window_size` 的 fallback 分支与 GL 逻辑像素可能不同 | 待立项 |

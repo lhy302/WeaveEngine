@@ -52,9 +52,10 @@ def _enforce_fail_exit_code():
 对拍面：
   ✅ 实对拍：GL编辑器播放 (真 editor.EditorApp + toggle_play + render) vs
              GL播放器 (真 runtime.PlayerApp + render) —— 本门主体。
-  ⏸ SKIP：VK编辑器播放 vs VK播放器 / VK编辑器播放 vs GL编辑器播放
-           —— **S4 未实现**（编辑器视口 VK 化未实现，Q-B7-47-1 五阶段之 S4）。
-           未实现要可见，不许静默放过；S4 落地时本门补 VK 夹具即可。
+  ✅ S5（2026-11-20）：**四面全对拍** —— GL编辑器播放 / GL播放器 / VK编辑器播放 /
+     VK播放器（S4 落地 VkEditorApp 后，S1 的两条 SKIP 换成真断言；VK 面断言用的
+     采集器与 GL 面**同一个**（measure_gl / ui_tree_of / REC / _model_world），
+     同源纪律：不是各写一份）。
 
 四组断言（同一份场景 + 同一串渲染帧 → 逐项相等，且 = 手算期望；期望值不取自任何一端）：
   ① 相机 8 元组 (eye, fwd, up, yaw, pitch, roll) + fov + orbit_mode + 生产 VP ——
@@ -127,6 +128,29 @@ def _enforce_fail_exit_code():
     （契约路径 0 次）；修后绿：5 轮退出各恰 +1 disable、VM 关闭 100% 走 on_disable
     契约路径（存活恒 0 —— 修前「疑似泄漏」实测为兜底即时回收，非线性泄漏）。
     本门 ⑦ 组锁定：退出追加恰一次 on_disable + 全仓唯一派发点在组件重建之前的结构锁。
+
+⑧ S5（2026-11-20，Q-B7-47-1 五阶段·阶段 5）：VK 面补齐 = 四面全对拍 + 修前必红（5 处 VK
+  播放/编辑态真缺陷，全部按「同源不同步」修完，本提交）：
+  修前红（S5 门 VK 断言先行落笔、生产修复前实测；基线 afe58f2）：
+  · ③ VK编辑器钩子序双发：['start','update','late','late'] —— SceneDriver.advance_logic
+    渲染帧尾派发 LateUpdate（VK 播放器形状没有渲染帧派发点，本就需要）+ 共享 editor.render
+    再派发一次 → VK 编辑器播放态每帧 on_late_update ×2（GL 三面恒单发）；
+  · ⑥ VK编辑器生效天空盒恒 None —— SceneDriver.effective_skybox 场景级回落只读播放器字段
+    self.skybox，编辑器共享加载写的是 GL 同名字段 _skybox → 场景天空盒整体消失
+    （include_sky=False；GL/VK播放器 两面正确）；
+  · ② VK编辑器 _frame_world 冻结在进播放位姿 —— VK _logic_prep 只算碰撞对、不刷新逻辑
+    位姿矩阵（GL 侧 P-01 内联块 VK 侧没有）→ 抽 EngineCore._refresh_play_frame_world
+    两端 _logic_prep 同调（同源唯一实现）；
+  · ②/④ VK编辑器 _interp 恒 None —— 渲染矩阵落编辑态管线（= 逻辑位姿、无插值），与
+    GL 编辑器播放态差 1 个逻辑帧的观感 → _EditorCore._init_editor_state 补建（GL 已有
+    不触发，一行不变）；
+  · 编辑态 VK 编辑器照跑逻辑帧 —— SceneDriver.advance_logic 无 is_playing 门（VK 播放器
+    形状恒播放用不到），未播放脚本被实例化并 update、物体在编辑态自己动（GL 编辑态零
+    逻辑）→ advance_logic 补与 GL 同一条编辑态零逻辑门（播放器形状 is_playing 恒 True
+    → 行为零变化）。
+  修后绿：四面逐项相等（相机/世界矩阵/钩子/时钟/UI/天空盒），断言计数见提交信息。
+  修前必红复跑法：git stash Loom/editor.py Loom/engine.py Loom/engine_core.py
+  Loom/scene_driver.py（4 个生产文件回到修前）→ 门红；还原 → 绿。
 """
 
 import hashlib
@@ -153,6 +177,7 @@ import loom_scene_contract                                        # noqa: E402  
 import loom_ui                                                    # noqa: E402  Canvas UI（事件插桩）
 import moderngl                                                   # noqa: E402
 import runtime                                                    # noqa: E402  GL 打包播放器（生产入口）
+import scene_driver as _sd                                       # noqa: E402  VK 播放器（生产类，S5 四面对拍）
 from loom_scene_entities import wrap_deg                          # noqa: E402  相机角度环绕（唯一实现）
 from matlib import (mat4_ortho, mat4_perspective, mat4_rotation,   # noqa: E402
                     mat4_scale, mat4_translation, mat4_view_yaw_pitch,
@@ -259,6 +284,27 @@ for _hist in ('def _apply_render_camera', 'def apply_play_camera',
               'def apply_main_pass_camera'):
     _h = _grep_prod(_hist)
     check('结构：历史名/公开别名 %r 在全部生产文件里不存在' % _hist, not _h, _h[:4])
+
+print()
+print("=== 〇''. S5 结构：四面同源（GL/VK 编辑器共用同一份 _EditorCore 方法对象） ===")
+from loom_render import RenderMixin as _RenderMixin     # noqa: E402
+from engine import GLEngine as _GLE                     # noqa: E402
+_vk_mro = [cls.__name__ for cls in editor_mod.VkEditorApp.__mro__]
+check('S5 结构：VkEditorApp -> _EditorCore -> SceneDriver 装配形状（S4 落地未变）',
+      _vk_mro[:3] == ['VkEditorApp', '_EditorCore', 'SceneDriver'], _vk_mro[:4])
+check('S5 结构：编辑器 render 是同一份函数对象（GL/VK 两入口同一条 editor.render）',
+      editor_mod.EditorApp.render is editor_mod.VkEditorApp.render, '')
+check('S5 结构：toggle_play 是同一份函数对象（进/出播放边界四面同源）',
+      editor_mod.EditorApp.toggle_play is editor_mod.VkEditorApp.toggle_play, '')
+check('S5 结构：主 pass 相机策略 = 同一函数对象再绑定（VkEditorApp._apply_main_pass_camera '
+      'is loom_render.RenderMixin._apply_main_pass_camera；非复制）',
+      editor_mod.VkEditorApp._apply_main_pass_camera is _RenderMixin._apply_main_pass_camera, '')
+check('S5 结构：_refresh_play_frame_world 唯一实现（GL/VK 的 _logic_prep 解析到同一函数对象；'
+      'getattr 口径 —— 生产修复被回退时两侧皆缺 = False，不是 AttributeError）',
+      getattr(_GLE, '_refresh_play_frame_world', None)
+      is getattr(_sd.SceneDriver, '_refresh_play_frame_world', None), '')
+check('S5 结构：compute_world_matrices 是同一份 TransformMixin 函数对象（四面共享）',
+      _GLE.compute_world_matrices is _sd.SceneDriver.compute_world_matrices, '')
 check('已知差异登记表为空（不许登记任何容差）', not KNOWN_DIFFS, KNOWN_DIFFS)
 
 
@@ -283,6 +329,59 @@ def _gl_fbo(w, h):
             depth_attachment=ctx.depth_renderbuffer((w, h)))
         _GL['fbos'][key] = fbo
     return fbo
+
+
+# ---- VK 夹具（S5：与 GL 同一构造式；离屏纹理 = test_ab_gl_vk 既有口径） ----
+_VK_FMT = 'rgba8unorm'
+_VK = {'device': None, 'tex': None}
+
+
+def _vk_device():
+    if _VK['device'] is None:
+        import wgpu
+        adapter = wgpu.gpu.request_adapter_sync(power_preference='high-performance')
+        if adapter is None:
+            raise RuntimeError('无可用 Vulkan 适配器（与 test_ab_gl_vk 同口径：FAIL 不 SKIP）')
+        _VK['device'] = adapter.request_device_sync()
+    return _VK['device']
+
+
+class _VkOffscreenCtx:
+    """VK 离屏目标（test_ab_gl_vk.render_vk 的 Ctx 同款）：physical_size +
+    get_current_texture —— VkFrameExecutor / 叠加层 flush 的宿主协议。"""
+
+    physical_size = (W, H)
+
+    def get_current_texture(self):
+        if _VK['tex'] is None:
+            import wgpu
+            _VK['tex'] = _vk_device().create_texture(
+                size=(W, H, 1), format=_VK_FMT,
+                usage=wgpu.TextureUsage.RENDER_ATTACHMENT | wgpu.TextureUsage.COPY_SRC)
+        return _VK['tex']
+
+
+class _NullView:
+    """VK 编辑器宿主视图桩（VkEditorApp 要求显式注入 IEditorView；不画叠加层 ——
+    状态面对拍不涉及视图叠加层，像素面归 S5 像素门）。"""
+
+    def attach(self, ctl):
+        self.ctl = ctl
+
+    def input_state(self):
+        return {'mouse_pos': (0, 0), 'buttons': (0, 0, 0), 'pressed': set(),
+                'released': set(), 'wheel': 0, 'click_captured': True,
+                'focus_id': None}
+
+    def handle_key_event(self, ev):
+        return True
+
+    def reset_interaction(self):
+        pass
+
+    def draw(self, controller, delta_time):
+        pass
+
 
 
 # ---- 钩子记录（真实注册脚本；REC 按引擎实例分桶） ----
@@ -498,8 +597,63 @@ def measure_gl(app):
             'vp_ok': bool(np.array_equal(np.asarray(V) @ np.asarray(P), prod)),
             'fw_sha': hashlib.sha256(np.asarray(app._frame_world, dtype=np.float64).tobytes()).hexdigest(),
             'rw_sha': hashlib.sha256(np.asarray(app._render_world, dtype=np.float64).tobytes()).hexdigest(),
+            # S5: 渲染矩阵的渲染管线原生精度形态（f32 = GPU 上传精度，非容差口径）
+            'rw32': np.asarray(app._render_world, dtype=np.float32).tobytes(),
             'steps': int(app._clock.steps), 'alpha': float(app._clock.alpha),
-            'steps_total': int(getattr(app, '_logic_steps_total', -1)),
+            # S5: GL 端 _logic_steps_total（engine 记账）；VK 编辑器面无该字段，
+            # 回落到同一份 CoreClock 的 steps_total（probe3 实测 GL 两面二值恒等）。
+            'steps_total': int(getattr(app, '_logic_steps_total',
+                                       getattr(getattr(app, '_clock', None),
+                                               'steps_total', -1))),
+            'sky': None if sky is None else (getattr(sky, 'name', None),
+                                             list(getattr(sky, '_solid_color', ()) or ())),
+            }
+
+
+def _vk_fw_sha(drv):
+    """VK 播放器面 _frame_world 的 sha（getattr 口径）：生产修复被回退（修前）时
+    VK 播放器形状连该字段都没有 —— 测量降级为 None（断言按「不等」红），不让测量
+    本身把门炸成 AttributeError（修前红必须以 FAIL 行留痕，见门头 ⑧ 段）。"""
+    _fw = getattr(drv, '_frame_world', None)
+    if _fw is None:
+        return None
+    return hashlib.sha256(np.asarray(_fw, dtype=np.float64).tobytes()).hexdigest()
+
+def measure_vk_player(drv, prod_vp):
+    """VK 播放器面测量 —— 字段名与 measure_gl 同名同义（采集器同源，不是各写一份）。
+
+    · fw = drv._frame_world（S5 D4 后由共享 EngineCore._refresh_play_frame_world
+      每逻辑帧维护，float64 —— 与 GL 面同一份生产者）；
+    · rw32 = vk_renderer.world_matrices(models, interp)（VK 渲染管线每帧自算的 f32
+      渲染矩阵 —— vk_renderer.draw_frame 消费的正是这一份）；
+    · VP = render_pose 生产返回值；「生产字段重建 V@P == 本帧生产 VP」保真断言与
+      GL measure_gl 同口径。
+    """
+    eye = (float(drv.camera.x), float(drv.camera.y), float(drv.camera.z))
+    V = mat4_view_yaw_pitch(np, eye, drv.camera_yaw, drv.camera_pitch, drv.camera_roll)
+    if getattr(drv, 'ortho', False):
+        h = float(getattr(drv, 'ortho_size', 12.0))
+        asp = W / max(1, H)
+        P = mat4_ortho(np, -h * asp * 0.5, h * asp * 0.5, -h * 0.5, h * 0.5,
+                       drv.near, drv.far)
+    else:
+        P = mat4_perspective(np, drv.fov, W / H, drv.near, drv.far)
+    prod = np.asarray(prod_vp, dtype=np.float64)
+    sky = drv.effective_skybox()
+    import vk_renderer as _vr          # 惰性：GL 读者不拉 wgpu 之外的 VK 渲染器
+    rw32 = _vr.world_matrices(drv.models, getattr(drv, '_interp', None)).tobytes()
+    return {'eye': eye,
+            'fwd': tuple(float(v) for v in V[0:3, 2]),
+            'up': tuple(float(v) for v in V[0:3, 1]),
+            'yaw': float(drv.camera_yaw), 'pitch': float(drv.camera_pitch),
+            'roll': float(drv.camera_roll),
+            'fov': float(drv.fov), 'orbit': bool(getattr(drv, 'orbit_mode', None)),
+            'vp': prod,
+            'vp_ok': bool(np.array_equal(np.asarray(V) @ np.asarray(P), prod)),
+            'fw_sha': _vk_fw_sha(drv),
+            'rw32': rw32,
+            'steps': int(drv._clock.steps), 'alpha': float(drv._clock.alpha),
+            'steps_total': int(drv._clock.steps_total),
             'sky': None if sky is None else (getattr(sky, 'name', None),
                                              list(getattr(sky, '_solid_color', ()) or ())),
             }
@@ -553,22 +707,54 @@ class Pair:
             UI_EVENTS.append(('view_draw', id(_ed)))
             return _orig(ctl, dt)
         self.ed.view.draw = _vd
-        # 两端同一份生产时钟设置
+        # ---- S5: VK 两面（同一份场景用户内容；生产构造式） ----
+        # VK 播放器面 = scene_driver.SceneDriver（生产 VK 播放器同一类），
+        # 装配按 vk_player.run_vk 生产同款：is_playing=True（vk_player.py:346，
+        # 「播放器一进来就是正在播放语义」）→ load_from_data → set_fps。
+        self.v = _sd.SceneDriver()
+        self.v.is_playing = True
+        self.v.load_from_data(json.loads(json.dumps(scene_data)))
+        # VK 编辑器面 = editor.VkEditorApp（S4 生产类）：wgpu device + 离屏纹理宿主
+        # （VkFrameExecutor/叠加层 flush 协议）→ 生产打开路径 _load_scene →
+        # toggle_play（与 GL 编辑器共享的同一份 _EditorCore.toggle_play）。
+        self.k = editor_mod.VkEditorApp(W, H, view=_NullView(), device=_vk_device(),
+                                        present_format=_VK_FMT)
+        self.k._vk_ctx = _VkOffscreenCtx()
+        self.k.show_grid = False
+        self.k.selected_index = -1
+        self.k.selected_light_index = -1
+        self.k.selected_camera_index = -1
+        self.k._load_scene(sfile)
+        # 四面同一份生产时钟设置
         self.gl._clock.set_fps(logic_fps=LOGIC_FPS)
         self.ed.toggle_play()
         self.ed._clock.set_fps(logic_fps=LOGIC_FPS)
+        self.v._clock.set_fps(logic_fps=LOGIC_FPS)
+        self.k.toggle_play()
+        self.k._clock.set_fps(logic_fps=LOGIC_FPS)
         self.gl_hooks_at_enter = list(REC.get(id(self.gl), []))
         self.ed_hooks_at_enter = list(REC.get(id(self.ed), []))
+        self.v_hooks_at_enter = list(REC.get(id(self.v), []))
+        self.k_hooks_at_enter = list(REC.get(id(self.k), []))
         REC.setdefault(id(self.gl), []).clear()
         REC.setdefault(id(self.ed), []).clear()
+        REC.setdefault(id(self.v), []).clear()
+        REC.setdefault(id(self.k), []).clear()
 
     @staticmethod
     def _model_world(app, name):
         idx = [i for i, m in enumerate(app.models) if m.name == name]
-        return np.asarray(app._frame_world, dtype=np.float64)[idx[0]].copy()
+        # getattr 口径（修前 VK 播放器形状连 _frame_world 都没有 -> None，断言按不等红）：
+        fw = getattr(app, '_frame_world', None)
+        return None if fw is None else np.asarray(fw, dtype=np.float64)[idx[0]].copy()
 
     def frame(self, k):
-        """第 k 个渲染帧（1 基）：喂 dt 前清墙钟锚（测试语义，见 _clock_advance docstring）。"""
+        """第 k 个渲染帧（1 基）：喂 dt 前清墙钟锚（测试语义，见 _clock_advance docstring）。
+
+        S5: 四面同一帧驱动 —— GL 两面走 render()；VK 播放器面走生产 vk_player.draw
+        帧序（advance_logic → interp.alpha 透传 → render_pose；状态面不含 draw_frame，
+        像素面归 S5 像素门）；VK 编辑器面与 GL 编辑器**同一条** editor.render 生产帧
+        （VkFrameExecutor 消费同一份 FramePlan）。"""
         self.gl._logic_wall_last = None
         self.ed._logic_wall_last = None
         ui0 = len(UI_EVENTS)
@@ -578,19 +764,46 @@ class Pair:
         ev_ui = UI_EVENTS[ui0:]
         gh = REC[id(self.gl)][h0[0]:]
         eh = REC[id(self.ed)][h0[1]:]
+        # ---- S5: VK 两面 ----
+        self.v._logic_wall_last = None
+        h0v = len(REC.get(id(self.v), []))
+        self.v.advance_logic(FRAME_DT)
+        if getattr(self.v, '_interp', None) is not None and self.v._clock is not None:
+            self.v._interp.alpha = self.v._clock.alpha
+        v_vp, _v_cam_pos = self.v.render_pose(W / H)
+        vh = REC[id(self.v)][h0v:]
+        self.k._logic_wall_last = None
+        h0k = len(REC.get(id(self.k), []))
+        self.k.render(FRAME_DT)
+        kh = REC[id(self.k)][h0k:]
         return {'g': measure_gl(self.gl), 'e': measure_gl(self.ed),
+                'v': measure_vk_player(self.v, v_vp), 'k': measure_gl(self.k),
                 'g_hooks': list(gh), 'e_hooks': list(eh),
+                'v_hooks': list(vh), 'k_hooks': list(kh),
                 'g_ui': [x[0] for x in ev_ui if x[1] == id(self.gl)],
                 'e_ui': [x[0] for x in ev_ui if x[1] == id(self.ed)],
                 'g_tree': ui_tree_of(self.gl), 'e_tree': ui_tree_of(self.ed),
+                'v_tree': ui_tree_of(self.v), 'k_tree': ui_tree_of(self.k),
                 'g_host': self._model_world(self.gl, self.host_name),
                 'e_host': self._model_world(self.ed, self.host_name),
+                'v_host': self._model_world(self.v, self.host_name),
+                'k_host': self._model_world(self.k, self.host_name),
                 'g_box': self._model_world(self.gl, '物体box'),
-                'e_box': self._model_world(self.ed, '物体box')}
+                'e_box': self._model_world(self.ed, '物体box'),
+                'v_box': self._model_world(self.v, '物体box'),
+                'k_box': self._model_world(self.k, '物体box')}
 
 
 print()
 print("=== 〇'. 夹具保真：两端都是生产类 + 生产构造式 ===")
+# S5: 先建 wgpu 设备再建任何 GL 上下文 —— 本机驱动实测（GTX 1050 Ti）：
+# wgpu Vulkan 设备创建**之后**，既有 moderngl standalone 上下文「下一次新建
+# program」会 cannot create program（tests/_tmp/s5_probe9_glctx.py / _probe10 /
+# _probe11 / _probe12：设备先行 = 3/3 稳定；旧上下文续用 = 偶发失败）。
+# 设备先行是夹具顺序口径，不是被测行为。
+_vk_device()
+check('S5 夹具：Vulkan 设备先于 GL 上下文建立（驱动干扰规避，见上注）',
+      _VK['device'] is not None, type(_VK['device']).__name__)
 _p0 = Pair(scene_a())
 check('GL 播放器端是 runtime.PlayerApp（打包 GL 生产入口）',
       type(_p0.gl) is runtime.PlayerApp, type(_p0.gl).__name__)
@@ -605,6 +818,24 @@ check('夹具前提：两端场景装配出同名同序物体（同一份用户�
 check('夹具前提：进播放即无钩子泄漏（toggle_play 只建快照不实例化脚本）',
       _p0.gl_hooks_at_enter == [] and _p0.ed_hooks_at_enter == [],
       (_p0.gl_hooks_at_enter, _p0.ed_hooks_at_enter))
+
+check('S5 夹具保真：VK 播放器端是 scene_driver.SceneDriver（生产 VK 播放器同一类）',
+      type(_p0.v) is _sd.SceneDriver, type(_p0.v).__name__)
+check('S5 夹具保真：VK 编辑器端是 editor.VkEditorApp（S4 生产类）',
+      type(_p0.k) is editor_mod.VkEditorApp, type(_p0.k).__name__)
+check('S5 夹具保真：VK 播放器按生产装配 is_playing=True（vk_player.run_vk 同款）',
+      _p0.v.is_playing is True, _p0.v.is_playing)
+check('S5 夹具保真：VK 两面时钟 fixed_dt == 1/60（生产入口 set_fps）',
+      (_p0.v._clock.fixed_dt, _p0.k._clock.fixed_dt) == (FRAME_DT, FRAME_DT),
+      (_p0.v._clock.fixed_dt, _p0.k._clock.fixed_dt))
+check('S5 夹具前提：四面场景装配出同名同序物体（同一份用户内容）',
+      [m.name for m in _p0.gl.models] == [m.name for m in _p0.ed.models]
+      == [m.name for m in _p0.v.models] == [m.name for m in _p0.k.models],
+      ([m.name for m in _p0.gl.models], [m.name for m in _p0.v.models],
+       [m.name for m in _p0.k.models]))
+check('S5 夹具前提：进播放即无钩子泄漏（VK 两面）',
+      _p0.v_hooks_at_enter == [] and _p0.k_hooks_at_enter == [],
+      (_p0.v_hooks_at_enter, _p0.k_hooks_at_enter))
 
 
 def pose_assert(tag, m, exp):
@@ -696,6 +927,86 @@ def run_case(tag, scene_data, cam_case, host_name='物体box'):
         check('%s 帧%d ⑤ 编辑器 UI 绘制路径 == [\'draw_all\',\'view_draw\']'
               '（同一条 screen_ui pass 在前, view.draw 叠加层在后, 不再自画 Canvas UI）' % (tag, k),
               s['e_ui'] == ['draw_all', 'view_draw'], s['e_ui'])
+    # ---- S5（Q-B7-47-1 阶段 5）：VK 面断言（采集器与 GL 面同一个：measure_gl /
+    #      measure_vk_player / ui_tree_of / REC / _model_world —— 不是各写一份） ----
+    for k, s in enumerate(snaps, 1):
+        if cam_case == 'B':
+            exp = hand_orbit_pose(scene_data['camera'])
+        else:
+            px = 0.0 if cam_case == 'A' else hand_box_x(k - 1)
+            exp = hand_active_pose(camd, parent_x=px)
+        # ---- ① 相机 8 元组 + 生产 VP（VK 面） ----
+        pose_assert('%s 帧%d ① VK播放器相机 8 元组 == 手算期望' % (tag, k), s['v'], exp)
+        pose_assert('%s 帧%d ① VK编辑器相机 8 元组 == 手算期望' % (tag, k), s['k'], exp)
+        check('%s 帧%d ① 四面相机 8 元组逐项相等（GL播放器/GL编辑器/VK播放器/VK编辑器）' % (tag, k),
+              (s['g']['eye'], s['g']['fwd'], s['g']['up'], s['g']['yaw'], s['g']['pitch'],
+               s['g']['roll'], s['g']['fov'], s['g']['orbit'])
+              == (s['e']['eye'], s['e']['fwd'], s['e']['up'], s['e']['yaw'], s['e']['pitch'],
+                  s['e']['roll'], s['e']['fov'], s['e']['orbit'])
+              == (s['v']['eye'], s['v']['fwd'], s['v']['up'], s['v']['yaw'], s['v']['pitch'],
+                  s['v']['roll'], s['v']['fov'], s['v']['orbit'])
+              == (s['k']['eye'], s['k']['fwd'], s['k']['up'], s['k']['yaw'], s['k']['pitch'],
+                  s['k']['roll'], s['k']['fov'], s['k']['orbit']), '')
+        check('%s 帧%d ① 四面生产 VP 逐元素相等' % (tag, k),
+              np.array_equal(s['g']['vp'], s['e']['vp'])
+              and np.array_equal(s['g']['vp'], s['v']['vp'])
+              and np.array_equal(s['g']['vp'], s['k']['vp']),
+              'max|Δ|(g,v)=%.3e' % float(np.max(np.abs(s['g']['vp'] - s['v']['vp']))))
+        check('%s 帧%d ① 夹具保真（VK 面：生产字段重建 V@P == 本帧生产 VP）' % (tag, k),
+              s['v']['vp_ok'] and s['k']['vp_ok'], (s['v']['vp_ok'], s['k']['vp_ok']))
+        # ---- ② 世界矩阵（VK 面） ----
+        check('%s 帧%d ② 四面 _frame_world sha256 相等（VK 面与 GL 同一份共享 compute 维护）'
+              % (tag, k),
+              s['g']['fw_sha'] is not None and s['k']['fw_sha'] is not None
+              and s['g']['fw_sha'] == s['e']['fw_sha'] == s['v']['fw_sha'] == s['k']['fw_sha'],
+              (('none' if s['v']['fw_sha'] is None else s['v']['fw_sha'][:12]),
+               ('none' if s['k']['fw_sha'] is None else s['k']['fw_sha'][:12])))
+        check('%s 帧%d ② 渲染矩阵逐位相等（GL _render_world f32 == VK 渲染管线原生 f32；'
+              'f32 = 渲染管线上传精度, 非容差口径）' % (tag, k),
+              s['g']['rw32'] == s['v']['rw32'] and s['e']['rw32'] == s['k']['rw32']
+              and s['g']['rw32'] == s['k']['rw32'], '')
+        check('%s 帧%d ② 脚本宿主世界矩阵 == matlib 纯函数手算（VK播放器）' % (tag, k),
+              s['v_host'] is not None and np.array_equal(s['v_host'], hand_box_world(k)),
+              None if s['v_host'] is None else
+              'tx=%r 期望=%r' % (float(s['v_host'][3, 0]), hand_box_x(k)))
+        check('%s 帧%d ② 脚本宿主世界矩阵 == matlib 纯函数手算（VK编辑器）' % (tag, k),
+              s['k_host'] is not None and np.array_equal(s['k_host'], hand_box_world(k)),
+              None if s['k_host'] is None else
+              'tx=%r 期望=%r' % (float(s['k_host'][3, 0]), hand_box_x(k)))
+        if cam_case == 'C':
+            check('%s 帧%d ② 静态 box（无脚本）tx==0（四面）' % (tag, k),
+                  s['g_box'] is not None and s['e_box'] is not None
+                  and s['v_box'] is not None and s['k_box'] is not None
+                  and float(s['g_box'][3, 0]) == 0.0 and float(s['e_box'][3, 0]) == 0.0
+                  and float(s['v_box'][3, 0]) == 0.0 and float(s['k_box'][3, 0]) == 0.0,
+                  (None if s['v_box'] is None else float(s['v_box'][3, 0]),
+                   None if s['k_box'] is None else float(s['k_box'][3, 0])))
+        # ---- ③ 钩子调用序（VK 面） ----
+        exp_hooks = ['start', 'update', 'late'] if k == 1 else ['update', 'late']
+        check('%s 帧%d ③ VK播放器钩子序 == 手算期望 %r' % (tag, k, exp_hooks),
+              s['v_hooks'] == exp_hooks, s['v_hooks'])
+        check('%s 帧%d ③ VK编辑器钩子序 == 手算期望 %r' % (tag, k, exp_hooks),
+              s['k_hooks'] == exp_hooks, s['k_hooks'])
+        check('%s 帧%d ③ 四面钩子序逐项相等（修前 VK 编辑器每帧双发 late）' % (tag, k),
+              s['g_hooks'] == s['e_hooks'] == s['v_hooks'] == s['k_hooks'],
+              (s['g_hooks'], s['v_hooks'], s['k_hooks']))
+        # ---- ④ 时钟（VK 面） ----
+        check('%s 帧%d ④ VK 时钟 == 手算期望（每帧恰 1 逻辑帧, alpha=0, 累计=%d）' % (tag, k, k),
+              (s['v']['steps'], s['v']['alpha'], s['v']['steps_total']) == (1, 0.0, k)
+              and (s['k']['steps'], s['k']['alpha'], s['k']['steps_total']) == (1, 0.0, k),
+              (s['v']['steps'], s['v']['alpha'], s['v']['steps_total'],
+               s['k']['steps'], s['k']['alpha'], s['k']['steps_total']))
+        check('%s 帧%d ④ 四面时钟 steps/alpha/累计 逐项相等' % (tag, k),
+              (s['g']['steps'], s['g']['alpha'], s['g']['steps_total'])
+              == (s['e']['steps'], s['e']['alpha'], s['e']['steps_total'])
+              == (s['v']['steps'], s['v']['alpha'], s['v']['steps_total'])
+              == (s['k']['steps'], s['k']['alpha'], s['k']['steps_total']),
+              (s['g']['steps_total'], s['v']['steps_total'], s['k']['steps_total']))
+        # ---- ⑤ UI Canvas 树（VK 面） ----
+        check('%s 帧%d ⑤ VK两面 UI Canvas 树 == 场景 UI 段手写期望' % (tag, k),
+              s['v_tree'] == exp_tree and s['k_tree'] == exp_tree, '')
+        check('%s 帧%d ⑤ 四面 UI Canvas 树逐项相等' % (tag, k),
+              s['g_tree'] == s['e_tree'] == s['v_tree'] == s['k_tree'], '')
     return pair, snaps
 
 
@@ -721,6 +1032,21 @@ check('⑥ 用例 C 生效天空盒 = 引擎默认蓝天（相机级未覆盖；
       snapsC[0]['g']['sky'] == snapsC[0]['e']['sky']
       and snapsC[0]['g']['sky'][1] == [58, 155, 213, 255],
       (snapsC[0]['g']['sky'], snapsC[0]['e']['sky']))
+
+check('⑥ S5: 用例 A 生效天空盒 VK 两面 == GL 两面（修前 VK 编辑器恒 None）',
+      snapsA[0]['g']['sky'] == snapsA[0]['v']['sky'] == snapsA[0]['k']['sky']
+      and snapsA[0]['v']['sky'] is not None
+      and snapsA[0]['v']['sky'][1] == [255, 0, 0, 255],
+      (snapsA[0]['g']['sky'], snapsA[0]['v']['sky'], snapsA[0]['k']['sky']))
+check('⑥ S5: 用例 B 生效天空盒 VK 两面 == GL 两面（引擎默认蓝天）',
+      snapsB[0]['g']['sky'] == snapsB[0]['v']['sky'] == snapsB[0]['k']['sky']
+      and snapsB[0]['v']['sky'] is not None
+      and snapsB[0]['v']['sky'][1] == [58, 155, 213, 255],
+      (snapsB[0]['g']['sky'], snapsB[0]['v']['sky'], snapsB[0]['k']['sky']))
+check('⑥ S5: 用例 C 生效天空盒 VK 两面 == GL 两面（引擎默认蓝天）',
+      snapsC[0]['g']['sky'] == snapsC[0]['v']['sky'] == snapsC[0]['k']['sky']
+      and snapsC[0]['v']['sky'][1] == [58, 155, 213, 255],
+      (snapsC[0]['g']['sky'], snapsC[0]['v']['sky'], snapsC[0]['k']['sky']))
 
 
 # ---- ⑦ 退出播放 on_disable（Q-B7-48-2, 2026-11-20 修后收口） ----
@@ -755,11 +1081,21 @@ for _t7, _pair7 in (('用例 A', pairA), ('用例 B', pairB), ('用例 C', pairC
           all(sc._script is None for m in _pair7.ed.models for sc in m.scripts),
           [(m.name, [sc.script_id for sc in m.scripts]) for m in _pair7.ed.models])
 
+for _t7, _pair7 in (('用例 A', pairA), ('用例 B', pairB), ('用例 C', pairC)):
+    _rec7 = REC.setdefault(id(_pair7.k), [])
+    _n7 = len(_rec7)
+    _pair7.k.toggle_play()           # 同一份 _EditorCore.toggle_play 退出分支（VK 面）
+    _tail7 = _rec7[_n7:]
+    check('%s ⑦ VK编辑器退出播放追加恰 1 次 on_disable + 回到编辑态' % _t7,
+          _tail7 == ['disable'] and _pair7.k.is_playing is False,
+          (_tail7, _pair7.k.is_playing))
+    check('%s ⑦ VK编辑器退出后编辑态脚本组件 _script 全为 None' % _t7,
+          all(sc._script is None for m in _pair7.k.models for sc in m.scripts),
+          [(m.name, [sc.script_id for sc in m.scripts]) for m in _pair7.k.models])
+
 print()
-print('=== ⏸ SKIP：VK 对拍面（S4 未实现 —— 未实现要可见，不许静默放过） ===')
-print('SKIP  对拍面「VK编辑器播放 vs VK播放器」：S4 未实现'
-      '（编辑器视口 VK 化未落地，Q-B7-47-1 五阶段之 S4；落地时在本门补 VK 夹具）')
-print('SKIP  对拍面「VK编辑器播放 vs GL编辑器播放」：S4 未实现（同上）')
+print('=== S5：VK 对拍面已补齐（S4 落地 VkEditorApp 后，S1 的两条 SKIP 换成真断言） ===')
+print('S5   四面对拍 = GL编辑器播放 / GL播放器 / VK编辑器播放 / VK播放器（采集器同一个）')
 
 check('已知差异登记表为空（不许登记任何容差）', not KNOWN_DIFFS, KNOWN_DIFFS)
 

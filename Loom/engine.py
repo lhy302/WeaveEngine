@@ -1268,18 +1268,16 @@ class GLEngine(EngineCore, ShadowMixin, HudMixin, RenderMixin, ModelGpuMixin, Li
         # 逻辑帧跑了 (gen 变) 或结构/外观变 → 重算; 否则跳过
         if self._prep_sig == sig and self._prep_aabbs is not None:
             return
-        # 逻辑矩阵: 用/建 _frame_world (静止帧 _fw_cache 命中 ~0ms)
-        fw = getattr(self, '_frame_world', None)
         # P-01 (2026-11-07): 播放态每个逻辑帧都必须走一次 compute_world_matrices
         # —— 它内部 _fw_cache 在"变换对象未变"时直接返回缓存对象(静止帧 ~0ms),
         # 只有动态帧才真算; 同时 _transform_snapshot 会刷新 _soa_snap 供
         # interp.advance 翻页。旧实现只在 None/行数不符时赋值, 进播放后
         # _frame_world 与 _soa_snap 永久冻结 (编辑器画面/阴影/碰撞全停在进播放位姿)。
-        if (getattr(self, 'is_playing', False) or fw is None
-                or fw.shape[0] != n):
-            fw = self._profile(
-                'world_matrices', lambda: self.compute_world_matrices(models))
-            self._frame_world = fw
+        # ★S5 (Q-B7-47-1 阶段 5): 本段抽成 EngineCore._refresh_play_frame_world
+        # **唯一实现**（VK 的 _logic_prep 调同一份，同源不同步规则 5.5）——
+        # 条件/算式/序一字未改，GL 数值逐位不变。
+        self._refresh_play_frame_world(models)
+        fw = self._frame_world
         # ① 全量 AABB (visible_only=False 阴影碰撞共享)
         self._prep_aabbs = self._profile(
             'aabbs', lambda: self._model_aabbs_par(models, fw,
