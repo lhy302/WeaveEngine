@@ -7,16 +7,18 @@
   ③ VkFrameExecutor 消费 loom_pass.frame_plan() 的**同一份** plan（与 GLFrameExecutor 同源）；
   ④ 同一组顶点/颜色数组，GL 离屏渲染 vs VK 离屏渲染的像素门（修前必红：loom_pass_vk 不存在）。
 
-★ 线宽口径（待 Q-B7-48-1 人类裁决，未裁前 VK 按 1px 实现 —— wgpu 0.33 的
-  PrimitiveState 没有 line_width 字段，实测传 2.0 -> ValueError；GL 是 2px，
-  本机 430 core 离屏实测也确实光栅化 2px）。因此本门**不用逐像素 MAE 当判据**，
-  用「中心线重合度」：
-    · 两端各取线像素掩码（黑底上亮度 > 0.06）；
-    · 对 GL 每个线像素取到最近 VK 线像素的棋盘距离（8 邻域扩散），反之亦然；
-    · 判据：双向 mean <= 1.2px 且 max <= 3.0px，且无孤点（超出 32px 扩散半径 = 0）；
-    · MAE / NCC 只打印留证，不判红绿；
-  反例自检（B5）：把 VK 画面整体平移 16px，门判据必须变红 —— 证明度量真能抓错位。
-  若裁决 2px：需两端 shader 扩 quad（另立账，S3 不自行决定）。
+★ 线宽口径（Q-B7-48-1 人类裁决 2026-11-20「问题一：B」= 两端统一改成
+  「用四边形模拟粗线」）：GL 的 ctx.line_width 与 wgpu 的「无 line_width 字段」
+  **都不再被依赖** —— 线段在 CPU 侧由 loom_line_geometry.build_line_quads 按
+  **屏幕空间像素宽度**膨胀成 2 个三角形，两端只负责画三角形（GL TRIANGLES /
+  VK triangle-list）。于是两端线宽像素数**相等**，本门因此**改用逐像素 MAE 直接
+  比**（修前是「中心线重合度」口径，那是 1px vs 2px 的退让；裁决 B 之后没有
+  退让的理由，属**收紧**）：
+    · B8a：同一线宽参数下，单条水平线的「线宽像素数」两端相等；
+    · B8b：真实夹具（网格/选中框/gizmo）两端线像素数比在 [0.95, 1.05]；
+    · B/B5/B6/B7：MAE <= 2e-4（= test_ab_gl_vk.DEFAULT_GATE.mae_abs，同源阈值）
+      且线像素数相等 —— 中心线距离/覆盖率比值只打印留证，不再当判据。
+  反例自检（B5）：把 VK 画面整体平移 16px，MAE 判据必须变红 —— 证明度量真能抓错位。
 
 同源证据：
   · 夹具顶点/颜色数组全部来自**真实编辑器代码路径**（grid_geometry /
@@ -192,7 +194,7 @@ def _capture_fixtures(ed):
 
 
 def _gl_render_lines(ctx, fbo, ed, verts, cols, vp, depth_on, blend=False,
-                     depth_clear=1.0):
+                     depth_clear=1.0, width=2.0):
     import moderngl
     fbo.use()
     ctx.clear(0.0, 0.0, 0.0, 1.0, depth=float(depth_clear))
@@ -204,7 +206,8 @@ def _gl_render_lines(ctx, fbo, ed, verts, cols, vp, depth_on, blend=False,
         ctx.enable(moderngl.BLEND)
         ctx.blend_func = (moderngl.SRC_ALPHA, moderngl.ONE_MINUS_SRC_ALPHA)
     try:
-        ed.draw_lines(verts, cols, view_proj=np.asarray(vp, dtype="f4"))
+        ed.draw_lines(verts, cols, view_proj=np.asarray(vp, dtype="f4"),
+                      line_width=float(width))
     finally:
         if blend:
             ctx.disable(moderngl.BLEND)
@@ -213,8 +216,7 @@ def _gl_render_lines(ctx, fbo, ed, verts, cols, vp, depth_on, blend=False,
     return np.flipud(img)   # 与 test_ab_gl_vk 同一口径：读回底行在前，翻成顶行在前
 
 
-# ---------------- VK 渲染（VkLineBatch 本尊） ----------------
-
+# ---------------- VK 设备 / 回读 ----------------
 
 _VK = {}
 
@@ -248,31 +250,58 @@ def _vk_read(device, tex):
     return img
 
 
+# ---------------- VK 渲染（生产路径 VkEditorRenderMixin 本尊） ----------------
+
+
+class _VkLineHost:
+    """最小 VK 叠加层宿主桩：只提供 mixin 需要的东西（设备/格式/视图/视口尺寸）。
+
+    ★ 走的是**生产代码**（loom_pass_vk.VkEditorRenderMixin.overlay_scope +
+    draw_lines），不是绕过 mixin 直调 VkLineBatch —— 这样本门测的是两端真实
+    绘制路径（线宽扩宽发生在 mixin 的 draw_lines 里）。
+    宿主协议新增 width/height（视口像素尺寸，扩宽数学需要），与真实宿主
+    （EditorApp / VkEditorApp）同名同语义。
+    """
+
+    def __init__(self, device, view, depth_view, width, height,
+                 fmt="rgba8unorm"):
+        self._vk_line_device = device
+        self._vk_line_format = fmt
+        self._vk_overlay_view = view
+        self._vk_overlay_depth_view = depth_view
+        self.width = int(width)
+        self.height = int(height)
+
+
 def _vk_render_lines(device, verts, cols, vp, depth_on=False, blend=False,
-                     depth_clear=1.0):
+                     depth_clear=1.0, width=2.0):
     import wgpu
     import loom_pass_vk as lpv
-    batch = lpv.VkLineBatch(device, "rgba8unorm")
     tex = device.create_texture(
         size=(W, H, 1), format="rgba8unorm",
         usage=wgpu.TextureUsage.RENDER_ATTACHMENT | wgpu.TextureUsage.COPY_SRC)
     dtex = device.create_texture(size=(W, H, 1), format="depth32float",
                                  usage=wgpu.TextureUsage.RENDER_ATTACHMENT)
+    view, dview = tex.create_view(), dtex.create_view()
+    # mixin 的 flush 是 LoadOp.load（画在已有帧内容之上，与 GL 语义一致）——
+    # 目标必须先清好（颜色黑 + 深度按用例指定）。
     enc = device.create_command_encoder()
     rp = enc.begin_render_pass(
-        color_attachments=[{'view': tex.create_view(), 'load_op': wgpu.LoadOp.clear,
+        color_attachments=[{'view': view, 'load_op': wgpu.LoadOp.clear,
                             'clear_value': (0, 0, 0, 1),
                             'store_op': wgpu.StoreOp.store}],
-        depth_stencil_attachment={'view': dtex.create_view(),
-                                  'depth_load_op': wgpu.LoadOp.clear,
-                                  'depth_clear_value': float(depth_clear),
-                                  'depth_store_op': wgpu.StoreOp.store})
-    try:
-        batch.draw(rp, verts, cols, np.asarray(vp, dtype="f4"),
-                   depth_test=depth_on, blend=blend)
-    finally:
-        rp.end()
+        depth_stencil_attachment={
+            'view': dview, 'depth_load_op': wgpu.LoadOp.clear,
+            'depth_clear_value': float(depth_clear),
+            'depth_store_op': wgpu.StoreOp.store})
+    rp.end()
     device.queue.submit([enc.finish()])
+    host = _VkLineHost(device, view, dview, W, H)
+    flags = tuple(f for f, on in (("depth_test", depth_on), ("blend", blend)) if on)
+    kw = {"enable": flags} if flags else {"enable_only": 0}
+    with host.overlay_scope(framebuffer=view, **kw):
+        host.draw_lines(verts, cols, view_proj=np.asarray(vp, dtype="f4"),
+                        line_width=float(width))
     return _vk_read(device, tex)
 
 
@@ -614,6 +643,61 @@ def section_b7():
                   (int(mg.sum()), int(mv.sum())))
 
 
+def _line_width_px(img):
+    """水平线的「线宽像素数」= 线覆盖区域中间那批列上亮像素数的中位数。
+
+    对**水平线**而言这就是线宽本身（GL 2px 线 = 每列 2 个亮像素；VK 1px = 1 个）。
+    取中位数而非均值：端点处（butt cap）列只有部分覆盖，不污染口径。"""
+    m = _mask(img)
+    cols = [x for x in range(W // 4, 3 * W // 4) if m[:, x].any()]
+    if not cols:
+        return 0.0
+    return float(np.median([int(m[:, x].sum()) for x in cols]))
+
+
+def section_b8():
+    print("=" * 60)
+    print("B8. 线宽像素数两端相等（Q-B7-48-1 裁决 B：四边形模拟粗线）")
+    print("=" * 60)
+    try:
+        import loom_pass_vk  # noqa: F401
+    except Exception as e:
+        check('B8 前置 loom_pass_vk 可导入', False, repr(e))
+        return
+    device = _vk_device()
+    ctx, fbo, ed, _vp = _editor()
+    # ---- B8a：同一线宽参数下，单条水平线的线宽像素数两端相等 ----
+    vp_id = np.eye(4, dtype="f4")
+    lv = [(-0.8, 0.0, 0.0), (0.8, 0.0, 0.0)]
+    lc = [(1.0, 1.0, 1.0), (1.0, 1.0, 1.0)]
+    g = _gl_render_lines(ctx, fbo, ed, lv, lc, vp_id, depth_on=False)
+    v = _vk_render_lines(device, lv, lc, vp_id, depth_on=False)
+    wg, wv = _line_width_px(g), _line_width_px(v)
+    print("  [水平线 width=2px] 线宽像素数 GL=%s VK=%s" % (wg, wv))
+    check("B8a 同一线宽参数(2px)下两端线宽像素数相等", wg == wv and wg >= 1.0,
+          (wg, wv))
+    # ---- B8b：真实夹具（网格/选中框/gizmo）两端线像素数相等 ----
+    fx = _capture_fixtures(ed)
+    for name in FIXTURE_ORDER:
+        item = fx.get(name)
+        if not item or len(item[0]) == 0:
+            check("B8b 夹具非空: " + name, False, "捕获为空")
+            continue
+        verts, cols = item
+        depth_on = (name == "grid")          # 网格 = 深度开 + alpha 混合（同 B 段）
+        blend = (name == "grid")
+        g = _gl_render_lines(ctx, fbo, ed, verts, cols, _vp, depth_on=depth_on,
+                             blend=blend)
+        v = _vk_render_lines(device, verts, cols, _vp, depth_on=depth_on,
+                             blend=blend)
+        res = _compare(g, v)
+        ratio = res["vk_cov"] / max(1, res["gl_cov"])
+        print("  [%s] gl_cov=%d vk_cov=%d 覆盖比=%.3f mae=%.6f"
+              % (name, res["gl_cov"], res["vk_cov"], ratio, res["mae"]))
+        check("B8b 两端线宽像素数相等: " + name, 0.95 <= ratio <= 1.05,
+              "gl_cov=%d vk_cov=%d 比=%.3f" % (res["gl_cov"], res["vk_cov"], ratio))
+
+
 def main():
     print("=" * 60)
     print("S3 门：VK 绘制原语补齐（中心线重合度口径；线宽待 Q-B7-48-1 裁决）")
@@ -630,6 +714,7 @@ def main():
     section_b5()
     section_b6()
     section_b7()
+    section_b8()
     print("=" * 60)
     if _fails:
         print("FAIL 汇总: %d 项 —— %s" % (len(_fails), ", ".join(_fails)))
