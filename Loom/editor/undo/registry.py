@@ -110,6 +110,10 @@ class UndoManager:
         self._batch_lease = float(self.BATCH_LEASE_S)
         self._batch_deadline = None      # time.monotonic() 截止; None = 不设租约
         self._batch_absorb = True
+        # 批归属 (Q-B7-56-1 2026-11-22): 'agent' = agent_batch_begin/分拆重开;
+        # 'gui' = GUI 数值行编辑会话批 (_spin_session_begin, absorb=True 但无租约,
+        # 非 agent 批作用域 —— D10=A 的"用户编辑不进 agent 批"不受影响)。
+        self._batch_owner = 'agent'
         self._agent_depth = 0            # >0 = 正在执行 Agent 命令 (AgentService 包裹)
         # 出声通道 (GUI/EAI 读): 最近一次失败 / 拒绝 / 自动收口
         self.last_error = None
@@ -131,6 +135,11 @@ class UndoManager:
     @property
     def batch_active(self):
         return self._batch is not None
+
+    @property
+    def batch_owner(self):
+        """当前批归属 ('agent'|'gui'|None) — GUI 凭它识别"自己的会话批"."""
+        return self._batch_owner
 
     @property
     def batch_size(self):
@@ -168,11 +177,13 @@ class UndoManager:
             self.last_closed = batch
         return batch
 
-    def begin_batch(self, label=None, lease_s=None, absorb=True):
+    def begin_batch(self, label=None, lease_s=None, absorb=True, owner='agent'):
         """开始收集批次. 已有未结束的批次 -> 先 cancel 旧批 (防悬挂), 返回 True.
 
         lease_s: 租约秒数; None=默认 30s, <=0 = 不设租约 (无限期, 仅供测试/兼容).
         absorb : True=push 无条件吸进批 (旧行为); False=只吸 Agent 命令作用域内的.
+        owner  : 批归属 ('agent'|'gui') — Q-B7-56-1 (2026-11-22): GUI 数值行编辑
+                 会话批传 'gui' (无租约、非 agent 批作用域); 缺省 'agent' 全兼容。
         """
         had_stale = self._batch is not None
         if had_stale:
@@ -181,6 +192,7 @@ class UndoManager:
         self._batch_label = label
         self._batch_lease = float(self.BATCH_LEASE_S if lease_s is None else lease_s)
         self._batch_absorb = bool(absorb)
+        self._batch_owner = owner if owner in ('agent', 'gui') else 'agent'
         self._batch_deadline = None
         if self._batch_lease > 0:
             self._batch_touch()
@@ -195,6 +207,7 @@ class UndoManager:
         label = self._batch_label
         self._batch_label = None
         self._batch_deadline = None
+        self._batch_owner = None
         if not cmds:
             return None
         batch = BatchCommand(label, cmds)
@@ -214,6 +227,7 @@ class UndoManager:
         self._batch = None
         self._batch_label = None
         self._batch_deadline = None
+        self._batch_owner = None
         self.redo_stack.clear()
         return n
 
@@ -223,9 +237,10 @@ class UndoManager:
         用户编辑不续租、不进批 (D10-A 附注); 重开同标签/同租约/同 absorb 的批次,
         让 Agent 后续命令仍归一批, 而用户那一步单独留在历史里。
         """
-        label, lease, absorb = self._batch_label, self._batch_lease, self._batch_absorb
+        label, lease, absorb, owner = (self._batch_label, self._batch_lease,
+                                       self._batch_absorb, self._batch_owner)
         self.end_batch()
-        self.begin_batch(label, lease_s=lease, absorb=absorb)
+        self.begin_batch(label, lease_s=lease, absorb=absorb, owner=owner)
 
     def _append(self, cmd):
         """压入撤销栈 (限长) + 清空重做栈 (push/push_no_do/end_batch 共用)."""
@@ -342,6 +357,7 @@ class UndoManager:
         self._batch = None
         self._batch_label = None
         self._batch_deadline = None
+        self._batch_owner = None
         self.last_error = None
         self.last_refusal = None
         self.last_closed = None

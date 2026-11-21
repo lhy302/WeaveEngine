@@ -94,11 +94,10 @@ from gui.widgets import AssetListWidget, DraggableSpin, DragBlock   # noqa: F401
 _MSG_COLORS = {'ok': '#222222', 'err': '#c00000', 'dim': '#666666'}
 
 
-# namedtuple 向量单轴写入: 实现在 agent_commands.vec_set (命令层与 GUI 共用
-# 同一份 —— 检查器拖块和 set_transform 命令写位置的语义必须逐字一致).
-# 2026-08-22 的坑记录在那里 (Point3D 是 namedtuple, setattr 无效 / 整体重建
-# 会三轴同改).
-_vec_set = agent_commands.vec_set
+# namedtuple 向量单轴写入: 实现在 agent_commands.vec_set (命令层专用 helper;
+# 2026-08-22 的坑记录在那里: Point3D 是 namedtuple, setattr 无效 / 整体重建
+# 会三轴同改). Q-B7-56-1 裁定① (2026-11-22): GUI 检查器数值行不再直调本函数,
+# 统一翻译成 set_transform/light_set/camera_set 命令 (见 _cmd_vec_set).
 
 
 # =====================================================================
@@ -640,35 +639,129 @@ class LoomGUI(QMainWindow):
             self.uitree.raise_()   # 从 tab 切到前台（与 console 同款行为）
         return show
 
-    def _invoke_ui_cmd(self, cmd_name, **args):
-        """所有 UI 树操作走这里（决策 B4 命令壳）。
+    def _invoke_cmd(self, cmd_name, args=None, quiet=False, notify_error=True):
+        """GUI → EAI 命令统一入口（Q-B7-56-1 裁定①, 2026-11-22）。
 
-        1) 调 EAI 命令（进撤销栈）
-        2) 写命令日志（教学：小白看到等价 EAI 命令）
-        3) 刷 UI 树
-        4) 刷检查器（C3 联动）
+        裁定①: GUI 界面除「鼠标拾取/拖拽」与「开发者相机连贯移动」两个豁免面外,
+        一切点击都翻译成命令表 (agent_commands._COMMANDS) 里的命令再执行 ——
+        本方法即翻译器。原名 _invoke_ui_cmd（决策 B4 命令壳, UI 树专用）, 本批
+        通用化为全 GUI 共用; 旧名保留为别名（UI 树 4 处调用点行为逐位不变）。
+
+        执行语义（与 B4 原壳逐位一致）:
+          1) 查命令表 → **直调命令函数**（不经 ac.dispatch 的 agent 作用域包裹
+             —— GUI 翻译的命令 = 用户编辑: 进撤销栈, 但不进 agent 批作用域、
+             不续租, D10=A 语义保持; 命令行 F12/远程才走 dispatch 缺省
+             scope='agent'; 执行期本方法把命令作用域置 'user', 供命令层按需
+             区分, 如 scene_save 对人类对话框授权路径的放行）；
+          2) 错误 → _notify 出声（notify_error=False 时由调用方消费, 如
+             _cmd_undo 交 _report_history_result, 防双 toast）；
+          3) 命令日志（教学: 小白看到等价 EAI 命令, log_cmd）+ 刷 UI 树；
+          4) 刷检查器（C3 联动）。
+        quiet=True: 高频数值行（拖块逐像素）不逐条写日志/刷新 —— 记入
+        _pending_quiet_cmd, 会话收尾 _spin_session_end 统一补一条 + 刷新。
         """
         import agent_commands as ac
+        args = dict(args or {})
         fn = ac._COMMANDS.get(cmd_name)
         if fn is None:
             self.editor._notify("UI 命令不存在: %s" % cmd_name, (235, 90, 90))
             return {'error': '命令不存在: %s' % cmd_name}
         try:
-            r = fn(self, args)
+            ac._CMD_SCOPE.push('user')
+            try:
+                r = fn(self, args)
+            finally:
+                ac._CMD_SCOPE.pop()
         except Exception as e:
             self.editor._notify("UI 操作异常: %r" % e, (235, 90, 90))
             return {'error': repr(e)}
         if isinstance(r, dict) and 'error' in r:
-            self.editor._notify("UI 操作失败: %s" % r['error'], (235, 90, 90))
+            if notify_error:
+                self.editor._notify("UI 操作失败: %s" % r['error'], (235, 90, 90))
             return r
-        # 命令日志（教学：等价命令）
-        self.uitree.log_cmd(cmd_name, args)
-        # 刷 UI 树
-        self.uitree.refresh()
-        # 刷检查器（C3 联动）
+        if quiet:
+            # 高频数值行: 日志/刷新延后会话收尾 (一次编辑 = 一条教学命令)
+            self._pending_quiet_cmd = (cmd_name, args)
+            return r
+        self._log_gui_cmd(cmd_name, args)
+        # 刷检查器（C3 联动; 无检查器的桩环境 try 兜底, 不吞命令结果）
         self._insp_last_digest = None
-        self._rebuild_inspector()
+        try:
+            self._rebuild_inspector()
+        except Exception:
+            pass
         return r
+
+    def _invoke_ui_cmd(self, cmd_name, **args):
+        """（兼容别名, B4 命令壳旧名）→ _invoke_cmd. UI 树调用点行为逐位不变."""
+        return self._invoke_cmd(cmd_name, args)
+
+    def _log_gui_cmd(self, cmd_name, args):
+        """命令日志（教学: 等价命令）+ 刷 UI 树; uitree 未建/异常时静默跳过
+        （裸桩测试与极早启动期没有 uitree, 不该让命令执行本身失败）."""
+        ut = getattr(self, 'uitree', None)
+        if ut is None:
+            return
+        try:
+            ut.log_cmd(cmd_name, dict(args))
+            ut.refresh()
+        except Exception:
+            pass
+
+    # ---- 数值行编辑会话 (Q-B7-56-1 裁定①: 命令化数值行的连续写合一步撤销) ----
+    def _spin_session_begin(self, label):
+        """数值行编辑会话开始（DragBlock 按下 / spinbox 首个 valueChanged）。
+
+        会话内每条 apply 已是 EAI 命令（set_transform/light_set/camera_set, 各自
+        自带一步撤销）; 不合并的话拖一次 = 几十步撤销。用 **GUI 自己的批**
+        （absorb=True, owner='gui', 无租约）把会话内命令合成一步 —— 不是 agent 批:
+        不经 agent_batch_begin、无租约续租, D10=A 的 agent 批作用域不受影响。
+        批激活时若跑的是 agent 批, 先 end_batch 收口（历史保留, D10=A 用户编辑
+        插入语义）再开 GUI 批。"""
+        e = self.editor
+        um = getattr(e, 'undo', None) if e is not None else None
+        if um is None or not hasattr(um, 'begin_batch'):
+            return
+        try:
+            if um.batch_active:
+                if getattr(um, 'batch_owner', None) == 'gui':
+                    return           # 已在本次会话批中（连续 valueChanged）
+                um.end_batch()       # 用户编辑打断 agent 批: 先收口（历史保留）
+            um.begin_batch('检查器: ' + (label or '数值'), lease_s=0,
+                           absorb=True, owner='gui')
+        except TypeError:
+            pass                     # 兼容无 owner/lease 参数的旧 UndoManager
+        self._pending_quiet_cmd = None
+
+    def _spin_session_end(self, label):
+        """数值行编辑会话结束（DragBlock 松开 / editingFinished）: 收口会话批
+        （会话内无命令则不留撤销）+ 补一条教学等价命令日志 + 刷新（对齐旧
+        on_finish 的 _refresh_all）。"""
+        e = self.editor
+        um = getattr(e, 'undo', None) if e is not None else None
+        if um is not None and hasattr(um, 'end_batch') \
+                and getattr(um, 'batch_owner', None) == 'gui':
+            um.end_batch()
+        pending = getattr(self, '_pending_quiet_cmd', None)
+        if pending is not None:
+            self._pending_quiet_cmd = None
+            self._log_gui_cmd(*pending)
+        self._refresh_all()
+
+    def _cmd_vec_set(self, obj, kind, field, axis, v):
+        """检查器数值行单轴写入 → EAI 命令（Q-B7-56-1 裁定①, 2026-11-22）。
+
+        旧实现直调 agent_commands.vec_set（同名 helper 却没走命令表）—— 现翻译
+        成等价命令: model → set_transform（x/y/z; rotation 用 rx/ry/rz, **度制**,
+        命令层内部转弧度 —— 与命令行输 set_transform 逐字同义）, light →
+        light_set（x/y/z）, camera → camera_set（x/y/z）。quiet=True: 高频单轴写
+        不逐条刷 UI/写教学日志, 会话收尾统一处理（_spin_session_end）。
+        """
+        key = ('r' if field == 'rotation' else '') + str(axis).lower()
+        cmd = {'model': 'set_transform', 'light': 'light_set',
+               'camera': 'camera_set'}[kind]
+        self._invoke_cmd(cmd, {'name': getattr(obj, 'name', None), key: v},
+                         quiet=True)
 
     def _ui_tree_set_selection(self, elem_name, canvas_idx):
         """UI 树选中变化 -> 检查器切到该元素属性（C3）."""
@@ -1382,7 +1475,9 @@ class LoomGUI(QMainWindow):
 
     def _cmd_play(self):
         if self.editor is not None:
-            self.editor.toggle_play()
+            # Q-B7-56-1 裁定①: 播放/暂停点击翻译成 play 命令 (缺省 toggle, 与
+            # 命令行/远程同一条命令); TPS 按钮复位与刷新保留 (GUI 自身反馈)
+            self._invoke_cmd('play')
             # 分离批5: 进出新播放复位 TPS 按钮文字 (暂停态不跨播放会话)
             if hasattr(self, '_act_tps_pause'):
                 self._act_tps_pause.setText("⏸暂停TPS")
@@ -1423,24 +1518,60 @@ class LoomGUI(QMainWindow):
             e.prefab_name = self._prefab_edit.text().strip() or 'prefab'
 
     def _cmd_save(self):
-        if self.editor is not None:
-            self.editor.save_scene()
-            self._refresh_all()
+        ed = self.editor
+        if ed is None:
+            return
+        # Q-B7-56-1 裁定①: 保存翻译成 scene_save 命令。有对应文件 = 无 path 分支
+        # (与命令行同一条); 无对应文件 = 先弹保存对话框选路径 (GUI 输入采集, 与
+        # editor.save_scene 旧分支一致), 保存本体再走命令 (人类对话框授权路径由
+        # 命令层 user 作用域放行白名单)。
+        if getattr(ed, '_scene_path', None):
+            self._invoke_cmd('scene_save')
+        else:
+            path = ed.choose_scene_save_path()
+            if path:
+                self._invoke_cmd('scene_save', {'path': path})
+        self._refresh_all()
 
     def _cmd_save_as(self):
-        if self.editor is not None:
-            self.editor.save_scene_as()
-            self._refresh_all()
+        ed = self.editor
+        if ed is None:
+            return
+        # Q-B7-56-1 裁定①: 另存为 = 对话框选路径 (GUI 输入采集) + scene_save 命令
+        # (旧 save_scene_as() = _save_scene(None) 也是同一个对话框)。
+        path = ed.choose_scene_save_path()
+        if path:
+            self._invoke_cmd('scene_save', {'path': path})
+        self._refresh_all()
 
     def _cmd_load(self):
-        if self.editor is not None:
-            self.editor.load_scene_cmd()
-            self._refresh_all()
+        ed = self.editor
+        if ed is None:
+            return
+        # Q-B7-56-1 裁定①: 加载翻译成 scene_load 命令。防丢确认框 (三态) 与
+        # 文件对话框是 GUI 输入采集, 保留在 GUI 侧; 换场本体走命令 (命令层内含
+        # isfile/prepare/对象图校验, 与远程 EAI 完全同一条)。
+        if getattr(ed, 'is_playing', False):
+            return                       # 与 editor.load_scene_cmd 同前置
+        if not ed._confirm_unsaved():
+            return                       # 用户取消: 中止 (旧语义)
+        path = ed.choose_scene_to_open()
+        if path:
+            self._invoke_cmd('scene_load', {'path': path})
+        self._refresh_all()
 
     def _cmd_new(self):
-        if self.editor is not None:
-            self.editor.new_scene_cmd()
-            self._refresh_all()
+        ed = self.editor
+        if ed is None:
+            return
+        # Q-B7-56-1 裁定①: 新建翻译成 scene_new 命令 (命令 = ed._new_scene,
+        # 与 editor.new_scene_cmd 尾段同一入口); 防丢确认框保留在 GUI 侧。
+        if getattr(ed, 'is_playing', False):
+            return                       # 与 editor.new_scene_cmd 同前置
+        if not ed._confirm_unsaved():
+            return                       # 用户取消: 中止 (旧语义)
+        self._invoke_cmd('scene_new')
+        self._refresh_all()
 
     def _report_history_result(self, res):
         """撤销/重做被拒或被批次租约挡住 -> 出声 (D10=B: 不允许静默无效).
@@ -1467,21 +1598,28 @@ class LoomGUI(QMainWindow):
 
     def _cmd_undo(self):
         if self.editor is not None:
-            self._report_history_result(self.editor._undo_action())
+            # Q-B7-56-1 裁定①: 撤销翻译成 undo 命令 (D10=B 拒批语义同源)。
+            # notify_error=False: 结果交 _report_history_result 统一出声, 防双 toast。
+            self._report_history_result(
+                self._invoke_cmd('undo', notify_error=False))
             self._refresh_all()
 
     def _cmd_redo(self):
         if self.editor is not None:
-            self._report_history_result(self.editor._redo_action())
+            self._report_history_result(
+                self._invoke_cmd('redo', notify_error=False))
             self._refresh_all()
 
     def _cmd_gizmo(self, mode):
         if self.editor is not None:
-            self.editor.set_gizmo_mode(mode)
+            # Q-B7-56-1 裁定①: gizmo 模式切换翻译成 gizmo 命令
+            self._invoke_cmd('gizmo', {'mode': mode})
 
     def _cmd_add(self, typ):
         if self.editor is not None:
-            self.editor._add_primitive(typ)
+            # Q-B7-56-1 裁定①: 加基元翻译成 object_add 命令 (与命令行同一条;
+            # 自动聚焦只对 agent 作用域生效, 人类点击相机不被拖走 —— 见命令层)
+            self._invoke_cmd('object_add', {'type': typ})
             self._refresh_all()
 
     def _gl_guard(self):
@@ -1493,13 +1631,22 @@ class LoomGUI(QMainWindow):
         self.viewport.makeCurrent()
 
     def _cmd_import_obj(self):
-        if self.editor is not None:
-            self.editor._import_obj()
-            self._refresh_all()
+        ed = self.editor
+        if ed is None:
+            return
+        # Q-B7-56-1 裁定①: 导入 = 文件对话框选路径 (GUI 输入采集, 与
+        # editor._import_obj 的对话框逐参一致) + import_obj 命令 (导入本体,
+        # 含相机适配/撤销, 与命令行同一条)。取消 = 不发命令 (旧语义)。
+        path = ed.choose_obj_to_import()
+        if not path:
+            return
+        self._invoke_cmd('import_obj', {'path': path})
+        self._refresh_all()
 
     def _cmd_dup(self):
         if self.editor is not None:
-            self.editor.duplicate_object()
+            # Q-B7-56-1 裁定①: 复制翻译成 object_duplicate 命令
+            self._invoke_cmd('object_duplicate')
             self._refresh_all()
 
     def _cmd_del(self):
@@ -1509,17 +1656,21 @@ class LoomGUI(QMainWindow):
             # bind_editor 是否跑过 (editor.__init__ 会覆盖 attach 期注入)。
             # 钩子在 N>0 时弹「该物体有 N 个子物体…」, 返回 False 则 editor 不删。
             self._inject_delete_confirm(e)
-            e.delete_object()
+            # Q-B7-56-1 裁定① (清单外顺带归零): 删除翻译成 object_delete 命令
+            # (命令体 = e.delete_object(), 确认钩子语义原样在 editor 侧生效)。
+            self._invoke_cmd('object_delete')
             self._refresh_all()
 
     def _cmd_add_light(self, kind):
         if self.editor is not None:
-            self.editor._add_light(kind)
+            # Q-B7-56-1 裁定①: 加光源翻译成 light_add 命令
+            self._invoke_cmd('light_add', {'kind': kind})
             self._refresh_all()
 
     def _cmd_add_camera(self):
         if self.editor is not None:
-            self.editor._add_camera()
+            # Q-B7-56-1 裁定①: 加摄像机翻译成 camera_add 命令
+            self._invoke_cmd('camera_add')
             self._refresh_all()
 
     def _cmd_toggle_visible(self):
@@ -1527,17 +1678,22 @@ class LoomGUI(QMainWindow):
         if e is not None:
             m = e._selected()
             if m is not None:
-                e.toggle_visible(m)
+                # Q-B7-56-1 裁定① (清单外顺带归零): 显隐翻译成 set_visible 命令
+                # (缺 on = 切换, 命令体 = e.toggle_visible(m), 同一入口)
+                self._invoke_cmd('set_visible', {'name': m.name})
                 self._refresh_all()
 
     def _cmd_prefab_save(self):
         if self.editor is not None:
-            self.editor._save_prefab()
+            # Q-B7-56-1 裁定①: 存 Prefab 翻译成 prefab_save 命令 (无 path = 命令
+            # 调 editor._save_prefab(None), 对话框/默认名逻辑原样在 editor 侧)。
+            self._invoke_cmd('prefab_save')
             self._refresh_all()
 
     def _cmd_prefab_put(self):
         if self.editor is not None:
-            self.editor._instantiate_prefab()
+            # Q-B7-56-1 裁定①: 放 Prefab 实例翻译成 prefab_place 命令
+            self._invoke_cmd('prefab_place')
             self._refresh_all()
 
     # ---------------- 层级树 ----------------
@@ -1703,7 +1859,13 @@ class LoomGUI(QMainWindow):
                 e._select_camera(e.cameras[idx])
 
     def _hier_drop(self, d0, d1):
-        """拖拽落点解析: 拖到行=挂父, 拖空白=脱父 (仅对象/相机参与)."""
+        """拖拽落点解析: 拖到行=挂父, 拖空白=脱父 (仅对象/相机参与).
+
+        Q-B7-56-1 裁定① (2026-11-22): 挂父/脱父本体翻译成 reparent 命令 (物体与
+        相机共用同一条命令, 命令层内含脱父/自挂/成环判据, 与本函数的拖拽预判
+        一致; 无效拖拽只选中不翻译, 保持旧 UX)。拖拽手势本身属鼠标豁免面,
+        命令化的只是落点解析后的那次写操作。
+        """
         e = self.editor
         if e is None or d0 is None:
             return
@@ -1716,11 +1878,9 @@ class LoomGUI(QMainWindow):
         if src is None:
             return
         if d1 is None:
-            # 拖空白: 有父则脱父
-            if kind0 == 'model' and src.parent is not None:
-                e.detach(src)
-            elif kind0 == 'camera' and src.parent is not None:
-                e.detach_camera(src)
+            # 拖空白: 有父则脱父 (reparent 命令缺 parent = 脱父)
+            if getattr(src, 'parent', None) is not None:
+                self._invoke_cmd('reparent', {'child': src.name})
             return
         kind1, idx1 = d1
         dst = None
@@ -1731,14 +1891,16 @@ class LoomGUI(QMainWindow):
         if dst is None or dst is src:
             return
         if kind0 == kind1 == 'model':
-            # 不拖到自身/父/后代
+            # 不拖到自身/父/后代 (命令层同判据)
             if not self._is_ancestor(dst, src) and src.parent is not dst:
-                e.reparent(src, dst)
+                self._invoke_cmd('reparent', {'child': src.name,
+                                              'parent': dst.name})
             else:
                 e._select_model(idx0)
         elif kind0 == kind1 == 'camera':
             if src.parent is not dst:
-                e.reparent_camera(src, dst)
+                self._invoke_cmd('reparent', {'child': src.name,
+                                              'parent': dst.name})
 
     @staticmethod
     def _is_ancestor(anc, m):
@@ -1767,7 +1929,9 @@ class LoomGUI(QMainWindow):
             menu.addAction("复制", self._cmd_dup)
             menu.addAction("删除", self._cmd_del)
             if m.parent is not None:
-                menu.addAction("脱父", lambda: e.detach(m))
+                # Q-B7-56-1 裁定①: 脱父翻译成 reparent 命令 (缺 parent = 脱父)
+                menu.addAction("脱父", lambda: self._invoke_cmd(
+                    'reparent', {'child': m.name}))
         elif kind == 'light' and 0 <= idx < len(e.lights):
             l = e.lights[idx]
             menu.addAction("重命名", lambda: self._rename_light(l))
@@ -1779,7 +1943,9 @@ class LoomGUI(QMainWindow):
             menu.addAction("取消激活" if e.active_camera == c.guid else "设为激活相机",
                            lambda: e.set_active_camera(None if e.active_camera == c.guid else c))
             if c.parent is not None:
-                menu.addAction("脱父", lambda: e.detach_camera(c))
+                # Q-B7-56-1 裁定①: 相机脱父同样走 reparent 命令
+                menu.addAction("脱父", lambda: self._invoke_cmd(
+                    'reparent', {'child': c.name}))
             menu.addAction("删除", self._cmd_del)
         menu.exec(self.hierarchy.viewport().mapToGlobal(pos))
         self._refresh_all()
@@ -1791,19 +1957,22 @@ class LoomGUI(QMainWindow):
     def _rename_obj(self, m):
         v = self._ask_text("重命名", "新名称:", m.name)
         if v is not None and self.editor is not None:
-            self.editor.rename(m, v, m.name)
+            # Q-B7-56-1 裁定①: 改名翻译成 object_rename 命令 (命令层按名字解析
+            # 三类目标, 命令体 = ed.rename/rename_light/rename_camera 同一入口;
+            # 重名/非法名由命令层查实际结果报 error -> _notify, 与旧 toast 等价)
+            self._invoke_cmd('object_rename', {'name': m.name, 'new': v})
             self._refresh_all()
 
     def _rename_light(self, l):
         v = self._ask_text("重命名", "新名称:", l.name)
         if v is not None and self.editor is not None:
-            self.editor.rename_light(l, v, l.name)
+            self._invoke_cmd('object_rename', {'name': l.name, 'new': v})
             self._refresh_all()
 
     def _rename_camera(self, c):
         v = self._ask_text("重命名", "新名称:", c.name)
         if v is not None and self.editor is not None:
-            self.editor.rename_camera(c, v, c.name)
+            self._invoke_cmd('object_rename', {'name': c.name, 'new': v})
             self._refresh_all()
 
     # ---------------- 资源面板 ----------------
@@ -1957,11 +2126,18 @@ class LoomGUI(QMainWindow):
             self._building = False
 
     # ---- 数值行通用 (撤销接线: 拖动 edit_model active / 提交压栈) ----
-    def _spin(self, lay, label, value, lo, hi, key, apply, step=0.1, dec=3):
+    def _spin(self, lay, label, value, lo, hi, key, apply, step=0.1, dec=3,
+              via_cmd=False):
         """数值行通用入口 (2026-08-22 加拖拽调节): QDoubleSpinBox + 聚焦后检查器
         底部弹出 DragBlock 拖区 (按住左右拖动调值, 每像素=step). 后续新增可拖条
         数值行只需继续调用本函数, 自动获得拖拽调节 + 撤销. apply(v) 写入模型;
-        撤销经 edit_model(active 语义)."""
+        撤销经 edit_model(active 语义).
+
+        via_cmd=True (Q-B7-56-1 裁定①, 2026-11-22): apply 已翻译成 EAI 命令
+        (每条自带一步撤销), 撤销/教学日志/刷新改由**数值行编辑会话批**协议接管
+        (_spin_session_begin/end —— 会话内连续命令合成一步撤销, 对齐旧快照协议
+        "一次编辑=一步撤销"的用户可见语义); via_cmd=False 的行保持旧
+        edit_model 快照协议逐位不变 (本批未命令化的数值行: 强度/颜色/fov 等)."""
         sb = DraggableSpin(key, self._spin_focused)
         sb.setRange(lo, hi)
         sb.setDecimals(dec)
@@ -1972,6 +2148,15 @@ class LoomGUI(QMainWindow):
         kind, obj = self._insp_target()
 
         def edit(active):
+            if self._building or e is None:
+                return
+            if via_cmd:
+                # Q-B7-56-1: 命令化数值行 —— 会话批协议 (begin/end 合一步撤销)
+                if active:
+                    self._spin_session_begin(label)
+                else:
+                    self._spin_session_end(label)
+                return
             if active:
                 if kind == 'obj':
                     e.edit_model(obj, label, True, key, lambda: None)
@@ -1990,14 +2175,18 @@ class LoomGUI(QMainWindow):
         def on_drag(v):
             if self._building or e is None:
                 return
+            if via_cmd:
+                edit(True)      # 先开会话批: 首条命令也进批 (合一步撤销)
             apply(v)
-            edit(True)
+            if not via_cmd:
+                edit(True)
 
         def on_finish():
             if self._building or e is None:
                 return
             edit(False)
-            self._refresh_all()
+            if not via_cmd:
+                self._refresh_all()   # via_cmd 行由 _spin_session_end 统一刷
 
         sb.valueChanged.connect(on_drag)
         sb.editingFinished.connect(on_finish)
@@ -2185,7 +2374,8 @@ class LoomGUI(QMainWindow):
         e = self.editor
         name_edit = QLineEdit(m.name)
         name_edit.editingFinished.connect(
-            lambda: e.rename(m, name_edit.text(), m.name) if name_edit.text() != m.name else None)
+            lambda: self._invoke_cmd('object_rename', {'name': m.name, 'new': name_edit.text()})
+            if name_edit.text() != m.name else None)   # Q-B7-56-1 裁定①
         lay.addRow("名称", name_edit)
         # ---- Layer / Tag (2026-10-18, 契约 §7) ----
         import kernels.layer_tag as layer_tag
@@ -2249,19 +2439,26 @@ class LoomGUI(QMainWindow):
         p = m.position
         lay.addRow(QLabel("位置"))
         for axis, cur in (('X', p.x), ('Y', p.y), ('Z', p.z)):
+            # Q-B7-56-1 裁定①: 数值行写位置翻译成 set_transform 命令 (单轴语义
+            # 与旧 vec_set 直写逐字一致 —— 命令体就是 vec_set; via_cmd 会话批把
+            # 拖拽/连输合一步撤销)
             self._spin(lay, axis, cur, -1000, 1000, 'pos.' + axis,
-                       lambda v, a=axis: _vec_set(m, 'position', a, v))
+                       lambda v, a=axis: self._cmd_vec_set(m, 'model',
+                                                           'position', a, v),
+                       via_cmd=True)
         r = m.rotation
         lay.addRow(QLabel("旋转 (°)"))
         for axis, cur in (('X', r.x), ('Y', r.y), ('Z', r.z)):
             # 2026-08-27 修复: 原写 setattr(m.rotation, 'X', ...) —— rotation 是
             # Point3D **namedtuple**, setattr 直接抛 AttributeError (且键名大小写
             # 也不对), 异常在 Qt 信号回调里被吞 -> 旋转三行从来改不动值.
-            # 与位置/缩放行一致走 _vec_set 整体重建 (LoomGUI 是 m.rotation=Point3D(*old)).
+            # Q-B7-56-1 裁定①: 旋转行翻译成 set_transform 命令 (rx/ry/rz **度制**,
+            # 命令层内部转弧度 + vec_set 整体重建, 与命令行输 set_transform 同义;
+            # 这里不再预转 radians —— 命令层换算)
             self._spin(lay, axis, math.degrees(cur), -360, 360, 'rot.' + axis,
-                       lambda v, a=axis: _vec_set(m, 'rotation', a,
-                                                  math.radians(v)),
-                       step=1.0)
+                       lambda v, a=axis: self._cmd_vec_set(m, 'model',
+                                                           'rotation', a, v),
+                       step=1.0, via_cmd=True)
         s = m.scale
         lay.addRow(QLabel("缩放"))
         for i, axis in enumerate(('X', 'Y', 'Z')):
@@ -2447,7 +2644,8 @@ class LoomGUI(QMainWindow):
         e = self.editor
         name_edit = QLineEdit(l.name)
         name_edit.editingFinished.connect(
-            lambda: e.rename_light(l, name_edit.text(), l.name) if name_edit.text() != l.name else None)
+            lambda: self._invoke_cmd('object_rename', {'name': l.name, 'new': name_edit.text()})
+            if name_edit.text() != l.name else None)   # Q-B7-56-1 裁定①
         lay.addRow("名称", name_edit)
         self._btn_row(lay, [("阴影: 开" if l.shadow else "阴影: 关",
                              lambda: e.commit_light(l, "光源阴影",
@@ -2483,19 +2681,26 @@ class LoomGUI(QMainWindow):
                        lambda v: setattr(l, 'roll', v), step=1.0)
         p = l.position
         for axis, cur in (('X', p.x), ('Y', p.y), ('Z', p.z)):
+            # Q-B7-56-1 裁定①: 光源位置行翻译成 light_set 命令
             self._spin(lay, "位置 " + axis, cur, -1000, 1000, 'li.p' + axis,
-                       lambda v, a=axis: _vec_set(l, 'position', a, v))
+                       lambda v, a=axis: self._cmd_vec_set(l, 'light',
+                                                           'position', a, v),
+                       via_cmd=True)
 
     def _build_camera_inspector(self, lay, c):
         e = self.editor
         name_edit = QLineEdit(c.name)
         name_edit.editingFinished.connect(
-            lambda: e.rename_camera(c, name_edit.text(), c.name) if name_edit.text() != c.name else None)
+            lambda: self._invoke_cmd('object_rename', {'name': c.name, 'new': name_edit.text()})
+            if name_edit.text() != c.name else None)   # Q-B7-56-1 裁定①
         lay.addRow("名称", name_edit)
         p = c.position
         for axis, cur in (('X', p.x), ('Y', p.y), ('Z', p.z)):
+            # Q-B7-56-1 裁定①: 摄像机位置行翻译成 camera_set 命令
             self._spin(lay, "位置 " + axis, cur, -1000, 1000, 'cam.p' + axis,
-                       lambda v, a=axis: _vec_set(c, 'position', a, v))
+                       lambda v, a=axis: self._cmd_vec_set(c, 'camera',
+                                                           'position', a, v),
+                       via_cmd=True)
         # M41: 摄像机朝向存度制 (yaw/pitch/roll 环绕), 直接读写不转换
         self._spin(lay, "朝向", c.yaw, -360, 360, 'cam.yaw',
                    lambda v: setattr(c, 'yaw', v), step=1.0)

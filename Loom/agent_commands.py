@@ -48,6 +48,40 @@ _COMMANDS = {}           # 命令名 -> fn(win, args) -> dict/值
 _CMDS_DESC = {}          # 命令名 -> 用途说明 (GUI 控制台提示)
 
 
+# ---- 命令作用域 (Q-B7-56-1 裁定①/D10=A, 2026-11-22) ----
+# 'agent' = EAI 命令行语义 (F12 控制台 / 远程 HTTP / MCP): dispatch 缺省, 执行期
+#           打 Agent 命令作用域 (批内写命令可被吸进批, D10=A/B 现状不变);
+# 'user'  = GUI 点击翻译的命令 (gui/main_window._invoke_cmd): 用户编辑 —— 进撤销
+#           栈, 但**不进** agent 批作用域 (不 agent_command_begin, 不续租)。
+# 线程约定: 命令只跑在 Qt 主线程 (HTTP 队列经 QTimer drain 回主线程执行), 栈式
+# 嵌套 (dispatch/命令壳各自 push/pop) 在该约定下安全。
+class _CommandScope:
+    """命令作用域栈 ('agent' | 'user'), dispatch / GUI 命令壳 push, cmd_* 经
+    current_scope() 读取 (按需区分, 如写白名单对人类对话框授权的放行)。"""
+
+    def __init__(self):
+        self._stack = ['agent']
+
+    def push(self, scope):
+        self._stack.append(scope if scope in ('agent', 'user') else 'agent')
+
+    def pop(self):
+        if len(self._stack) > 1:
+            self._stack.pop()
+
+    @property
+    def current(self):
+        return self._stack[-1]
+
+
+_CMD_SCOPE = _CommandScope()
+
+
+def current_scope():
+    """当前命令作用域 ('agent'|'user') — cmd_* 内部按需区分。"""
+    return _CMD_SCOPE.current
+
+
 def log(msg):
     """统一调试日志环 (命令/错误/事件; GUI 控制台与 Agent /logs 共用).
 
@@ -318,7 +352,7 @@ def command_names():
     return {k: _CMDS_DESC.get(k, '') for k in _COMMANDS}
 
 
-def dispatch(cmd, args, win):
+def dispatch(cmd, args, win, scope='agent'):
     """执行一条命令 (win=LoomGUI 或桩). 返回 {"ok":..., "result"/"error"}.
     命令报错不会崩编辑器: 记录日志并返回错误.
 
@@ -326,16 +360,24 @@ def dispatch(cmd, args, win):
     这里给 UndoManager 打上 "agent 命令作用域", 让批次只吸 EAI 命令产生的写命令。
     用户在检查器/gizmo/层级面板上的编辑不走 dispatch, 因此仍是"用户编辑":
     不进批、不续租 (批内 undo 时会被 D10=B 拒绝, 历史不丢)。
+
+    2026-11-22 (Q-B7-56-1 裁定①): 增 scope 参数 —— 'agent' (缺省, 兼容现状) =
+    EAI 命令行路径 (控制台 F12 / 远程 HTTP / MCP), 执行期打 agent 命令作用域
+    (D10 批语义现状不变); 'user' = GUI 点击翻译路径, **不打** agent 作用域
+    (GUI 翻译的命令 = 用户编辑, 只进撤销栈不进批)。GUI 命令壳
+    main_window._invoke_cmd 直调命令函数并自带 user 作用域包裹, 不经 dispatch;
+    本参数供测试与未来调用方显式表达路径。
     """
     fn = _COMMANDS.get(cmd)
     if fn is None:
         return {'ok': False, 'error': '未知命令: %s (可用: %s)'
                 % (cmd, ' '.join(sorted(_COMMANDS)))}
     _um, _ = _undo_manager(win)
-    if _um is not None and hasattr(_um, 'agent_command_begin'):
+    if scope == 'agent' and _um is not None and hasattr(_um, 'agent_command_begin'):
         _um.agent_command_begin()
     else:
         _um = None
+    _CMD_SCOPE.push(scope)
     try:
         t0 = time.perf_counter()
         result = fn(win, args or {})
@@ -356,6 +398,7 @@ def dispatch(cmd, args, win):
         log('[命令] %s 失败: %r' % (cmd, e))
         return {'ok': False, 'error': repr(e)}
     finally:
+        _CMD_SCOPE.pop()
         if _um is not None:
             try:
                 _um.agent_command_end()
@@ -509,7 +552,14 @@ def cmd_scene_save(win, args):
     if path:
         # 2026-08-28 二轮(高危3): 写路径白名单 —— 任意路径释放 = Agent 语
         # 句可达的病毒落点; 白名单外明确拒绝 (目录/场景/用户三根)
-        ok, full = _safe_write_path(path, 'scene_save', win)
+        # Q-B7-56-1 裁定① (2026-11-22): GUI「保存/另存为」点击 = 人类在系统
+        # 对话框里亲手逐字确认的路径, 翻译成 scene_save 执行时放行该路径所在
+        # 目录 —— 白名单挡的是 Agent 可注入的任意写, 人类对话框授权不受此限;
+        # 命令行/远程 (scope='agent') 一律维持原白名单, 越域照旧拒绝。
+        _extra = None
+        if _CMD_SCOPE.current == 'user':
+            _extra = [os.path.dirname(os.path.abspath(os.path.normpath(str(path))))]
+        ok, full = _safe_write_path(path, 'scene_save', win, extra_roots=_extra)
         if not ok:
             return {'error': full}
         out = ed._save_scene(full)
@@ -569,7 +619,10 @@ def cmd_object_add(win, args):
     # 不再"创建完让 Agent 猜最后一个"（重名/撤销后必错）。
     m = ed._add_primitive(typ)
     # 2026-11-07 C: 新物体创建后自动聚焦 (Agent 每一步都要人类看得见)
-    if m is not None:
+    # Q-B7-56-1 裁定① (2026-11-22): 自动聚焦是 Agent 可见性设施 —— GUI 点击
+    # (scope='user') 翻译执行时跳过, 保持人类点工具栏加物体相机不被拖走的旧 UX;
+    # 可观察等价面 (对象状态/撤销栈/命令日志) 两路一致 (相机视角不属场景状态)。
+    if m is not None and _CMD_SCOPE.current != 'user':
         try:
             _auto_focus(win, ed, ed.models.index(m))
         except ValueError:
@@ -1222,18 +1275,33 @@ def cmd_camera_active(win, args):
     return {'active': name}
 
 
-@command('camera_move', '开发者轨道相机移动: {x,y,z} 绝对目标 或 {dx,dy,dz} 增量, 可选 {distance}')
+@command('camera_move', '开发者轨道相机移动: {x,y,z} 绝对目标 或 {dx,dy,dz} 增量, 可选 {distance} '
+                        '(2026-11-22 裁定②: 进撤销栈)')
 def cmd_camera_move(win, args):
+    """开发者轨道相机移动. 2026-11-22 (Q-B7-56-1 裁定②): 命令行移动**进撤销栈**
+    —— 走 editor.set_orbit_view (与 camera_proj 的 set_camera_projection 同款:
+    先快照后写入, 有变化才 push)。GUI 右键轨道/中键平移/滚轮/WASDQE 老链路不经
+    本函数、不进栈 (连贯性操作豁免, 2026-08-27 原则不变)。"""
     ed = win.editor
+    target = None
     if 'x' in args:
-        ed.camera_target = (float(args['x']), float(args['y']), float(args['z']))
+        target = (float(args['x']), float(args['y']), float(args['z']))
     elif 'dx' in args:
         t = ed.camera_target
-        ed.camera_target = (t[0] + float(args['dx']),
-                            t[1] + float(args['dy']),
-                            t[2] + float(args['dz']))
-    if 'distance' in args:
-        ed.camera_distance = float(args['distance'])
+        target = (t[0] + float(args['dx']),
+                  t[1] + float(args['dy']),
+                  t[2] + float(args['dz']))
+    distance = float(args['distance']) if 'distance' in args else None
+    setter = getattr(ed, 'set_orbit_view', None)
+    if setter is not None:
+        out = setter(target=target, distance=distance)
+        return {'target': list(out['target']), 'distance': out['distance']}
+    # 兼容没有 set_orbit_view 的旧桩/老编辑器 (与 cmd_camera_proj 兜底同款):
+    # 直接写, 不进撤销 (真实 EditorApp 恒有该方法, 此路只为既有桩测试保命)。
+    if target is not None:
+        ed.camera_target = target
+    if distance is not None:
+        ed.camera_distance = distance
     return {'target': list(ed.camera_target), 'distance': ed.camera_distance}
 
 
@@ -1312,19 +1380,33 @@ def cmd_camera_proj(win, args):
     return out
 
 
-@command('camera_look', '开发者相机视角: {yaw,pitch}(度) 绝对 或 {dyaw,dpitch}(度) 增量')
+@command('camera_look', '开发者相机视角: {yaw,pitch}(度) 绝对 或 {dyaw,dpitch}(度) 增量 '
+                        '(2026-11-22 裁定②: 进撤销栈)')
 def cmd_camera_look(win, args):
+    """开发者相机视角. 2026-11-22 (Q-B7-56-1 裁定②): 命令行转视角**进撤销栈**
+    —— 走 editor.set_orbit_view (与 camera_proj 同款快照/恢复语义)。GUI 右键
+    轨道/方向键老链路不经本函数、不进栈 (连贯性操作豁免)。"""
     import math
     ed = win.editor
+    yaw = pitch = None
     if 'yaw' in args:
-        ed.camera_yaw = math.radians(float(args['yaw']))
+        yaw = math.radians(float(args['yaw']))
     elif 'dyaw' in args:
-        ed.camera_yaw += math.radians(float(args['dyaw']))
+        yaw = ed.camera_yaw + math.radians(float(args['dyaw']))
     if 'pitch' in args:
-        ed.camera_pitch = max(-1.55, min(1.55, math.radians(float(args['pitch']))))
+        pitch = math.radians(float(args['pitch']))
     elif 'dpitch' in args:
-        ed.camera_pitch = max(-1.55, min(1.55,
-                                         ed.camera_pitch + math.radians(float(args['dpitch']))))
+        pitch = ed.camera_pitch + math.radians(float(args['dpitch']))
+    setter = getattr(ed, 'set_orbit_view', None)
+    if setter is not None:
+        out = setter(yaw=yaw, pitch=pitch)
+        return {'yaw_deg': round(math.degrees(out['yaw']), 1),
+                'pitch_deg': round(math.degrees(out['pitch']), 1)}
+    # 兼容没有 set_orbit_view 的旧桩/老编辑器 (与 cmd_camera_proj 兜底同款)。
+    if yaw is not None:
+        ed.camera_yaw = yaw
+    if pitch is not None:
+        ed.camera_pitch = max(-1.55, min(1.55, pitch))
     return {'yaw_deg': round(math.degrees(ed.camera_yaw), 1),
             'pitch_deg': round(math.degrees(ed.camera_pitch), 1)}
 

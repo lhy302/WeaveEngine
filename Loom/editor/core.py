@@ -158,6 +158,31 @@ class _CameraProjCommand(Command):
         self.engine._apply_camera_proj(self.before)
 
 
+class _OrbitViewCommand(Command):
+    """开发者轨道相机视角 (target/distance/yaw/pitch) 改值命令
+    （Q-B7-56-1 裁定②, 2026-11-22: 命令行 camera_move/camera_look 进撤销栈）。
+
+    与 _CameraProjCommand 同款: 只持有 before/after 两组值, do/undo 都走引擎的
+    同一条赋值路径 (_apply_orbit_view), 不复制任何钳制逻辑 (钳制在 set_orbit_view)。
+    视角属**编辑器视图状态**（_scene_digest 口径, 2026-11-08 批2 注）—— 不进场景
+    脏判定: 撤销视角不把场景变脏, 与 camera_proj 先例（投影三件套才进脏判定）对齐。
+    GUI 右键轨道/中键平移/滚轮/WASDQE 老链路不走 set_orbit_view, 不产生本命令。
+    """
+
+    label = "相机视角"
+
+    def __init__(self, engine, before, after):
+        self.engine = engine
+        self.before = dict(before)
+        self.after = dict(after)
+
+    def do(self):
+        self.engine._apply_orbit_view(self.after)
+
+    def undo(self):
+        self.engine._apply_orbit_view(self.before)
+
+
 def _editor_skybox_provider(engine, cmd):
     """FramePlan 的 skybox 绘制源（编辑器版）：保持迁移前「失败每帧打印一行」的语义。"""
     try:
@@ -951,6 +976,50 @@ class _EditorCore(EngineCore):
             self._apply_camera_proj(after)
         return self._camera_proj_state()
 
+    # ---- 开发者轨道相机视角 (Q-B7-56-1 裁定②, 2026-11-22) ----
+    def _orbit_view_state(self):
+        """轨道相机视角四元组快照 (与 _apply_orbit_view 成对)."""
+        return {'target': tuple(float(v) for v in self.camera_target),
+                'distance': float(self.camera_distance),
+                'yaw': float(self.camera_yaw),
+                'pitch': float(self.camera_pitch)}
+
+    def _apply_orbit_view(self, state):
+        """把视角快照写回 (undo/redo 与 set_orbit_view 共用同一条赋值路径)."""
+        t = state['target']
+        self.camera_target = (float(t[0]), float(t[1]), float(t[2]))
+        self.camera_distance = float(state['distance'])
+        self.camera_yaw = float(state['yaw'])
+        self.camera_pitch = float(state['pitch'])
+
+    def set_orbit_view(self, target=None, distance=None, yaw=None, pitch=None):
+        """改开发者轨道相机视角（**进撤销栈**；Q-B7-56-1 裁定② 2026-11-22）。
+
+        EAI 命令 camera_move / camera_look 应走本方法 —— 直接写 self.camera_target
+        等会绕过撤销栈，命令行转的视角/移动撤不回（与 camera_proj / 裁决 D7=A
+        同病同修）。None = 该项不变；pitch 钳制 [-1.55, 1.55] 与 cmd_camera_look
+        旧实现一致。视角是编辑器视图状态（_scene_digest 不含它）：进撤销栈但
+        **不进场景脏判定**（对齐 camera_proj 先例：只有投影三件套进脏判定）。
+        GUI 右键轨道 / WASDQE 老链路**不走这里**（裁定②: 连贯性操作不进栈）。
+        返回改后的 {'target','distance','yaw','pitch'}（yaw/pitch 弧度）。
+        """
+        before = self._orbit_view_state()
+        if target is not None:
+            self.camera_target = (float(target[0]), float(target[1]),
+                                  float(target[2]))
+        if distance is not None:
+            self.camera_distance = float(distance)
+        if yaw is not None:
+            self.camera_yaw = float(yaw)
+        if pitch is not None:
+            self.camera_pitch = max(-1.55, min(1.55, float(pitch)))
+        after = self._orbit_view_state()
+        if after != before:
+            # push 会先 do()（再走一遍 _apply_orbit_view, 幂等）—— 与
+            # set_camera_projection 同一款"先写后 push"模式。
+            self.undo.push(_OrbitViewCommand(self, before, after))
+        return after
+
     def _camera_depth(self, cam):
         """摄像机挂父链深度 (层级树缩进用, 相机物体化 2026-08-16)."""
         depth = 0
@@ -1108,6 +1177,28 @@ class _EditorCore(EngineCore):
         except Exception as e:
             print("[编辑器] 保存失败:", e)
             return None
+
+    # ---- 文件对话框输入采集 (公开; Q-B7-56-1 裁定①, 2026-11-22) ----
+    # 裁定①: GUI 文件类点击的对话框只是"人类输入采集", 保存/加载/导入的**写本体**
+    # 必须翻译成 EAI 命令 (scene_save/scene_load/import_obj)。三个公开方法只选
+    # 路径、不写任何编辑器状态, 与原先内嵌在 _save_scene/_load_scene/_import_obj
+    # 里的对话框逐参一致 (GUI 路径行为不变); 命令行/远程仍走免对话框的命令语义。
+    def choose_scene_save_path(self):
+        """弹"保存场景"对话框, 返回所选路径 (取消 None). GUI 输入采集专用."""
+        return self._choose_scene_path()
+
+    def choose_scene_to_open(self):
+        """弹"加载场景"对话框 (与 _load_scene 的对话框逐参一致). 取消 None."""
+        path = filedialog.open_file("加载场景", initial_dir(self.last_dir),
+                                    _SCENE_FILTER)
+        self.view.reset_interaction()
+        return path
+
+    def choose_obj_to_import(self):
+        """弹"导入 .obj 模型"对话框 (与 _import_obj 的对话框逐参一致). 取消 None."""
+        return filedialog.open_file(
+            "导入 .obj 模型",
+            filter_str="Wavefront OBJ (*.obj)\0*.obj\0所有文件 (*.*)\0*.*\0")
 
     def _choose_scene_path(self):
         """弹保存对话框: 初始目录=上次目录或'保存', 默认文件名自动避让重名."""
