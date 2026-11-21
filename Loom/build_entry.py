@@ -1,22 +1,22 @@
 #! python3.13
 # -*- coding: utf-8 -*-
 """
-Loom.py — 入口: 命令行参数 + 数学管线基准 + 启动引擎
+build_entry.py — 编译入口: 命令行参数 + 数学管线基准 + 启动引擎
 
-模块拆分:
-  mathlib/matlib.py   4×4 矩阵数学库 (MVP)
-  mathlib/mesh.py     顶点/索引缓冲 Mesh + cube/sphere 生成器
-  engine.py   GLEngine 渲染引擎 (moderngl/OpenGL 真 GPU 渲染 + pygame 窗口/输入/HUD)
-
+（本文件是 Nuitka 编译主模块: 编译产物 Loom.exe 由 tools/build_engine.py 产出。
+ 本 docstring 原抄自 Loom.py（自称 Loom.py），2026-11-22 F-7(终审) 改为
+ build_entry 自述；与源码入口 Loom.py 同参同语义 —— 后端选择同走 run_player
+ 单一实现（_player_backend_choice / _editor_backend_choice, B7-54）。）
 命令行:
-  python Loom.py                          启动编辑器 (默认)
-  python Loom.py --editor                 显式启动编辑器
-  python Loom.py --run <scene.json>       播放场景 (运行时, 无编辑器 UI)
-  python Loom.py --open <scene.json>      编辑器打开指定场景 (供项目管理器"打开项目")
-  python Loom.py --benchmark [三角形数] [迭代数]  数学管线基准 (不弹窗口)
-  python Loom.py --bench <scene.json> [帧数]     场景基准 (加载->预热->测量, 编译版测速用;
+  python build_entry.py                          启动编辑器 (默认)
+  python build_entry.py --editor                 显式启动编辑器
+  python build_entry.py --run <scene.json>       播放场景 (运行时, 无编辑器 UI)
+  python build_entry.py --open <scene.json>      编辑器打开指定场景 (供项目管理器"打开项目")
+  python build_entry.py --benchmark [三角形数] [迭代数]  数学管线基准 (不弹窗口)
+  python build_entry.py --bench <scene.json> [帧数]     场景基准 (加载->预热->测量, 编译版测速用;
                                           结果打印 stdout 并写**用户目录** bench/bench_result.txt（D1: 不再写 exe 旁）—
                                           编译版是 windows-disable-console, 靠文件收结果)
+  （数学管线基准模块与 Loom.py 同一份: mathlib/matlib.py 矩阵库 / mathlib/mesh.py 网格。）
 """
 import os
 import sys

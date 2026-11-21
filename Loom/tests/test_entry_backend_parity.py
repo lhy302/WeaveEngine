@@ -26,9 +26,26 @@
      PlayerApp 直连；build_entry 静态 import run_player
      （Nuitka 编进 build_entry.dist = 编译产物自带同源副本）。
 
-修前红（2026-11-21, HEAD 089677f 真跑留痕）: B 组 8 条 FAIL（三份内联解析
-仍在）+ C 组 4 条 FAIL（build_entry 四分支硬编码 GL、决策函数不存在）。
+修前红（2026-11-21, HEAD 089677f 真跑留痕）: 终审 agent-60 复核实测 38 条
+FAIL = A 组 24 + B 组 7 + C 组 7（本文件头初稿误记「B8+C4」，2026-11-22
+B7-54 终审 F-3 更正；C2 的静态 import 断言修前即 PASS，不属红证据）。
 修后全绿。git 停靠点见该文件所在提交。
+
+2026-11-22 B7-54 终审 F-2 补牙（agent-61）:
+  旧 A④ 的期望是门内复刻的「S4 规则」，不触达 Loom.py 真分支源码
+  （:500-507 的编辑器分支决策在门内没有对应物）→ 解析层两端同步坏仍绿；
+  A①/A①b 两侧同走 run_player.parse_backend_arg（_cli_backend 是薄转调），
+  解析层两端同步坏也仍绿。修法:
+  · Loom.py 把 S4 编辑器分支决策抽成可独立调用的纯函数
+    _editor_backend_choice（main 分支真调用它，决策语义逐位不变）;
+  · A④ 改为「双方真调用 + S4 独立期望」三判据（A④ = Loom.py 决策 vs
+    独立期望；A④b = build_entry 决策 vs Loom.py 决策，逐位）;
+  · B 组新增源码结构断言: _cli_backend 体内含 parse_backend_arg 转调
+    且不含 --backend 内联比较；main 的 S4 分支真调用 _editor_backend_choice；
+    旧内联 `as _resolve_backend` 已删。
+  修前红（新断言就位、Loom.py 尚未抽函数时真跑留痕）: 27 条 FAIL =
+  A④ 12 + A④b 12 + B 组结构断言 3（_editor_backend_choice 未定义 /
+  main 未真调用 / 旧内联 as _resolve_backend 仍在）。修后全绿。
 """
 import sys as _sys_utf8
 try:
@@ -177,16 +194,26 @@ def t_parity():
                       gp_api == ref, 'gp=%r ref=%r' % (gp_api, ref))
             except AttributeError as e:
                 check('A③ game_player 决策与 run_player 一致 (%s)' % tag, False, e)
-            # ④ 编辑器面：Loom.py S4 规则（仅显式 --backend 且解析为 vulkan 才 VK）
-            #    与 build_entry._editor_backend_choice 必须逐位一致。
-            loom_edit = 'vulkan' if (loom_cli is not None
-                                     and run_player.resolve_backend(loom_cli) == 'vulkan') else 'gl'
+            # ④ 编辑器面（2026-11-22 终审 F-2 补牙）：旧版期望是门内复刻的
+            #    「S4 规则」，不触达 Loom.py 真分支源码 → 两端同步坏仍绿。
+            #    现在 Loom.py 侧真调用 loom._editor_backend_choice（main S4 分支
+            #    用的同一份决策函数），build_entry 侧真调用其同名纯函数；
+            #    expected_edit 仅作独立第三判据（防两边决策函数一起坏）。
+            expected_edit = 'vulkan' if (cli_ref is not None
+                                         and run_player.resolve_backend(cli_ref) == 'vulkan') else 'gl'
+            loom_edit = None
+            try:
+                loom_edit = loom._editor_backend_choice(list(argv))
+                check('A④ Loom.py 编辑器决策（真调用 _editor_backend_choice）与 S4 独立期望一致 (%s)' % tag,
+                      loom_edit == expected_edit, 'loom=%r expected=%r' % (loom_edit, expected_edit))
+            except AttributeError as e:
+                check('A④ Loom.py 编辑器决策（真调用 _editor_backend_choice）与 S4 独立期望一致 (%s)' % tag, False, e)
             try:
                 be_edit = build_entry._editor_backend_choice(list(argv))
-                check('A④ build_entry 编辑器决策与 Loom.py S4 规则一致 (%s)' % tag,
+                check('A④b build_entry 编辑器决策与 Loom.py 决策逐位一致（双方真调用）(%s)' % tag,
                       be_edit == loom_edit, 'be=%r loom=%r' % (be_edit, loom_edit))
             except AttributeError as e:
-                check('A④ build_entry 编辑器决策与 Loom.py S4 规则一致 (%s)' % tag, False, e)
+                check('A④b build_entry 编辑器决策与 Loom.py 决策逐位一致（双方真调用）(%s)' % tag, False, e)
     # 恢复未配置，避免影响同批其它测试（用户层已隔离，双保险）
     _set_render_api(None)
 
@@ -220,6 +247,45 @@ def t_single_source():
     n = len(re.findall(_INLINE_PARSE_PATTERNS[0][0], rp_src))
     check('B run_player.py 是唯一内联解析点（恰 1 处，位于 parse_backend_arg 体内）',
           n == 1 and hasattr(run_player, 'parse_backend_arg'), '比较次数=%d' % n)
+
+
+# ============ B+. Loom.py 源码结构（2026-11-22 终审 F-2 补牙） ============
+
+def _func_body_src(src, name):
+    """按 ast 定位模块顶层函数 name，返回其完整源码行段（含 docstring）。"""
+    import ast
+    try:
+        tree = ast.parse(src)
+    except SyntaxError:
+        return None
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and node.name == name:
+            lines = src.split('\n')
+            return '\n'.join(lines[node.lineno - 1:node.end_lineno])
+    return None
+
+
+def t_loom_source_structure():
+    """A① 的 _cli_backend 是薄转调、A④ 旧期望是门内复刻 —— 解析/决策层
+    两端同步坏仍绿。本组用源码结构把 Loom.py 钉死在单一解析与真决策函数上:
+    _cli_backend 体内必须含 parse_backend_arg 转调且不含 --backend 内联
+    比较；main 的 S4 分支必须真调用 _editor_backend_choice（门测的就是
+    分支用的那份决策，不是复刻）。"""
+    src = open(os.path.join(ROOT, 'Loom.py'), encoding='utf-8').read()
+    body = _func_body_src(src, '_cli_backend')
+    check('B Loom.py _cli_backend 可定位（结构断言前提）', body is not None)
+    if body:
+        check('B Loom.py _cli_backend 体内含 parse_backend_arg 转调（解析单一事实）',
+              'parse_backend_arg' in body)
+        bad = [why for pat, why in _INLINE_PARSE_PATTERNS if re.search(pat, body)]
+        check('B Loom.py _cli_backend 体内不含 --backend 内联比较/查找（不得长出第二份解析）',
+              not bad, '; '.join(bad) or '-')
+    check('B Loom.py 定义 _editor_backend_choice（编辑器决策可被门真调用）',
+          _func_body_src(src, '_editor_backend_choice') is not None)
+    check('B Loom.py main 的 S4 分支真调用 _editor_backend_choice（门测的就是分支用的那份决策）',
+          re.search(r'_editor_backend_choice\(sys\.argv\)', src) is not None)
+    check('B Loom.py main 不再内联编辑器后端决策（旧 as _resolve_backend 内联已删）',
+          'as _resolve_backend' not in src)
 
 
 # ============ C. build_entry 分支决策可达 ============
@@ -270,6 +336,7 @@ def t_build_entry_branches():
 
 t_parity()
 t_single_source()
+t_loom_source_structure()
 t_build_entry_branches()
 
 print('=' * 60)

@@ -102,6 +102,22 @@ def _cli_backend(argv):
     return parse_backend_arg(argv)
 
 
+def _editor_backend_choice(argv):
+    """S4（Q-B7-47-1 阶段 4）编辑器后端决策（纯函数，无副作用）。
+
+    只有**显式 --backend vulkan** 才走 VK 视口; 不带 --backend（或缺省
+    opengl/auto）= GL, 与修前逐位一致（零用户可感知差异）。
+    2026-11-22 B7-54 终审 F-2: 从 main 的 S4 内联分支**逐位上移**成纯函数
+    （决策三行原样搬入, 语义零变化）—— main 分支真调用它, 对拍门
+    tests/test_entry_backend_parity.py A④ 也真调用同一份（门不再用
+    门内复刻做期望, 解析/决策层坏会真红）。"""
+    from run_player import resolve_backend
+    _cli = _cli_backend(argv)
+    if _cli is not None and resolve_backend(_cli) == 'vulkan':
+        return 'vulkan'
+    return 'gl'
+
+
 # ==================== E2: 远程模式三态 (2026-11-09 beta5) ====================
 # LOOM_REMOTE_MODE 取值 (Hub 默认**不注入** = off, 见版本计划 E2):
 #   off(未设) / 0  -> 原生 present (旧行为, 不变)
@@ -494,15 +510,12 @@ if __name__ == "__main__":
                 # 玩家模式不加锁，允许同时开多个游戏实例）。防止连点开 N 个编辑器。
                 from core.single_instance import ensure_editor_single_instance
                 ensure_editor_single_instance(scene_path=open_scene)
-                # S4（Q-B7-47-1 阶段 4）: 编辑器后端选择 —— 复用 run_player.resolve_backend
-                # 单一事实（不另写选择逻辑）。只有**显式 --backend vulkan**才走 VK 视口;
-                # 不带 --backend（或缺省 opengl/auto）= GL, 与修前逐位一致(零风险)。
-                _cli = _cli_backend(sys.argv)
-                _edit_backend = 'gl'
-                if _cli is not None:
-                    from run_player import resolve_backend as _resolve_backend
-                    if _resolve_backend(_cli) == 'vulkan':
-                        _edit_backend = 'vulkan'
+                # S4（Q-B7-47-1 阶段 4）: 编辑器后端选择 —— 决策在
+                # _editor_backend_choice 纯函数里（2026-11-22 B7-54 终审 F-2 抽出,
+                # 原 :500-505 内联三行逐位上移, 语义零变化）: 只有**显式 --backend
+                # vulkan**才走 VK 视口; 不带 --backend（或缺省 opengl/auto）= GL。
+                # 对拍门 test_entry_backend_parity.A④ 真调用同一份函数（不再是门内复刻）。
+                _edit_backend = _editor_backend_choice(sys.argv)
                 from gui.main_window import run_loom_gui
                 run_loom_gui(scene_path=open_scene, backend=_edit_backend)
                 sys.exit(0)
