@@ -96,8 +96,11 @@ class _View:
 
 
 class _ConsumingUI:
-    """UI 命中并消费点击 (模拟 HUD 按钮)。"""
-    def dispatch_mouse(self, pos, pressed, released):
+    """UI 命中并消费点击 (模拟 HUD 按钮)。
+    B7-28 (2026-11-21): 签名对齐 loom_ui.UIManager.dispatch_mouse(pos, pressed,
+    released, wheel=0) —— 编辑器 _dispatch_ui_mouse 现在把本帧 wheel 一起传入
+    (与 GL 播放器 P3-1 同语义), 桩不收第 4 参会 TypeError 被吞掉。"""
+    def dispatch_mouse(self, pos, pressed, released, wheel=0):
         return True
 
     def update_hover_only(self, pos):

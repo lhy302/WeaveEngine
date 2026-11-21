@@ -27,6 +27,9 @@ from render.contract.post import post_enabled   # 2B2: LOOM_POST=0 走旧路径
 from engine import (GLEngine, Point3D, LightState, CameraState, wrap_deg,
                     gc_play_enter, gc_play_exit)
 from core.engine_core import EngineCore     # S2 阶段2: _EditorCore 的内核底座（后端无关）
+# 2026-11-21 B7-28: 滚轮判据与 GL/VK 播放器同源 —— loom_ui_input 是 P3-1 抽出的
+# 唯一实现（编辑器不许另写一份判据，开发要求 §5.5「同源不同步」反模式）。
+from loom_ui_input import wheel_consumed_by_ui, wheel_taken_by_scrollview
 from render.gl.render import RenderMixin  # S4: VkEditorApp 绑定 GL 同一份 _apply_main_pass_camera（同源唯一实现）
 from render.gl.lighting import LightingMixin  # S4: VkEditorApp 绑定 GL 同一份 _aabbs_batched（S2 留痕的纯 numpy 归位未做）
 from render.vk.driver import SceneDriver # S4: VK 编辑器装配基类（VkEditorApp(_EditorCore, SceneDriver)）
@@ -506,20 +509,33 @@ class _EditorCore(EngineCore):
             self.ui_consumed = False
             return
         # pressed/released 是「本帧新按下/松开」, 每帧事件处理后被清空
+        pos = getattr(self, 'mouse_pos', (0, 0))
+        pressed = set(getattr(self, 'pressed', ()))
+        released = set(getattr(self, 'released', ()))
+        # 2026-11-21 B7-28: 本帧滚轮也要交给 UI（此前漏传, 编辑器里 ScrollView
+        # 滚轮滚不动）。Qt 宿主 wheelEvent 给的是 angleDelta/120, 保留浮点不取整,
+        # ScrollView 平滑滚动语义不变（GL 播放器 GLFW 事件本就是整数）。
+        wheel = getattr(self, 'mouse_wheel', 0) or 0
+        # B7-28: 滚轮专属判据必须在 dispatch **之前**取 —— dispatch 会改
+        # ScrollView.scroll_pos（与 runtime.P3-1 / vk_ui.begin_frame 同一时序约束）。
+        wheel_taken = bool(wheel) and wheel_taken_by_scrollview(ui, pos)
         consumed = False
         try:
-            consumed = ui.dispatch_mouse(
-                getattr(self, 'mouse_pos', (0, 0)),
-                set(getattr(self, 'pressed', ())),
-                set(getattr(self, 'released', ())))
+            consumed = bool(ui.dispatch_mouse(pos, pressed, released, wheel))
         except Exception:
             consumed = False
         # hover-only 更新 (按钮悬停效果, 无点击时)
         if not consumed:
             try:
-                ui.update_hover_only(getattr(self, 'mouse_pos', (0, 0)))
+                ui.update_hover_only(pos)
             except Exception:
                 pass
+        # B7-28 (P-09 组合规则, 唯一实现 wheel_consumed_by_ui, 与 GL/VK 播放器同源):
+        # 只有「滚轮本身被 ScrollView 吃掉」才清 self.mouse_wheel —— 相机/脚本
+        # 不再看到它; 同帧「点按钮 + 滚轮」consumed=True 但 wheel_taken=False,
+        # 滚轮照给相机/脚本（不许用整帧 consumed 把滚轮连坐丢掉）。
+        if wheel_consumed_by_ui(wheel, consumed, wheel_taken):
+            self.mouse_wheel = 0
         self.ui_consumed = consumed
 
     def _update_gizmo(self):
@@ -2752,7 +2768,11 @@ class _EditorCore(EngineCore):
         # 滚轮缩放 (视口内): 往上推 = 放大/拉近, 往下滑 = 拉远 (2026-08-12 用户确认标准方向)
         # 2026-09-06 相机统一: 播放/编辑同一轨道几何 — 滚轮一律推拉
         # camera_distance (旧"播放态推拉相机本体"自由相机分支删除)。
-        if (not _ui_lock and self.mouse_wheel
+        # 2026-11-21 B7-28 (P-09 裁决): 滚轮不再被 _ui_lock (整帧鼠标事件被消费)
+        # 连坐 —— 只有「滚轮本身被 ScrollView 吃掉」才不给相机; 被吃掉的滚轮已在
+        # _dispatch_ui_mouse 里清 0, 这里只看 self.mouse_wheel 是否还有值。
+        # 同帧「点按钮 + 滚轮」: 按钮消费点击, 滚轮仍归相机/脚本。
+        if (self.mouse_wheel
                 and self._in_viewport(self.mouse_pos)):
             # 2026-10-20 视距提升：相机滚动上限 200→1000（匹配 far=1000）
             self.camera_distance = max(0.5, min(1000.0,
