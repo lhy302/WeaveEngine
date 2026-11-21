@@ -1346,7 +1346,7 @@ def cmd_camera_look(win, args):
 # ====================================================================
 @command('plugins', '插件与已注册按钮清单 (播放器层插件命令化入口)')
 def cmd_plugins(win, args):
-    import plugin_loader
+    import plugin.loader as plugin_loader
     loaded = plugin_loader.get_loaded()
     btns = []
     for text, cb, pid in plugin_loader.editor_buttons():
@@ -1358,7 +1358,7 @@ def cmd_plugins(win, args):
 
 @command('plugin_button', '运行插件按钮: {plugin, text} (与 GUI 菜单点击等价)')
 def cmd_plugin_button(win, args):
-    import plugin_loader
+    import plugin.loader as plugin_loader
     pid = args.get('plugin')
     text = args.get('text')
     for t, cb, p in plugin_loader.editor_buttons():
@@ -1763,7 +1763,7 @@ def cmd_set_texture(win, args):
             return {'error': '贴图解码失败: %s' % (_why2,)}
     else:
         try:
-            from loom_texture import Texture
+            from assets.texture import Texture
             tex = Texture.from_file(
                 ap, name=os.path.basename(ap),
                 wrap=args.get('wrap', 'repeat'),
@@ -1892,7 +1892,7 @@ def cmd_set_env(win, args):
     except Exception:
         _ctx = None
     try:
-        from loom_cubemap import Cubemap
+        from assets.cubemap import Cubemap
         if paths:
             if isinstance(paths, str):
                 paths = [p for p in paths.split(',') if p.strip()]
@@ -2135,7 +2135,7 @@ def cmd_script_reload(win, args):
     之前 load_script_dir 只在引擎启动时调一次，Agent 每改一次脚本都要重启编辑器，
     整个"写脚本->挂载->播放->看结果->改"闭环无法连续迭代。
     """
-    import scripts as _scripts
+    import script.scripts as _scripts
     import os as _os
     target_dir = args.get('dir')
     if not target_dir:
@@ -2162,7 +2162,7 @@ def cmd_script_reload(win, args):
 def cmd_scripts(win, args):
     """2026-10-19 P0-2: 供 Agent 在 script_add 前查询有效 id，
     避免再猜一个不存在的 id 导致挂载失败。"""
-    import scripts as _scripts
+    import script.scripts as _scripts
     out = []
     for sid, cls in _scripts.SCRIPTS.items():
         params = []
@@ -2519,7 +2519,7 @@ def cmd_asset_get(win, args):
          '{guid, src?, wrap?/filter_mode?/aniso?/max_size?/mipmaps?/compression?, clear?}')
 def cmd_asset_user_override(win, args):
     """F-02: 用户层 delta 的唯一写入口（旧实现只有读、没有 writer -> 死代码）。"""
-    import loom_assets
+    import assets.assets as loom_assets
     ed = win.editor
     root = ed._project_root()
     if root is None:
@@ -2564,7 +2564,7 @@ def cmd_asset_user_override(win, args):
 @command('asset_list', '项目资产清单 (含逐条 valid/reason): {type?}')
 def cmd_asset_list(win, args):
     """P1-2: 必须区分「缺文件 / 文件在但部分坏 / 完全不可用」三种状态。"""
-    import loom_assets
+    import assets.assets as loom_assets
     ed = win.editor
     root = ed._project_root()
     if root is None:
@@ -2596,7 +2596,7 @@ def cmd_asset_list(win, args):
          '场景资产体检: 本次加载记录的引用问题 (valid/reason)，对齐 skybox_get 口径')
 def cmd_scene_assets_check(win, args):
     import sceneio
-    import loom_assets
+    import assets.assets as loom_assets
     ed = win.editor
     errs = sceneio.asset_errors(ed)          # 含天空盒/相机天空盒（P-05 修）
     root = ed._project_root()

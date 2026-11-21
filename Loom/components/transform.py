@@ -32,7 +32,7 @@ from kernels.fastpath import depths as _fp_depths
 # 这里接上"失败回退"到纯 Python 参考实现（同口径），符合调用方应尽的义务。
 from kernels.fastpath import _depths_impl as _fp_depths_py
 from core.primitives import Point3D
-from loom_components import TransformComponent
+from components.components import TransformComponent
 from core.interp import InterpState
 
 

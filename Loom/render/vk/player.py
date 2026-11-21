@@ -355,7 +355,7 @@ def run_vk(scene=None, frames_n=None, keep=False, mini=False, no_shadow=False,
     # 宿主不再预喂 UI（详见 host_key_forward 的说明）。
     ui_bridge = UIInputBridge(getattr(driver, 'ui', None))
     try:
-        from physics_bridge import cv_available as _pb_ok
+        from physics.bridge import cv_available as _pb_ok
     except Exception:
         _pb_ok = False
     # 2026-11-06 相机对齐: 打印也用真实玩家相机 (有 active_camera 时不再是轨道参数)

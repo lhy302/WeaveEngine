@@ -13,8 +13,8 @@ os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import gc
 import numpy as np
 
-from loom_texture import Texture
-from loom_cubemap import Cubemap
+from assets.texture import Texture
+from assets.cubemap import Cubemap
 
 ok = True
 def check(label, cond, detail=""):

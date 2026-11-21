@@ -16,8 +16,8 @@ import numpy as np
 import engine as E
 from mathlib.mesh import create_cube
 import undo as U
-from loom_texture import Texture
-from loom_cubemap import Cubemap
+from assets.texture import Texture
+from assets.cubemap import Cubemap
 
 E.GLEngine._build_gpu = lambda self, m: None
 

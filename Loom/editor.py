@@ -799,7 +799,7 @@ class _EditorCore(EngineCore):
     def _project_root(self):
         """场景目录向上找项目根（以 Assets/assets.json 为唯一判据）；没有返回 None。"""
         try:
-            import loom_assets
+            import assets.assets as loom_assets
             return loom_assets.find_project_root(self._scene_dir())
         except Exception:
             return None
@@ -813,7 +813,7 @@ class _EditorCore(EngineCore):
         if create and not getattr(self, '_scene_path', None):
             return None
         try:
-            import loom_assets
+            import assets.assets as loom_assets
             return loom_assets.AssetContext.for_dir(self._scene_dir(), create=create)
         except Exception:
             return None
@@ -825,7 +825,7 @@ class _EditorCore(EngineCore):
         项目根 = 场景目录（要求场景已保存到文件；否则拒绝，避免把 Assets/ 建到
         引擎目录/CWD 污染仓库）。
         """
-        import loom_assets
+        import assets.assets as loom_assets
         if not getattr(self, '_scene_path', None):
             return None, False, '请先保存场景：项目根 = 场景文件所在目录'
         ctx = loom_assets.AssetContext.for_dir(self._scene_dir(), create=True)
@@ -1898,7 +1898,7 @@ class _EditorCore(EngineCore):
 
         extra_vars: 挂载时覆盖默认参数（对齐 P1-1 script_vars 透传）。
         """
-        import scripts as _scripts
+        import script.scripts as _scripts
         cls = _scripts.get_script(sid)
         if cls is None:
             raise ValueError(

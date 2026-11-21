@@ -66,7 +66,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import engine as E                    # noqa: E402
-from physics_pipe import PhysicsPipeThread   # noqa: E402
+from physics.pipe import PhysicsPipeThread   # noqa: E402
 from mathlib.mesh import create_cube          # noqa: E402
 
 DT = 1.0 / 60.0

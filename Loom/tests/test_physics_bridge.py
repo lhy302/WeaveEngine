@@ -84,7 +84,7 @@ if not HAS_CV:
     print("SKIP: culverin 未安装, physics_bridge 用例跳过 (legacy 路径不受影响)")
     sys.exit(0)
 
-import physics_bridge as B          # noqa: E402
+import physics.bridge as B          # noqa: E402
 import engine as E                 # noqa: E402
 import numpy as np                 # noqa: E402
 from mathlib.mesh import create_cube, create_sphere, create_plane   # noqa: E402

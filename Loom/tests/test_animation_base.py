@@ -74,8 +74,8 @@ import engine as E
 import sceneio as S
 import render.vk.driver as SD
 import undo as U
-import loom_components as C
-import loom_frame_components as LFC
+import components.components as C
+import components.frame_components as LFC
 from mathlib.mesh import create_cube
 
 E.GLEngine._build_gpu = lambda self, m: None

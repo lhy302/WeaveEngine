@@ -111,7 +111,7 @@ def _warn_logging_failed(exc):
 def _run_from_pack():
     """游戏包启动: 返回 PlayerApp 实例或 None (无有效包 = 不启动).
     包查找: exe 目录优先, 其次当前目录 (源码开发时 Ctrl+F5 便捷)."""
-    import game_pack
+    import build.game_pack as game_pack
     gm = None
     pack_dir = None
     for d in (_EXE_DIR, os.getcwd()):
@@ -123,9 +123,9 @@ def _run_from_pack():
         return None
     # 2026-08-27: 播放器层插件装载 —— secure 校验 .lpc 哈希后内存注册;
     # open/MOD 装发布夹 plugins/player/ 目录. 缺/被改 -> SystemExit 报错.
-    import game_pack
+    import build.game_pack as game_pack
     n_plug = game_pack.install_game_plugins(_EXE_DIR, gm)
-    from scripts import register_sources
+    from script.scripts import register_sources
     n = register_sources(gm.get('scripts') or [])
     cf = gm.get('config') or {}
     from runtime import PlayerApp
@@ -247,7 +247,7 @@ def _run_backend_safe(backend, scene=None, explicit=False, **kw):
 
 def _start_pack(backend, explicit=False):
     """游戏包启动: 解包+插件/脚本注册后按渲染 API 进入播放器 (Vk/GL)."""
-    import game_pack
+    import build.game_pack as game_pack
     gm = None
     pack_dir = None
     for d in (_EXE_DIR, os.getcwd()):
@@ -258,7 +258,7 @@ def _start_pack(backend, explicit=False):
     if gm is None:
         return None
     n_plug = game_pack.install_game_plugins(_EXE_DIR, gm)
-    from scripts import register_sources
+    from script.scripts import register_sources
     n = register_sources(gm.get('scripts') or [])
     cf = gm.get('config') or {}
     actual = _run_backend_safe(backend, scene_data=gm.get('scene'),

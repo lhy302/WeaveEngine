@@ -125,7 +125,7 @@ os.environ.setdefault('LOOM_NO_SAVE_MIGRATE', '1')
 os.environ.setdefault('LOOM_USER_ROOT', tempfile.mkdtemp(prefix='loom_p1_userroot_'))
 
 import sceneio as S                                          # noqa: E402
-import scripts as SCRIPTS_MOD                                # noqa: E402
+import script.scripts as SCRIPTS_MOD                                # noqa: E402
 import moderngl                                              # noqa: E402
 import runtime                                               # noqa: E402
 import render.vk.driver as scene_driver                                          # noqa: E402

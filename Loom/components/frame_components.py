@@ -14,7 +14,7 @@ mixin 只通过 self 按需访问 (语义与拆分前逐位一致)。
 import math
 import weakref
 
-from loom_components import evaluate_animations, physics_disabled_by_env
+from components.components import evaluate_animations, physics_disabled_by_env
 
 
 # ============ 2026-11-17 (B7-26): 音频段与碰撞回调的**共享实现**（两端同一份） ============
@@ -95,7 +95,7 @@ def call_collision_cb(m, hook, other):
     return _lc.call_cb(m, hook, other)
 
 
-import loom_collision as _lc   # noqa: E402  (模块级共享：碰撞回调)
+import components.collision as _lc   # noqa: E402  (模块级共享：碰撞回调)
 
 class FrameComponentMixin:
 

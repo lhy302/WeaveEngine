@@ -29,12 +29,12 @@ import shutil
 import subprocess
 import sys
 
-import game_pack
-import plugin_loader
+import build.game_pack as game_pack
+import plugin.loader as plugin_loader
 import sceneio
 
 try:
-    import loom_assets
+    import assets.assets as loom_assets
 except Exception:                     # 极旧引擎目录（无资产层）: 退化为"不拷资产"
     loom_assets = None
 

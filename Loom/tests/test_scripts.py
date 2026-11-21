@@ -62,7 +62,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import math
 import engine as E
 from engine import Point3D, GLEngine, GameObject
-import scripts
+import script.scripts as scripts
 
 ok = True
 def check(label, cond, detail=""):

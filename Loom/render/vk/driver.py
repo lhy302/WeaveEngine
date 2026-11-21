@@ -26,17 +26,17 @@ from engine import GameObject, Point3D, LightState, DEFAULT_ACTIONS
 import weakref
 
 from core.engine_core import EngineCore   # S2-3: 后端无关的引擎内核（与 GLEngine 同一个）
-from loom_components import (MeshRendererComponent, animator_from_dict,
-                            evaluate_animations, physics_disabled_by_env,
-                            AudioSystem)
+from components.components import (MeshRendererComponent, animator_from_dict,
+                            evaluate_animations, physics_disabled_by_env)
+from audio.system import AudioSystem   # B6: 音频门面归 audio/ 包
 # 2026-11-17 (B7-26): 碰撞配对/事件派发与音频段的**共享实现**（GL 侧同一份）
-import loom_collision as _lc
-import loom_frame_components as _lfc
+import components.collision as _lc
+import components.frame_components as _lfc
 # 2026-11-06 相机对齐 (双后端): CameraState 实体 (纯数据类, 无 GL 依赖) ——
 # 场景 cameras/active_camera 在 Vk 侧也要还原, 否则"场景里的 Camera 实体"
 # 在 Vulkan 播放器里完全不存在, 只能看轨道相机。
 from scene.entities import CameraState
-from scripts import get_script
+from script.scripts import get_script
 from loom_ui import UIManager, Canvas  # 2026-10-18: Canvas UI (替换 _DriverUI 空壳)
 # 2026-11-19 (P4-2): 轨道相机眼睛位置的**唯一实现**（GL 的 apply_orbit_camera 也调它）。
 # 修前 VK 里另有一份同公式拷贝（camera_pos），且 self.camera 从不由轨道相机更新。
@@ -54,7 +54,7 @@ from render.vk.pass_vk import VkEditorRenderMixin
 
 # B1: 物理桥 (零 GL; 缺失/导入失败 -> physb=None -> 无物理步进)
 try:
-    import physics_bridge as physb
+    import physics.bridge as physb
 except Exception:
     physb = None
 
@@ -172,7 +172,7 @@ def _asset_tex(ref, ctx):
             return None, '只有 guid 但解析不到资产（缺 assets.json 或条目已删）'
         return None, None
     try:
-        from loom_texture import Texture
+        from assets.texture import Texture
         tex = Texture.from_file(
             p, name=ref.get('name'), guid=guid,
             mipmaps=ref.get('mipmaps', True),
@@ -198,7 +198,7 @@ def _asset_env(ref, ctx):
         except Exception as e:
             return None, '环境贴图解析失败 (%r)' % (e,)
     try:
-        from loom_cubemap import Cubemap
+        from assets.cubemap import Cubemap
         if ref.get('paths'):
             try:
                 from sceneio import _resolve_scene_rel
@@ -224,7 +224,7 @@ def build_materials(data, ctx=None, errors=None):
     beta6 B1: 贴图/环境贴图按 guid 从项目资产解析；旧 path 字段兼容读并告警
     （与 GL 走同一套 loom_assets 解析，禁止两后端各写一份）。
     """
-    from loom_material import Material
+    from assets.material import Material
     out = []
 
     def _rec(where, guid, why):
@@ -542,7 +542,7 @@ class SceneDriver(VkWindowMixin, VkEditorRenderMixin, EngineCore):
         # (GL 播放器继承 GLEngine.__init__ 会加载), 导致打包后自定义脚本不生效。
         try:
             import os as _os
-            from scripts import load_script_dir as _lsd
+            from script.scripts import load_script_dir as _lsd
             _lsd(_os.path.join(_os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))), 'scripts'))
         except Exception:
             pass
@@ -1648,7 +1648,7 @@ class SceneDriver(VkWindowMixin, VkEditorRenderMixin, EngineCore):
     def _dispatch_fixed_update(self, fixed_dt):
         """2026-10-18 阶段1档序10 FixedUpdate（Vk 后端同步版）。"""
         try:
-            from scripts import Script as _Base
+            from script.scripts import Script as _Base
         except ImportError:
             return
         for m in self.models:
@@ -1670,7 +1670,7 @@ class SceneDriver(VkWindowMixin, VkEditorRenderMixin, EngineCore):
     def _dispatch_late_update(self, render_dt):
         """2026-10-18 阶段1档序11 LateUpdate（Vk 后端同步版）。"""
         try:
-            from scripts import Script as _Base
+            from script.scripts import Script as _Base
         except ImportError:
             return
         for m in self.models:

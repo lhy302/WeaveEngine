@@ -52,7 +52,9 @@ _diag_brepro/
 *~
 
 # ---- 构建目录 ----
-build/
+# 2026-11-21 (B6): 改根锚定 —— Loom/build/ 现在是源码包（build_game/game_pack），
+# 只忽略仓库根的 build/ 产物目录
+/build/
 dist/
 *.spec
 nul

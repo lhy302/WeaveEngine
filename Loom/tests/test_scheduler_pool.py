@@ -37,7 +37,7 @@ import types
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))            # Loom\
 
-from scheduler import NgilPool
+from script.scheduler import NgilPool
 
 _FAILS = []
 

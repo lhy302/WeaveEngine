@@ -303,7 +303,7 @@ class InputMixin:
         """
         occ = {}
         try:
-            import scripts
+            import script.scripts as scripts
             uses = scripts.script_key_uses()
             disp = scripts.script_display_name
         except Exception as e:

@@ -292,7 +292,7 @@ def t_plugin_buttons():
     check("plugins 命令返回清单结构",
           r['ok'] and 'plugins' in r['result'] and 'buttons' in r['result'], r['result'])
     # 模拟插件注册按钮 (与 plugin_loader.register_editor_button 同语义)
-    import plugin_loader
+    import plugin.loader as plugin_loader
     got = []
     plugin_loader._EDITOR_BUTTONS.append(('给球加力', lambda: got.append('kick'),
                                           'com.example.hi'))

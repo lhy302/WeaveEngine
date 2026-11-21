@@ -59,7 +59,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 
-import script_glue                                       # noqa: E402
+import script.glue as script_glue                        # noqa: E402
 from engine import GLEngine, GameObject, ScriptComponent  # noqa: E402
 from engine import DEFAULT_ACTIONS   # N3: 桩需要最小键位表（update_scripts 首行轮询解锁键）
 

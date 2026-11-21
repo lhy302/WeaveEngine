@@ -77,7 +77,7 @@ def check(name, cond, detail=''):
 
 
 # ---- 1. Texture 资产 ----
-from loom_texture import Texture
+from assets.texture import Texture
 
 t1 = Texture.white()
 check("white 纹理 1x1", t1.width == 1 and t1.height == 1, "%dx%d" % (t1.width, t1.height))
@@ -131,7 +131,7 @@ p = create_plane()
 check("plane UV 数对齐", p.uvs is not None and len(p.uvs) == 4, str(p.uvs))
 
 # ---- 3. Material albedo / normal_map 槽 ----
-from loom_material import Material
+from assets.material import Material
 
 mat = Material(color='#FF0000')
 check("材质默认无贴图", mat.albedo is None and mat._tex_guid == '', "")

@@ -54,7 +54,7 @@ def _enforce_fail_exit_code():
 import sys, os, math
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import engine as E
-import scripts
+import script.scripts as scripts
 from mathlib.mesh import create_cube, create_plane
 
 E.GLEngine._build_gpu = lambda self, m: None

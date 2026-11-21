@@ -9,7 +9,7 @@
 (确保撞飞/跌落不会卡死丢玩家).
 """
 from engine import Point3D
-from scripts import Script, register
+from script.scripts import Script, register
 
 
 @register

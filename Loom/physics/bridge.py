@@ -42,7 +42,7 @@ import os
 from collections import namedtuple as _namedtuple
 
 import numpy as np
-import physics_glue as _phys_glue
+import physics.glue as _phys_glue
 
 try:
     import culverin as cv

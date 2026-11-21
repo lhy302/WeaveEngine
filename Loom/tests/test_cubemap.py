@@ -64,7 +64,7 @@ sys.argv[0] = os.path.join(BASE, 'Loom.py')
 
 import numpy as np
 import moderngl
-from loom_cubemap import Cubemap
+from assets.cubemap import Cubemap
 
 _fails = []
 
@@ -108,7 +108,7 @@ check("release 后 gl_tex 为 None", c.gl_tex is None, "")
 ctx.release()
 
 # ---- 材质 env_map 槽 ----
-from loom_material import Material
+from assets.material import Material
 mat = Material(color='#FFFFFF')
 check("材质默认无 env", mat.env_map is None and mat._env_guid == '', "")
 mat.env_map = Cubemap.from_solid('#8080FF', size=4)

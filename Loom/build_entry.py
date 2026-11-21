@@ -375,7 +375,7 @@ if __name__ == "__main__":
 
     # L1 插件加载 (2026-08-20): plugins\ 目录投放, 坏插件自动跳过回退官方
     try:
-        from plugin_loader import load_plugins
+        from plugin.loader import load_plugins
         load_plugins()
     except Exception as e:
         print("[插件] 加载失败: %r" % e)
@@ -404,7 +404,7 @@ if __name__ == "__main__":
                 # 2026-08-27: 双启=玩家进程语义 —— 装载同夹插件
                 # (有 .lsc+哈希=secure 校验; 否则 MOD 目录投放式)
                 try:
-                    import game_pack
+                    import build.game_pack as game_pack
                     gm = None
                     try:
                         gm = game_pack.load(_exe_dir)

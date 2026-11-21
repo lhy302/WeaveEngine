@@ -154,7 +154,7 @@ def t_a5_invalid_cubemap():
     """A5=A: 无效 cubemap 统一错误模型 —— 拒绝 + 告警一次 + 不画, 不抛到渲染循环。"""
     print("=== D. 无效 cubemap (A5=A) ===")
     import numpy as np
-    from loom_cubemap import Cubemap
+    from assets.cubemap import Cubemap
     arr = np.zeros((2, 2, 4), dtype=np.uint8)
     bad_faces = Cubemap(2, faces=[arr.copy(), arr.copy()])      # 只有 2 面
     ok, why = bad_faces.validate()

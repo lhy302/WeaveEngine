@@ -21,8 +21,8 @@ import uuid
 
 import numpy as np
 
-from loom_game_object import GameObject
-from loom_material import Material
+from components.game_object import GameObject
+from assets.material import Material
 from core.color import _hex_rgba
 
 

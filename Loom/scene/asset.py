@@ -38,7 +38,7 @@ def asset_context(base_dir=None, create=False):
     None = **旧路径模式**（无项目资产库）：一切行为与 beta5 完全一致（兼容闸门）。
     """
     try:
-        from loom_assets import context_for_scene
+        from assets.assets import context_for_scene
         return context_for_scene(base_dir, create=create)
     except Exception:
         return None

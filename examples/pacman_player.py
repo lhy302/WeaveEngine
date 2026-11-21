@@ -8,7 +8,7 @@ UI 按钮回调 on_restart / on_quit。
 import math
 
 from engine import Point3D
-from scripts import Script, register
+from script.scripts import Script, register
 
 
 @register

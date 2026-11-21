@@ -15,7 +15,7 @@ import os
 import sys
 import threading
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
+_HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # B6: 深一层 -> 仍指 Loom/
 _CC = os.path.join(_HERE, 'core_components')
 for _p in (_CC, _HERE):
     if _p not in sys.path:

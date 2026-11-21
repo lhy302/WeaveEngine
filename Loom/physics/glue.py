@@ -5,7 +5,7 @@ import ctypes
 import os
 import sys
 import threading
-_HERE = os.path.dirname(os.path.abspath(__file__))
+_HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # B6: 深一层 -> 仍指 Loom/
 _CC = os.path.join(_HERE, 'core_components')
 if _CC not in sys.path: sys.path.insert(0, _CC)
 if _HERE not in sys.path: sys.path.insert(0, _HERE)

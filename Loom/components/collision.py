@@ -31,7 +31,7 @@ def _script_overrides_stay(inst):
     if inst is None:
         return False
     try:
-        from scripts import Script as _BaseScript
+        from script.scripts import Script as _BaseScript
     except ImportError:
         return False
     fn = getattr(type(inst), 'on_collision_stay', None)
@@ -43,7 +43,7 @@ def _script_overrides_trigger_stay(inst):
     if inst is None:
         return False
     try:
-        from scripts import Script as _BaseScript
+        from script.scripts import Script as _BaseScript
     except ImportError:
         return False
     fn = getattr(type(inst), 'on_trigger_stay', None)

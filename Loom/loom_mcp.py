@@ -863,7 +863,7 @@ class LoomMCPServer:
             import subprocess
             out_dir = args.get('output_dir') or os.path.join(
                 c.base_dir, '发布', args.get('game_name', 'MyGame'))
-            cmd = [sys.executable, os.path.join(c.base_dir, 'build_game.py'),
+            cmd = [sys.executable, os.path.join(c.base_dir, 'build', 'build_game.py'),
                    '--name', args.get('game_name', 'MyGame'),
                    '--output', out_dir, '--force']
             if 'scene_path' in args:

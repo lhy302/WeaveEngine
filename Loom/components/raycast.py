@@ -84,7 +84,7 @@ class RaycastMixin:
         if getattr(bridge, '_w', None) is None:
             return False
         try:
-            import physics_bridge as pb
+            import physics.bridge as pb
             return pb.cv_available
         except Exception:
             return False
@@ -167,7 +167,7 @@ class RaycastMixin:
             # → 下面 mn.x 抛 "str object has no attribute x"。且该分支在**没有
             # _model_aabbs_par 的宿主（VK）上必然进入 → VK 的 raycast 100% 失效。
             # 改用后端无关的 loom_collision.aabb_of（两端同一份）。
-            import loom_collision as _lc
+            import components.collision as _lc
             _cache = getattr(self, '_bb_cache', None)
             if _cache is None:
                 _cache = {}

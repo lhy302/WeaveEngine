@@ -31,7 +31,7 @@ import numpy as np
 
 import kernels.fastpath as fastpath
 from kernels.fastpath import ancestry_dfs as _fp_ancestry
-from loom_components import physics_disabled_by_env as _physics_disabled_by_env
+from components.components import physics_disabled_by_env as _physics_disabled_by_env
 from core.primitives import Point3D
 
 
@@ -44,8 +44,8 @@ _PUSH_TIE_EPS = 1e-9
 # 2026-11-17 (B7-26): 脚本钩子判定与碰撞派发搬进 loom_collision 共享实现，
 # 这里 re-export 同名符号 —— 既有导入点（本文件内 + 外部）不需要改，
 # 且两端（GL PhysicsMixin / VK SceneDriver）从此用的是**同一份**判定与派发代码。
-import loom_collision as _lc
-from loom_collision import (                     # noqa: F401  (兼容 re-export)
+import components.collision as _lc
+from components.collision import (               # noqa: F401  (兼容 re-export)
     _any_script_needs_stay,
     _is_trigger_pair,
     _script_overrides_stay,
@@ -537,7 +537,7 @@ class PhysicsMixin:
         if br is not None:
             return br
         try:
-            from physics_bridge import PhysicsWorldBridge, cv_available
+            from physics.bridge import PhysicsWorldBridge, cv_available
         except Exception as e:
             print("[物理] physics_bridge 导入失败:", e)
             self._phys_bridge_disabled = True
@@ -583,7 +583,7 @@ class PhysicsMixin:
         if getattr(self, '_phys_pipe', None) is not None:
             return self._phys_pipe
         try:
-            from physics_pipe import PhysicsPipeThread
+            from physics.pipe import PhysicsPipeThread
             _pol = (getattr(self, 'parallel', None) or {}).get('policy') or {}
             self._phys_pipe = PhysicsPipeThread(br, mask=_pol.get('pool_mask') or 0)
             return self._phys_pipe

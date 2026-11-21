@@ -84,7 +84,7 @@ def _make_png(path, size=256):
 
 def _fake_gl_engine():
     """sceneio._apply_materials 需要的引擎面 (materials 列表 + add_material)."""
-    from loom_material import Material
+    from assets.material import Material
 
     class _Eng:
         def __init__(self):
@@ -210,8 +210,8 @@ def t_env_solid_color():
 def t_env_solid_color_roundtrip():
     """emit -> apply 往返: sceneio 写出的 solid_color 段 VK 侧也能吃 (F7 契约)."""
     print("=== 纯色 env_map: sceneio emit -> VK build_materials 往返 ===")
-    from loom_material import Material
-    from loom_cubemap import Cubemap
+    from assets.material import Material
+    from assets.cubemap import Cubemap
     mat = Material(name="往返", color="#20c060")
     mat.guid = "m-roundtrip"
     mat.env_map = Cubemap.from_solid((20, 192, 96, 255), name="env-rt",

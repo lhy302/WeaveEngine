@@ -29,7 +29,7 @@ LOOM = os.path.join(ROOT, 'Loom')
 sys.path.insert(0, LOOM)
 
 import sceneio  # noqa: E402
-import loom_assets  # noqa: E402
+import assets.assets as loom_assets  # noqa: E402
 
 TEXTURE_KEYS = ('mipmaps', 'wrap', 'filter_mode', 'aniso', 'max_size', 'compression')
 

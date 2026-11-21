@@ -193,13 +193,13 @@ os.environ.setdefault('LOOM_USER_ROOT', tempfile.mkdtemp(prefix='loom_p4_userroo
 import moderngl                                                  # noqa: E402
 import pygame                                                    # noqa: E402
 
-import loom_components                                           # noqa: E402
-import loom_frame_components as LFC                              # noqa: E402
+import components.components as loom_components # noqa: E402
+import components.frame_components as LFC                              # noqa: E402
 import runtime                                                   # noqa: E402  GL 打包播放器（生产入口）
 import render.vk.driver as SD                                        # noqa: E402  VK 播放器（生产入口）
 import sceneio                                                   # noqa: E402
-from loom_components import AudioSystem                          # noqa: E402  生产音频门面
-from scripts import Script, register                             # noqa: E402  脚本生产注册路径
+from audio.system import AudioSystem                          # noqa: E402  生产音频门面
+from script.scripts import Script, register                             # noqa: E402  脚本生产注册路径
 
 ok = True
 KNOWN_DIFFS = []        # 已知差异登记表：必须为空；发现差异 = 红并报告，不许登记糊过去
@@ -274,21 +274,21 @@ def src_has(fname, needle, must=True, why=''):
 
 print("=== 〇. 结构：音频段唯一实现 / 两端生产调用点 / 音频门面唯一 / 历史名 ===")
 _sync_defs = _grep_prod('def sync_audio_listener')
-check('结构：sync_audio_listener 只由 loom_frame_components.py 实现（其它生产文件 0 处）',
-      [p for (p, _l) in _sync_defs] == ['loom_frame_components.py'], _sync_defs)
+check('结构：sync_audio_listener 只由 components/frame_components.py 实现（其它生产文件 0 处）',
+      [p for (p, _l) in _sync_defs] == ['components/frame_components.py'], _sync_defs)
 _ua_defs = _grep_prod('def update_audio')
 check('结构：update_audio 的定义恰好 3 处（loom_frame_components 的模块级函数 + '
       'FrameComponentMixin 方法，scene_driver 的 VK 方法）—— 没有第三份实现',
-      sorted(p for (p, _l) in _ua_defs) == ['loom_frame_components.py',
-                                            'loom_frame_components.py',
+      sorted(p for (p, _l) in _ua_defs) == ['components/frame_components.py',
+                                            'components/frame_components.py',
                                             'render/vk/driver.py'], _ua_defs)
 for _hist in ('def _update_audio', 'def update_audio_impl', 'def _apply_audio',
               'def _sync_audio_listener_impl', 'def sync_listener'):
     _h = _grep_prod(_hist)
     check('结构：历史名/拷贝名 %r 在全部生产文件里不存在' % _hist, not _h, _h[:4])
-src_has('loom_frame_components.py', 'return update_audio(self, dt)', True,
+src_has('components/frame_components.py', 'return update_audio(self, dt)', True,
         'GL 的 FrameComponentMixin.update_audio 转调模块级共享实现（:111）')
-src_has('loom_frame_components.py', 'return sync_audio_listener(self)', True,
+src_has('components/frame_components.py', 'return sync_audio_listener(self)', True,
         'GL 的 _sync_audio_listener 转调模块级共享实现（:103）')
 src_has('render/vk/driver.py', 'return _lfc.update_audio(self, dt)', True,
         'VK 调的是同一份 loom_frame_components.update_audio（:943）')
@@ -305,18 +305,18 @@ check('结构：self.update_audio( 的生产调用点恰好 7 处（GL: engine �
                                              'render/vk/driver.py', 'render/vk/driver.py'],
       _ua_calls)
 _as_cls = _grep_prod('class AudioSystem')
-check('结构：class AudioSystem 只在 loom_components.py（唯一音频门面）',
-      [p for (p, _l) in _as_cls] == ['loom_components.py'], _as_cls)
+check('结构：class AudioSystem 只在 audio/system.py（唯一音频门面，B6 拆分）',
+      [p for (p, _l) in _as_cls] == ['audio/system.py'], _as_cls)
 _ab_cls = _grep_prod('class AudioBackend')
-check('结构：class AudioBackend 只在 audio_backend.py（唯一设备后端）',
-      [p for (p, _l) in _ab_cls] == ['audio_backend.py'], _ab_cls)
+check('结构：class AudioBackend 只在 audio/backend.py（唯一设备后端）',
+      [p for (p, _l) in _ab_cls] == ['audio/backend.py'], _ab_cls)
 for _m in ('def play_spatial', 'def set_listener', 'def update_sound_position'):
     _h = _grep_prod(_m)
-    check('结构：%s 只有 audio_backend.py 一份实现（AudioSystem 必须委托它）' % _m,
-          [p for (p, _l) in _h] == ['audio_backend.py'], _h)
+    check('结构：%s 只有 audio/backend.py 一份实现（AudioSystem 必须委托它）' % _m,
+          [p for (p, _l) in _h] == ['audio/backend.py'], _h)
 _ps = _grep_prod('def play_sound')
-check('结构：def play_sound 只在 loom_components.py（两端同一个函数对象）',
-      [p for (p, _l) in _ps] == ['loom_components.py'], _ps)
+check('结构：def play_sound 只在 audio/system.py（两端同一个函数对象，B6 拆分）',
+      [p for (p, _l) in _ps] == ['audio/system.py'], _ps)
 _ss = _grep_prod('def stop_sound')
 check('结构：def stop_sound 在生产代码里 0 处（两端都没有这个名字 = 同一 API 面）',
       not _ss, _ss)

@@ -10,7 +10,7 @@ engine.py 通过 `from loom_game_object import GameObject` 重导出。
 
 import render.contract.appearance as loom_appearance   # 组6件1: 外观代计数器 (原类属性 _appearance_gen 的真身)
 from core.primitives import Point3D
-from loom_components import (
+from components.components import (
     TransformComponent, MeshRendererComponent, ScriptComponent,
     ColliderComponent, RigidbodyComponent, AudioSourceComponent,
     AnimatorComponent,

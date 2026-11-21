@@ -168,7 +168,7 @@ from core.primitives import Point3D                                    # noqa: E
 from mathlib.matlib import (mat4_ortho, mat4_perspective, mat4_rotation,   # noqa: E402
                     mat4_scale, mat4_translation, mat4_view_yaw_pitch,
                     view_basis_to_angles)
-from scripts import Script, register                              # noqa: E402  脚本生产注册路径
+from script.scripts import Script, register                              # noqa: E402  脚本生产注册路径
 
 ok = True
 KNOWN_DIFFS = []        # 已知差异登记表：必须为空；发现差异 = 红并报告，不许登记糊过去

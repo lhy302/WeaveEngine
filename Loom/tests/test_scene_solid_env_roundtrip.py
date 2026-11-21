@@ -13,7 +13,7 @@ os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import engine as E
 from mathlib.mesh import create_cube
 import sceneio as S
-from loom_cubemap import Cubemap
+from assets.cubemap import Cubemap
 
 E.GLEngine._build_gpu = lambda self, m: None
 

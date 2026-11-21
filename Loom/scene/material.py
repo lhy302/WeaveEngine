@@ -76,7 +76,7 @@ def _apply_material_texture(engine, mat, slot, ref, ctx):
                                '旧路径引用（beta6 兼容期；建议 asset_import 迁移为 guid）: %s'
                                % (path,))
             try:
-                from loom_texture import Texture
+                from assets.texture import Texture
                 tex = Texture.from_file(
                     path, name=ref.get('name'), guid=guid,
                     mipmaps=ref.get('mipmaps', True),
@@ -149,7 +149,7 @@ def _apply_material_env(engine, mat, ref, ctx):
             if why:
                 record_asset_error(engine, 'materials.env_map', guid, why)
             return
-        from loom_cubemap import Cubemap
+        from assets.cubemap import Cubemap
         if ref.get('paths'):
             record_asset_error(engine, 'materials.env_map', guid,
                                '旧路径引用（6 面路径，beta6 兼容期；建议 asset_import）')
@@ -224,7 +224,7 @@ def _apply_materials(engine, mat_dicts, ctx=None):
     """
     engine.materials.clear()
     try:
-        from loom_assets import material_has_inline as _has_inline
+        from assets.assets import material_has_inline as _has_inline
     except Exception:
         def _has_inline(_d):
             return False

@@ -69,8 +69,8 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))            # Loom\ (plugin_loader / scripts ...)
 
-import plugin_loader
-from scripts import SCRIPTS
+import plugin.loader as plugin_loader
+from script.scripts import SCRIPTS
 
 _FAILS = []
 
@@ -602,7 +602,7 @@ def t_restricted_sdk_module_banned():
 
 # ============ 23c. 受限沙箱内核自检 (V06 面必须榨无可榨) ============
 def t_restricted_sandbox_clean():
-    import plugin_sandbox as _sb
+    import plugin.sandbox as _sb
     check("沙箱命名空间无模块对象/无 __builtins__ (V06 面榨无可榨)",
           _sb.sandbox_globals_clean() is True,
           [k for k, v in vars(_sb).items() if k == '__builtins__'
@@ -898,7 +898,7 @@ def t_scan_player_plugins_core():
 
 # ============ 33. 内存包加载 (玩家端, 全权) ============
 def t_plugin_from_pack():
-    import plugin_loader as pl
+    import plugin.loader as pl
     info = json.loads(_manifest())
     info.update({"id": "com.example.pack", "layer": "player",
                  "capability": "render", "desc": "包内插件"})

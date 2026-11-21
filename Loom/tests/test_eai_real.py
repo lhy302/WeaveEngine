@@ -347,7 +347,7 @@ def t_components():
     r = run('animator', {'action': 'clip'}, expect_ok=False)
     check("animator clip 缺参数 -> 拒绝并列出可用片段", r['ok'] is False)
     # beta6 C1: 命令层补 speed / seek / loop_mode (组件 API 已可脚本直调)
-    from loom_components import AnimationClip as _Clip
+    from components.components import AnimationClip as _Clip
     an = m.animator
     an.clips['t'] = _Clip([{'time': 0.0, 'position': (0.0, 0.0, 0.0)},
                            {'time': 1.0, 'position': (0.0, 1.0, 0.0)}])
@@ -389,7 +389,7 @@ def t_scripts():
           and m.scripts[-1].script_id == sid, [s.script_id for s in m.scripts])
 
     i = len(m.scripts) - 1
-    from scripts import get_script
+    from script.scripts import get_script
     params = list(get_script(sid).params or {})
     if params:
         key = params[0]
@@ -704,7 +704,7 @@ def t_misc():
     guiloader.save_settings('loom', s)
 
     # 插件按钮命令化 (与 GUI「插件」菜单点击同一回调)
-    import plugin_loader
+    import plugin.loader as plugin_loader
     got = []
     plugin_loader._EDITOR_BUTTONS.append(('EAI测试按钮', lambda: got.append(1),
                                           'com.test.eai'))

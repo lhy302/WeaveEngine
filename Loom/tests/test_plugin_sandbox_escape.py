@@ -50,9 +50,9 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))            # Loom\
 
-import plugin_loader
-import plugin_sandbox
-from scripts import SCRIPTS
+import plugin.loader as plugin_loader
+import plugin.sandbox as plugin_sandbox
+from script.scripts import SCRIPTS
 
 _FAILS = []
 
@@ -279,7 +279,8 @@ def t_chain2_runtime_sanitized():
           all(not hit[1] for hit in chain)
           and all(not hit[2] and not hit[3] for hit in chain[1:]), chain)
     check("[链2/运行时] 除调用方帧外的帧都来自 plugin_sandbox (命名空间榨无可榨)",
-          all(hit[0] in ('plugin_sandbox', '__main__',
+          # B6: 模块搬家后限定名 plugin.sandbox（原 plugin_sandbox）——安全语义不变，只改名字串
+          all(hit[0] in ('plugin.sandbox', '__main__',
                          'test_plugin_sandbox_escape') for hit in chain), chain)
 
     # tb_next 就是审计里报的攻击入口: 修复前它是 plugin_loader 的帧

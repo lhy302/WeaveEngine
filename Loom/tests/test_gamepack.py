@@ -66,9 +66,9 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 
-import game_pack
-import plugin_loader
-from scripts import SCRIPTS
+import build.game_pack as game_pack
+import plugin.loader as plugin_loader
+from script.scripts import SCRIPTS
 
 _FAILS = []
 
@@ -98,7 +98,7 @@ def _cleanup():
 
 ENTRY_WHITELIST = """# -*- coding: utf-8 -*-
 import math
-from scripts import Script
+from script.scripts import Script
 
 class WScript(Script):
     script_id = 'p_math'

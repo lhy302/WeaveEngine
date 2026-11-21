@@ -1678,7 +1678,7 @@ class LoomGUI(QMainWindow):
     def _rebuild_plugin_menu(self, menu):
         """重建「插件」菜单: 列出 plugin_loader.editor_buttons() 注册的按钮.
         回调与插件同环境 (普通插件=受限); 异常只提示不崩编辑器."""
-        import plugin_loader
+        import plugin.loader as plugin_loader
         menu.clear()
         btns = plugin_loader.editor_buttons()
         if not btns:
@@ -2020,16 +2020,16 @@ class LoomGUI(QMainWindow):
     # ---------------- 发布游戏 (Unity Build Settings 对齐, 2026-08-22) ----------------
     def _build_tool_cmd(self, extra_args):
         """构建器启动命令: 优先 <程序目录>/build_game.exe (编译版用户无 python);
-        源码版用当前解释器跑 build_game.py. 程序目录解析同 guiloader."""
+        源码版用当前解释器跑 build/build_game.py. 程序目录解析同 guiloader."""
         import guiloader
         bin_dir = guiloader.program_dir()
         exe_tool = os.path.join(bin_dir, 'build_game.exe')
         if os.path.isfile(exe_tool):
             return [exe_tool] + extra_args
         py = sys.executable
-        if not py or not os.path.isfile(os.path.join(bin_dir, 'build_game.py')):
+        if not py or not os.path.isfile(os.path.join(bin_dir, 'build', 'build_game.py')):
             return None    # 编译版无工具/无解释器 -> 提示
-        return [py, os.path.join(bin_dir, 'build_game.py')] + extra_args
+        return [py, os.path.join(bin_dir, 'build', 'build_game.py')] + extra_args
 
     def _cmd_publish_game(self):
         """[发布游戏]: Build Settings 对话框 (游戏名/公司名/启动场景/脚本目录/
@@ -2048,7 +2048,7 @@ class LoomGUI(QMainWindow):
         edit_scripts = QLineEdit("")
         edit_out = QLineEdit("")
         import guiloader
-        import plugin_loader
+        import plugin.loader as plugin_loader
         def _script_dir_default():
             d = os.path.join(plugin_loader._PROGRAM_DIR, 'scripts')
             return d if os.path.isdir(d) else ""
@@ -3222,7 +3222,7 @@ class LoomGUI(QMainWindow):
                 h.addWidget(b)
                 lay.addRow("脚本", row)
                 try:
-                    from scripts import get_script
+                    from script.scripts import get_script
                     params = get_script(sc.script_id).params
                     for pname, pdef in params.items():
                         val = sc.script_vars.get(pname, pdef.get('default', 0.0))
@@ -3236,7 +3236,7 @@ class LoomGUI(QMainWindow):
         # 旧代码当字符串 addItem 会 TypeError 被吞 -> 下拉从未显示; 已挂脚本
         # 也未过滤, 一并修: 过滤+addItem(name, id))
         try:
-            from scripts import script_options
+            from script.scripts import script_options
             have = {sc.script_id for sc in m.scripts}
             opts = [(sid, nm) for sid, nm in script_options()
                     if sid is not None and sid not in have]
@@ -3926,7 +3926,7 @@ class LoomGUI(QMainWindow):
         #  core_plugins/<类别>   = 核心插件 (全权, 信任闸: 未信任/被改 -> 确认后重启生效)
         lay.addWidget(QLabel(
             "插件（plugins/editor|player 普通插件·受限；core_plugins 核心插件·信任闸+重启生效）"))
-        import plugin_loader
+        import plugin.loader as plugin_loader
         plug_list = QListWidget()
         plug_summary = QLabel("")
 
@@ -4181,7 +4181,7 @@ def _confirm_core_plugins(win):
     """核心插件信任闸 (2026-08-27): 启动时对未信任/被修改的核心插件弹确认框.
     警告信息明示全权风险与来源可信要求; [确认信任] -> 写信任记录 + 提示重启
     (本次不加载, 重启后生效); [本会话不加载] -> 跳过. 无头/自动关闭模式跳过."""
-    import plugin_loader
+    import plugin.loader as plugin_loader
     unfound = plugin_loader.list_untrusted()
     if not unfound:
         return

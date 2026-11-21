@@ -35,9 +35,9 @@ from kernels.fastpath import ancestry_dfs as _fp_ancestry   # 组3层2: ancestry
 import kernels.fastpath as fastpath   # 组3层3: AABB 批量归约 (aabbs_minmax 串行 njit 默认 / _par 逃生门)
 from core.clock import clock_from_settings, split_enabled   # 分离批1: 逻辑帧/渲染帧分离时钟 (零依赖)
 from core.interp import InterpState   # 分离批2: prev/curr 快照 + alpha 插值 (单实现双端共享)
-from scheduler import (NgilPool, sched_wm_chunk,       # 调度重构期1: nogil 常驻工作池
+from script.scheduler import (NgilPool, sched_wm_chunk,       # 调度重构期1: nogil 常驻工作池
                        split_bounds as sched_split_bounds)
-import script_glue as _sg
+import script.glue as _sg
 
 from core.primitives import Point3D   # 已抽出：原 engine.py 内联 namedtuple
 from core.log import verbose   # 2026-10-19 启动日志开关 (LOOM_QUIET 时抑制)
@@ -52,8 +52,8 @@ from render.contract.shaders import (  # noqa: E402
 from mathlib.line_geometry import build_line_quads   # noqa: E402
 from core.engine_core import EngineCore   # S2-1: 后端无关的引擎内核 (JVM 模型)
 from render.gl.shadow import ShadowMixin   # M29 阴影子系统 (已抽出)
-from loom_frame_components import FrameComponentMixin   # 每帧组件推进 (音频/动画/碰撞回调)
-from loom_physics import PhysicsMixin   # M28 碰撞 + M31 刚体物理 (已抽出)
+from components.frame_components import FrameComponentMixin   # 每帧组件推进 (音频/动画/碰撞回调)
+from physics.physics import PhysicsMixin   # M28 碰撞 + M31 刚体物理 (已抽出)
 
 # ---- 按键映射 + 输入动作层（已抽出到 loom_input.py，原 51-77 行） ----
 from loom_input import _KEYMAP, DEFAULT_ACTIONS, _ACTION_FILE   # noqa: E402,F401
@@ -94,26 +94,27 @@ from render.gl.model_gpu import ModelGpuMixin   # 模型/材质 GPU 资源子系
 from render.gl.lighting import LightingMixin   # 光源/光照上传/阴影 VP 子系统
 from render.gl.window import GlfwWindowMixin   # 2026-10-18: GLFW 窗口 (pygame 已剥离)
 from render.gl.version import require_gl_version   # 2026-11-09 A0: GL 4.3 core 地板门 (失败必须可见)
-from loom_transform import TransformMixin   # 变换层次子系统 (世界矩阵/父链/包围盒)
+from components.transform import TransformMixin   # 变换层次子系统 (世界矩阵/父链/包围盒)
 from core.profiler import ProfilerMixin   # 性能插桩子系统 (LOOM_PROFILE 阶段耗时)
 from loom_logic_thread import LogicThreadMixin   # 逻辑帧线程子系统 (异步逻辑线程启停/主循环)
-from loom_raycast import RaycastMixin   # 2026-10-18: 射线检测 (物理 Culverin + 几何 AABB 兜底)
+from components.raycast import RaycastMixin   # 2026-10-18: 射线检测 (物理 Culverin + 几何 AABB 兜底)
 from core.events import EventBus   # 2026-10-18: 全局事件总线 (跨脚本/跨系统解耦通信)
 
 # ---- 组件化 M25（已抽出到 loom_components.py，原 79-448 行） ----
-from loom_components import (  # noqa: E402,F401
+from components.components import (  # noqa: E402,F401
     Component, TransformComponent, MeshRendererComponent, ScriptComponent,
     ColliderComponent, RigidbodyComponent, AudioSourceComponent,
-    AnimationClip, AnimatorComponent, AudioSystem,
+    AnimationClip, AnimatorComponent,
 )
+from audio.system import AudioSystem   # noqa: E402,F401  B6: 音频门面归 audio/ 包
 
 
 # ---- 材质资产（已抽出到 loom_material.py，原 451-495 行） ----
-from loom_material import Material   # noqa: E402,F401
+from assets.material import Material   # noqa: E402,F401
 
 
 # ---- 场景物体 GameObject（已抽出到 loom_game_object.py，原 91-368 行） ----
-from loom_game_object import GameObject   # noqa: E402,F401
+from components.game_object import GameObject   # noqa: E402,F401
 
 # ---- 光源/相机/运行时 UI（已抽出到 scene/entities.py（原 loom_scene_entities.py，B2 归位），原 94-319 行） ----
 from loom_ui import UIManager, Canvas  # 2026-10-18: 新 Canvas UI 系统
@@ -408,7 +409,7 @@ class GLEngine(EngineCore, ShadowMixin, HudMixin, RenderMixin, ModelGpuMixin, Li
         # M38: 游戏脚本目录 (exe/引擎旁的 scripts/) 启动时加载注册
         # (Unity 项目脚本机制: 游戏专属脚本放这, 检查器可挂, 打包时随游戏分发)
         try:
-            from scripts import load_script_dir
+            from script.scripts import load_script_dir
             load_script_dir(os.path.join(
                 os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'scripts'))
         except Exception:
@@ -1032,8 +1033,8 @@ class GLEngine(EngineCore, ShadowMixin, HudMixin, RenderMixin, ModelGpuMixin, Li
         if not has_scripts:
             return
 
-        from scripts import get_script
-        import script_glue as _sg
+        from script.scripts import get_script
+        import script.glue as _sg
         _sg.handle()   # ★B3: 官方件缺失硬 raise (不再有 use_c 逃生门)
 
         rot_items = []
@@ -1552,7 +1553,7 @@ class GLEngine(EngineCore, ShadowMixin, HudMixin, RenderMixin, ModelGpuMixin, Li
                 if inst is None or getattr(sc, '_script_broken', False):
                     continue
                 try:
-                    from scripts import Script as _Base
+                    from script.scripts import Script as _Base
                 except ImportError:
                     continue
                 if type(inst).on_fixed_update is _Base.on_fixed_update:
@@ -1578,7 +1579,7 @@ class GLEngine(EngineCore, ShadowMixin, HudMixin, RenderMixin, ModelGpuMixin, Li
                 if inst is None or getattr(sc, '_script_broken', False):
                     continue
                 try:
-                    from scripts import Script as _Base
+                    from script.scripts import Script as _Base
                 except ImportError:
                     continue
                 if type(inst).on_late_update is _Base.on_late_update:
@@ -1609,7 +1610,7 @@ class GLEngine(EngineCore, ShadowMixin, HudMixin, RenderMixin, ModelGpuMixin, Li
                 if inst is None or getattr(sc, '_script_broken', False):
                     continue
                 try:
-                    from scripts import Script as _Base
+                    from script.scripts import Script as _Base
                 except ImportError:
                     continue
                 if type(inst).on_application_quit is _Base.on_application_quit:
@@ -1637,7 +1638,7 @@ class GLEngine(EngineCore, ShadowMixin, HudMixin, RenderMixin, ModelGpuMixin, Li
                 if inst is None or getattr(sc, '_script_broken', False):
                     continue
                 try:
-                    from scripts import Script as _Base
+                    from script.scripts import Script as _Base
                 except ImportError:
                     continue
                 if getattr(type(inst), method) is getattr(_Base, method):

@@ -26,7 +26,7 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 os.chdir(ROOT)
 
-import physics_bridge                                        # noqa: E402
+import physics.bridge as physics_bridge                      # noqa: E402
 
 
 class StubModel:

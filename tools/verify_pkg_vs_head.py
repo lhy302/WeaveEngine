@@ -42,7 +42,7 @@ def _find_repo():
 
 REPO = _find_repo()
 KEY = ['Loom/sceneio.py', 'Loom/agent_commands.py', 'Loom/render/contract/post.py',
-       'Loom/loom_assets.py']
+       'Loom/assets/assets.py']
 
 
 def sha(b):

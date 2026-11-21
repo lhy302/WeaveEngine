@@ -255,7 +255,7 @@ def _gl_readback():
 
 # ---- 场景（同一份用户内容；轨道相机 + 移动脚本 + 1 平行光 + 默认天空） ----
 
-from scripts import Script, register   # noqa: E402
+from script.scripts import Script, register   # noqa: E402
 
 
 @register

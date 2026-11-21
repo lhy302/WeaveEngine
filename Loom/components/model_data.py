@@ -88,7 +88,7 @@ class ModelDataMixin:
     # ================ 材质库 ================
     def add_material(self, color=None, saturation=1.0, name=None, guid=None):
         """新建材质并加入材质库（供物体共享引用）。返回 Material。"""
-        from loom_material import Material
+        from assets.material import Material
         mat = Material(color=color, saturation=saturation, name=name, guid=guid)
         self.materials.append(mat)
         return mat

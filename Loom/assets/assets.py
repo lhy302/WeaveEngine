@@ -768,7 +768,7 @@ class AssetContext(object):
 
     def texture(self, guid, ref=None):
         """guid -> (Texture|None, valid, reason)。"""
-        from loom_texture import Texture
+        from assets.texture import Texture
         p, e, ok, why = self.resolve(guid, 'texture')
         if not ok:
             return None, False, why
@@ -784,7 +784,7 @@ class AssetContext(object):
 
     def cubemap(self, guid, ref=None):
         """guid -> (Cubemap|None, valid, reason)。src = 目录，faces 见 entry['files']。"""
-        from loom_cubemap import Cubemap
+        from assets.cubemap import Cubemap
         p, e, ok, why = self.resolve(guid, 'cubemap')
         if not ok:
             return None, False, why
@@ -807,7 +807,7 @@ class AssetContext(object):
         e = self.entry(guid)
         if e is None or e.get('type') != 'material':
             return None, False, '材质资产不存在: %s' % (guid,)
-        from loom_material import Material
+        from assets.material import Material
         v = e.get('value') or {}
         try:
             mat = Material(color=v.get('color'), saturation=v.get('saturation', 1.0),
@@ -843,7 +843,7 @@ class AssetContext(object):
                 first_reason = why
         elif v.get('env_map_solid'):
             try:
-                from loom_cubemap import Cubemap
+                from assets.cubemap import Cubemap
                 mat.env_map = Cubemap.from_solid(tuple(v['env_map_solid']),
                                                  name=v.get('name'), guid=guid + ':env')
             except Exception:
@@ -958,7 +958,7 @@ class AssetContext(object):
         """D-05: 六面图正文缺失 -> 按同 guid 重写六面。"""
         if self.readonly:
             return guid, False, '只读模式：六面图正文缺失但未写盘'
-        from loom_cubemap import Cubemap
+        from assets.cubemap import Cubemap
         abs_p = self._entry_abs(entry)
         if abs_p and is_inside(assets_dir(self.root), abs_p):
             dest = abs_p
@@ -1083,7 +1083,7 @@ class AssetContext(object):
             return None, False, '六面图目标路径越界: %r' % (dest,)
         if not self.readonly:
             os.makedirs(dest, exist_ok=True)
-        from loom_cubemap import Cubemap
+        from assets.cubemap import Cubemap
         files = []
         face_stats = {}
         try:

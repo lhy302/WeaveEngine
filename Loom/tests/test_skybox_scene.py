@@ -299,7 +299,7 @@ def t_draw_gate_effective():
     ed._scene_skybox = None
     ed._skybox = None
     cam = E.GLEngine.add_camera(ed, name='cam')
-    from loom_cubemap import Cubemap
+    from assets.cubemap import Cubemap
     cam.skybox = Cubemap.from_solid(green, name='相机绿')
     ed.cameras.append(cam)
     ed.active_camera = cam.guid
@@ -549,7 +549,7 @@ def t_path_confinement():
               valid3 is False and '绝对路径' in str(reason3), reason3)
 
         # ③ 保存越界：cube 的图在场景目录外 -> 不写出 + valid=False + reason 可见
-        from loom_cubemap import Cubemap
+        from assets.cubemap import Cubemap
         out_six = []
         for i, n in enumerate(names):
             pth = os.path.join(root, 'ext', n)

@@ -79,8 +79,8 @@ if not HAS_CV:
     sys.exit(0)
 
 import numpy as np                 # noqa: E402
-import physics_bridge as B          # noqa: E402
-import physics_glue as pg           # noqa: E402
+import physics.bridge as B          # noqa: E402
+import physics.glue as pg           # noqa: E402
 import engine as E                  # noqa: E402
 from mathlib.mesh import create_cube, create_sphere, create_plane   # noqa: E402
 

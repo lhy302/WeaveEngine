@@ -42,7 +42,7 @@ import numpy as np
 
 import engine as E
 from mathlib.mesh import create_cube
-from loom_components import TransformComponent
+from components.components import TransformComponent
 
 E.GLEngine._build_gpu = lambda self, m: None
 

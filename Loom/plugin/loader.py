@@ -71,7 +71,7 @@ CORE_CATEGORIES = None      # 功能类别不限白名单, 目录即类别 (gui/
 if getattr(sys, 'frozen', False):
     _PROGRAM_DIR = os.path.dirname(os.path.abspath(sys.argv[0]))
 else:
-    _PROGRAM_DIR = os.path.dirname(os.path.abspath(__file__))
+    _PROGRAM_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # B6: 深一层 -> 仍指 Loom/
 
 # ---- 校验正则 (宽松但防注入/防重名污染) ----
 _ID_SEG = re.compile(r'^[A-Za-z0-9_-]+$')
@@ -133,7 +133,7 @@ def _engine_ok(min_engine):
 #   同样泄); ③matlib 首参是 numpy/cupy 后端, 受限环境用不上.
 #   插件要引擎能力一律走 api.* (L1: register_script / register_editor_button
 #   / read_asset)。
-from plugin_sandbox import (          # noqa: E402
+from plugin.sandbox import (          # noqa: E402          # noqa: E402
     _RESTRICTED_MODULES, _BANNED_MODULES, restricted_import, guard_api,
 )
 
@@ -265,7 +265,7 @@ def _load_entry_restricted(entry_path, mod_name):
     白名单放行照常 (plugin_sandbox 模块 docstring 有完整设计说明)。
     2026-08-28 (V05 收口): entry 源码先过 _entry_ast_check (元编程黑面直写
     `.__subclasses__`/`.__globals__`/`.`__builtins__` 等直接拒绝加载)。"""
-    import plugin_sandbox
+    import plugin.sandbox as plugin_sandbox
     plugin_sandbox._strip_builtins()
     with open(entry_path, 'r', encoding='utf-8') as f:
         src = f.read()
@@ -478,7 +478,7 @@ class PluginAPI:
         "注册表无所有权"缺陷。冲突 = 抛 ValueError, 由 _load_one 事务回滚
         (load 报 broken, 不留残渣)。同一插件重复注册**同一个类**是幂等,
         不算冲突 (register 被调两次的容错)。"""
-        from scripts import SCRIPTS
+        from script.scripts import SCRIPTS
         sid = getattr(cls, 'script_id', None)
         if not isinstance(sid, str) or not sid.strip():
             raise ValueError('register_script 需要 Script 子类且 '
@@ -547,7 +547,7 @@ def core_plugin_root(base=None):
 
 def _registry_snapshot():
     """注册表快照 (事务回滚用): (脚本 id 集合, 按钮表副本)."""
-    from scripts import SCRIPTS
+    from script.scripts import SCRIPTS
     return set(SCRIPTS), list(_EDITOR_BUTTONS)
 
 
@@ -559,7 +559,7 @@ def _rollback_load(api, mod_name, sids_before, buttons_before):
     unload_plugin 走"插件未加载"直接返回, 清理链不可达 (坏插件"没加载"却
     仍在检查器下拉里可挂载执行)。现在失败路径在这三张表上全部还原。
     """
-    from scripts import SCRIPTS
+    from script.scripts import SCRIPTS
     for sid in list(getattr(api, '_sids', ()) or ()):
         if sid not in sids_before:       # 只撤本次新增, 不伤既有条目
             SCRIPTS.pop(sid, None)
@@ -779,7 +779,7 @@ def unload_plugin(plugin_id, disable=True):
             # 2026-11-07 (scan_09 P-02): 受限插件始终拿到同一个代理壳, 卸载
             # 钩子里也不会突然拿到真 PluginAPI (否则卸钩子可绕过异常清洗)。
             deact(entry.get('gapi') or entry['api'])
-        from scripts import SCRIPTS
+        from script.scripts import SCRIPTS
         for sid in entry['api']._sids:
             SCRIPTS.pop(sid, None)
         _EDITOR_BUTTONS[:] = [b for b in _EDITOR_BUTTONS

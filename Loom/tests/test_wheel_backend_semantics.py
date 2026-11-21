@@ -210,11 +210,19 @@ class _BackendHarness:
         self.orig_vk = run_player._run_vulkan
         self.orig_gl = run_player._run_opengl
         self.orig_open = run_player._open_opengl
-        self.old_gp = _sys.modules.get('game_pack')
-        self.old_sc = _sys.modules.get('scripts')
+        # B6: 模块搬家后键 = build.game_pack / script.scripts；from-import 走
+        # getattr(包, 子模块) 优先，所以包属性也要一并换（restore 逐项还原）。
+        import build as _build_pkg
+        import script as _script_pkg
+        self.old_gp_key = _sys.modules.get('build.game_pack')
+        self.old_gp_attr = getattr(_build_pkg, 'game_pack', None)
+        self.old_sc_key = _sys.modules.get('script.scripts')
+        self.old_sc_attr = getattr(_script_pkg, 'scripts', None)
         gp, sc = _fake_modules()
-        _sys.modules['game_pack'] = gp
-        _sys.modules['scripts'] = sc
+        _sys.modules['build.game_pack'] = gp
+        _build_pkg.game_pack = gp
+        _sys.modules['script.scripts'] = sc
+        _script_pkg.scripts = sc
         self.calls = []
         self.vk_stub = None
         self.gl_stub = None
@@ -243,14 +251,26 @@ class _BackendHarness:
         self.rp._run_vulkan = self.orig_vk
         self.rp._open_opengl = self.orig_open
         self.rp._run_opengl = self.orig_gl
-        if self.old_gp is None:
-            _sys.modules.pop('game_pack', None)
+        import build as _build_pkg
+        import script as _script_pkg
+        if self.old_gp_key is None:
+            _sys.modules.pop('build.game_pack', None)
         else:
-            _sys.modules['game_pack'] = self.old_gp
-        if self.old_sc is None:
-            _sys.modules.pop('scripts', None)
+            _sys.modules['build.game_pack'] = self.old_gp_key
+        if self.old_gp_attr is None:
+            if hasattr(_build_pkg, 'game_pack'):
+                del _build_pkg.game_pack
         else:
-            _sys.modules['scripts'] = self.old_sc
+            _build_pkg.game_pack = self.old_gp_attr
+        if self.old_sc_key is None:
+            _sys.modules.pop('script.scripts', None)
+        else:
+            _sys.modules['script.scripts'] = self.old_sc_key
+        if self.old_sc_attr is None:
+            if hasattr(_script_pkg, 'scripts'):
+                del _script_pkg.scripts
+        else:
+            _script_pkg.scripts = self.old_sc_attr
 
 
 def _start_pack(h, backend):

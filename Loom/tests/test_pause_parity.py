@@ -167,7 +167,7 @@ import render.vk.driver as SD                                         # noqa: E4
 import render.vk.renderer as VR                                          # noqa: E402  VK 渲染器（生产绘制）
 import wgpu                                                       # noqa: E402
 from core.primitives import Point3D                                    # noqa: E402  脚本写位姿的唯一数据形态
-from scripts import Script, register                              # noqa: E402  脚本生产注册路径
+from script.scripts import Script, register                              # noqa: E402  脚本生产注册路径
 
 ok = True
 KNOWN_DIFFS = []            # 已知差异登记表：必须为空

@@ -105,7 +105,7 @@ def install_game_plugins(pack_dir, gm):
         load_plugins(base=发布夹) —— 允许玩家往发布夹 plugins/player/ 放
         非原版插件 (open 模式随夹分发). 不校验.
     返回注册插件个数."""
-    import plugin_loader
+    import plugin.loader as plugin_loader
     plugin_loader.set_mode('player')          # 玩家进程: 全权加载
     expect = (gm or {}).get('config', {}).get('plugins_sha256')
     if expect:

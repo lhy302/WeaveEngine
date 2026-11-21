@@ -43,8 +43,8 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))            # Loom\
 
-import script_glue as sg
-import scripts
+import script.glue as sg
+import script.scripts as scripts
 
 _FAILS = []
 

@@ -366,7 +366,7 @@ def build_builder(mode, cfg, info):
            '--windows-console-mode=%s' % cfg['console']] + _builder_includes() + \
           _ver_flags('builder', info.get('version')) + [
            '--output-dir=%s' % out, '--output-filename=build_game.exe',
-           os.path.join(LOOM, 'build_game.py')]
+           os.path.join(LOOM, 'build', 'build_game.py')]
     secs = _run(cmd, cwd=LOOM)
     _sync_builder_data(dist)
     _assert_meta(dist, '构建器 dist')
@@ -397,7 +397,7 @@ def build_runtime(mode, cfg, info):
     # 运行时由 build_game.py 间接调 Nuitka：版本资源旗标用换行分隔的环境变量传下去
     # （build_game.py 只把这些行拼接进自己的 Nuitka 命令行，打包逻辑零改动）。
     env['LOOM_BUILD_VER_FLAGS'] = '\n'.join(_ver_flags('runtime', info.get('version')))
-    cmd = [sys.executable, os.path.join(LOOM, 'build_game.py'), '--build-runtime']
+    cmd = [sys.executable, os.path.join(LOOM, 'build', 'build_game.py'), '--build-runtime']
     secs = _run(cmd, cwd=LOOM, env=env)
     _assert_meta(dist, '运行时 dist')
     exe = os.path.join(dist, 'MyGame.exe')

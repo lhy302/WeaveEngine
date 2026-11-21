@@ -63,7 +63,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import kernels.parallel as parallel
 from engine import GLEngine, Point3D
-from loom_components import TransformComponent   # 桩类 property setter 需 bump _xform_gen
+from components.components import TransformComponent   # 桩类 property setter 需 bump _xform_gen
 
 ok = True
 

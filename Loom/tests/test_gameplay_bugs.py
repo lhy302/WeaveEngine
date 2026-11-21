@@ -73,8 +73,8 @@ editor_mod._LEGACY_SAVE_DIR = os.path.join(_SAVE_ROOT, "保存")
 import engine as E
 import sceneio
 from mathlib.mesh import create_cube
-from loom_texture import Texture
-from loom_material import Material
+from assets.texture import Texture
+from assets.material import Material
 
 _fails = []
 
@@ -97,7 +97,7 @@ ed.load_scene(os.path.join(BASE, '保存', '压力测试', '压力_空场景.jso
 
 # ---- Bug 1: count_touch 移除物体后不崩溃 ----
 # 直接测脚本 update：物体被移除后 index() 不应抛（修复=命中后 return）
-import scripts
+import script.scripts as scripts
 class _FakeUIManager:
     """最小 Canvas UI 替身: 只满足 count_touch 用到的 default_canvas().root.add_child."""
     class _Root:

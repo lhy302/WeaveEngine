@@ -38,7 +38,7 @@ from render.contract.post import post_enabled   # 2026-11-10 阶段 2B2: LOOM_PO
 import moderngl
 
 from mathlib.matlib import mat4_perspective, mat4_ortho, mat4_view_yaw_pitch
-from loom_game_object import GameObject
+from components.game_object import GameObject
 
 
 # ============ 2026-11-09 C5=B: 上屏健康计数 (GL/VK 的唯一实现) ============

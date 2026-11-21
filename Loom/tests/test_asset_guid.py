@@ -48,9 +48,9 @@ os.makedirs(os.environ['LOOM_GAME_DIR'], exist_ok=True)
 import engine as E                                       # noqa: E402
 import editor                                            # noqa: E402
 import sceneio as S                                      # noqa: E402
-import loom_assets                                       # noqa: E402
-import game_pack                                         # noqa: E402
-import build_game                                        # noqa: E402
+import assets.assets as loom_assets                      # noqa: E402
+import build.game_pack as game_pack                      # noqa: E402
+import build.build_game as build_game                    # noqa: E402
 import agent_commands as AC                              # noqa: E402
 from undo import UndoManager                             # noqa: E402
 

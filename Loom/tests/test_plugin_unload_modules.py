@@ -38,8 +38,8 @@ import types
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))            # Loom\
 
-import plugin_loader
-from scripts import SCRIPTS
+import plugin.loader as plugin_loader
+from script.scripts import SCRIPTS
 
 _FAILS = []
 _PREFIX = 'loom_plugin_probe_unload'

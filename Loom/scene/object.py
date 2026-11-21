@@ -14,7 +14,7 @@
 import os
 
 from core.primitives import Point3D
-from loom_components import animator_from_dict, animator_to_dict
+from components.components import animator_from_dict, animator_to_dict
 from mathlib.mesh import create_cube, spec_to_mesh
 
 from scene.asset import record_asset_error

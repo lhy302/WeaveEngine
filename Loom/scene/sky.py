@@ -33,7 +33,7 @@ DEFAULT_SKYBOX_NAME = '默认蓝天'
 
 def default_skybox():
     """Q1=A: 默认纯色天空盒（新建场景 / 场景无 skybox 键 / 值解析失败时使用）。"""
-    from loom_cubemap import Cubemap
+    from assets.cubemap import Cubemap
     return Cubemap.from_solid(DEFAULT_SKYBOX_COLOR, name=DEFAULT_SKYBOX_NAME)
 
 
@@ -133,7 +133,7 @@ def skybox_from_dict(d, base_dir=None, ctx=None):
             return None, False, '天空盒资产解析失败: %s' % (_why,)
         return cube, True, _why
     try:
-        from loom_cubemap import Cubemap
+        from assets.cubemap import Cubemap
     except Exception as e:
         return None, False, 'Cubemap 模块不可用: %r' % (e,)
     paths = d.get('paths')

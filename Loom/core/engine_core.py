@@ -42,18 +42,18 @@ import time
 
 import numpy as np
 
-from loom_game_object import GameObject   # S2 阶段2: _model_aabbs_par 的缓存键 (_appearance_gen)
+from components.game_object import GameObject   # S2 阶段2: _model_aabbs_par 的缓存键 (_appearance_gen)
 from loom_camera import CameraMixin
-from loom_frame_components import FrameComponentMixin
+from components.frame_components import FrameComponentMixin
 from loom_input import InputMixin
 from loom_logic_thread import LogicThreadMixin
-from loom_model_data import ModelDataMixin
-from loom_physics import PhysicsMixin
+from components.model_data import ModelDataMixin
+from physics.physics import PhysicsMixin
 from core.profiler import ProfilerMixin
-from loom_raycast import RaycastMixin
+from components.raycast import RaycastMixin
 from scene.entities import LightState   # S4: 光源实体（纯数据, 无 GPU 依赖; B2 原 loom_scene_entities.py 归位）
 from scene.query import SceneQueryMixin   # B2: 原 loom_scene_query.py 归位
-from loom_transform import TransformMixin
+from components.transform import TransformMixin
 
 
 class EngineCore(TransformMixin, PhysicsMixin, InputMixin, CameraMixin,

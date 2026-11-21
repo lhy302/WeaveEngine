@@ -43,9 +43,9 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))            # Loom\
 
-import plugin_loader
-import scripts
-from scripts import SCRIPTS
+import plugin.loader as plugin_loader
+import script.scripts as scripts
+from script.scripts import SCRIPTS
 
 _FAILS = []
 

@@ -38,7 +38,7 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))            # Loom\
 
-import plugin_loader
+import plugin.loader as plugin_loader
 
 _FAILS = []
 _MOD_PREFIX = 'loom_plugin_probe_core'

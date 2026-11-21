@@ -51,7 +51,7 @@ def capture(fn):
 import engine as E            # noqa: E402
 import game_settings as GS    # noqa: E402
 import loom_input as LI       # noqa: E402
-import scripts as SC          # noqa: E402
+import script.scripts as SC          # noqa: E402
 
 
 class Stub(LI.InputMixin):
@@ -152,7 +152,7 @@ def t_declared():
           'Tab' not in uses.get('first_person', ()) and
           'Tab' not in uses.get('third_person', ()),
           (uses.get('first_person'), uses.get('third_person')))
-    src = open(os.path.join(ROOT, 'scripts.py'), encoding='utf-8').read()
+    src = open(os.path.join(ROOT, 'script', 'scripts.py'), encoding='utf-8').read()
     check("内置播放器脚本源码里不再 toggle 鼠标锁定",
           src.count('toggle_mouse_locked') == 0, src.count('toggle_mouse_locked'))
     fp = SC.get_script('first_person')()
