@@ -272,10 +272,10 @@ def _start_pack(backend, explicit=False):
 def main():
     _bootstrap_logging()          # 2026-11-08 P-02-08: 从模块级挪进入口, import 无副作用
     args = sys.argv[1:]
-    backend = None
-    for i, a in enumerate(args):
-        if a == "--backend" and i + 1 < len(args):
-            backend = args[i + 1]
+    # 2026-11-21 B7-54: --backend 的 argv 解析收敛到 run_player.parse_backend_arg
+    # （全仓唯一一份, 规则 5.5）; 本入口不再有自己的内联解析。
+    import run_player
+    backend = run_player.parse_backend_arg(args)
     explicit = backend is not None      # 命令行 --backend = 显式选择 (不改写设置)
     if "--run" in args:
         i = args.index("--run")

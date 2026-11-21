@@ -92,11 +92,14 @@ def _cli_backend(argv):
     原来直连 runtime.PlayerApp (恒 OpenGL), 既不解析 --backend 也不读
     render_api —— 同一份发布物从 run_player/game_player 启动是 Vk,
     从 Loom.py 启动却是 GL, "API 自由切换"在这个入口完全失效。
-    这里只解析参数, 真正的后端选择仍走 run_player.resolve_backend 单一事实。"""
-    for i, a in enumerate(argv):
-        if a == "--backend" and i + 1 < len(argv):
-            return argv[i + 1]
-    return None
+    这里只解析参数, 真正的后端选择仍走 run_player.resolve_backend 单一事实。
+
+    2026-11-21 B7-54: 解析实现收敛到 run_player.parse_backend_arg（全仓唯一
+    一份, 规则 5.5）。**保留函数名做薄转调**而不改调用点 —— 本入口有两处
+    调用（_launch_native / 编辑器 S4 分支）, 薄转调使 diff 最小、不碰任何
+    调用点语义, 且保持"入口层只解析、选择走 run_player"的原有缝。"""
+    from run_player import parse_backend_arg
+    return parse_backend_arg(argv)
 
 
 # ==================== E2: 远程模式三态 (2026-11-09 beta5) ====================

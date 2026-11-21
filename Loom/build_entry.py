@@ -90,6 +90,39 @@ def _make_editor_view(ui_name, base=None):
     return None
 
 
+# ==================== B7-54: 编译入口后端选择同源 (2026-11-21) ====================
+# 人类裁定「编译入口和源码入口和打包游戏一样，全部走 run_player.py 后端选择组件」。
+# build_entry 之前四处分支硬编码 GL（两处 PlayerApp 直连 / run_loom_gui 恒缺省
+# 'gl' / EditorApp 恒 GL -> VkEditorApp 不可达），与 Loom.py / game_player /
+# run_player 三个入口对同一份 argv+配置的决策分叉。现在解析 + 选择全部转调
+# run_player 唯一实现（parse_backend_arg / resolve_backend），本文件只留两条
+# **纯决策函数**：分支用它们接线，对拍门（tests/test_entry_backend_parity.py）
+# 直接真调它们。
+
+def _player_backend_choice(argv):
+    """播放分支（--run / 游戏配置.json 双击）的后端决策（纯函数，无副作用）。
+
+    返回 (api, explicit)：api = run_player.resolve_backend 的结果
+    ('vulkan'|'opengl'|'auto')；explicit = 是否来自显式 --backend（Q6:
+    显式 vulkan 失败不改写设置）。与 game_player._pick_backend 同一事实源。"""
+    import run_player
+    _cli = run_player.parse_backend_arg(argv)
+    return run_player.resolve_backend(_cli), (_cli is not None)
+
+
+def _editor_backend_choice(argv):
+    """编辑器分支（--ui qt / --ui default|minimal）的后端决策（纯函数）。
+
+    与 Loom.py S4（Q-B7-47-1 阶段 4）同源规则：只有**显式 --backend** 且
+    resolve_backend 解析为 vulkan 才走 VK（qt = VK 视口 / default = VkEditorApp）；
+    不带 --backend（或缺省 opengl/auto）= GL，与修前逐位一致（零用户可感知差异）。"""
+    import run_player
+    _cli = run_player.parse_backend_arg(argv)
+    if _cli is not None and run_player.resolve_backend(_cli) == 'vulkan':
+        return 'vulkan'
+    return 'gl'
+
+
 def _benchmark_math(n_tri=5000, n_iter=100):
     """
     纯计算基准 (不弹窗口): 构造随机 mesh, 跑完整 MVP 批量管线
@@ -380,11 +413,24 @@ if __name__ == "__main__":
     except Exception as e:
         print("[插件] 加载失败: %r" % e)
 
+    _edit_backend = 'gl'   # B7-54: 编辑器分支决策落点（tail 打印/运行循环按它分派）
     try:
         if run_scene is not None:
             # Player 模式 (运行时, 无编辑器)
-            from runtime import PlayerApp
-            engine = PlayerApp(run_scene, 1280, 800)
+            # 2026-11-21 B7-54: 不再硬编码 GL 直连 PlayerApp —— 走 run_player
+            # 后端选择链路（--backend > 游戏设置 render_api > 设置 > 默认），
+            # 与 Loom.py --run / game_player / run_player 三个入口同源
+            # （人类裁定「编译入口和源码入口和打包游戏一样」）。
+            # 阻塞语义与原 PlayerApp 路径一致：run_backend 内部构建播放器
+            # （GL 路径 = PlayerApp, 1280x800 为其默认分辨率）并阻塞运行到
+            # 窗口关闭, 返回后本入口 sys.exit(0)。
+            # R6-03 的 SceneVersionError 处理不变：run_backend 内部已统一拦截
+            # （Q-VER-1: 打印要求/当前版本 + 弹窗 + SystemExit(1)）, 本函数
+            # 下方 except 兜底仍在（双保险, SystemExit 不被 except Exception 捕获）。
+            _api, _explicit = _player_backend_choice(sys.argv[1:])
+            import run_player
+            run_player.run_backend(_api, run_scene, explicit=_explicit)
+            sys.exit(0)
         else:
             # 游戏封装 (M38, Unity Build 模型): 无参数时若 exe/脚本旁有 游戏配置.json
             # 且含 "scene" -> 直接进游戏 (玩家双击启动 exe 即玩, 无需命令行/编辑器).
@@ -414,26 +460,51 @@ if __name__ == "__main__":
                 except SystemExit as e:
                     print(e)
                     sys.exit(1)
-                from runtime import PlayerApp
-                engine = PlayerApp(_scene, 1280, 800)
+                # 2026-11-21 B7-54: 双击进游戏同样走 run_player 后端选择 ——
+                # 打包游戏 (game_player) 对同一路径就是 resolve_backend +
+                # run_backend, 编译入口此前恒 GL = 同一发布物行为分叉。
+                # 阻塞/退出语义同 --run 分支（run_backend 阻塞到窗口关闭）。
+                _api, _explicit = _player_backend_choice(sys.argv[1:])
+                import run_player
+                run_player.run_backend(_api, _scene, explicit=_explicit)
+                sys.exit(0)
             elif ui == 'qt':
                 # Qt 编辑器 (2026-08-17): 原生 Qt 控件全重写 —— pygame(SDL) 窗口
                 # 会进程级污染中文输入法(IME)候选框, 编辑器弃用 pygame 做窗口;
                 # QOpenGLWidget 承载 moderngl 视口 + Qt 原生面板 (见记忆
                 # sdl-window-contaminates-ime). 控制器命令层/GL 渲染管线复用.
                 from gui.main_window import run_loom_gui
-                run_loom_gui(scene_path=open_scene)
+                # 2026-11-21 B7-54: backend 不再恒缺省 'gl' —— 由 run_player
+                # 后端选择推导（_editor_backend_choice 与 Loom.py S4 同源规则:
+                # 仅显式 --backend 且解析为 vulkan 才走 VK 视口, 其余 gl 与修前
+                # 逐位一致）。
+                run_loom_gui(scene_path=open_scene,
+                             backend=_editor_backend_choice(sys.argv[1:]))
                 sys.exit(0)
             else:
                 # --ui default / minimal: 走 guiloader (自定义 GUI 投放机制) 或
                 # 遗留 pygame 视图 (仅参考, 有 IME 污染)
-                from editor import EditorApp
-                engine = EditorApp(1280, 800, scene_path=open_scene,
-                                   view=_make_editor_view(ui))
+                # 2026-11-21 B7-54: 后端决策与 --ui qt 分支同源（此前恒
+                # EditorApp(GL), VkEditorApp 不可达）。VK 分支 = VkEditorApp,
+                # 其参数门会在无 Qt 宿主视图/wgpu device 时**可见报错**
+                # （不许静默降级 GL, 见 editor/vk_app.py __init__）。
+                if _editor_backend_choice(sys.argv[1:]) == 'vulkan':
+                    from editor import VkEditorApp
+                    engine = VkEditorApp(1280, 800, scene_path=open_scene,
+                                         view=_make_editor_view(ui))
+                    _edit_backend = 'vulkan'
+                else:
+                    from editor import EditorApp
+                    engine = EditorApp(1280, 800, scene_path=open_scene,
+                                       view=_make_editor_view(ui))
+                    _edit_backend = 'gl'
     except Exception as e:
-        # 2026-11-11 R6-03 缺口1: `--run` / 旧 游戏配置.json 直连 PlayerApp，不走 run_player
-        # —— 高版本场景必须与 MyGame.exe 同一套可见失败（弹窗 + 要求/当前版本 + 非 0），
-        # 不能只打一条通用错误（release console=disable 时等于静默）。
+        # 2026-11-11 R6-03 缺口1: 高版本场景必须与 MyGame.exe 同一套可见失败
+        # （弹窗 + 要求/当前版本 + 非 0），不能只打一条通用错误（release
+        # console=disable 时等于静默）。
+        # 2026-11-21 B7-54: 播放分支已改走 run_backend（其内部 Q-VER-1 已统一
+        # 拦截 SceneVersionError），本 except 降为**双保险兜底**（例如上游把
+        # 版本异常重新抛出的路径），语义不变。
         try:
             import sceneio as _sio
             _is_ver = isinstance(e, _sio.SceneVersionError)
@@ -445,6 +516,12 @@ if __name__ == "__main__":
         print(f"[错误] 无法启动渲染引擎: {e}")
         sys.exit(1)
 
+    if _edit_backend == 'vulkan':
+        # B7-54: VkEditorApp 无独立 run() 循环 —— 事件循环由 Qt 宿主驱动
+        # （生产路径 = run_loom_gui(backend='vulkan') → editor/viewport/vk_viewport）。
+        # 非 Qt 视图的装配已在 VkEditorApp 参数门处可见报错（不降级 GL）。
+        print("渲染后端: Vulkan (wgpu) — 编辑器 VK 视口由 Qt 宿主驱动 (见 --ui qt)")
+        sys.exit(0)
     print(f"渲染后端: OpenGL ({engine.ctx.info['GL_VERSION']})")
     if run_scene is not None:
         print("运行时: 已加载 %d 个对象 | 左键拖=相机轨道, WASD=平移, 方向键=视角, 滚轮=缩放" % len(engine.models))

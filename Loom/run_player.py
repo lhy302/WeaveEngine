@@ -130,6 +130,25 @@ def _game_api():
         return None
 
 
+def parse_backend_arg(argv):
+    """扫 argv 找 ``--backend <值>``，返回该值；缺省 None（B7-54 抽出）。
+
+    2026-11-21 B7-54（人类裁定「编译入口和源码入口和打包游戏一样，全部走
+    run_player.py 后端选择组件」）: --backend 的 argv 解析原来写了**三份**
+    （Loom.py ``_cli_backend`` / 本文件 ``main`` 内联 / game_player ``main``
+    内联，规则 5.5 违规）。现收敛为本函数（全仓唯一一份），三处全部转调。
+
+    只解析不校验：取值合法性由 :func:`resolve_backend` 归一（未知值 -> 默认
+    vulkan），``explicit`` 判定（Q6: 显式 vulkan 失败不改写设置）由调用方
+    用 ``返回值 is not None`` 得出 —— 与三份旧实现逐位一致
+    （``--backend`` 后没跟值 = 视为没给，返回 None）。
+    """
+    for i, a in enumerate(argv):
+        if a == '--backend' and i + 1 < len(argv):
+            return argv[i + 1]
+    return None
+
+
 def resolve_backend(requested=None):
     """解析渲染 API: 参数 > 游戏配置 > 引擎设置 > 默认 vulkan.
 
@@ -459,10 +478,8 @@ def _run_opengl(scene, **kw):
 def main():
     args = sys.argv[1:]
     scene = args[0] if args and not args[0].startswith('--') else None
-    backend = None
-    for i, a in enumerate(args):
-        if a == '--backend' and i + 1 < len(args):
-            backend = args[i + 1]
+    # 2026-11-21 B7-54: 内联解析删除，转调全仓唯一实现 parse_backend_arg（规则 5.5）。
+    backend = parse_backend_arg(args)
     if not scene:
         print("用法: py -3.13 run_player.py <场景.json> [--backend vulkan|opengl|auto]")
         sys.exit(2)
