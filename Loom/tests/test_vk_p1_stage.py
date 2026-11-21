@@ -44,7 +44,7 @@ def _enforce_fail_exit_code():
 """test_vk_p1_stage.py — VK P1 逃生舱（--stage p1）管线可创建 (2026-11-13)
 
 为什么有这条测试：
-  `VkRenderer(stage='p1')` 是一条**诊断逃生舱**（`py vk_player.py --stage p1`），
+  `VkRenderer(stage='p1')` 是一条**诊断逃生舱**（`py render/vk/player.py --stage p1`），
   只画清屏、用于定位显卡/驱动问题。它在 23 个 A/B 场景里零覆盖，也**没有 GL 对应
   阶段**可以单源化，因此 T3 明确豁免它（计划 §9.34 / 未完项清单 A1-8）。
   豁免的前提是：**至少证明它还能把管线建起来**——否则某次重构把它改坏了，
@@ -62,7 +62,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 
-import vk_renderer as VR                            # noqa: E402
+import render.vk.renderer as VR                            # noqa: E402
 
 _fails = []
 

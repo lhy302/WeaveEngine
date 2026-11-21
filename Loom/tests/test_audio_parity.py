@@ -80,7 +80,7 @@ def _enforce_fail_exit_code():
           逻辑帧 = engine._logic_frame:1146（8 段，含 update_audio:1195/1218）；
           渲染帧 = engine.advance_logic:1424（暂停门控在 :1452）。
   VK : scene_driver.SceneDriver() + load_from_data(场景)
-       —— VK 播放器；音频对象惰性建（scene_driver.py:916 _ensure_audio）；
+       —— VK 播放器；音频对象惰性建（render/vk/driver.py:916 _ensure_audio）；
           逻辑帧 = scene_driver._logic_frame:883（8 段，含 update_audio:902）；
           渲染帧 = scene_driver.advance_logic:1043（暂停门控在 :1053）。
   两端音频段是**同一份实现**（loom_frame_components.py:54 模块级 update_audio /
@@ -98,7 +98,7 @@ def _enforce_fail_exit_code():
 
 环境前提（只建输入前提，不改任何断言/语义）：
   · LOOM_LOGIC_SYNC=1 —— GL 的异步逻辑线程只在 Qt 宿主（_external_ctx=True）启用
-    （engine.py:1443 注释：「无头探针/测试直驱 advance_logic 时若也起线程会双驱」）。
+    （render/gl/engine.py:1443 注释：「无头探针/测试直驱 advance_logic 时若也起线程会双驱」）。
     本门是离屏 ctx（_external_ctx=True），故按该注释走同步路径。
   · LOOM_NO_PHYSICS=1 —— 本门只验音频面，用生产开关关掉物理（段序里的物理段仍在）。
   · 本门不注入鼠标/键盘事件 → **不涉及光标落点协议**（P3 的 settle_cursor 不适用）。
@@ -112,28 +112,28 @@ def _enforce_fail_exit_code():
     loom_frame_components.update_audio:71 调 host.audio.play_spatial(...)、
     sync_audio_listener:44 调 host.audio.set_listener(...)。
     后果：category 为 sfx/voice（**默认值 sfx**）且 playing=True 的 AudioSource → 音频段
-    抛 AttributeError（GL engine.py:1218 / VK scene_driver.py:902 一路抛到宿主）；
+    抛 AttributeError（GL render/gl/engine.py:1218 / VK render/vk/driver.py:902 一路抛到宿主）；
     set_listener 的 AttributeError 被 sync_audio_listener 的 except 吞掉 → 监听器**永远
     不同步**（静默）。2D（music）路径正常。归属：loom_components.py:1015（AudioSystem 缺
     3 个委托方法）+ loom_frame_components.py:44/71（调用方）。归 P4 新项。
   · P4-2（VK 听者不跟随相机）：sync_audio_listener 的相机输入源两端不同源 —— GL 的
-    self.camera 每渲染帧由 loom_render.py:1053 apply_orbit_camera() 更新（runtime.py:174
+    self.camera 每渲染帧由 render/gl/render.py:1053 apply_orbit_camera() 更新（runtime.py:174
     加载时也调一次）；VK **全仓没有** apply_orbit_camera 调用点（grep 实测 0 处），
-    self.camera 恒为 scene_driver.py:616 的初始 (0,0,-5)，朝向取 camera_yaw/camera_pitch
+    self.camera 恒为 render/vk/driver.py:616 的初始 (0,0,-5)，朝向取 camera_yaw/camera_pitch
     （:617 恒 0.0），而 VK 轨道相机实际用的是 yaw/pitch（render_pose:1257）。→ 即使修好
-    P4-1，VK 的听者也钉在 (0,0,-5)、朝向钉在 0/0。归属：scene_driver.py:616-619 +
+    P4-1，VK 的听者也钉在 (0,0,-5)、朝向钉在 0/0。归属：render/vk/driver.py:616-619 +
     无 apply_orbit_camera 调用点；共享函数 loom_frame_components.py:34-40 的取源顺序
     （getattr(host,'camera') 优先于 camera_pos）是放大器。
   · P4-3（VK 首帧前 engine.audio 是 None）：GL 在 __init__ 就建 AudioSystem，VK 是
-    self.audio = None（scene_driver.py:659）+ 首帧 _ensure_audio 惰性建。脚本在 on_start
+    self.audio = None（render/vk/driver.py:659）+ 首帧 _ensure_audio 惰性建。脚本在 on_start
     里调 self.engine.audio.play_sound(...)（用户脚本最常这么用）→ GL 正常返回 None，
     VK 抛 AttributeError → 引擎把它当坏脚本（_script_broken=True）→ **该脚本在 VK 上
-    整局不再运行**。归属：scene_driver.py:659。
+    整局不再运行**。归属：render/vk/driver.py:659。
   · P4-4（绑死模式 VK 没有音频段）：用户设置 logic_fps<=0（core_clock.split_enabled）时
-    两端都进「旧绑死模式」。GL 的两条绑死路径都调 update_audio（engine.py:1504 /
-    loom_render.py:1126 _escape_door_step），VK 的 advance_logic:1109-1115 与
+    两端都进「旧绑死模式」。GL 的两条绑死路径都调 update_audio（render/gl/engine.py:1504 /
+    render/gl/render.py:1126 _escape_door_step），VK 的 advance_logic:1109-1115 与
     _step_one_logic_frame:1133-1137 **都没有** update_audio → 该配置下 VK 的 AudioSource
-    永不播/停（F10 单步同理）。归属：scene_driver.py:1109-1115 / :1133-1137。
+    永不播/停（F10 单步同理）。归属：render/vk/driver.py:1109-1115 / :1133-1137。
   以上四条都是「本门红」的证据，**本任务只报告不修**（照 P1/P2/P3 先例按修前红提交）。
 
 修后（2026-11-19，HEAD=788a998 之上）：**105 PASS / 0 FAIL**（修前 100 PASS / 5 FAIL）。
@@ -196,7 +196,7 @@ import pygame                                                    # noqa: E402
 import loom_components                                           # noqa: E402
 import loom_frame_components as LFC                              # noqa: E402
 import runtime                                                   # noqa: E402  GL 打包播放器（生产入口）
-import scene_driver as SD                                        # noqa: E402  VK 播放器（生产入口）
+import render.vk.driver as SD                                        # noqa: E402  VK 播放器（生产入口）
 import sceneio                                                   # noqa: E402
 from loom_components import AudioSystem                          # noqa: E402  生产音频门面
 from scripts import Script, register                             # noqa: E402  脚本生产注册路径
@@ -281,7 +281,7 @@ check('结构：update_audio 的定义恰好 3 处（loom_frame_components 的�
       'FrameComponentMixin 方法，scene_driver 的 VK 方法）—— 没有第三份实现',
       sorted(p for (p, _l) in _ua_defs) == ['loom_frame_components.py',
                                             'loom_frame_components.py',
-                                            'scene_driver.py'], _ua_defs)
+                                            'render/vk/driver.py'], _ua_defs)
 for _hist in ('def _update_audio', 'def update_audio_impl', 'def _apply_audio',
               'def _sync_audio_listener_impl', 'def sync_listener'):
     _h = _grep_prod(_hist)
@@ -290,9 +290,9 @@ src_has('loom_frame_components.py', 'return update_audio(self, dt)', True,
         'GL 的 FrameComponentMixin.update_audio 转调模块级共享实现（:111）')
 src_has('loom_frame_components.py', 'return sync_audio_listener(self)', True,
         'GL 的 _sync_audio_listener 转调模块级共享实现（:103）')
-src_has('scene_driver.py', 'return _lfc.update_audio(self, dt)', True,
+src_has('render/vk/driver.py', 'return _lfc.update_audio(self, dt)', True,
         'VK 调的是同一份 loom_frame_components.update_audio（:943）')
-src_has('scene_driver.py', 'return _lfc.sync_audio_listener(self)', True,
+src_has('render/vk/driver.py', 'return _lfc.sync_audio_listener(self)', True,
         'VK 的 _sync_audio_listener 也是同一份（:937）')
 _ua_calls = _grep_prod('self.update_audio(')
 # 2026-11-19 (P4-4 修复后): VK 由 1 处变 3 处 —— 逻辑帧 + **绑死分支** +
@@ -300,9 +300,9 @@ _ua_calls = _grep_prod('self.update_audio(')
 #   条数不许再变少（少一处 = 又漏了一条绑死路径），也不许多（多一处 = 音频段重复跑）。
 check('结构：self.update_audio( 的生产调用点恰好 7 处（GL: engine 逻辑帧 2 + 绑死 1 + '
       'loom_render 绑死 1；VK: scene_driver 逻辑帧 1 + 绑死 1 + 无时钟单步 1）',
-      sorted(p for (p, _l) in _ua_calls) == ['engine.py', 'engine.py', 'engine.py',
-                                             'loom_render.py', 'scene_driver.py',
-                                             'scene_driver.py', 'scene_driver.py'],
+      sorted(p for (p, _l) in _ua_calls) == ['render/gl/engine.py', 'render/gl/engine.py', 'render/gl/engine.py',
+                                             'render/gl/render.py', 'render/vk/driver.py',
+                                             'render/vk/driver.py', 'render/vk/driver.py'],
       _ua_calls)
 _as_cls = _grep_prod('class AudioSystem')
 check('结构：class AudioSystem 只在 loom_components.py（唯一音频门面）',
@@ -333,14 +333,14 @@ check('结构：VK 的 self.camera 由轨道相机合成（P4-2 已修）—— 
       'orbit_camera_eye 一份，scene_driver 有「加载 + 每渲染帧」两处同步调用点',
       not _vk_aoc
       and [p for (p, _l) in _eye_defs] == ['loom_camera.py']
-      and sorted(p for (p, _l) in _sync_aoc) == ['scene_driver.py', 'scene_driver.py'],
+      and sorted(p for (p, _l) in _sync_aoc) == ['render/vk/driver.py', 'render/vk/driver.py'],
       (_vk_aoc, _eye_defs, _sync_aoc))
-src_has('loom_render.py', 'self.apply_orbit_camera()', True,
+src_has('render/gl/render.py', 'self.apply_orbit_camera()', True,
         'GL 每渲染帧把轨道相机合成到 self.camera（:1053，听者的输入源）')
-src_has('scene_driver.py', 'self.audio = None', True,
-        'VK 的音频对象初值 None（scene_driver.py:659，P4-3）')
-src_has('engine.py', 'self.audio = AudioSystem()', True,
-        'GL 在 __init__ 就建好音频门面（engine.py:405）')
+src_has('render/vk/driver.py', 'self.audio = None', True,
+        'VK 的音频对象初值 None（render/vk/driver.py:659，P4-3）')
+src_has('render/gl/engine.py', 'self.audio = AudioSystem()', True,
+        'GL 在 __init__ 就建好音频门面（render/gl/engine.py:405）')
 check('已知差异登记表为空（不许登记任何容差）', not KNOWN_DIFFS, KNOWN_DIFFS)
 
 

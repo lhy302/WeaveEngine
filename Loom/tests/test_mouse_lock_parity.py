@@ -58,7 +58,7 @@
        GLEngine 必须逐项同值，否则"编辑器能跑、打包版不能"（本组就是这条的牙）。
 
 夹具保真（§5 反模式 8 的牙）：桥必须是生产类 vk_ui.UIInputBridge 且按生产构造式
-（vk_player.py:367 UIInputBridge(getattr(driver,'ui',None))）包 driver.ui；两端窗口都是
+（render/vk/player.py:367 UIInputBridge(getattr(driver,'ui',None))）包 driver.ui；两端窗口都是
 真 GLFW 句柄；帧首/回调镜像锚点有源码断言（结构段）。
 
 已知差异登记表：**必须为空**（KNOWN_DIFFS）。任何"差不多"/阈值/容差都不许。
@@ -68,8 +68,8 @@
     —— B6「暂停期既不结算也不累积」GL 侧未实现；用户可感知路径：F9 暂停 + F10 单步时
     脚本读 mouse_rel（GL 视角转 / VK 不转）。
     缺陷归属（只报告不修）：loom_glfw_window._update_mouse_rel（无 logic_paused 门控；
-    run 循环 loom_render.py:1313 暂停期照跑泵）+ engine.GLEngine.advance_logic 暂停分支
-    （engine.py:1446-1459 不清 mouse_rel）；VK 参照实现 scene_driver.py:1059-1062。
+    run 循环 render/gl/render.py:1313 暂停期照跑泵）+ engine.GLEngine.advance_logic 暂停分支
+    （render/gl/engine.py:1446-1459 不清 mouse_rel）；VK 参照实现 render/vk/driver.py:1059-1062。
 
 R1/F-3 修后（2026-11-18，本门 **37 条全绿**；修前 = 30 绿 / 7 红 = ⑤ + ⑦×2 +
 结构锚点×3 + ④ 偶发 1 次）：
@@ -113,7 +113,7 @@ F-1/F-2/F-6/F-7 修后（2026-11-18，Q-B7-40；**只改 VK 侧**，GL 一行未
 历史附加发现（保留原文，F-1/F-2/F-6/F-7 四条已在上面结清）：
   F-3 F9 暂停期间按解锁键：VK 解锁（advance_logic 暂停分支自带 poll_unlock
       + vk_player 渲染帧采样，双保险）；GL 暂停帧**无人轮询**（GL 唯一轮询点 =
-      update_scripts 首行 engine.py:995，暂停时不执行）——同一串输入两端结果不同。
+      update_scripts 首行 render/gl/engine.py:995，暂停时不执行）——同一串输入两端结果不同。
       → **已修（2026-11-18，组⑦ 已加牙；见下「R1/F-3 修后」）**。
   F-5 ShowCursor 计数：GL _apply_cursor_backend 每次 set_mouse_locked 调用都无条件
       ShowCursor（loom_input.py:443，含状态未变的幂等调用）；VK apply_mouse_lock_backend
@@ -125,7 +125,7 @@ F-1/F-2/F-6/F-7 修后（2026-11-18，Q-B7-40；**只改 VK 侧**，GL 一行未
       AttributeError。修法见上「F-1/F-2/F-6/F-7 修后 · F-6」。
   F-7（**已修**）: 原状 = GL True→立即按意图应用（锁定）、False→清 requested + 解锁
       （loom_input.py:347-365，test_unlock_key I 段钉过 GL）；VK True→什么都不做、
-      False→只解锁**不清 requested**（旧 scene_driver.py:1637-1647）。
+      False→只解锁**不清 requested**（旧 render/vk/driver.py:1637-1647）。
 
 Q-B7-40-1 修后（2026-11-18，**只改 GL 侧 runtime.py + 本门**，VK 一行未动）：
   本门 **62 条全绿**（原 52 条一条未动、基线未移 + 组⑫ 新增 10 条）。
@@ -218,12 +218,12 @@ import glfw                                                      # noqa: E402
 import pygame                                                    # noqa: E402
 
 import engine as E                                               # noqa: E402
-import scene_driver as SD                                        # noqa: E402
-import vk_player                                                 # noqa: E402
-import vk_ui                                                     # noqa: E402  Q-B7-34-1: 夹具用生产那个桥类
+import render.vk.driver as SD                                        # noqa: E402
+import render.vk.player as vk_player                                                 # noqa: E402
+import render.vk.ui as vk_ui                                                     # noqa: E402  Q-B7-34-1: 夹具用生产那个桥类
 import runtime                                                   # noqa: E402  两端共用的后端落地工具
 from loom_input import DEFAULT_ACTIONS                           # noqa: E402
-from loom_glfw_window import _on_cursor_pos_cb                   # noqa: E402  GL 生产光标回调
+from render.gl.window import _on_cursor_pos_cb                   # noqa: E402  GL 生产光标回调
 
 ok = True
 _PAIRS = []                                                      # 收尾统一释放光标捕获
@@ -250,8 +250,11 @@ def _find_src(fname):
         for skip in ('tests', '__pycache__'):
             if skip in dirnames:
                 dirnames.remove(skip)
-        if fname in filenames:
-            hits.append(os.path.join(dirpath, fname))
+        # B3 目录重构: fname 既可以是裸文件名（旧口径），也可以是 ROOT 相对路径
+        # （'render/vk/driver.py' 等）—— 判据不变：恰好一份才算数。
+        for fn in filenames:
+            if fn == fname or os.path.relpath(os.path.join(dirpath, fn), ROOT).replace('\\', '/') == fname:
+                hits.append(os.path.join(dirpath, fn))
     if len(hits) != 1:
         return None, hits
     with open(hits[0], 'r', encoding='utf-8') as f:
@@ -269,30 +272,30 @@ def src_has(fname, needle, must=True, why=''):
 
 print("=== 〇. 结构：唯一实现 / 镜像锚点 / 退出释放 / 登记表 ===")
 # 解锁键唯一实现（D6=A）：VK 不许复制切换语义 —— 当前名与历史名都查
-src_has('vk_player.py', 'def _poll_mouse_unlock_key', False,
+src_has('render/vk/player.py', 'def _poll_mouse_unlock_key', False,
         'VK 播放器不得自写解锁键轮询（委托 engine.GLEngine 唯一实现）')
-src_has('scene_driver.py', 'def _poll_unlock_local', False,
+src_has('render/vk/driver.py', 'def _poll_unlock_local', False,
         '批2已删的历史拷贝 _poll_unlock_local 不得回来（B7 之前的双实现病灶；docstring 提及不算）')
-src_has('scene_driver.py', 'GLEngine._poll_mouse_unlock_key', True,
+src_has('render/vk/driver.py', 'GLEngine._poll_mouse_unlock_key', True,
         'SceneDriver._poll_mouse_unlock_key 只做委托（唯一实现）')
 # 本门帧首/回调镜像的生产锚点（镜像漂移 = 门失真，必须当场红）
-src_has('vk_player.py', 'ui_bridge.begin_frame()', True, '帧首结算入口仍在')
-src_has('vk_player.py', 'driver.feed_mouse_rel(', True, '光标增量生产喂入点仍在')
-src_has('vk_player.py', 'poll_unlock_frame(driver)', True, '渲染帧解锁键采样仍在')
-src_has('loom_glfw_window.py', 'def _update_mouse_rel', True, 'GL 泵结算点仍在')
-src_has('loom_glfw_window.py', 'self.mouse_rel = (int(dx), int(dy))', True,
+src_has('render/vk/player.py', 'ui_bridge.begin_frame()', True, '帧首结算入口仍在')
+src_has('render/vk/player.py', 'driver.feed_mouse_rel(', True, '光标增量生产喂入点仍在')
+src_has('render/vk/player.py', 'poll_unlock_frame(driver)', True, '渲染帧解锁键采样仍在')
+src_has('render/gl/window.py', 'def _update_mouse_rel', True, 'GL 泵结算点仍在')
+src_has('render/gl/window.py', 'self.mouse_rel = (int(dx), int(dy))', True,
         'GL 帧增量 int 截断语义仍在')
 # 退出释放（锁定态不得带出进程）
-src_has('loom_render.py', 'self.set_mouse_locked(False)', True,
+src_has('render/gl/render.py', 'self.set_mouse_locked(False)', True,
         'GL run() finally 退出释放鼠标（loom_render run 收尾）')
-src_has('vk_player.py', '_release_cursor', True,
+src_has('render/vk/player.py', '_release_cursor', True,
         'VK 渲染循环 finally 退出释放鼠标')
 # R1/F-3 修后锚点（暂停期门控的唯一实现点；漂移 = 门失真，必须当场红）
-src_has('loom_glfw_window.py', '_logic_paused_state', True,
+src_has('render/gl/window.py', '_logic_paused_state', True,
         'GL 泵结算点的逻辑暂停门控仍在（R1：暂停不结算 mouse_rel）')
-src_has('engine.py', 'self.poll_unlock()', True,
+src_has('render/gl/engine.py', 'self.poll_unlock()', True,
         'GL advance_logic 暂停分支的解锁键轮询仍在（F-3）')
-src_has('loom_render.py', 'self.poll_unlock()', True,
+src_has('render/gl/render.py', 'self.poll_unlock()', True,
         'GL 渲染帧（玩家主循环）暂停期解锁键采样仍在（F-3）')
 check('已知差异登记表为空（不许登记任何容差）', not KNOWN_DIFFS, KNOWN_DIFFS)
 
@@ -323,7 +326,7 @@ class Pair:
         # 生产注入点（vk_player._register_input:523-524）：F11 假全屏/光标落地都要这个句柄
         self.vk._vk_glfw_window = self.vk_win
         self.vk._vk_canvas = None
-        # Q-B7-34-1：桥必须是生产那个类，构造式与生产逐字相同（vk_player.py:367）
+        # Q-B7-34-1：桥必须是生产那个类，构造式与生产逐字相同（render/vk/player.py:367）
         self.bridge = vk_ui.UIInputBridge(getattr(self.vk, 'ui', None))
         # vk_player._apply_cursor_mode:590-606 逐行镜像（win = 注入的真窗口）
         self._prev = [None]
@@ -411,14 +414,14 @@ class Pair:
     def vk_frame(self, x, y):
         """VK 生产帧：生产光标回调 + vk_player.draw 帧首逐行镜像（643-668）。"""
         self._cursor(x, y)                             # vk_player._on_cursor:558-562 的全部内容
-        self.bridge.begin_frame()                      # vk_player.py:643
+        self.bridge.begin_frame()                      # render/vk/player.py:643
         _x, _y = self.bridge.pos
         _p = self._prev[0]
         if _p is not None and self.bridge.wants_camera():
-            self.vk.feed_mouse_rel(_x - _p[0], _y - _p[1])   # vk_player.py:647-648
+            self.vk.feed_mouse_rel(_x - _p[0], _y - _p[1])   # render/vk/player.py:647-648
         self._prev[0] = (_x, _y)
-        self.vk.advance_logic(FRAME_DT)                # vk_player.py:664（结算在其帧首）
-        vk_player.poll_unlock_frame(self.vk)           # vk_player.py:668
+        self.vk.advance_logic(FRAME_DT)                # render/vk/player.py:664（结算在其帧首）
+        vk_player.poll_unlock_frame(self.vk)           # render/vk/player.py:668
         return ((int(self.bridge.pos[0]), int(self.bridge.pos[1])),
                 tuple(self.vk.mouse_rel))
 
@@ -459,7 +462,7 @@ def settle_cursor(win, eng, x, y, maxit=40, dt=0.002, stable=2):
       glfw.set_cursor_pos 底层是 Win32 SetCursorPos，**物理光标的落地是异步的**：
         · 紧跟着的 glfw.get_cursor_pos（= GetCursorPos + ScreenToClient，读物理光标）
           可能仍回读到**上一个**落点 —— 而生产 _on_mouse_button_cb 正是自己再读一次
-          get_cursor_pos 来定 e.mouse_pos（loom_glfw_window.py:657-661），于是「按下
+          get_cursor_pos 来定 e.mouse_pos（render/gl/window.py:657-661），于是「按下
           帧」的 mouse_pos 被写成上一帧的位置 → 命中全落 root。本门 ①/② 组偶发假红的
           签名 GL=('root','root',None,None) 就是它。
         · 上一次 set_cursor_pos 产生的 WM_MOUSEMOVE 还可能排在消息队列里，晚一拍才被

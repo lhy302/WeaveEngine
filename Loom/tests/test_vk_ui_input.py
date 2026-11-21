@@ -2,7 +2,7 @@
 """test_vk_ui_input.py — Vk 播放器 UI 输入分发对齐 GL (2026-11-06 R3)
 
 覆盖:
-  1. UIInputBridge (vk_ui.py) 的鼠标/键盘/文本事件 -> UIManager 与 GL 路径
+  1. UIInputBridge (render/vk/ui.py) 的鼠标/键盘/文本事件 -> UIManager 与 GL 路径
      (editor._dispatch_ui_mouse / loom_glfw_window._on_key_cb 的直调等价物)
      **逐步状态一致**: Button 点击回调、Slider 拖动值、InputField 输入/提交、
      焦点元素、hover 元素、每帧 consumed 标记.
@@ -60,7 +60,7 @@ def _enforce():
 
 
 import loom_ui
-import vk_ui
+import render.vk.ui as vk_ui
 from loom_ui import UIManager, Canvas, Button, Slider, InputField
 
 try:
@@ -140,7 +140,7 @@ def check(label, cond, detail=''):
 # 保留的代价: 将来任何宿主直接调 on_key / on_text = **绕过内核的第二个 UI 写者**
 # （输入框打一个字出两个字）, 而现有行为门抓不到这种「接回」—— 宿主自己喂一次 UI,
 # 内核第③步又喂一次, 两个写者打的是同一个 UIManager。
-# 所以补这条静态断言: 生产代码（Loom/**.py, 排除 tests/ 与 vk_ui.py 自身定义）里
+# 所以补这条静态断言: 生产代码（Loom/**.py, 排除 tests/ 与 render/vk/ui.py 自身定义）里
 # 不允许出现对这两个方法的调用点, 也不允许 getattr(x, 'on_key'/'on_text') 间接取用。
 # 为什么只扫 on_key / on_text, 不扫 dispatch_key / dispatch_text: 后两个是**转调内层**
 # （on_key -> self.dispatch_key -> self.ui.dispatch_key）, 而内核第③步在
@@ -188,7 +188,7 @@ def production_py_files(root):
                 continue
             p = _os.path.join(dirpath, fn)
             rel = _os.path.relpath(p, root).replace('\\', '/')
-            if rel == 'vk_ui.py':      # 定义处自身（on_key 内部转调 dispatch_key）不算调用方
+            if rel == 'render/vk/ui.py':      # 定义处自身（on_key 内部转调 dispatch_key）不算调用方
                 continue
             out.append(p)
     return out

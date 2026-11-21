@@ -10,7 +10,7 @@ build_game 的静态 import 图）。engine.py 通过 `from loom_material import
 
 import numpy as np
 
-import loom_appearance
+import render.contract.appearance as loom_appearance
 from core.color import _hex_rgba
 
 from scene.identity import new_guid   # Q-B7-49-1 P2: guid 唯一真源

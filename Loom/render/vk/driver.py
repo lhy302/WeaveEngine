@@ -44,13 +44,13 @@ from loom_camera import orbit_camera_eye
 # 2026-11-18 (Q-B7-32-1 = ①): VK 宿主窗口的假全屏（F11）—— 与 GL 的
 # loom_glfw_window.GlfwWindowMixin._set_fullscreen 同语义（三步：去边框/铺桌面/置顶）。
 # 只含下划线成员，不进用户 API 面；GL 侧一行未动。
-from loom_vk_window import VkWindowMixin
+from render.vk.window import VkWindowMixin
 
 # 2026-11-20 (S3, Q-B7-47-1 阶段 3): VK 侧叠加层绘制原语 + FramePlan 执行器 ——
 # overlay_scope / draw_lines / _backend_execute_frame 与 loom_render.RenderMixin
 # 的 GL 钩子同签名（同源契约，规则 5.5）；线宽两端统一 = 像素宽度（Q-B7-48-1
 # 裁决 B：loom_line_geometry.build_line_quads 屏幕空间扩宽，不再依赖后端线宽）。
-from loom_pass_vk import VkEditorRenderMixin
+from render.vk.pass_vk import VkEditorRenderMixin
 
 # B1: 物理桥 (零 GL; 缺失/导入失败 -> physb=None -> 无物理步进)
 try:
@@ -543,7 +543,7 @@ class SceneDriver(VkWindowMixin, VkEditorRenderMixin, EngineCore):
         try:
             import os as _os
             from scripts import load_script_dir as _lsd
-            _lsd(_os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 'scripts'))
+            _lsd(_os.path.join(_os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))), 'scripts'))
         except Exception:
             pass
         self.near = 0.1
@@ -579,7 +579,7 @@ class SceneDriver(VkWindowMixin, VkEditorRenderMixin, EngineCore):
             import game_settings as _gs
             from loom_input import (_ACTION_FILE as _TPL_NEW,
                                     _ACTION_FILE_LEGACY as _TPL_OLD)
-            _d = os.path.dirname(os.path.abspath(__file__))
+            _d = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
             _p = next((q for q in (os.path.join(_d, _TPL_NEW), os.path.join(_d, _TPL_OLD))
                        if os.path.exists(q)), None)
             _acts = None

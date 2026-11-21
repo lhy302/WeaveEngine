@@ -17,7 +17,7 @@ import weakref
 
 import numpy as np
 
-import loom_appearance
+import render.contract.appearance as loom_appearance
 
 from scene.identity import new_guid   # Q-B7-49-1 P2: guid 唯一真源
 

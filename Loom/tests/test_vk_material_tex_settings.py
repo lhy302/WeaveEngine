@@ -69,7 +69,7 @@ def check(name, cond, detail=""):
         _fails.append(name)
 
 import sceneio
-import scene_driver as SD
+import render.vk.driver as SD
 
 
 def _make_png(path, size=256):

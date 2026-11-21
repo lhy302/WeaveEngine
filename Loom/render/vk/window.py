@@ -90,7 +90,7 @@ def _make_hwnd(win):
     """GLFW 窗口 -> Win32 HWND。**同一份实现**：直接复用 loom_glfw_window._make_hwnd
     （filedialog.py 已有同样的跨模块复用先例），导入失败才本地兜底。"""
     try:
-        from loom_glfw_window import _make_hwnd as _gl_make
+        from render.gl.window import _make_hwnd as _gl_make
         return _gl_make(win)
     except Exception:
         pass

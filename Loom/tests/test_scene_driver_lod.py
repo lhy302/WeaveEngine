@@ -64,7 +64,7 @@ sys.path.insert(0, ROOT)
 os.environ.setdefault('LOOM_NO_PARALLEL', '1')
 os.environ.setdefault('LOOM_NO_SAVE_MIGRATE', '1')
 
-import scene_driver as SD
+import render.vk.driver as SD
 from core.primitives import Point3D
 
 _fails = []
@@ -258,7 +258,7 @@ def t_wheel_reset_each_frame():
 # ============ 5. vk_player 侧助手 (P-07/P-08/P-09) ============
 def t_vk_helpers():
     print("=== vk_player 助手: 回调链 / 重试预算 / 滚轮消费 ===")
-    import vk_player as VP
+    import render.vk.player as VP
 
     # (a) 链式转发: 先库回调, 后自己的
     order = []

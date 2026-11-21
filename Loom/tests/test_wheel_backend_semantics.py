@@ -60,7 +60,7 @@ def _enforce():
         _os._exit(1)
 
 
-import vk_ui
+import render.vk.ui as vk_ui
 from loom_ui import UIManager, Canvas, Button, ScrollView
 
 W, H = 480, 320

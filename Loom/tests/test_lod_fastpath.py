@@ -39,7 +39,7 @@ sys.path.insert(0, ROOT)
 os.environ.setdefault('LOOM_NO_PARALLEL', '1')
 os.environ.setdefault('LOOM_NO_SAVE_MIGRATE', '1')
 
-import scene_driver as SD
+import render.vk.driver as SD
 from loom_components import MeshRendererComponent
 
 _fails = []

@@ -44,7 +44,7 @@ def _enforce_fail_exit_code():
 
 """test_light_vp_cache_roll.py — 编辑态阴影 VP 静止缓存键必须含 roll (2026-11-07 P1)
 
-缺陷 (loom_lighting.py 旧 823-838 / _light_vps_cache_sig):
+缺陷 (render/gl/lighting.py 旧 823-838 / _light_vps_cache_sig):
   缓存键里放的是 l.direction 向量, 而 LightState.direction 只由 azimuth/elevation
   派生 —— roll (倾斜) 只影响 up_vector()。于是在编辑态"光源静止"缓存下:
       改 roll -> 签名不变 -> 直接 return 上一帧的 _light_vps -> 阴影视图/光束截面
@@ -65,7 +65,7 @@ sys.path.insert(0, ROOT)
 
 import numpy as np                                     # noqa: E402
 
-from loom_lighting import LightingMixin                # noqa: E402
+from render.gl.lighting import LightingMixin                # noqa: E402
 from scene.entities import LightState             # noqa: E402
 from core.primitives import Point3D                          # noqa: E402
 

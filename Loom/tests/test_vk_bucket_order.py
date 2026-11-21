@@ -37,8 +37,8 @@ def check(name, cond, detail=''):
         _fails.append(name)
 
 
-import vk_renderer as VR
-import vk_ui as VU
+import render.vk.renderer as VR
+import render.vk.ui as VU
 
 
 # ============ 1. 桶重排核心逻辑 ============

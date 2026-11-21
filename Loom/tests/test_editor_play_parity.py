@@ -84,7 +84,7 @@ def _enforce_fail_exit_code():
 结构段（「同源，不同步」的牙）：
   · 相机策略只有 loom_render._apply_main_pass_camera 一份，播放器与编辑器各恰好 1 个调用点；
   · 挂父相机重应用只有 loom_camera._reapply_parent_camera 一份，两端各恰好 1 个调用点；
-  · 编辑器调用共享 mixin 方法 _dispatch_late_update（GL 侧 def 只在 engine.py）；
+  · 编辑器调用共享 mixin 方法 _dispatch_late_update（GL 侧 def 只在 render/gl/engine.py）；
   · Canvas UI 只走 FramePlan include_ui 路径（view 层 0 处 ui.draw_all）；
   · 历史缺陷串 'self.is_playing or' 与历史名在生产代码 0 处。
 
@@ -149,8 +149,8 @@ def _enforce_fail_exit_code():
     逻辑）→ advance_logic 补与 GL 同一条编辑态零逻辑门（播放器形状 is_playing 恒 True
     → 行为零变化）。
   修后绿：四面逐项相等（相机/世界矩阵/钩子/时钟/UI/天空盒），断言计数见提交信息。
-  修前必红复跑法：git stash Loom/editor.py Loom/engine.py Loom/engine_core.py
-  Loom/scene_driver.py（4 个生产文件回到修前）→ 门红；还原 → 绿。
+  修前必红复跑法：git stash Loom/editor.py Loom/render/gl/engine.py Loom/engine_core.py
+  Loom/render/vk/driver.py（4 个生产文件回到修前）→ 门红；还原 → 绿。
 """
 
 import hashlib
@@ -177,7 +177,7 @@ import scene.contract as _scene_contract                                        
 import loom_ui                                                    # noqa: E402  Canvas UI（事件插桩）
 import moderngl                                                   # noqa: E402
 import runtime                                                    # noqa: E402  GL 打包播放器（生产入口）
-import scene_driver as _sd                                       # noqa: E402  VK 播放器（生产类，S5 四面对拍）
+import render.vk.driver as _sd                                       # noqa: E402  VK 播放器（生产类，S5 四面对拍）
 from scene.entities import wrap_deg                          # noqa: E402  相机角度环绕（唯一实现）
 from mathlib.matlib import (mat4_ortho, mat4_perspective, mat4_rotation,   # noqa: E402
                     mat4_scale, mat4_translation, mat4_view_yaw_pitch,
@@ -251,11 +251,11 @@ print("=== 〇. 结构：播放组件同源（同一条实现，两端 import/�
 _defs = _grep_prod('def _apply_main_pass_camera')
 check('结构：主 pass 相机策略只有 loom_render._apply_main_pass_camera 一份实现'
       '（播放器与编辑器继承同一份 = 同源）',
-      [p for (p, _l) in _defs] == ['loom_render.py'], _defs)
+      [p for (p, _l) in _defs] == ['render/gl/render.py'], _defs)
 _calls = _grep_prod('self._apply_main_pass_camera()')
 check('结构：主 pass 相机策略恰好两个调用点（loom_render._prepare_main_pass + '
       'editor._prepare_main_pass）—— 编辑器不再有第二份条件',
-      sorted(p for (p, _l) in _calls) == ['editor.py', 'loom_render.py'], _calls)
+      sorted(p for (p, _l) in _calls) == ['editor.py', 'render/gl/render.py'], _calls)
 src_has('editor.py', 'self.is_playing or', False,
         '历史缺陷串（S1 修前 editor.py:2410 的第二份相机条件）已从编辑器 0 处'
         '（反模式 10：注释/代码不得与同源裁决不符）')
@@ -265,11 +265,11 @@ check('结构：挂父激活相机重应用只有 loom_camera._reapply_parent_ca
 _rpcalls = _grep_prod('self._reapply_parent_camera()')
 check('结构：挂父相机重应用恰好两个调用点（loom_render.render + editor.render）'
       '—— 编辑器不再有复制的三行',
-      sorted(p for (p, _l) in _rpcalls) == ['editor.py', 'loom_render.py'], _rpcalls)
+      sorted(p for (p, _l) in _rpcalls) == ['editor.py', 'render/gl/render.py'], _rpcalls)
 _ludefs = _grep_prod('def _dispatch_late_update')
-check('结构：def _dispatch_late_update 恰好两份（GL engine.py + VK scene_driver.py，'
+check('结构：def _dispatch_late_update 恰好两份（GL render/gl/engine.py + VK render/vk/driver.py，'
       '既有后端分界；编辑器调用的就是 GL 那一份共享 mixin 方法）',
-      sorted(p for (p, _l) in _ludefs) == ['engine.py', 'scene_driver.py'], _ludefs)
+      sorted(p for (p, _l) in _ludefs) == ['render/gl/engine.py', 'render/vk/driver.py'], _ludefs)
 src_has('editor.py', 'self._dispatch_late_update(delta_time)', True,
         '编辑器渲染帧派发 LateUpdate（与 loom_render.render 同序）—— 修前 0 处，'
         '脚本 on_late_update 在编辑器播放态死掉')
@@ -287,7 +287,7 @@ for _hist in ('def _apply_render_camera', 'def apply_play_camera',
 
 print()
 print("=== 〇''. S5 结构：四面同源（GL/VK 编辑器共用同一份 _EditorCore 方法对象） ===")
-from loom_render import RenderMixin as _RenderMixin     # noqa: E402
+from render.gl.render import RenderMixin as _RenderMixin     # noqa: E402
 from engine import GLEngine as _GLE                     # noqa: E402
 _vk_mro = [cls.__name__ for cls in editor_mod.VkEditorApp.__mro__]
 check('S5 结构：VkEditorApp -> _EditorCore -> SceneDriver 装配形状（S4 落地未变）',
@@ -640,7 +640,7 @@ def measure_vk_player(drv, prod_vp):
         P = mat4_perspective(np, drv.fov, W / H, drv.near, drv.far)
     prod = np.asarray(prod_vp, dtype=np.float64)
     sky = drv.effective_skybox()
-    import vk_renderer as _vr          # 惰性：GL 读者不拉 wgpu 之外的 VK 渲染器
+    import render.vk.renderer as _vr          # 惰性：GL 读者不拉 wgpu 之外的 VK 渲染器
     rw32 = _vr.world_matrices(drv.models, getattr(drv, '_interp', None)).tobytes()
     return {'eye': eye,
             'fwd': tuple(float(v) for v in V[0:3, 2]),
@@ -709,7 +709,7 @@ class Pair:
         self.ed.view.draw = _vd
         # ---- S5: VK 两面（同一份场景用户内容；生产构造式） ----
         # VK 播放器面 = scene_driver.SceneDriver（生产 VK 播放器同一类），
-        # 装配按 vk_player.run_vk 生产同款：is_playing=True（vk_player.py:346，
+        # 装配按 vk_player.run_vk 生产同款：is_playing=True（render/vk/player.py:346，
         # 「播放器一进来就是正在播放语义」）→ load_from_data → set_fps。
         self.v = _sd.SceneDriver()
         self.v.is_playing = True
@@ -1059,8 +1059,8 @@ print("=== ⑦. 退出播放 on_disable（Q-B7-48-2）：退出追加恰一次/�
 with open(os.path.join(ROOT, 'editor.py'), 'r', encoding='utf-8') as _f7:
     _ed_src7 = _f7.read()
 _no_dis7 = {fn: open(os.path.join(ROOT, fn), 'r', encoding='utf-8').read().count('inst.on_disable(')
-            for fn in ('runtime.py', 'engine.py', 'core/engine_core.py', 'scene_driver.py',
-                       'loom_model_gpu.py', 'vk_player.py', 'game_player.py',
+            for fn in ('runtime.py', 'render/gl/engine.py', 'core/engine_core.py', 'render/vk/driver.py',
+                       'render/gl/model_gpu.py', 'render/vk/player.py', 'game_player.py',
                        'loom_player_window.py')}
 check('⑦ 结构：inst.on_disable( 生产派发点全仓恰 1 处（editor.py 第 1.5 步）+ 播放器入口 0 处',
       _ed_src7.count('inst.on_disable(') == 1 and set(_no_dis7.values()) == {0},

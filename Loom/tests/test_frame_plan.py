@@ -19,10 +19,10 @@ sys.path.insert(0, ROOT)
 os.environ.setdefault('LOOM_NO_PARALLEL', '1')
 os.environ['LOOM_NO_SAVE_MIGRATE'] = '1'
 
-from loom_pass import (SCREEN_TARGET, DrawCmd, DepthState, FramePlan, PassSpec,
+from render.contract.frame_plan import (SCREEN_TARGET, DrawCmd, DepthState, FramePlan, PassSpec,
                        RasterState, TargetDecl, frame_plan)
-from loom_shaders import CLEAR_COLOR_RGBA
-import loom_pass_gl as LPGL
+from render.contract.shaders import CLEAR_COLOR_RGBA
+import render.gl.pass_gl as LPGL
 
 _fails = []
 
@@ -75,13 +75,13 @@ def t_spec():
 def t_shared():
     print('=== B. 编辑器/播放器共享同一份描述 ===')
     import editor
-    import loom_render
+    import render.gl.render as loom_render
     check('B1 编辑器用 loom_pass.frame_plan',
           editor.frame_plan is frame_plan, editor.frame_plan)
     check('B2 播放器用 loom_pass.frame_plan',
           loom_render.frame_plan is frame_plan, loom_render.frame_plan)
     src_e = open(os.path.join(ROOT, 'editor.py'), encoding='utf-8').read()
-    src_p = open(os.path.join(ROOT, 'loom_render.py'), encoding='utf-8').read()
+    src_p = open(os.path.join(ROOT, 'render', 'gl', 'render.py'), encoding='utf-8').read()
     check('B3 编辑器调用 frame_plan(include_shadow=..., ...)',
           'frame_plan(include_shadow=' in src_e, '')
     check('B4 播放器调用 frame_plan(include_shadow=..., ...)',
@@ -288,7 +288,7 @@ def t_s3s4():
 # ---------------- 2B2: 后处理链结构 ----------------
 def t_post():
     print('=== F. 2B2 后处理链（tonemap + bloom）===')
-    from loom_post import HDR_TARGET, HALF_TARGET, QUARTER_TARGET, post_enabled
+    from render.contract.post import HDR_TARGET, HALF_TARGET, QUARTER_TARGET, post_enabled
     p = frame_plan(include_shadow=False, include_world_canvas=True,
                    include_hud=True, include_ui=True, include_post=True)
     ids = [x.id for x in p.passes]
@@ -338,8 +338,8 @@ def t_post():
 # ---------------- T3c-1: 场景参数 UBO 单一来源 ----------------
 def t_scene_ubo():
     print('=== H. T3c-1 场景 UBO 单点表 ===')
-    import loom_scene_ubo as SU
-    import vk_renderer as VR
+    import render.contract.scene_ubo as SU
+    import render.vk.renderer as VR
     check('H1 字段表：头 36 + 8*40 = 356 f32', SU.assert_layout() == 356, SU.FLOATS)
     check('H2 字节数 = 1424', SU.BYTES == 1424, SU.BYTES)
     check('H3 VK 旧常量与表一致',
@@ -367,8 +367,8 @@ def t_scene_ubo():
     check('H5 pack 输出长度 = 356 f32', len(buf) == 356, len(buf))
     check('H6 pack 输出字节 = 1424', buf.tobytes().__len__() == 1424,
           len(buf.tobytes()))
-    import loom_shaders as SH
-    from loom_shader_bindings import expand as _exp
+    import render.contract.shaders as SH
+    from render.contract.shader_bindings import expand as _exp
     _blk = _exp(SU.glsl_block())
     check('H8 GL 主片段结构体 == 生成器输出（不手写第二份）',
           _blk in SH._FRAG_SRC and _blk in SH._VERT_SRC, '')
@@ -378,8 +378,8 @@ def t_scene_ubo():
                                        'u_shadow_slot', 'u_view_pos',
                                        'u_pbr_mode', 'u_ambient_scale')),
           '')
-    import loom_shader_bindings as SB
-    import vk_renderer as VR2
+    import render.contract.shader_bindings as SB
+    import render.vk.renderer as VR2
     check('H11 实例布局表 stride = 96', SB.INSTANCE_STRIDE == 96, SB.INSTANCE_STRIDE)
     check('H12 VK _INST_BYTES == 表 stride', VR2._INST_BYTES == SB.INSTANCE_STRIDE,
           (VR2._INST_BYTES, SB.INSTANCE_STRIDE))
@@ -423,7 +423,7 @@ def t_scene_ubo():
 # ---------------- Q-D1-3=A: profiler 默认空实现 ----------------
 def t_profiler_defaults():
     print('=== G. Q-D1-3=A: RenderMixin 的 profiler 默认空实现 ===')
-    from loom_render import RenderMixin
+    from render.gl.render import RenderMixin
     from core.profiler import ProfilerMixin
 
     class OnlyRender(RenderMixin):

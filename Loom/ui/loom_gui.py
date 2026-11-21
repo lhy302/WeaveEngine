@@ -73,7 +73,7 @@ from PySide6.QtOpenGLWidgets import QOpenGLWidget
 
 # 2026-11-09 批次 A0（人类裁决 D1=B）：GL 地板 3.3 -> 4.3 core。
 # 版本门与报错文案的唯一实现在 loom_gl_version（GLFW/Qt 两条路径共用）。
-from loom_gl_version import (GL_MIN_MAJOR, GL_MIN_MINOR, GLVersionError,
+from render.gl.version import (GL_MIN_MAJOR, GL_MIN_MINOR, GLVersionError,
                              require_gl_version)
 
 # pygame 键值 (Qt.Key -> pygame 常量)

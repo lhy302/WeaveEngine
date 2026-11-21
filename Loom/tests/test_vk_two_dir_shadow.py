@@ -73,7 +73,7 @@ sys.path.insert(0, ROOT)
 
 import numpy as np                                  # noqa: E402
 
-import vk_renderer as VR                            # noqa: E402
+import render.vk.renderer as VR                            # noqa: E402
 
 _fails = []
 

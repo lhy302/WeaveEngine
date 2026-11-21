@@ -12,7 +12,7 @@ os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 """FPS 缓冲预画: 真正写入离屏 FBO + 深度附件 + 引擎渲染目标恢复 (Q8=A)."""
 import weakref
 import engine as E
-from frame_buffer import RenderFrameBuffer
+from render.contract.frame_buffer import RenderFrameBuffer
 
 ok = True
 def check(label, cond, detail=""):

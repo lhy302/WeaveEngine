@@ -72,12 +72,12 @@ CLEAR_COLOR_RGBA = (0.10, 0.12, 0.16, 1.0)
 # Loom/shaders/sky.vert / sky.frag（VK 走 glslang 出来的 .spv）。
 # 由本文件末尾的 _shared_shader_src() 加载，这里不再保留第二份 GLSL 文本。
 # 2026-11-11 T3c-1: 场景 block **由字段表生成**（不许手写第二份）
-from loom_scene_ubo import glsl_block as _glsl_scene_block
-from loom_shader_bindings import expand as _expand_bindings
+from render.contract.scene_ubo import glsl_block as _glsl_scene_block
+from render.contract.shader_bindings import expand as _expand_bindings
 _SCENE_UBO_GLSL = _expand_bindings(_glsl_scene_block())
-from loom_shader_bindings import bucket_block_glsl as _bucket_block
+from render.contract.shader_bindings import bucket_block_glsl as _bucket_block
 _BUCKET_UBO_GLSL = _expand_bindings(_bucket_block())
-from loom_shader_compat_src import compat_src as _compat_src
+from render.contract.shader_compat_src import compat_src as _compat_src
 
 
 def _shared_shader_src(name):
@@ -87,7 +87,7 @@ def _shared_shader_src(name):
     天空/阴影源里没有 SCENE/BUCKET 标记，故不替换那两个块。
     """
     import os
-    base = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'shaders')
+    base = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'shaders')
     with open(os.path.join(base, name), encoding='utf-8') as fh:
         src = fh.read()
     src = src.replace('//@@COMPAT@@', _compat_src())
@@ -114,7 +114,7 @@ def _shared_frag_src():
     本文件不再保存第二份 GLSL 文本（单一来源 = shaders/main.frag）。
     """
     import os
-    base = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'shaders')
+    base = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'shaders')
     with open(os.path.join(base, 'main.frag'), encoding='utf-8') as fh:
         src = fh.read()
     src = src.replace('//@@COMPAT@@', _compat_src())
@@ -130,7 +130,7 @@ _FRAG_SRC = _shared_frag_src()
 def _shared_vert_src():
     """T3a Phase-2a: GL 主 pass 顶点着色器读**同一份** shaders/main.vert（VK 走 SPIR-V）。"""
     import os
-    base = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'shaders')
+    base = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'shaders')
     with open(os.path.join(base, 'main.vert'), encoding='utf-8') as fh:
         src = fh.read()
     with open(os.path.join(base, 'loom_shader_compat.glsl'), encoding='utf-8') as fh:

@@ -116,7 +116,7 @@ def t_real_gate(tmp):
     print('=== A. 真实版本闸门（VK 路径也要拦） ===')
     err = None
     try:
-        import scene_driver
+        import render.vk.driver as scene_driver
         scene_driver.SceneDriver().load_from_data(_newer_scene())
     except BaseException as e:
         err = e

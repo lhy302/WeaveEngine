@@ -4,7 +4,7 @@ import os
 
 
 def compat_src():
-    p = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+    p = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
                      "shaders", "loom_shader_compat.glsl")
     with open(p, encoding="utf-8") as f:
         return f.read()

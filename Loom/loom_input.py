@@ -246,7 +246,7 @@ class InputMixin:
             return result
         try:
             import glfw
-            from loom_glfw_window import _GLFW_TO_PG
+            from render.gl.window import _GLFW_TO_PG
             for gl_key, pg_key in _GLFW_TO_PG.items():
                 if glfw.get_key(win, gl_key) == glfw.PRESS:
                     result[pg_key] = 1

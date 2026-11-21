@@ -69,7 +69,7 @@ os.environ.setdefault('LOOM_NO_DIALOG', '1')
 import moderngl                                            # noqa: E402
 import pygame                                              # noqa: E402
 import engine as E                                         # noqa: E402
-import scene_driver as SD                                  # noqa: E402
+import render.vk.driver as SD                                  # noqa: E402
 from core.engine_core import EngineCore                         # noqa: E402
 
 E.GLEngine._build_gpu = lambda self, m: None               # 无头：不建 VBO/VAO

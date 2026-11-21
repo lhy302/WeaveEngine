@@ -82,8 +82,8 @@ def render_gl(data):
 
 def render_vk(data):
     import wgpu
-    import scene_driver as sd
-    import vk_renderer as vr
+    import render.vk.driver as sd
+    import render.vk.renderer as vr
 
     drv = sd.SceneDriver()
     drv.load_from_data(data)

@@ -39,7 +39,7 @@ os.environ['LOOM_NO_DIALOG'] = '1'      # 弹窗在测试里被 stub，这里再
 
 import run_player
 import hostenv.backend_guard as G
-from loom_gl_version import GLVersionError
+from render.gl.version import GLVersionError
 
 _fails = []
 
@@ -328,7 +328,7 @@ def t_diag_fields():
 def t_vk_canvas_closed(tmp):
     """P2-2: 建窗后初始化失败（设备创建失败 / 无适配器）必须关闭窗口。"""
     print('=== I. VK 初始化失败关闭残留空窗 ===')
-    import vk_player
+    import render.vk.player as vk_player
 
     sentinel = {}
 
@@ -395,7 +395,7 @@ def t_vk_canvas_closed(tmp):
 def t_vk_floor_gate(tmp):
     """B（goal_01）：VK 地板闸三个缺口 —— adapter 版本 / 后端类型 / None 分支文案。"""
     print('=== K. VK 地板闸（adapter 版本 / backend_type / 文案） ===')
-    import vk_player
+    import render.vk.player as vk_player
     import wgpu
     saved_ver = G.vulkan_api_version
     # K1: loader 1.1 但 adapter 只有 1.0 -> 必须拒绝

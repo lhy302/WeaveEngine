@@ -15,7 +15,7 @@
 import moderngl
 import numpy as np
 
-from loom_shaders import _SHADOW_VERT, _SHADOW_FRAG
+from render.contract.shaders import _SHADOW_VERT, _SHADOW_FRAG
 
 
 class ShadowMixin:

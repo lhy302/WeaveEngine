@@ -179,8 +179,8 @@ class _Index:
 def api_matrix():
     """返回 (gl, vk)：各自 {公开方法名: 元组}。"""
     idx = _Index()
-    engine_py = os.path.join(LOOM, 'engine.py')
-    driver_py = os.path.join(LOOM, 'scene_driver.py')
+    engine_py = os.path.join(LOOM, 'render', 'gl', 'engine.py')
+    driver_py = os.path.join(LOOM, 'render', 'vk', 'driver.py')
     idx.load(engine_py)
     idx.load(driver_py)
     gl = {k: v for k, v in idx.members(idx.find_class('GLEngine', engine_py)).items()
@@ -232,7 +232,7 @@ def _call_groups():
                 g = 'tests'
             elif rel.startswith('Loom/') and fn in ('editor.py', 'editor_app.py', 'editor_ui.py'):
                 g = 'editor'
-            elif rel.startswith('Loom/') and fn in ('run_player.py', 'vk_player.py', 'game_player.py',
+            elif rel.startswith('Loom/') and fn in ('run_player.py', 'render/vk/player.py', 'game_player.py',
                                                    'build_game.py', 'build_entry.py', 'runtime.py'):
                 g = 'player_pack'
             elif rel.startswith('Loom/'):

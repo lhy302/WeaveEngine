@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-"""engine.py 安全加固断言 (2026-08-20 安全审查第一轮):
+"""render/gl/engine.py 安全加固断言 (2026-08-20 安全审查第一轮):
 空场景按键路径不崩 (ZeroDivisionError/IndexError 修复) + 索引越界 clamp."""
 
 # 2026-11-06 P-02 修复: Windows 控制台默认 GBK, 末尾 print 的 ✅/❌/≤ 等字符会抛

@@ -21,15 +21,15 @@ import pygame
 import moderngl
 
 # 2026-11-10 阶段 2A: 与播放器共用同一份 FramePlan 描述（S0-S2）
-from loom_pass import frame_plan
-from loom_post import post_enabled   # 2B2: LOOM_POST=0 走旧路径
+from render.contract.frame_plan import frame_plan
+from render.contract.post import post_enabled   # 2B2: LOOM_POST=0 走旧路径
 
 from engine import (GLEngine, Point3D, LightState, CameraState, wrap_deg,
                     gc_play_enter, gc_play_exit)
 from core.engine_core import EngineCore     # S2 阶段2: _EditorCore 的内核底座（后端无关）
-from loom_render import RenderMixin  # S4: VkEditorApp 绑定 GL 同一份 _apply_main_pass_camera（同源唯一实现）
-from loom_lighting import LightingMixin  # S4: VkEditorApp 绑定 GL 同一份 _aabbs_batched（S2 留痕的纯 numpy 归位未做）
-from scene_driver import SceneDriver # S4: VK 编辑器装配基类（VkEditorApp(_EditorCore, SceneDriver)）
+from render.gl.render import RenderMixin  # S4: VkEditorApp 绑定 GL 同一份 _apply_main_pass_camera（同源唯一实现）
+from render.gl.lighting import LightingMixin  # S4: VkEditorApp 绑定 GL 同一份 _aabbs_batched（S2 留痕的纯 numpy 归位未做）
+from render.vk.driver import SceneDriver # S4: VK 编辑器装配基类（VkEditorApp(_EditorCore, SceneDriver)）
 from mathlib.matlib import (mat4_perspective, mat4_ortho, mat4_rotation, mat4_scale,
                     mat4_translation, mat4_view_yaw_pitch, decompose_euler)
 from mathlib.mesh import create_cube, create_plane, create_sphere, spec_to_mesh
@@ -3096,7 +3096,7 @@ class VkEditorApp(_EditorCore, SceneDriver):
         #    线批设备/格式（overlay_scope / draw_lines / draw_screen_rect 用）；
         #    _vk_renderer_obj（VkFrameExecutor 转 draw_frame）；_vk_ctx 由 VkViewport
         #    在拿到 rendercanvas 上下文后注入（帧提交用）。
-        from vk_renderer import VkRenderer   # 惰性导入：GL 编辑器进程不拉 VK 渲染器
+        from render.vk.renderer import VkRenderer   # 惰性导入：GL 编辑器进程不拉 VK 渲染器
         self._vk_line_device = device
         self._vk_line_format = present_format
         self._vk_renderer_obj = VkRenderer(device, present_format)

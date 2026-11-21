@@ -34,7 +34,7 @@ os.makedirs(os.environ['LOOM_GAME_DIR'], exist_ok=True)
 import numpy as np                                       # noqa: E402
 
 import sceneio as S                                      # noqa: E402
-import scene_driver as SD                                # noqa: E402
+import render.vk.driver as SD                                # noqa: E402
 import loom_ui as L                                      # noqa: E402
 
 ok = True

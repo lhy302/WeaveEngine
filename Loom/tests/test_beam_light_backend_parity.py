@@ -44,9 +44,9 @@ def _enforce_fail_exit_code():
 """test_beam_light_backend_parity.py — B7-21 门：beam 平行光关阴影后两端必须都照亮。
 
 缺陷（2026-11-17 实测）：
-  GL 侧算平行光 VP 的条件是 {BT}light.shadow or light.mode == "beam"{BT}（loom_lighting.py:163），
+  GL 侧算平行光 VP 的条件是 {BT}light.shadow or light.mode == "beam"{BT}（render/gl/lighting.py:163），
   因为 beam 的光束截面遮罩走 {BT}u.lights[i].ortho{BT}（shaders/main.frag:198-210）。
-  VK 侧条件只有 {BT}l.shadow{BT}（vk_renderer.py:1582 修前）→ beam 灯一旦关阴影就没有 VP，
+  VK 侧条件只有 {BT}l.shadow{BT}（render/vk/renderer.py:1582 修前）→ beam 灯一旦关阴影就没有 VP，
   ortho 全零 → {BT}SHADOW_UV(lp){BT} 除 w 得 NaN → {BT}in_shape=0{BT} → {BT}sh=0{BT} → 该灯 radiance 归零，
   **整盏灯失效**（不是整帧黑，而是这盏灯一点光都不出）。
 
@@ -64,7 +64,7 @@ def _enforce_fail_exit_code():
   ④ 数据面 + 反向保护：
        beam 灯（无论 shadow）→ VK {BT}_light_vps{BT} 必须有它（遮罩要用 ortho）；
        **full 灯 + shadow=False → VK {BT}_light_vps{BT} 必须没有它** —— 钉住 M3-N5 优化
-       （无条件算 VP 会让 main_pass 0.65 → 18.16 ms/帧，见 loom_lighting.py:157-162）。
+       （无条件算 VP 会让 main_pass 0.65 → 18.16 ms/帧，见 render/gl/lighting.py:157-162）。
 
 渲染复用 {BT}test_ab_gl_vk{BT} 的 {BT}render_gl{BT} / {BT}render_vk{BT}（真实 GL 离屏 + 真实 Vulkan 离屏），
 与既有 A/B 门同一条路径、同一套口径。
@@ -144,8 +144,8 @@ check('beam + rect + shadow=False：两端 MAE <= %.0e' % MAE_ABS, m <= MAE_ABS,
 
 print()
 print("=== 三. 数据面 + 反向保护（VP 只在需要时算） ===")
-import scene_driver as sd                                  # noqa: E402
-import vk_renderer as vr                                   # noqa: E402
+import render.vk.driver as sd                                  # noqa: E402
+import render.vk.renderer as vr                                   # noqa: E402
 
 device = AB._vk_device()
 

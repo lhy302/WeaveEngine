@@ -20,15 +20,15 @@ import wgpu
 from mathlib.matlib import mat4_view_yaw_pitch, mat4_perspective  # noqa: F401 (探针兼容)
 
 # 中间层 (scene_driver) 为单一数据来源
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 import sceneio
-from scene_driver import SceneDriver, build_models, build_lights  # noqa: F401
+from render.vk.driver import SceneDriver, build_models, build_lights  # noqa: F401
 
 from rendercanvas.glfw import GlfwRenderCanvas
 import rendercanvas.glfw
 
-from vk_renderer import VkRenderer
-from vk_ui import UIInputBridge      # 2026-11-06 R3: 窗口事件 -> driver.ui
+from render.vk.renderer import VkRenderer
+from render.vk.ui import UIInputBridge      # 2026-11-06 R3: 窗口事件 -> driver.ui
 # 2026-11-18 P3-1: 滚轮判据的唯一实现在共享前置 loom_ui_input（GL/VK 同源）。
 from loom_ui_input import wheel_taken_by_scrollview as _wheel_taken_by_scrollview
 # 2026-11-18 Q-B7-41-1: 「窗口尺寸 -> UI 画布尺寸」的唯一实现在共享前置 loom_ui_resize
@@ -497,7 +497,7 @@ def run_vk(scene=None, frames_n=None, keep=False, mini=False, no_shadow=False,
             return
         try:
             import glfw
-            from loom_glfw_window import _GLFW_TO_PG
+            from render.gl.window import _GLFW_TO_PG
             win = _resolve_glfw_window(glfw)
             if win is None:
                 _input_retry.failed(_handle_error[0] or "GLFW 窗口句柄不可用")
@@ -701,7 +701,7 @@ def run_vk(scene=None, frames_n=None, keep=False, mini=False, no_shadow=False,
             _hud = None
             if os.environ.get("LOOM_VK_HUD") == "1":
                 try:
-                    import vk_ui as _vkui
+                    import render.vk.ui as _vkui
                     _hud = _vkui.hud_lines_from_driver(driver)
                 except Exception:
                     _hud = None
@@ -866,7 +866,7 @@ def _mini_data():
 def main():
     args = sys.argv[1:]
     scene = args[0] if args and not args[0].startswith('--') else \
-        os.path.join(os.path.dirname(os.path.abspath(__file__)),
+        os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
                      '保存', '压测50球.json')
     frames_n = None
     stage = 'p4'

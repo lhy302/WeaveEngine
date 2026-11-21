@@ -69,13 +69,13 @@ def _enforce_fail_exit_code():
     经场景文件 scripts:[{"id":...}] → GameObject.add_script 挂载，不手搓假对象。
 
 留痕（**修前红**：本次只交门 + 红证据；业务代码由 B7-16 / B7-17 修复方改，本门不做修复）：
-  · R1 ③-v8 VK 相机 yaw/pitch 绝对值：VK 装配路径不调 sceneio.migrate()（scene_driver.py
+  · R1 ③-v8 VK 相机 yaw/pitch 绝对值：VK 装配路径不调 sceneio.migrate()（render/vk/driver.py
     只调 check_engine_version）→ v8 相机 yaw 停在 1.5707963（弧度当度用）。修点 = B7-17
     （"VK 播放器/打包游戏不做场景迁移"）。
   · R2 ③-migrate VK 装配路径经过 sceneio.migrate：migrate() 全仓只有 1 处调用点
     （现 scene/io.py 的 scene_from_dict 内；B2 前 sceneio.py），VK 装配路径没经过它 → 迁移不是单一入口。修点 = B7-16。
   · R3 ③-gate 闸门单一入口：check_engine_version( 有 3 处重复调用
-    （agent_commands.py / editor.py / scene_driver.py），没有单一入口。修点 = B7-16
+    （agent_commands.py / editor.py / render/vk/driver.py），没有单一入口。修点 = B7-16
     （契约模块 scene/contract.py）。**修复方若另起了模块名，改本断言的白名单。**
     **2026-11-18 独立复查 P0-1（本条曾是假门）**：函数改名为 gate 之后，断言仍只认旧名字
     `check_engine_version(`，于是"在 editor.py 里用**新名字** `gate({})` 插一处重复闸门"
@@ -98,7 +98,7 @@ def _enforce_fail_exit_code():
     人类判据「清空后 lights 全空」因此不是 clear_scene 单独满足的，本门用 ④-6（切到无光源
     场景后 models/materials/lights 三者全空）覆盖**用户可见路径**。这条**不是两端差异**，
     如需改 clear_scene 契约请人类裁决，不属 B7-16/B7-17 范围。
-  · R7 ⑥-2 GL 相对路径：GL 的 _load_scene_data 故意忽略 base_dir（loom_model_gpu.py 注释），
+  · R7 ⑥-2 GL 相对路径：GL 的 _load_scene_data 故意忽略 base_dir（render/gl/model_gpu.py 注释），
     从别处 CWD 启动时 GL 按 CWD 找图失败、VK 按场景目录成功。修点：GL 装配侧传 base_dir。
     **2026-11-18 独立复查 P1-5（已补门）**：R7 改的是 base_dir，而它同时喂
     `sceneio._CUR_BASE_DIR` 与 `asset_context(base_dir)` —— 影响的是 GL **全部**相对资源
@@ -128,7 +128,7 @@ import sceneio as S                                          # noqa: E402
 import scripts as SCRIPTS_MOD                                # noqa: E402
 import moderngl                                              # noqa: E402
 import runtime                                               # noqa: E402
-import scene_driver                                          # noqa: E402
+import render.vk.driver as scene_driver                                          # noqa: E402
 
 _fails = []
 KNOWN_DIFFS = []          # 已知差异登记表：必须为空

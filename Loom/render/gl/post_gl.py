@@ -12,7 +12,7 @@
 """
 import moderngl
 
-from loom_post import HDR_TARGET, HALF_TARGET, QUARTER_TARGET, params
+from render.contract.post import HDR_TARGET, HALF_TARGET, QUARTER_TARGET, params
 
 
 
@@ -20,8 +20,8 @@ from loom_post import HDR_TARGET, HALF_TARGET, QUARTER_TARGET, params
 def shared_src(name):
     """T3：读取 `Loom/shaders/<name>` 单源，展开兼容层 + 绑定号单点表（GL 用 #version 430）。"""
     import os
-    import loom_shader_bindings
-    base = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'shaders')
+    import render.contract.shader_bindings as loom_shader_bindings
+    base = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'shaders')
     with open(os.path.join(base, name), encoding='utf-8') as fh:
         src = fh.read()
     with open(os.path.join(base, 'loom_shader_compat.glsl'), encoding='utf-8') as fh:

@@ -1,17 +1,17 @@
 # -*- coding: utf-8 -*-
-r"""ab_gl_vk_ui.py — GL / Vulkan 的 Canvas UI + HUD 离屏 A/B 对比 (2026-11-06)
+r"""ab_gl_render/vk/ui.py — GL / Vulkan 的 Canvas UI + HUD 离屏 A/B 对比 (2026-11-06)
 
 与 ab_gl_vk.py 同一口径 (同场景 JSON / 同相机 / 同分辨率 / 逐像素 MAE/MAX/NCC),
 差别只在于**渲染末尾额外叠加 HUD 文本 + UIManager 元素树**:
 
   GL 侧: EditorApp.render() 之后手工执行与 loom_render.render() 末尾同序的两步:
            ed._draw_hud()        (loom_hud.draw_text_quad)
-           ed.ui.draw_all(ed)    (loom_render.py:796-798 的原地次序)
+           ed.ui.draw_all(ed)    (render/gl/render.py:796-798 的原地次序)
   Vk 侧: VkRenderer.draw_frame(..., ui=driver.ui, hud_lines=...)
          driver.ui 由 sceneio._apply_ui 从场景 'ui' 段恢复 (与 GL 同源, 同一棵树)
 
 用法:
-    python tests\_tmp\ab_gl_vk_ui.py [scene.json] [out_prefix] [--no-ui]
+    python tests\_tmp\ab_gl_render/vk/ui.py [scene.json] [out_prefix] [--no-ui]
     --no-ui : Vulkan 侧不画 HUD/UI (= 改造前行为), 用于产出"改造前"基线数值
 
 输出: <prefix>_gl.png / _vk.png / _side.png / _diff.png + 控制台指标
@@ -111,7 +111,7 @@ def render_gl(data, with_ui=True, expand=False, world=False):
             # 赋值后才有), 而 loom_render._draw_world_canvases 第一行就读它 ->
             # 真实 GL 路径会抛 AttributeError 被吞, 世界 Canvas 不画. 为了拿到
             # 设计意图上的 GL 参考图, 这里在 A/B 工具里注入一个 depth_mask 初值
-            # (不修改 loom_render.py; 该差异已写入残差报告).
+            # (不修改 render/gl/render.py; 该差异已写入残差报告).
             try:
                 _ = ed.ctx.depth_mask
             except AttributeError:
@@ -147,8 +147,8 @@ def _camera_basis(drv, cam_pos):
 def render_vk(data, hud_lines=None, with_ui=True, expand=False):
     """Vk 侧: 同一场景 + 同一 UIManager 树 (从场景 'ui' 段恢复) 叠加渲染."""
     import wgpu
-    import scene_driver as sd
-    import vk_renderer as vr
+    import render.vk.driver as sd
+    import render.vk.renderer as vr
 
     drv = sd.SceneDriver()
     drv.load_from_data(data)                 # 内部已 _apply_ui -> drv.ui

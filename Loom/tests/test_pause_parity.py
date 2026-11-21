@@ -65,7 +65,7 @@
 
 环境前提（只建输入前提，不改任何断言/语义）：
   · LOOM_LOGIC_SYNC=1 —— GL 的异步逻辑线程只在 Qt 宿主（_external_ctx=True）启用
-    （engine.py:1443 注释）。本门是离屏 ctx（_external_ctx=True），按该注释走同步路径。
+    （render/gl/engine.py:1443 注释）。本门是离屏 ctx（_external_ctx=True），按该注释走同步路径。
   · 两端同一份设置改动：clk.set_fps(logic_fps=60.0)（设置面板改 TPS 的生产入口，
     ui/loom_gui.py:3799 / agent_commands.py:3649 同款，运行中即时生效）→ fixed_dt=1/60，
     于是「1 渲染帧（dt=1/60）= 恰好 1 个逻辑帧」可**手算**，期望值不依赖任何一端。
@@ -163,8 +163,8 @@ import engine as E                                                # noqa: E402
 import scene.contract as _scene_contract                                        # noqa: E402  场景版本号单点（不写死）
 import moderngl                                                   # noqa: E402
 import runtime                                                    # noqa: E402  GL 打包播放器（生产入口）
-import scene_driver as SD                                         # noqa: E402  VK 播放器（生产入口）
-import vk_renderer as VR                                          # noqa: E402  VK 渲染器（生产绘制）
+import render.vk.driver as SD                                         # noqa: E402  VK 播放器（生产入口）
+import render.vk.renderer as VR                                          # noqa: E402  VK 渲染器（生产绘制）
 import wgpu                                                       # noqa: E402
 from core.primitives import Point3D                                    # noqa: E402  脚本写位姿的唯一数据形态
 from scripts import Script, register                              # noqa: E402  脚本生产注册路径
@@ -283,20 +283,20 @@ check('结构：def _logic_paused_state 只有 engine_core.py 一份（两端同
 # set_logic_paused：内核版 + VK 的显式覆盖（VK 有 logic_paused 字段，覆盖是登记在案的）
 _pause_defs = sorted(p for (p, _l) in _grep_prod('def set_logic_paused'))
 check('结构：def set_logic_paused 只在内核 + VK 驱动两处（内核版为 GL 基准，VK 覆盖登记在案）',
-      _pause_defs == ['core/engine_core.py', 'scene_driver.py'], _pause_defs)
+      _pause_defs == ['core/engine_core.py', 'render/vk/driver.py'], _pause_defs)
 # 2) 一个逻辑帧的唯一组织点：两端各一份（段序一致由 test_vk_logic_frame_parity 覆盖）
 _lf_defs = sorted(p for (p, _l) in _grep_prod('def _logic_frame'))
-check('结构：def _logic_frame 恰好两端各一份（engine.py / scene_driver.py，没有第三份拷贝）',
-      _lf_defs == ['engine.py', 'scene_driver.py'], _lf_defs)
+check('结构：def _logic_frame 恰好两端各一份（render/gl/engine.py / render/vk/driver.py，没有第三份拷贝）',
+      _lf_defs == ['render/gl/engine.py', 'render/vk/driver.py'], _lf_defs)
 # 3) 三条暂停分支都消费 _step_requested 并走 clk.step_once()（GL 宿主/GL 渲染帧/VK）
-for _f, _why in (('engine.py', 'GL 宿主同步路径的暂停分支（advance_logic）'),
-                 ('loom_render.py', 'GL 玩家主循环的暂停分支（render 自驱时钟）'),
-                 ('scene_driver.py', 'VK 渲染帧的暂停分支（advance_logic）')):
+for _f, _why in (('render/gl/engine.py', 'GL 宿主同步路径的暂停分支（advance_logic）'),
+                 ('render/gl/render.py', 'GL 玩家主循环的暂停分支（render 自驱时钟）'),
+                 ('render/vk/driver.py', 'VK 渲染帧的暂停分支（advance_logic）')):
     src_has(_f, 'clk.step_once()', True, _why + '：F10 单步走时钟唯一实现')
     src_has(_f, '_step_requested', True, _why + '：F10 请求标志消费点')
     src_has(_f, 'self._logic_wall_last = None', True,
             _why + '：暂停/恢复边界重锚墙钟（不补暂停期欠账）')
-src_has('loom_render.py', 'self._logic_steps = 0', True,
+src_has('render/gl/render.py', 'self._logic_steps = 0', True,
         'GL 暂停且无步进请求：本渲染帧零逻辑（世界冻结、渲染照跑）')
 src_has('core/engine_core.py', 'self._step_requested = True', True,
         'F10 请求标志的唯一置位点（仅暂停态生效）')
@@ -575,17 +575,17 @@ class Pair:
     def vk_frame(self):
         """VK 生产渲染帧：vk_player.draw:643-725 的调用次序逐项镜像。"""
         d = self.vk
-        d.advance_logic(FRAME_DT)                        # vk_player.py:674
+        d.advance_logic(FRAME_DT)                        # render/vk/player.py:674
         if getattr(d, '_interp', None) is not None:
-            d._interp.alpha = d._clock.alpha             # vk_player.py:679-680
-        vp, cam_pos = d.render_pose(aspect=W / H)        # vk_player.py:681
+            d._interp.alpha = d._clock.alpha             # render/vk/player.py:679-680
+        vp, cam_pos = d.render_pose(aspect=W / H)        # render/vk/player.py:681
         _yaw, _pitch, _roll = ((d.yaw, d.pitch, 0.0) if getattr(d, 'orbit_mode', True)
                                else (d.camera_yaw, d.camera_pitch, d.camera_roll))
         import mathlib.matlib as matlib
         V = matlib.mat4_view_yaw_pitch(np, tuple(cam_pos), _yaw, _pitch, _roll)
         cam_basis = ((float(V[0, 0]), float(V[0, 1]), float(V[0, 2])),
                      (float(V[1, 0]), float(V[1, 1]), float(V[1, 2])))
-        _vk_renderer().draw_frame(                         # vk_player.py:720
+        _vk_renderer().draw_frame(                         # render/vk/player.py:720
             _VkCtx(), d.models, d.lights, vp, cam_pos, engine=d,
             interp=getattr(d, '_interp', None), sky=getattr(d, 'skybox', None),
             ui=getattr(d, 'ui', None), hud_lines=None, cam_basis=cam_basis)

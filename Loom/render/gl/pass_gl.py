@@ -15,7 +15,7 @@ GL 的能力边界（别假装做到了）：
 """
 import moderngl
 
-from loom_pass import SCREEN_TARGET
+from render.contract.frame_plan import SCREEN_TARGET
 
 # moderngl 5.13 的 depth_func setter 只认符号（'<' '<= ' '>' '>='）；传 'less'/'always' 这类
 # 名字会在 C++ 层「返回错误但没设 Python 异常」-> SystemError；**编译版（Nuitka）下这一步
@@ -59,9 +59,9 @@ class GLTargetPool:
             return None
         if decl.name == SCREEN_TARGET:
             return self.engine._screen_fb()
-        from loom_post import HDR_TARGET, HALF_TARGET, QUARTER_TARGET
+        from render.contract.post import HDR_TARGET, HALF_TARGET, QUARTER_TARGET
         if decl.name in (HDR_TARGET, HALF_TARGET, QUARTER_TARGET):
-            import loom_post_gl
+            import render.gl.post_gl as loom_post_gl
             return loom_post_gl.fbo_for(self.engine, decl.name)
         raise KeyError('GL 后端暂不支持的目标: %s（S0-S3 只做 %s、HDR/bloom 与 provider 自有目标）'
                        % (decl.name, SCREEN_TARGET))
@@ -92,7 +92,7 @@ class GLFrameExecutor:
         # 2a 补：后处理 bloom 源取决于 plan 里有没有 down pass（档 2 读 0.5、档 3 读 0.25），
         # 否则 LOOM_POST_STAGE=2 的 bright 输出无人消费 -> 与档 1 逐位相同（死档）。
         try:
-            from loom_post import HALF_TARGET as _H, QUARTER_TARGET as _Q
+            from render.contract.post import HALF_TARGET as _H, QUARTER_TARGET as _Q
             self.engine._post_bloom_src = (_Q if any(p.id == 'bloom.down' for p in plan.passes)
                                            else _H)
             # TargetDecl.scale -> 实际像素尺寸（GL 也读描述，不再写死 0.5/0.25）
@@ -229,7 +229,7 @@ def _draw_hud(engine, cmd):
 
 def _draw_post(engine, src):
     # 2B2: 后处理链的四个全屏 pass（目标已由执行器绑定）
-    import loom_post_gl
+    import render.gl.post_gl as loom_post_gl
     loom_post_gl.draw(engine, src)
 
 

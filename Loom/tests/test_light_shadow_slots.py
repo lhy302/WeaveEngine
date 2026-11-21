@@ -44,7 +44,7 @@ def _enforce_fail_exit_code():
 
 """test_light_shadow_slots.py — 阴影贴图槽位分配回归 (2026-11-07 P0/P1; 2026-11-13 T3c-1 迁移)
 
-缺陷 (docs/audit/scan_03_gl_render.md 第 1/2 项, loom_lighting.py 旧 171-180):
+缺陷 (docs/audit/scan_03_gl_render.md 第 1/2 项, render/gl/lighting.py 旧 171-180):
   · 阴影采样器数组 16 槽, 着色器对 kind>0.5 (点光/聚光灯) 统一走
     point_shadow(slot) 采样 slot..slot+5 共 6 张面图;
   · 旧代码 need = 6 if kind=='point' else 1 —— 聚光灯只登记 1 槽却绑 6 张面图:
@@ -52,14 +52,14 @@ def _enforce_fail_exit_code():
     ② 累加器越过 15 时 sampler_units[16] 直接 IndexError (2 投影点光 + 1 投影
        聚光灯 + 1 平行光即触发)。
 
-T3c-1 (4a66faa) 起逐灯参数整体搬进 std140 Scene UBO (loom_scene_ubo.py 单表生成),
+T3c-1 (4a66faa) 起逐灯参数整体搬进 std140 Scene UBO (render/contract/scene_ubo.py 单表生成),
 u_shadow_slot 这个逐灯 uniform 已不存在。槽位/面图单元号的新真实通路:
-  · 槽位           = Scene UBO lights[i].params.w  (loom_scene_ubo.py:29, 157-158)
-                     <- _upload_lights 的 b['slots']  (loom_lighting.py:111, 181)
-  · shadow 开关    = Scene UBO lights[i].kind.w    (loom_scene_ubo.py:24, 149-150)
+  · 槽位           = Scene UBO lights[i].params.w  (render/contract/scene_ubo.py:29, 157-158)
+                     <- _upload_lights 的 b['slots']  (render/gl/lighting.py:111, 181)
+  · shadow 开关    = Scene UBO lights[i].kind.w    (render/contract/scene_ubo.py:24, 149-150)
   · 面图单元号     = 独立 sampler 数组 u_shadow_maps[16] 的 value
-                     (不能进 UBO; loom_lighting.py:214-217), 与
-                     sampler_units[unit-1+k] = unit+k (loom_lighting.py:185) 一致。
+                     (不能进 UBO; render/gl/lighting.py:214-217), 与
+                     sampler_units[unit-1+k] = unit+k (render/gl/lighting.py:185) 一致。
   · 着色器消费点   = main.frag:212-226 读 params.w, compat:87-88 用
                      u_shadow_maps[slot+face] 采样。
 
@@ -83,8 +83,8 @@ sys.path.insert(0, ROOT)
 
 import numpy as np                              # noqa: E402
 
-import loom_scene_ubo as SU                     # noqa: E402
-from loom_lighting import LightingMixin         # noqa: E402
+import render.contract.scene_ubo as SU                     # noqa: E402
+from render.gl.lighting import LightingMixin         # noqa: E402
 from scene.entities import LightState      # noqa: E402
 from core.primitives import Point3D                  # noqa: E402
 
@@ -165,10 +165,10 @@ class SlotEngine(LightingMixin):
     """最小宿主: 喂 _upload_lights 在新通路 (T3c-1) 上真实需要的属性 (无 GL / 无窗口)。
 
     camera/_vp:
-        loom_lighting.py:197-206 的 pack_arrays(_vp, _cam, ...) 需要它们填 Scene UBO
+        render/gl/lighting.py:197-206 的 pack_arrays(_vp, _cam, ...) 需要它们填 Scene UBO
         的 mvp/cam 字段 —— 这是新通路本身的一部分, 不是为了掩盖缺陷的假数据。
     ctx/_scene_ubo:
-        loom_lighting.py:207-208 惰性创建 `self.ctx.buffer(reserve=SU.BYTES)`;
+        render/gl/lighting.py:207-208 惰性创建 `self.ctx.buffer(reserve=SU.BYTES)`;
         假 buffer 记录真实 write 的字节, 测试再从这份字节读回槽位。
     """
 

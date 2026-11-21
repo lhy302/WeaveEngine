@@ -268,7 +268,7 @@ def _vk_host_cls():
     （模块顶层不 import 它）。"""
     global _VK_HOST_CLS
     if _VK_HOST_CLS is None:
-        import loom_pass_vk as lpv
+        import render.vk.pass_vk as lpv
 
         class _VkLineHost(lpv.VkEditorRenderMixin):
             """最小 VK 叠加层宿主桩：只提供 mixin 需要的东西
@@ -297,7 +297,7 @@ def _vk_host_cls():
 def _vk_render_lines(device, verts, cols, vp, depth_on=False, blend=False,
                      depth_clear=1.0, width=2.0):
     import wgpu
-    import loom_pass_vk as lpv
+    import render.vk.pass_vk as lpv
     tex = device.create_texture(
         size=(W, H, 1), format="rgba8unorm",
         usage=wgpu.TextureUsage.RENDER_ATTACHMENT | wgpu.TextureUsage.COPY_SRC)
@@ -429,13 +429,13 @@ def section_a():
     print("A. 结构/同源段")
     print("=" * 60)
     try:
-        import loom_pass_vk as lpv
+        import render.vk.pass_vk as lpv
     except Exception as e:
         check('A0 loom_pass_vk 可导入（修前红：不存在）', False, repr(e))
         return
     check("A1 loom_pass_vk 导出 VkLineBatch / VkFrameExecutor / VkEditorRenderMixin",
           all(hasattr(lpv, n) for n in ("VkLineBatch", "VkFrameExecutor", "VkEditorRenderMixin")))
-    from loom_render import RenderMixin
+    from render.gl.render import RenderMixin
     import engine as E
     sg = inspect.signature(RenderMixin.overlay_scope)
     sv = inspect.signature(lpv.VkEditorRenderMixin.overlay_scope)
@@ -443,7 +443,7 @@ def section_a():
     sg2 = inspect.signature(E.GLEngine.draw_lines)
     sv2 = inspect.signature(lpv.VkEditorRenderMixin.draw_lines)
     check("A3 draw_lines 与 GL engine.draw_lines 签名逐参一致", _sig_eq(sg2, sv2), (sg2, sv2))
-    import scene_driver as SD
+    import render.vk.driver as SD
     check("A4 SceneDriver 装配 VK 叠加层（公开 overlay_scope/draw_lines 两端同名）",
           all(hasattr(SD.SceneDriver, n) for n in ("overlay_scope", "draw_lines")))
     src_ed = _read("editor.py")
@@ -465,14 +465,14 @@ def section_a7(device):
     print("A7. VkFrameExecutor 消费同一份 frame_plan")
     print("=" * 60)
     try:
-        import loom_pass_vk as lpv
+        import render.vk.pass_vk as lpv
     except Exception as e:
         check('A7 前置 loom_pass_vk 可导入', False, repr(e))
         return
     import wgpu
-    import loom_pass
-    import scene_driver as sd
-    import vk_renderer as vr
+    import render.contract.frame_plan as loom_pass
+    import render.vk.driver as sd
+    import render.vk.renderer as vr
     fmt = "rgba8unorm"
     drv = sd.SceneDriver()
     drv.load_from_data(_scene_dict())
@@ -492,7 +492,7 @@ def section_a7(device):
     r = vr.VkRenderer(device, fmt)
     ex = lpv.VkFrameExecutor(r, drv)
     # 与编辑器同一条构造式：flags 取自引擎自身状态
-    from loom_post import post_enabled
+    from render.contract.post import post_enabled
     plan = loom_pass.frame_plan(include_shadow=bool(drv.lights),
                                 include_sky=(drv.effective_skybox() is not None),
                                 include_world_canvas=False,
@@ -524,7 +524,7 @@ def section_b():
     print("B. 像素门：同一组顶点/颜色数组，GL 离屏 vs VK 离屏（MAE，两端同宽）")
     print("=" * 60)
     try:
-        import loom_pass_vk  # noqa: F401
+        import render.vk.pass_vk as loom_pass_vk  # noqa: F401
     except Exception as e:
         check('B 前置 loom_pass_vk 可导入（修前红：不存在）', False, repr(e))
         return
@@ -554,7 +554,7 @@ def section_b5():
     print("B5. 反例自检：VK 整体平移 16px 必须把门打红")
     print("=" * 60)
     try:
-        import loom_pass_vk  # noqa: F401
+        import render.vk.pass_vk as loom_pass_vk  # noqa: F401
     except Exception as e:
         check('B5 前置 loom_pass_vk 可导入', False, repr(e))
         return
@@ -587,7 +587,7 @@ def section_b6():
     print("B6. overlay_scope 端到端（VK mixin 自动 flush vs GL scope(enable_only=0)）")
     print("=" * 60)
     try:
-        import loom_pass_vk as lpv
+        import render.vk.pass_vk as lpv
     except Exception as e:
         check('B6 前置 loom_pass_vk 可导入', False, repr(e))
         return
@@ -634,7 +634,7 @@ def section_b7():
     print("B7. 深度开关语义（深度缓冲 0.5 前景遮挡 / 1.0 全通，两端一致）")
     print("=" * 60)
     try:
-        import loom_pass_vk  # noqa: F401
+        import render.vk.pass_vk as loom_pass_vk  # noqa: F401
     except Exception as e:
         check('B7 前置 loom_pass_vk 可导入', False, repr(e))
         return
@@ -683,7 +683,7 @@ def section_b8():
     print("B8. 线宽像素数两端相等（Q-B7-48-1 裁决 B：四边形模拟粗线）")
     print("=" * 60)
     try:
-        import loom_pass_vk  # noqa: F401
+        import render.vk.pass_vk as loom_pass_vk  # noqa: F401
     except Exception as e:
         check('B8 前置 loom_pass_vk 可导入', False, repr(e))
         return

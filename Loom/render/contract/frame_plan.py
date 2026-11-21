@@ -17,8 +17,8 @@
 from dataclasses import dataclass, field
 from typing import Literal, Sequence
 
-from loom_shaders import CLEAR_COLOR_RGBA
-from loom_post import HALF_TARGET, HDR_TARGET, QUARTER_TARGET, post_stage
+from render.contract.shaders import CLEAR_COLOR_RGBA
+from render.contract.post import HALF_TARGET, HDR_TARGET, QUARTER_TARGET, post_stage
 
 # 语义目标名（后端各自解析；GL = engine._screen_fb()）
 SCREEN_TARGET = 'color.ldr'

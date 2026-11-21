@@ -185,7 +185,7 @@ def main():
     import time as _t
     import threading as _th
     from core.primitives import Point3D
-    import loom_lighting
+    import render.gl.lighting as loom_lighting
 
     class _Mesh:
         def __init__(self, V):

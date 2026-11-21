@@ -44,7 +44,7 @@ def _enforce_fail_exit_code():
 """test_clock_settings_propagation.py — B7-18 门：时钟设置必须传播到两端。
 
 缺陷（2026-11-17 实测 / 工程设计失误盘点 D2）：
-  VK 侧 {BT}scene_driver.py{BT} 建时钟时用的是**无参**构造函数 —— {BT}FixedStepClock(){BT} 与
+  VK 侧 {BT}render/vk/driver.py{BT} 建时钟时用的是**无参**构造函数 —— {BT}FixedStepClock(){BT} 与
   {BT}split_enabled(){BT}，即永远取构造默认值 30Hz，**完全不读设置**的 {BT}logic_fps{BT} /
   {BT}phys_substep_dt{BT} / {BT}physics_fps{BT}。后果：
     · 设置里把 logic_fps 改成 20/45/60/120，GL 播放器生效、VK 播放器与**打包游戏**（默认后端
@@ -71,7 +71,7 @@ os.environ['LOOM_NO_PARALLEL'] = '1'   # 确定性：不建帧池/脚本线程
 import moderngl                                            # noqa: E402
 import guiloader                                           # noqa: E402
 import engine as E                                         # noqa: E402
-import scene_driver as SD                                  # noqa: E402
+import render.vk.driver as SD                                  # noqa: E402
 
 E.GLEngine._build_gpu = lambda self, m: None               # 无头：不建 VBO/VAO
 

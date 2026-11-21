@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 """
-test_frame_buffer.py — TPS 缓冲 (逻辑帧预取) 验收 (2026-09-06)
+test_render/contract/frame_buffer.py — TPS 缓冲 (逻辑帧预取) 验收 (2026-09-06)
 
 覆盖:
   T1 记账器单元: 深度封顶 / 预算红线 / 闸门 (logic_fps>=30) / 逃生门
@@ -68,7 +68,7 @@ import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from core.clock import FixedStepClock
-from frame_buffer import FrameBufferLedger, RenderFrameBuffer
+from render.contract.frame_buffer import FrameBufferLedger, RenderFrameBuffer
 
 
 class T1_LedgerUnit(unittest.TestCase):

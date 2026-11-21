@@ -30,10 +30,10 @@ from contextlib import contextmanager
 
 import numpy as np
 
-from loom_shaders import CLEAR_COLOR_RGBA   # 2026-11-09 Q2=A: 清屏底色唯一来源
+from render.contract.shaders import CLEAR_COLOR_RGBA   # 2026-11-09 Q2=A: 清屏底色唯一来源
 # 2026-11-10 阶段 2A: 帧描述层（编辑器与播放器共用同一份 FramePlan）
-from loom_pass import frame_plan
-from loom_post import post_enabled   # 2026-11-10 阶段 2B2: LOOM_POST=0 走旧路径
+from render.contract.frame_plan import frame_plan
+from render.contract.post import post_enabled   # 2026-11-10 阶段 2B2: LOOM_POST=0 走旧路径
 # 2026-10-18 A2: import pygame 已删（GLFW 窗口剥离；本文件不再引用 pygame 常量）
 import moderngl
 
@@ -169,7 +169,7 @@ class RenderMixin:
         if self._sky_prog is False:
             return
         if self._sky_prog is None:
-            from loom_shaders import _SKY_VERT, _SKY_FRAG
+            from render.contract.shaders import _SKY_VERT, _SKY_FRAG
             try:
                 self._sky_prog = self.ctx.program(
                     vertex_shader=_SKY_VERT, fragment_shader=_SKY_FRAG)
@@ -258,7 +258,7 @@ class RenderMixin:
         # 惰性建 program / vao（4 顶点动态 buffer：3f world_pos + 2f uv）
         if getattr(self, '_world_ui_prog', None) is None:
             try:
-                from loom_shaders import _WORLD_UI_VERT, _WORLD_UI_FRAG
+                from render.contract.shaders import _WORLD_UI_VERT, _WORLD_UI_FRAG
                 self._world_ui_prog = self.ctx.program(
                     vertex_shader=_WORLD_UI_VERT, fragment_shader=_WORLD_UI_FRAG)
                 self._world_ui_vbo = self.ctx.buffer(reserve=4 * 5 * 4)

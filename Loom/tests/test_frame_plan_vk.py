@@ -18,10 +18,10 @@ os.environ['LOOM_NO_SAVE_MIGRATE'] = '1'
 import numpy as np
 
 import test_ab_gl_vk as AB
-import loom_pass
-import loom_render
+import render.contract.frame_plan as loom_pass
+import render.gl.render as loom_render
 import editor
-from loom_pass import DrawCmd, DepthState
+from render.contract.frame_plan import DrawCmd, DepthState
 
 _fails = []
 
@@ -85,8 +85,8 @@ MAGNITUDE_EXCEPTIONS = {}
 def _vk_render_with_renderer(data):
     """渲染一帧并**把 renderer 交回来**（用于断言阴影槽位/绑定表等运行期状态）。"""
     import wgpu
-    import scene_driver as sd
-    import vk_renderer as vr
+    import render.vk.driver as sd
+    import render.vk.renderer as vr
     fmt = 'rgba8unorm'
     device = AB._vk_device()
     tex = device.create_texture(
@@ -168,7 +168,7 @@ def main():
           len(getattr(r2, '_dir_shadow_bufs', ())))
     # F2-02 新反例①：TargetDecl.format 必须两端真生效（改 bloom.half 格式 -> 两端都变）
     def _fmt8(plan):
-        from loom_post import HALF_TARGET as _HT
+        from render.contract.post import HALF_TARGET as _HT
         return dataclasses.replace(plan, targets=tuple(
             dataclasses.replace(t, format='rgba8unorm') if t.name == _HT else t
             for t in plan.targets))
@@ -192,7 +192,7 @@ def main():
 
     # F2-02 新反例②：同一引擎内动态改 scale，GL 后处理链必须重建（缓存键含尺寸/格式）
     import moderngl as _mg
-    import loom_post_gl as _LPG
+    import render.gl.post_gl as _LPG
 
     class _E:
         width, height = 480, 320

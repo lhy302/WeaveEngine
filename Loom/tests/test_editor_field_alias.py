@@ -19,7 +19,7 @@ except Exception:
 
 两种装配（夹具与生产同构，不依赖 GL 窗口 / VK 宿主）：
   装配 1（编辑器装配）：EngineCore() + 相机字段直写 —— _EditorCore 无 __init__、无相机
-          字段，这些字段全部由宿主 __init__ 建立（GLEngine.__init__ engine.py:240-265
+          字段，这些字段全部由宿主 __init__ 建立（GLEngine.__init__ render/gl/engine.py:240-265
           的同款直写：camera / camera_yaw / camera_pitch / camera_roll / orbit_mode）。
   装配 2（VK 播放装配）：SceneDriver()（纯数据层，与 test_camera_parity 等既有门同法）。
 
@@ -45,7 +45,7 @@ os.environ.setdefault('LOOM_NO_DIALOG', '1')
 
 from core.engine_core import EngineCore                             # noqa: E402
 from core.primitives import Point3D                                 # noqa: E402
-import scene_driver as SD                                      # noqa: E402
+import render.vk.driver as SD                                      # noqa: E402
 
 ok = True
 
@@ -60,7 +60,7 @@ def check(label, cond, detail=''):
 # ---------------- 装配 1：编辑器装配（EngineCore 底座，无别名机制） ----------------
 def build_editor_assembly():
     e = EngineCore()
-    # 与 GLEngine.__init__ (engine.py:240-265) 同款字段直写 —— 生产构造式，非假夹具
+    # 与 GLEngine.__init__ (render/gl/engine.py:240-265) 同款字段直写 —— 生产构造式，非假夹具
     e.camera = Point3D(0, 0, -5)
     e.camera_yaw = 0
     e.camera_pitch = 0

@@ -77,7 +77,7 @@ os.environ.setdefault('LOOM_NO_DIALOG', '1')
 import moderngl                                            # noqa: E402
 import numpy as np                                         # noqa: E402
 import engine as E                                         # noqa: E402
-import scene_driver as SD                                  # noqa: E402
+import render.vk.driver as SD                                  # noqa: E402
 import sceneio                                             # noqa: E402
 import loom_collision as _lc                               # noqa: E402
 from scripts import Script as _BaseScript, register as _register_script   # noqa: E402

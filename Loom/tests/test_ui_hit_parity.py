@@ -39,13 +39,13 @@
           它的 UI 鼠标派发是 runtime.PlayerApp._dispatch_ui_mouse（runtime.py:244-279），
           由 _handle_events（runtime.py:281-285）每帧调用一次。
        · 光标 → loom_glfw_window._on_cursor_pos_cb（GLFW cursor_pos_callback 投递的同一
-                函数，int 像素落点 loom_glfw_window.py:634-644）
+                函数，int 像素落点 render/gl/window.py:634-644）
        · 按键 → loom_glfw_window._on_mouse_button_cb（GLFW mouse_button_callback 同一函数）
        · 滚轮 → loom_glfw_window._on_scroll_cb（GLFW scroll_callback 同一函数）
        · 帧首 → app._handle_events()（生产泵：poll_events → pending → _dispatch_ui_mouse）
   VK : scene_driver.SceneDriver + 真 GLFW(NO_API) 窗口句柄（vk_player._register_input:525
        的真实注入点 driver._vk_glfw_window）
-       · 光标/按键/滚轮 → vk_ui.UIInputBridge（生产桥，构造式与 vk_player.py:371 逐字相同）
+       · 光标/按键/滚轮 → vk_ui.UIInputBridge（生产桥，构造式与 render/vk/player.py:371 逐字相同）
        · 帧首 → vk_player.draw:646-674 逐行镜像（begin_frame → wants_camera 门控
                 feed_mouse_rel → 滚轮专属判据 → advance_logic）—— 镜像保真由结构段源码
                 锚点断言守住
@@ -54,7 +54,7 @@
        （engine_core.py:185-196 / 227-244）—— 键与文本的 UI 派发**唯一写者**就在内核里。
 
 夹具保真（§5 反模式 8 的牙）：两端都用**生产 UI 管理器** loom_ui.UIManager（GL 由
-GLEngine.__init__ engine.py:401-404 建、VK 由 SceneDriver.__init__ scene_driver.py:629-632
+GLEngine.__init__ render/gl/engine.py:401-404 建、VK 由 SceneDriver.__init__ render/vk/driver.py:629-632
 建），**不是**测试里新搭的假 UI；两端 UI 树由同一个 _build_ui() 用**同一批脚本级 API 调用**
 搭出来（同一棵树 = 同一串用户脚本）；桥必须是生产类 vk_ui.UIInputBridge 且按生产构造式
 包 driver.ui（见 〇 段的「桥 ui is driver.ui」断言）。
@@ -68,8 +68,8 @@ GLEngine.__init__ engine.py:401-404 建、VK 由 SceneDriver.__init__ scene_driv
     的同时还会缩放/切换，VK 不会（同一份脚本两端表现不同）。
     缺陷归属（只报告不修）：GL 侧滚轮**没有**按「滚轮是否被 UI 消费」门控 ——
       · runtime.py:244-279 _dispatch_ui_mouse 只把 wheel 交给 dispatch_mouse，不回收
-      · loom_glfw_window.py:441/475-477 _handle_events 无条件写 self.mouse_wheel
-    参照实现（正确的一侧）：vk_player.py:656-666 + vk_ui.UIInputBridge.begin_frame
+      · render/gl/window.py:441/475-477 _handle_events 无条件写 self.mouse_wheel
+    参照实现（正确的一侧）：render/vk/player.py:656-666 + render/vk/ui.UIInputBridge.begin_frame
       （last_wheel_consumed / _wheel_taken_by_scrollview，2026-11-07 P-09 修复）。
     → 本门按「修前红」提交（照 P1/P2 先例）；GL 侧未改一行。
 
@@ -93,7 +93,7 @@ tests/ 与 __pycache__/_tmp），并同时覆盖**当前名与历史名** ——
     -> **Q-B7-41-2 已修**（裁决「以 GL 为准」）：vk_ui.UIInputBridge 的 ui_active 改成
     **只看本帧** dispatch_mouse 的返回值（= GL 的 ui_consumed），跨帧的
     「按下未松开/拖动中/pointer-down 未 up」三个判据已删除（拖动滑条仍抢相机，因为
-    dispatch_mouse 的拖动分支每帧返回 consumed=True）；vk_ui.py 里那段「与 GL 的
+    dispatch_mouse 的拖动分支每帧返回 consumed=True）；render/vk/ui.py 里那段「与 GL 的
     ui_consumed 不同」的注释已同步删改为事实（反模式 10）。门 = ⑧ 组。
 
 已知残差（本门**不锁**、只报告 —— 属另一面，需另立单）：GL 的 engine.mouse_rel 在
@@ -108,7 +108,7 @@ Q-B7-43-1 修后（2026-11-18，**只改本门夹具 + 注释**，业务代码�
     **物理光标的落地是异步的**。修前 gl_frame 只「set_cursor_pos + 两次 poll_events」
     就当光标已到位，于是：
       (a) 生产 _on_mouse_button_cb 自己再读一次 glfw.get_cursor_pos
-          （loom_glfw_window.py:657-661）时，回读到的是**上一个**落点 → 按下帧的
+          （render/gl/window.py:657-661）时，回读到的是**上一个**落点 → 按下帧的
           e.mouse_pos 被写成上一帧的位置 → 命中全落 root（= 本门假红签名）；
       (b) 上一次 set_cursor_pos 产生的 WM_MOUSEMOVE 还排在消息队列里，晚一拍才被
           poll_events 派发，把 e.mouse_pos 覆盖回旧值。
@@ -177,10 +177,10 @@ import loom_ui                                                   # noqa: E402  �
 import loom_ui_resize                                            # noqa: E402  ⑦ 的共享前置（VK 侧唯一实现）
 import scene.contract as _scene_contract                                       # noqa: E402  场景版本号单点（不写死）
 import runtime                                                   # noqa: E402  GL 打包播放器（生产入口）
-import scene_driver as SD                                        # noqa: E402
-import vk_player                                                 # noqa: E402
-import vk_ui                                                     # noqa: E402  夹具用生产那个桥类
-from loom_glfw_window import (_on_cursor_pos_cb,                  # noqa: E402  GL 生产光标回调
+import render.vk.driver as SD                                        # noqa: E402
+import render.vk.player as vk_player                                                 # noqa: E402
+import render.vk.ui as vk_ui                                                     # noqa: E402  夹具用生产那个桥类
+from render.gl.window import (_on_cursor_pos_cb,                  # noqa: E402  GL 生产光标回调
                               _on_mouse_button_cb,               # noqa: E402  GL 生产鼠标键回调
                               _on_scroll_cb,                     # noqa: E402  GL 生产滚轮回调
                               _on_window_size_cb)                # noqa: E402  GL 生产窗口尺寸回调（⑦）
@@ -254,15 +254,15 @@ def _grep_prod(needle):
 
 print("=== 〇. 结构：唯一 UI 管理器 / 唯一命中实现 / 两端生产派发入口 / 登记表 ===")
 # ① 两端都用**生产那个** UIManager（不是各写一套 UI 树/命中）
-src_has('engine.py', 'self.ui = UIManager()', True,
-        'GL 引擎的 UI 管理器是生产 loom_ui.UIManager（engine.py:401）')
-src_has('scene_driver.py', 'self.ui = UIManager()', True,
-        'VK 驱动的 UI 管理器是同一个生产 UIManager（scene_driver.py:629）')
+src_has('render/gl/engine.py', 'self.ui = UIManager()', True,
+        'GL 引擎的 UI 管理器是生产 loom_ui.UIManager（render/gl/engine.py:401）')
+src_has('render/vk/driver.py', 'self.ui = UIManager()', True,
+        'VK 驱动的 UI 管理器是同一个生产 UIManager（render/vk/driver.py:629）')
 # 历史名：2026-10-18 淘汰的 _DriverUI 空壳不得复活（它没有命中测试 = VK 点不动 UI 的病灶）。
-# 只查**代码用法**（class / 实例化）：scene_driver.py 的注释里提到这个名字是留痕，不算复活。
-src_has('scene_driver.py', 'class _DriverUI', False,
+# 只查**代码用法**（class / 实例化）：render/vk/driver.py 的注释里提到这个名字是留痕，不算复活。
+src_has('render/vk/driver.py', 'class _DriverUI', False,
         '历史空壳 _DriverUI 不得复活（淘汰于 72f513b；复活即 VK 又没命中实现）')
-src_has('scene_driver.py', '_DriverUI(', False,
+src_has('render/vk/driver.py', '_DriverUI(', False,
         '历史空壳 _DriverUI 不得被实例化（注释提及不算，代码用法才算）')
 # ② 命中测试只有一份实现（当前名 hit_test / _hit_screen）
 _hit_defs = [h for h in _grep_prod('def hit_test')] + [h for h in _grep_prod('def _hit_screen')]
@@ -283,23 +283,23 @@ src_has('runtime.py', 'ui.dispatch_mouse(', True, 'GL 播放器确实把事件�
 src_has('runtime.py', 'ui.update_hover_only(', True,
         'GL 播放器未被消费时仍更新 hover（与 VK 桥同序）')
 src_has('runtime.py', 'self._dispatch_ui_mouse()', True, 'GL 播放器帧首真的调它（:285）')
-src_has('vk_ui.py', 'consumed = bool(ui.dispatch_mouse(self.pos, pressed, released, wheel))',
-        True, 'VK 生产桥确实把事件交给同一个 UIManager（vk_ui.py:859）')
-src_has('vk_ui.py', 'ui.update_hover_only(self.pos)', True, 'VK 桥未被消费时也更新 hover')
-src_has('vk_player.py', "UIInputBridge(getattr(driver, 'ui', None))", True,
-        '生产构造式：桥包的就是 driver.ui（vk_player.py:371）')
-src_has('vk_player.py', 'ui_bridge.begin_frame()', True, 'VK 帧首真的结算（vk_player.py:649）')
-src_has('vk_player.py', '_wheel_taken_by_scrollview(_ui_now, ui_bridge.pos)', True,
-        'VK 滚轮专属判据的生产调用点仍在（vk_player.py:662-663）')
+src_has('render/vk/ui.py', 'consumed = bool(ui.dispatch_mouse(self.pos, pressed, released, wheel))',
+        True, 'VK 生产桥确实把事件交给同一个 UIManager（render/vk/ui.py:859）')
+src_has('render/vk/ui.py', 'ui.update_hover_only(self.pos)', True, 'VK 桥未被消费时也更新 hover')
+src_has('render/vk/player.py', "UIInputBridge(getattr(driver, 'ui', None))", True,
+        '生产构造式：桥包的就是 driver.ui（render/vk/player.py:371）')
+src_has('render/vk/player.py', 'ui_bridge.begin_frame()', True, 'VK 帧首真的结算（render/vk/player.py:649）')
+src_has('render/vk/player.py', '_wheel_taken_by_scrollview(_ui_now, ui_bridge.pos)', True,
+        'VK 滚轮专属判据的生产调用点仍在（render/vk/player.py:662-663）')
 # VK 不许另写一套 GL 播放器的派发（一个功能一个文件，规则 5/6）
-src_has('vk_ui.py', 'def _dispatch_ui_mouse', False,
+src_has('render/vk/ui.py', 'def _dispatch_ui_mouse', False,
         'VK 不得复制 GL 播放器的派发函数（同一件事只许一份实现）')
 src_has('runtime.py', 'class UIManager', False, 'GL 播放器不得自带第二份 UIManager 实现')
 # ④ 两端 int 像素光标落点（组⑥的判据基础；F-6 刚补的 VK 侧）
-src_has('loom_glfw_window.py', 'e.mouse_pos = (int(x), int(y))', True,
-        'GL 的 mouse_pos 是 int 像素（loom_glfw_window.py:638）')
-src_has('scene_driver.py', 'self.mouse_pos = (int(x), int(y))', True,
-        'VK 的 mouse_pos 也是 int 像素（scene_driver.py:1762，F-6）')
+src_has('render/gl/window.py', 'e.mouse_pos = (int(x), int(y))', True,
+        'GL 的 mouse_pos 是 int 像素（render/gl/window.py:638）')
+src_has('render/vk/driver.py', 'self.mouse_pos = (int(x), int(y))', True,
+        'VK 的 mouse_pos 也是 int 像素（render/vk/driver.py:1762，F-6）')
 # ⑤ 键/文本的 UI 派发唯一写者在内核（两端同一份）
 src_has('core/engine_core.py', 'ui.dispatch_key(k, getattr(ev, \'mod\', 0) or 0)', True,
         '内核第③步是键的 UI 派发唯一写者（core/engine_core.py:193）')
@@ -309,9 +309,9 @@ check('已知差异登记表为空（不许登记任何容差）', not KNOWN_DIF
 
 # ⑥ ⑦/⑧ 两面的**生产调用点**锚点（漂移 = 门失真，必须当场红）
 # Q-B7-41-1：VK 生产帧首必须把 UI 画布同步到窗口尺寸（GL 基准是 _on_resize）
-src_has('vk_player.py', 'sync_ui_canvas(_ui_now,', True,
+src_has('render/vk/player.py', 'sync_ui_canvas(_ui_now,', True,
         'VK 生产帧首调 UI 画布同步（Q-B7-41-1；参数 = driver.ui + 宿主窗口句柄 + 兜底尺寸）')
-_vp_src = _read_prod('vk_player.py') or ''
+_vp_src = _read_prod('render/vk/player.py') or ''
 _i_sync = _vp_src.find('sync_ui_canvas(_ui_now,')
 _i_begin = _vp_src.find('ui_bridge.begin_frame()')
 check('结构：VK 的 UI 画布同步排在 begin_frame **之前**（与 GL「先 _on_resize 再 '
@@ -332,22 +332,22 @@ for _p in _prod_py_files():
                         (os.path.relpath(_p, ROOT).replace('\\', '/'), _ln))
     except Exception:
         continue
-check('结构：ui.resize 的生产调用点恰好 2 处（GL 基准 loom_glfw_window.py + VK 侧唯一'
+check('结构：ui.resize 的生产调用点恰好 2 处（GL 基准 render/gl/window.py + VK 侧唯一'
       '实现 loom_ui_resize.py）—— 修前 VK 侧是 0 处（Q-B7-41-1）',
       len(_ui_resize_calls) == 2
       and sorted({p for (p, _l) in _ui_resize_calls})
-      == ['loom_glfw_window.py', 'loom_ui_resize.py'],
+      == ['loom_ui_resize.py', 'render/gl/window.py'],
       _ui_resize_calls)
-src_has('loom_glfw_window.py', 'ui.resize(self.width, self.height)', True,
+src_has('render/gl/window.py', 'ui.resize(self.width, self.height)', True,
         'GL 的 _on_resize 仍是基准（本任务 GL 一行未动）')
 src_has('loom_ui_resize.py', 'max(UI_MIN_W, int(w)), max(UI_MIN_H, int(h))', True,
         'VK 侧钳制口径与 GL 同值（320x240 + int 截断）')
 # Q-B7-41-2：VK 的相机门控只看**本帧**消费位（以 GL 为准），跨帧判据不得复活
 src_has('runtime.py', 'self.ui_consumed = consumed', True,
         'GL 的基准语义仍在：ui_consumed 只看本帧 dispatch_mouse 的返回值')
-src_has('vk_ui.py', 'self.ui_active = bool(consumed)', True,
+src_has('render/vk/ui.py', 'self.ui_active = bool(consumed)', True,
         'VK 的相机门控 = 本帧消费位（Q-B7-41-2「以 GL 为准」）')
-src_has('vk_ui.py', "for attr in ('_pressed_elem', '_dragging_elem', '_last_pointer_down')",
+src_has('render/vk/ui.py', "for attr in ('_pressed_elem', '_dragging_elem', '_last_pointer_down')",
         False, '跨帧持按判据不得复活（Q-B7-41-2 修前的差异来源）')
 
 
@@ -404,7 +404,7 @@ class Pair:
         # 同一尺寸 —— 只对齐「窗口尺寸」这个前提，不改任何命中/布局逻辑。
         # （VK 侧没有 ui.resize 调用点这件事本身见文件头「留痕」。）
         self.vk.ui.resize(W, H)
-        # Q-B7-34-1：桥必须是生产那个类，构造式与生产逐字相同（vk_player.py:371）
+        # Q-B7-34-1：桥必须是生产那个类，构造式与生产逐字相同（render/vk/player.py:371）
         self.bridge = vk_ui.UIInputBridge(getattr(self.vk, 'ui', None))
         self.clicks_gl = []
         self.clicks_vk = []
@@ -468,7 +468,7 @@ class Pair:
 
         与真实运行时的同帧顺序一致（GLFW 回调 -> loom_glfw_window._handle_events ->
         runtime.PlayerApp._dispatch_ui_mouse）。物理光标先落到位，是因为生产
-        _on_mouse_button_cb 会自己读 glfw.get_cursor_pos（loom_glfw_window.py:657-661）；
+        _on_mouse_button_cb 会自己读 glfw.get_cursor_pos（render/gl/window.py:657-661）；
         手动再喂一次 _on_cursor_pos_cb 是因为本进程里窗口不持真实鼠标焦点时 WM_MOUSEMOVE
         会晚一个 poll 才到 —— 喂的是 **GLFW 投递的同一个函数**（等价事件注入，同 P2 门）。
         Q-B7-43-1（夹具竞态）：物理光标落地是**异步**的，所以注入前必须先 settle_cursor()
@@ -601,7 +601,7 @@ def settle_cursor(win, eng, x, y, maxit=40, dt=0.002, stable=3):
       glfw.set_cursor_pos 底层是 Win32 SetCursorPos，**物理光标的落地是异步的**：
         · 紧跟着的 glfw.get_cursor_pos（= GetCursorPos + ScreenToClient，读物理光标）
           可能仍回读到**上一个**落点 —— 而生产 _on_mouse_button_cb 正是自己再读一次
-          get_cursor_pos 来定 e.mouse_pos（loom_glfw_window.py:657-661），于是「按下
+          get_cursor_pos 来定 e.mouse_pos（render/gl/window.py:657-661），于是「按下
           帧」的 mouse_pos 被写成上一帧的位置 → 命中全落 root。本门 ①/② 组偶发假红的
           签名 GL=('root','root',None,None) 就是它。
         · 上一次 set_cursor_pos 产生的 WM_MOUSEMOVE 还可能排在消息队列里，晚一拍才被
@@ -623,7 +623,7 @@ def settle_cursor(win, eng, x, y, maxit=40, dt=0.002, stable=3):
     ★Q-B7-43-2（P0-1，2026-11-19）：判据从「回读 == 注入点 **且** engine.mouse_pos ==
     注入点」收成「回读 == 注入点」。为什么必须收（实测，不是推测）：
       · 生产读光标的两个地方读的都是 glfw.get_cursor_pos —— _on_mouse_button_cb
-        （loom_glfw_window.py:657-661）与 _update_mouse_rel（:537），**不是** mouse_pos；
+        （render/gl/window.py:657-661）与 _update_mouse_rel（:537），**不是** mouse_pos；
         mouse_pos 由 gl_frame 随后显式注入的 _on_cursor_pos_cb(win, x, y) 兜底；
       · CURSOR_DISABLED（⑧ 组 lock_both 之后）下 set_cursor_pos 只把**虚拟坐标**置为
         (x,y)、物理光标回窗口中心，**不派发** cursor_pos 回调 -> engine.mouse_pos 停在

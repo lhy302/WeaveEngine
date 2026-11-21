@@ -38,7 +38,7 @@
 - 想知道「两个门面形状为什么不同」→ [图 2 / 2b](#图-2-两个门面是怎么拼出来的一个类--十几个文件)
 - 想知道「打开一个场景要过哪些文件」→ [图 4 场景链](#图-4-场景链打开一个场景要过哪些文件)
 - 想知道「一帧里谁调谁」→ [图 12 一帧时序](#图-12-一帧时序gl-与-vk-对照)
-- 想知道「为什么它这么密」→ [图 14 `engine.py` 解剖](#图-14-enginepy-解剖为什么它的连线最密)
+- 想知道「为什么它这么密」→ [图 14 `render/gl/engine.py` 解剖](#图-14-renderglenginepy-解剖为什么它的连线最密)
 
 ---
 
@@ -49,10 +49,10 @@
 | 颜色 | 角色 | 例 |
 |---|---|---|
 | 🔵 蓝 | 入口 / 驱动 | `Loom.py`、`run_player.py` |
-| 🟣 紫 | 门面 / 装配 | `engine.py`(GLEngine)、`scene_driver.py`(SceneDriver) |
-| 🟢 绿 | 实现 / 子系统 | `loom_render.py`、`loom_lighting.py` |
-| 🟠 橙 | 契约 / 单源 | `loom_pass.py`、`loom_scene_ubo.py`、`loom_shader_compat.glsl` |
-| ⚪ 灰 | 真实文件（被功能实现的那一个） | `sceneio.py`、`vk_renderer.py` |
+| 🟣 紫 | 门面 / 装配 | `render/gl/engine.py`(GLEngine)、`render/vk/driver.py`(SceneDriver) |
+| 🟢 绿 | 实现 / 子系统 | `render/gl/render.py`、`render/gl/lighting.py` |
+| 🟠 橙 | 契约 / 单源 | `render/contract/frame_plan.py`、`render/contract/scene_ubo.py`、`loom_shader_compat.glsl` |
+| ⚪ 灰 | 真实文件（被功能实现的那一个） | `sceneio.py`、`render/vk/renderer.py` |
 | 🟡 黄 | 产物 / 外部 | `Loom.exe`、`游戏包.lsc`、GitHub release、`rendercanvas` |
 | 🔵 深蓝 | **门**（验证） | `test_scene_load_parity.py` 等六面对拍门 |
 | 🔴 红 | **缺口**（还没有门的面） | 物理面、动画面、打包端到端 |
@@ -80,24 +80,24 @@ flowchart TB
   subgraph PLENT["播放器入口（两条腿，可切）"]
     A3["run_player.py<br/>后端选择 resolve_backend"]:::entry
     A4["game_player.py<br/>打包游戏"]:::entry
-    A5["vk_player.py<br/>VK 窗口循环"]:::entry
+    A5["render/vk/player.py<br/>VK 窗口循环"]:::entry
   end
   subgraph TOOL["构建器"]
     A6["build_game.py"]:::entry
   end
   subgraph FACADE["门面（形状不同）"]
-    B1["GLEngine<br/>engine.py（GL/moderngl）<br/>= EngineCore + 14 个 GL mixin"]:::facade
-    B2["SceneDriver<br/>scene_driver.py（VK/wgpu）<br/>= EngineCore + VkWindowMixin + VkRenderer"]:::facade
+    B1["GLEngine<br/>render/gl/engine.py（GL/moderngl）<br/>= EngineCore + 14 个 GL mixin"]:::facade
+    B2["SceneDriver<br/>render/vk/driver.py（VK/wgpu）<br/>= EngineCore + VkWindowMixin + VkRenderer"]:::facade
     B0["★ EngineCore<br/>core/engine_core.py<br/>后端无关的公共实现"]:::contract
   end
   subgraph IMPL["子系统 / 渲染器"]
     C1["14 个 GL mixin<br/>渲染/光照/物理/输入/相机/HUD…"]:::impl
-    C2["VkRenderer<br/>vk_renderer.py"]:::impl
+    C2["VkRenderer<br/>render/vk/renderer.py"]:::impl
   end
   subgraph CONTRACT["契约单源"]
-    D1["FramePlan<br/>loom_pass.py"]:::contract
-    D2["场景 UBO<br/>loom_scene_ubo.py"]:::contract
-    D3["着色器+compat<br/>loom_shaders / shaders/"]:::contract
+    D1["FramePlan<br/>render/contract/frame_plan.py"]:::contract
+    D2["场景 UBO<br/>render/contract/scene_ubo.py"]:::contract
+    D3["着色器+compat<br/>render/contract/shaders / shaders/"]:::contract
     D4["★ 场景契约<br/>scene/contract.py<br/>gate/migrate/prepare"]:::contract
     D5["★ 共享前置<br/>loom_ui_input / loom_ui_resize<br/>loom_collision / scene/query"]:::contract
   end
@@ -138,7 +138,7 @@ flowchart TB
 > **这张图 v1 画错过**：原来把 `run_player.py` 画在入口层中间、还画了一条 `run_player → game_player`，方向反了（是 game_player 调 run_player）。
 > 现在按「谁创建谁」重画：编辑器入口缺省直连 GLEngine（EditorApp(_EditorCore, GLEngine)），
 > S4 起显式 `--backend vulkan` 时改走 VkEditorApp(_EditorCore, SceneDriver)（真窗口双视口可用，ui/vk_viewport.py）；
-> 播放器入口经 run_player 分叉到 GL（runtime.PlayerApp）或 VK（vk_player → SceneDriver）。
+> 播放器入口经 run_player 分叉到 GL（runtime.PlayerApp）或 VK（render/vk/player → SceneDriver）。
 > 编辑器与播放器的播放组件是**同一份**（_EditorCore 中间基类 + 主 pass 相机/挂父相机/LateUpdate/
 > _refresh_play_frame_world 共享实现，「同源不同步」规则 5.5，S5 对拍门四面全绿）。
 
@@ -162,17 +162,17 @@ flowchart TB
 
 ```mermaid
 flowchart LR
-  G["GLEngine<br/>engine.py"]:::facade
-  G ==>|拼装| M1["RenderMixin<br/>loom_render.py"]:::impl
-  G ==>|拼装| M2["LightingMixin<br/>loom_lighting.py"]:::impl
-  G ==>|拼装| M3["ShadowMixin<br/>loom_shadow.py"]:::impl
-  G ==>|拼装| M4["ModelGpuMixin<br/>loom_model_gpu.py"]:::impl
+  G["GLEngine<br/>render/gl/engine.py"]:::facade
+  G ==>|拼装| M1["RenderMixin<br/>render/gl/render.py"]:::impl
+  G ==>|拼装| M2["LightingMixin<br/>render/gl/lighting.py"]:::impl
+  G ==>|拼装| M3["ShadowMixin<br/>render/gl/shadow.py"]:::impl
+  G ==>|拼装| M4["ModelGpuMixin<br/>render/gl/model_gpu.py"]:::impl
   G ==>|拼装| M5["TransformMixin<br/>loom_transform.py"]:::impl
   G ==>|拼装| M6["PhysicsMixin<br/>loom_physics.py"]:::impl
   G ==>|拼装| M7["InputMixin<br/>loom_input.py"]:::impl
   G ==>|拼装| M8["CameraMixin<br/>loom_camera.py"]:::impl
-  G ==>|拼装| M9["HudMixin<br/>loom_hud.py"]:::impl
-  G ==>|拼装| M10["GlfwWindowMixin<br/>loom_glfw_window.py"]:::impl
+  G ==>|拼装| M9["HudMixin<br/>render/gl/hud.py"]:::impl
+  G ==>|拼装| M10["GlfwWindowMixin<br/>render/gl/window.py"]:::impl
   G ==>|拼装| M11["ProfilerMixin<br/>core/profiler.py"]:::impl
   G ==>|拼装| M12["LogicThreadMixin<br/>loom_logic_thread.py"]:::impl
   G ==>|拼装| M13["RaycastMixin<br/>loom_raycast.py"]:::impl
@@ -187,11 +187,11 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-  S["SceneDriver<br/>scene_driver.py"]:::facade
+  S["SceneDriver<br/>render/vk/driver.py"]:::facade
   S ==>|拼装| K["EngineCore<br/>core/engine_core.py 720<br/>★后端无关的公共实现"]:::contract
-  S ==>|拼装| W["VkWindowMixin<br/>loom_vk_window.py 273<br/>★F11 假全屏（去边框/铺桌面/置顶）"]:::impl
-  S ==>|拼装| V["VkEditorRenderMixin<br/>loom_pass_vk.py 551<br/>★overlay_scope / draw_lines / VkFrameExecutor<br/>（S3；线宽 = Q-B7-48-1 裁决 B 四边形扩宽）"]:::impl
-  V -->|VkFrameExecutor 转 draw_frame| R["VkRenderer<br/>vk_renderer.py 2127"]:::impl
+  S ==>|拼装| W["VkWindowMixin<br/>render/vk/window.py 273<br/>★F11 假全屏（去边框/铺桌面/置顶）"]:::impl
+  S ==>|拼装| V["VkEditorRenderMixin<br/>render/vk/pass_vk.py 551<br/>★overlay_scope / draw_lines / VkFrameExecutor<br/>（S3；线宽 = Q-B7-48-1 裁决 B 四边形扩宽）"]:::impl
+  V -->|VkFrameExecutor 转 draw_frame| R["VkRenderer<br/>render/vk/renderer.py 2127"]:::impl
   V -.->|与 GL RenderMixin 同签名钩子| K
   classDef facade fill:#ede9fe,stroke:#7c3aed,color:#4c1d95
   classDef impl fill:#dcfce7,stroke:#16a34a,color:#14532d
@@ -205,9 +205,9 @@ flowchart LR
 > 也就是说：**公共语义在 `EngineCore`，后端差异在 mixin/钩子里**。
 > 门 `test_user_api_parity.py` 要求两端 97 个用户 API 是**同一个函数对象**（`getattr(GLEngine,n) is getattr(SceneDriver,n)`）。
 >
-> `loom_vk_window.py` 是 2026-11-19 新增的（Q-B7-32-1）：VK 的窗口由 `rendercanvas` 管，
+> `render/vk/window.py` 是 2026-11-19 新增的（Q-B7-32-1）：VK 的窗口由 `rendercanvas` 管，
 > 全屏要靠它的私有 `_window` 句柄做「假全屏」三步（去边框 / 铺桌面 / Win32 置顶），
-> **语义与 GL `loom_glfw_window._set_fullscreen` 逐项一致**（门 `test_fullscreen_parity.py` 47 条逐像素对拍）。
+> **语义与 GL `render/gl/window._set_fullscreen` 逐项一致**（门 `test_fullscreen_parity.py` 47 条逐像素对拍）。
 
 ---
 
@@ -216,19 +216,19 @@ flowchart LR
 ```mermaid
 flowchart LR
   R1["主循环 run()<br/>限帧 120"]:::impl
-  F1["loom_render.py<br/>1353 行"]:::file
+  F1["render/gl/render.py<br/>1353 行"]:::file
   R2["帧描述 frame_plan()"]:::contract
-  F2["loom_pass.py<br/>257 行"]:::file
+  F2["render/contract/frame_plan.py<br/>257 行"]:::file
   R3["执行器 execute(plan)"]:::impl
-  F3["loom_pass_gl.py<br/>254 行"]:::file
+  F3["render/gl/pass_gl.py<br/>254 行"]:::file
   R3b["VK 执行器 draw_frame(plan)<br/>+ 叠加层线批 VkLineBatch"]:::impl
-  F3b["loom_pass_vk.py<br/>518 行"]:::file
+  F3b["render/vk/pass_vk.py<br/>518 行"]:::file
   R4["各 pass 绘制源<br/>主pass / 天空 / 阴影 / 后处理"]:::impl
-  F4["loom_post_gl.py 214<br/>loom_shadow.py 117"]:::file
+  F4["render/gl/post_gl.py 214<br/>render/gl/shadow.py 117"]:::file
   R5["UBO 打包 pack_arrays"]:::contract
-  F5["loom_scene_ubo.py<br/>176 行"]:::file
+  F5["render/contract/scene_ubo.py<br/>176 行"]:::file
   R6["着色器源码 + 宏"]:::contract
-  F6["loom_shaders.py 144<br/>shaders/ 27 文件"]:::file
+  F6["render/contract/shaders.py 144<br/>shaders/ 27 文件"]:::file
   R1 -->|实现于| F1
   R1 -->|调用| R2
   R2 -->|实现于| F2
@@ -257,8 +257,8 @@ flowchart LR
 ```mermaid
 flowchart TB
   E1["编辑器打开<br/>editor.py:1245"]:::entry
-  E2["GL 播放器<br/>loom_model_gpu.py:285"]:::entry
-  E3["VK 播放器 / 打包游戏<br/>scene_driver.py:742"]:::entry
+  E2["GL 播放器<br/>render/gl/model_gpu.py:285"]:::entry
+  E3["VK 播放器 / 打包游戏<br/>render/vk/driver.py:742"]:::entry
   E4["EAI 命令<br/>agent_commands.py:549"]:::entry
   C["★ 场景契约唯一入口<br/>scene/contract.py<br/>prepare(data)"]:::contract
   G1["gate(data)<br/>版本闸门"]:::contract
@@ -268,7 +268,7 @@ flowchart TB
   F1["sceneio.py（薄门面）<br/>→ scene/io.py 装配等"]:::file
   F2["loom_assets.py"]:::file
   F3["loom_components.py<br/>loom_game_object.py"]:::file
-  F4["loom_model_gpu.py<br/>loom_lighting.py"]:::file
+  F4["render/gl/model_gpu.py<br/>render/gl/lighting.py"]:::file
   E1 -->|任何状态变更之前| C
   E2 -->|任何状态变更之前| C
   E3 -->|任何状态变更之前| C
@@ -314,7 +314,7 @@ flowchart LR
   C["环境图/天空盒<br/>loom_cubemap.py 238"]:::file
   G["网格<br/>mathlib/mesh.py 408"]:::file
   U1["GL 装配<br/>scene/material._apply_materials<br/>（sceneio 门面同名）"]:::impl
-  U2["VK 装配<br/>scene_driver.build_materials"]:::impl
+  U2["VK 装配<br/>render/vk/driver.build_materials"]:::impl
   P -->|读| A
   A -->|guid → 定义| S
   S -->|按 guid 取| M
@@ -370,11 +370,11 @@ flowchart TB
   S1["★ 滚轮消费判据<br/>loom_ui_input.py 67"]:::contract
   S2["★ UI 画布尺寸同步<br/>loom_ui_resize.py 100"]:::contract
   P1["GL 屏幕空间<br/>engine.draw_screen_lines/polygon"]:::impl
-  P2["GL 世界 Canvas<br/>loom_render.py world pass"]:::impl
-  P3["VK 屏幕 + 世界<br/>vk_ui.py"]:::impl
+  P2["GL 世界 Canvas<br/>render/gl/render.py world pass"]:::impl
+  P3["VK 屏幕 + 世界<br/>render/vk/ui.py"]:::impl
   E1["编辑器派发<br/>editor._dispatch_ui_mouse"]:::entry
   E2["GL 播放器派发<br/>runtime.py _dispatch_ui_mouse"]:::entry
-  E3["VK 派发<br/>vk_ui.UIInputBridge"]:::entry
+  E3["VK 派发<br/>render/vk/ui.UIInputBridge"]:::entry
   F["字体/字形<br/>loom_font.py"]:::file
   D -->|被画| P1
   D -->|被画| P2
@@ -393,7 +393,7 @@ flowchart TB
   classDef file fill:#f1f5f9,stroke:#64748b,color:#334155
 ```
 
-> **v2 曾写「三条派发线是同一件事写三遍」** —— 那时滚轮消费判据有两份同体拷贝（`vk_player` + `vk_ui`），
+> **v2 曾写「三条派发线是同一件事写三遍」** —— 那时滚轮消费判据有两份同体拷贝（`render/vk/player` + `render/vk/ui`），
 > GL 侧**完全没有**门控（→ 滚动列表时镜头还在缩放），VK 也**没有** `ui.resize`（窗口拉大后画布不跟随）。
 >
 > **2026-11-19 已收敛**：
@@ -409,7 +409,7 @@ flowchart TB
 ```mermaid
 flowchart LR
   ED["EditorApp<br/>editor.py 3128"]:::facade
-  GE["GLEngine<br/>engine.py"]:::facade
+  GE["GLEngine<br/>render/gl/engine.py"]:::facade
   V["Qt 视图<br/>ui/loom_gui.py 4338"]:::file
   U["撤销/重做<br/>undo.py 1391"]:::file
   EAI["EAI 命令面<br/>agent_commands.py 4048"]:::entry
@@ -419,10 +419,10 @@ flowchart LR
   ED ==>|继承| GE
   ED -->|通知/刷新| V
   VKE["VkEditorApp<br/>editor.py（S4）"]:::facade
-  SDV["SceneDriver<br/>scene_driver.py"]:::facade
+  SDV["SceneDriver<br/>render/vk/driver.py"]:::facade
   VKV["VkViewport<br/>ui/vk_viewport.py 292"]:::file
   COR["★ _EditorCore<br/>editor.py（S2 中间基类）<br/>编辑器 ~140 方法唯一实现"]:::contract
-  LPV["loom_pass_vk.py（S3）<br/>VkLineBatch / overlay_scope<br/>VkFrameExecutor（同一份 plan）"]:::contract
+  LPV["render/vk/pass_vk.py（S3）<br/>VkLineBatch / overlay_scope<br/>VkFrameExecutor（同一份 plan）"]:::contract
   ED ==>|继承| COR
   VKE ==>|继承| COR
   VKE ==>|继承| SDV
@@ -457,7 +457,7 @@ flowchart LR
   G1["guiloader.py 339<br/>引擎设置"]:::file
   G2["game_settings.py 414<br/>游戏设置"]:::file
   R1["run_player.py<br/>读 render_api"]:::entry
-  R2["engine.py / scene_driver.py<br/>读 logic_fps / interp_mode"]:::impl
+  R2["render/gl/engine.py / render/vk/driver.py<br/>读 logic_fps / interp_mode"]:::impl
   T -->|delta 覆盖| U
   U -->|路径由它算| P
   G1 -->|读| P
@@ -478,10 +478,10 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-  B1["build_engine.py"]:::tool
+  B1["build_render/gl/engine.py"]:::tool
   B2["build_shaders.py"]:::tool
   P1["package_engine_compiled.py"]:::tool
-  P2["package_engine.py"]:::tool
+  P2["package_render/gl/engine.py"]:::tool
   V1["verify_pkg_vs_head.py"]:::tool
   V2["smoke.py"]:::tool
   V3["check_binary_hygiene.py"]:::tool
@@ -532,12 +532,12 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
   autonumber
-  participant VP as vk_player.py
-  participant SD as scene_driver.py
+  participant VP as render/vk/player.py
+  participant SD as render/vk/driver.py
   participant GATE as check_engine_version
   participant BM as build_* 装配
   VP->>SD: load_from_data(data)
-  SD->>GATE: 闸门（scene_driver.py:625）
+  SD->>GATE: 闸门（render/vk/driver.py:625）
   GATE-->>SD: 通过 / 抛
   SD->>BM: build_materials / build_models / build_lights / build_cameras
   BM-->>SD: 场景就绪
@@ -551,11 +551,11 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
   autonumber
-  participant L as loom_render.run()
-  participant PL as loom_pass.frame_plan()
-  participant X as loom_pass_gl.execute()
+  participant L as render/gl/render.run()
+  participant PL as render/contract/frame_plan.frame_plan()
+  participant X as render/gl/pass_gl.execute()
   participant D as 绘制源(main/sky/shadow/post)
-  participant U as loom_scene_ubo
+  participant U as render/contract/scene_ubo
   L->>L: _handle_events / 相机
   L->>PL: frame_plan(include_shadow=...)
   PL-->>L: FramePlan（同参数命中缓存则复用）
@@ -570,13 +570,13 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
   autonumber
-  participant W as vk_player GLFW 循环
-  participant R as vk_renderer.draw_frame()
-  participant PL as loom_pass.frame_plan()
+  participant W as render/vk/player GLFW 循环
+  participant R as render/vk/renderer.draw_frame()
+  participant PL as render/contract/frame_plan.frame_plan()
   participant P as 各 pass 的 wgpu 管线
-  participant U as loom_scene_ubo
+  participant U as render/contract/scene_ubo
   W->>R: draw_frame()
-  R->>PL: frame_plan(...)（vk_renderer.py:1728）
+  R->>PL: frame_plan(...)（render/vk/renderer.py:1728）
   PL-->>R: 同一份 FramePlan
   R->>U: pack(vp, 灯, ...)（另一套 packer）
   U-->>R: 352 float 场景块
@@ -597,7 +597,7 @@ sequenceDiagram
 | `Loom.py` | 513 | 入口: 命令行参数 + 数学管线基准 + 启动引擎 |
 | `build_entry.py` | 460 | 入口: 命令行参数 + 数学管线基准 + 启动引擎 |
 | `run_player.py` | 477 | 播放器渲染 API 选择入口 (2026-08-29 P5) |
-| `vk_player.py` | 833 | Vulkan 后端播放器 (wgpu-py + GLFW, 2026-08-29 入口化 |
+| `render/vk/player.py` | 833 | Vulkan 后端播放器 (wgpu-py + GLFW, 2026-08-29 入口化 |
 | `runtime.py` | 309 | Player 运行时 (M17: 引擎/编辑器分层) |
 | `game_player.py` | 305 | 纯 Player 游戏入口 (M38, Unity Build 模型) |
 | `build_game.py` | 507 | 游戏构建器 (Unity BuildPipeline 对齐, 2026-08-22) |
@@ -606,18 +606,20 @@ sequenceDiagram
 ### B 引擎门面 + 14 mixin
 | 文件 | 行数 | 职责 |
 |---|---|---|
-| `engine.py` | 1810 | GLEngine: moderngl (OpenGL) 真 GPU 渲染 + pygam |
-| `loom_render.py` | 1353 | GLEngine 渲染管线子系统 (主 pass 帧准备 / 绘制 / 帧循环)。 |
-| `loom_lighting.py` | 952 | GLEngine 光源/光照上传/阴影 VP 子系统。 |
-| `loom_shadow.py` | 118 | GLEngine 的 M29 阴影贴图子系统 (深度 pass)。 |
-| `loom_model_gpu.py` | 385 | GLEngine 模型/材质 GPU 资源子系统。 |
+| `render/gl/engine.py` | 1810 | GLEngine: moderngl (OpenGL) 真 GPU 渲染 + pygam |
+| `engine.py`（Loom/ 根） | 20 | **薄门面（B3）**：`sys.modules['engine']` 别名到 `render/gl/engine.py` —— 旧导入名换身（engine 有模块级可变状态，读写必须落同一个模块对象，故不用逐名 re-export；先例 = B2 sceneio 门面，但 sceneio 是纯函数面）。用户游戏脚本 `from engine import Point3D` 照旧。 |
+| `render/__init__.py` | 12 | 渲染层包（B3 目录重构）：`render/contract/`（两端共享描述，零后端依赖）+ `render/gl/`（GL 后端）+ `render/vk/`（VK 后端）；刻意不 re-export（import render 本身零 GPU 依赖）。 |
+| `render/gl/render.py` | 1353 | GLEngine 渲染管线子系统 (主 pass 帧准备 / 绘制 / 帧循环)。 |
+| `render/gl/lighting.py` | 952 | GLEngine 光源/光照上传/阴影 VP 子系统。 |
+| `render/gl/shadow.py` | 118 | GLEngine 的 M29 阴影贴图子系统 (深度 pass)。 |
+| `render/gl/model_gpu.py` | 385 | GLEngine 模型/材质 GPU 资源子系统。 |
 | `loom_transform.py` | 438 | GLEngine 变换层次子系统 (模型选择 / 世界矩阵 / 父链层次 / 包围盒)。 |
 | `loom_physics.py` | 1014 | GLEngine 的碰撞系统 (M28) + 刚体物理 (M31) 子系统。 |
 | `loom_input.py` | 619 | 按键映射与输入动作层（M30b）。 |
-| `loom_hud.py` | 337 | GLEngine HUD / 文字渲染子系统。 |
+| `render/gl/hud.py` | 337 | GLEngine HUD / 文字渲染子系统。 |
 | `loom_font.py` | 207 | 多字体回退链 + 字形缓存（HUD/UI 共用） |
 | `loom_camera.py` | 269 | GLEngine 相机控制子系统 (开发者轨道相机 + 键控移动/旋转)。 |
-| `loom_glfw_window.py` | 621 | GLEngine 的 GLFW 窗口子系统 (2026-10-18) |
+| `render/gl/window.py` | 621 | GLEngine 的 GLFW 窗口子系统 (2026-10-18) |
 | `core/profiler.py` | 90 | GLEngine 性能插桩子系统 (LOOM_PROFILE 阶段耗时统计)。 |
 | `loom_logic_thread.py` | 143 | GLEngine 逻辑帧线程子系统 (异步逻辑线程启停与主循环)。 |
 | `loom_raycast.py` | 328 | 射线检测子系统 (2026-10-18) |
@@ -626,17 +628,17 @@ sequenceDiagram
 ### C 帧描述 / 契约单源
 | 文件 | 行数 | 职责 |
 |---|---|---|
-| `loom_pass.py` | 258 | 渲染 Pass 描述层（FramePlan / PassSpec），**纯数据，无后端依 |
-| `loom_pass_gl.py` | 255 | FramePlan 的 moderngl 执行器（2026-11-10 批次 A / 阶 |
-| `loom_pass_vk.py` | 551 | VK 侧执行器 + 叠加层原语（S3，Q-B7-47-1 阶段 3）：VkFrameExecutor 消费同一份 plan、VkLineBatch（draw_lines 的 VK 实现；线宽由 `loom_line_geometry` 在 CPU 侧扩宽，Q-B7-48-1 裁决 B）、VkEditorRenderMixin（overlay_scope 与 GL 同签名）。 |
-| `mathlib/line_geometry.py` | 222 | **Q-B7-48-1 裁决 B**：粗线 = 四边形的**唯一一份**扩宽数学（`build_line_quads`：世界→clip→屏幕像素→垂直偏移→回 NDC；`expand_segment`：垂直偏移本体，`vk_ui` UI 描边也用它）。GL `engine.draw_lines` / VK `loom_pass_vk.draw_lines` 两端只画三角形。 |
-| `loom_scene_ubo.py` | 177 | T3c-1：场景参数**单一来源**（字段表 + std140 打包）。 |
-| `loom_post.py` | 73 | 后处理链的开关与参数（tonemap + bloom，2026-11-10 阶段 2B2 |
-| `loom_post_gl.py` | 215 | GL 侧后处理链（HDR 目标 + bloom + tonemap，2026-11-10 |
-| `loom_shaders.py` | 145 | 从 engine.py 抽取的全部 GLSL 着色器源码常量。 |
-| `loom_shader_bindings.py` | 80 | T3c 最小落地：post 链绑定号**单点表**（2026-11-11）。 |
-| `loom_shader_compat_src.py` | 11 | 读取 shaders/loom_shader_compat.glsl（GL 侧宏层）。 |
-| `loom_gl_version.py` | 75 | OpenGL 地板版本门（2026-11-09 批次 A0 / 人类裁决 D1=B）。 |
+| `render/contract/frame_plan.py` | 258 | 渲染 Pass 描述层（FramePlan / PassSpec），**纯数据，无后端依 |
+| `render/gl/pass_gl.py` | 255 | FramePlan 的 moderngl 执行器（2026-11-10 批次 A / 阶 |
+| `render/vk/pass_vk.py` | 551 | VK 侧执行器 + 叠加层原语（S3，Q-B7-47-1 阶段 3）：VkFrameExecutor 消费同一份 plan、VkLineBatch（draw_lines 的 VK 实现；线宽由 `loom_line_geometry` 在 CPU 侧扩宽，Q-B7-48-1 裁决 B）、VkEditorRenderMixin（overlay_scope 与 GL 同签名）。 |
+| `mathlib/line_geometry.py` | 222 | **Q-B7-48-1 裁决 B**：粗线 = 四边形的**唯一一份**扩宽数学（`build_line_quads`：世界→clip→屏幕像素→垂直偏移→回 NDC；`expand_segment`：垂直偏移本体，`render/vk/ui` UI 描边也用它）。GL `engine.draw_lines` / VK `render/vk/pass_vk.draw_lines` 两端只画三角形。 |
+| `render/contract/scene_ubo.py` | 177 | T3c-1：场景参数**单一来源**（字段表 + std140 打包）。 |
+| `render/contract/post.py` | 73 | 后处理链的开关与参数（tonemap + bloom，2026-11-10 阶段 2B2 |
+| `render/gl/post_gl.py` | 215 | GL 侧后处理链（HDR 目标 + bloom + tonemap，2026-11-10 |
+| `render/contract/shaders.py` | 145 | 从 render/gl/engine.py 抽取的全部 GLSL 着色器源码常量。 |
+| `render/contract/shader_bindings.py` | 80 | T3c 最小落地：post 链绑定号**单点表**（2026-11-11）。 |
+| `render/contract/shader_compat_src.py` | 11 | 读取 shaders/loom_shader_compat.glsl（GL 侧宏层）。 |
+| `render/gl/version.py` | 75 | OpenGL 地板版本门（2026-11-09 批次 A0 / 人类裁决 D1=B）。 |
 
 ### D 场景 / 资产 / 数据模型
 | 文件 | 行数 | 职责 |
@@ -668,9 +670,9 @@ sequenceDiagram
 ### E VK 后端
 | 文件 | 行数 | 职责 |
 |---|---|---|
-| `vk_renderer.py` | 2107 | Vulkan 渲染后端 (wgpu-py, 2026-08-29 性能调优 P4F: 实 |
-| `scene_driver.py` | 1642 | 播放器中间层 (纯逻辑, 后端无关; 2026-08-29 用户指示"中间层") |
-| `vk_ui.py` | 925 | Vulkan 后端 Canvas UI / HUD 绘制子系统 (2026-11-06) |
+| `render/vk/renderer.py` | 2107 | Vulkan 渲染后端 (wgpu-py, 2026-08-29 性能调优 P4F: 实 |
+| `render/vk/driver.py` | 1642 | 播放器中间层 (纯逻辑, 后端无关; 2026-08-29 用户指示"中间层") |
+| `render/vk/ui.py` | 925 | Vulkan 后端 Canvas UI / HUD 绘制子系统 (2026-11-06) |
 
 ### F 运行时系统
 | 文件 | 行数 | 职责 |
@@ -684,7 +686,7 @@ sequenceDiagram
 | `kernels/parallel.py` | 537 | CPU 拓扑 / 亲和性 / 脚本专用线程 (2026-08-14 多核优化) |
 | `core/clock.py` | 198 | 逻辑帧/渲染帧分离核心时钟 (分离批5 架构重对齐, 2026-09-05) |
 | `core/interp.py` | 368 | 逻辑帧双快照 + 渲染帧 numpy 插值 (分离批2, 2026-09-05) |
-| `frame_buffer.py` | 345 | 逻辑帧预取缓冲 (TPS 缓冲实验, 2026-09-06) |
+| `render/contract/frame_buffer.py` | 345 | 逻辑帧预取缓冲 (TPS 缓冲实验, 2026-09-06) |
 | `scripts.py` | 828 | 物体脚本系统 (M27: 从"摆静态场景"跨到"做能动的游戏") |
 | `script_glue.py` | 221 | 基座 ↔ script.dll 接线层 (M4, 2026-10-01) |
 | `plugin_loader.py` | 836 | Loom 插件加载器 (L1 分级重设计, 2026-08-27) |
@@ -716,7 +718,7 @@ sequenceDiagram
 | `game_settings.py` | 415 | 单游戏设置 (与 Unity PlayerPrefs / UE GameUserSett |
 | `hostenv/userpaths.py` | 141 | 用户可写配置目录的**唯一**收口点（2026-11-08 用户配置目录契约 §2）。 |
 | `game_pack.py` | 138 | 游戏资源包 (2026-08-22 发布链路: Unity Build 对齐) |
-| `loom_appearance.py` | 38 | 外观代计数器（组6件1），不依赖 engine。 |
+| `render/contract/appearance.py` | 38 | 外观代计数器（组6件1），不依赖 engine。 |
 
 ### I 零碎
 | 文件 | 行数 | 职责 |
@@ -757,13 +759,13 @@ sequenceDiagram
 
 ---
 
-# 图 14 `engine.py` 解剖（为什么它的连线最密）
+# 图 14 `render/gl/engine.py` 解剖（为什么它的连线最密）
 
 实测：**1810 行 / 52 个 import（39 本项目 + 3 第三方 + 10 标准库）/ 50 个方法 + 5 个模块级函数**，其中 `__init__` 一个方法就 **409 行**（占全文 22.6%）。
 
 ```mermaid
 flowchart LR
-  E["engine.py<br/>1810 行 / 50 方法<br/>52 imports"]:::hub
+  E["render/gl/engine.py<br/>1810 行 / 50 方法<br/>52 imports"]:::hub
   M["14 个 mixin<br/>203 个方法"]:::impl
   P["39 个本项目模块<br/>（渲染/数据/调度/工具）"]:::file
   D1["A 装配/骨架<br/>3 方法 · 426 行"]:::dom
@@ -812,15 +814,15 @@ flowchart LR
 
 ## 14.2 为什么说它「密」：三个数字
 
-| 指标 | engine.py | 全仓第二 |
+| 指标 | render/gl/engine.py | 全仓第二 |
 |---|---|---|
-| 本项目模块 import 数（出边） | **39** | `scene_driver.py` 19 |
+| 本项目模块 import 数（出边） | **39** | `render/vk/driver.py` 19 |
 | 被多少模块 import（入边） | **12** | `sceneio.py` 门面 13（B2 起实现拆进 scene/） |
-| 自身方法数（不含继承来的） | **50** | `scene_driver.py` 58（但它同时是门面+装配器+播放器） |
+| 自身方法数（不含继承来的） | **50** | `render/vk/driver.py` 58（但它同时是门面+装配器+播放器） |
 
 ## 14.3 三个值得注意的点
 
-1. **mixin 已经有 203 个方法，engine.py 自己还留 50 个**，且与 mixin **只有 1 个重名**（`get_action_bindings`）。
+1. **mixin 已经有 203 个方法，render/gl/engine.py 自己还留 50 个**，且与 mixin **只有 1 个重名**（`get_action_bindings`）。
    说明这 50 个不是「重复实现」，而是**没被拆出去的第 11~20 个职责** —— 引擎的「其余部分」都住在别的文件里，
    唯独这十类没人认领，于是全堆在门面文件里。
 2. **有三个域与已有 mixin 语义重叠但实现不在一起**：输入（`InputMixin` 19 方法 / engine 另有 5）、
@@ -828,7 +830,7 @@ flowchart LR
    即「同一个域，一半在 mixin、一半在门面」。
 3. **进程级策略住在门面里**：`gc_play_enter` / `gc_play_exit`（模块级，改的是全局 `gc` 阈值）不属于任何实例，
    却和 `GLEngine` 同文件；类体内还有 `import weakref` + `_LIVE_INSTANCES` 弱引用表（给 `GameObject.parent` 旁路置脏用）。
-   这两样都不是「引擎实例的状态」，而是**进程级/全局注册表**，放在这里让 engine.py 同时是「类」和「全局设施」。
+   这两样都不是「引擎实例的状态」，而是**进程级/全局注册表**，放在这里让 render/gl/engine.py 同时是「类」和「全局设施」。
 
 ---
 
@@ -874,11 +876,11 @@ flowchart LR
 
 # 图 16 逻辑帧的段序：两端都是 8 段（2026-11-19 已补齐）
 
-同一个逻辑帧（`_logic_frame(fixed_dt)`）在两端做的事情对比 —— 左列 GL（`engine.py:1225-1320`），右列 VK（`scene_driver.py:796-809`）：
+同一个逻辑帧（`_logic_frame(fixed_dt)`）在两端做的事情对比 —— 左列 GL（`render/gl/engine.py:1225-1320`），右列 VK（`render/vk/driver.py:796-809`）：
 
 ```mermaid
 flowchart TB
-  subgraph GLL["GL：engine.py _logic_frame（8 段）"]
+  subgraph GLL["GL：render/gl/engine.py _logic_frame（8 段）"]
     A1["1 FixedUpdate 派发"]:::ok
     A2["2 脚本 update<br/>update_scripts（内核）"]:::ok
     A3["3 动画<br/>loom_frame_components"]:::ok
@@ -889,7 +891,7 @@ flowchart TB
     A8["8 插值翻页 + logic_gen bump"]:::ok
     A1 --> A2 --> A3 --> A4 --> A5 --> A6 --> A7 --> A8
   end
-  subgraph VKL["VK：scene_driver.py _logic_frame（8 段，B7-26 + P4-4 已补齐）"]
+  subgraph VKL["VK：render/vk/driver.py _logic_frame（8 段，B7-26 + P4-4 已补齐）"]
     B1["1 FixedUpdate 派发"]:::ok
     B2["2 脚本 update<br/>update_scripts（同一份内核）"]:::ok
     B3["3 动画 _update_animations"]:::ok
@@ -908,7 +910,7 @@ flowchart TB
 
 | 段 | GL 实现 | VK 实现 | 状态 |
 |---|---|---|---|
-| FixedUpdate | `engine.py` | `scene_driver.py` | ✅ 一致 |
+| FixedUpdate | `render/gl/engine.py` | `render/vk/driver.py` | ✅ 一致 |
 | 脚本 update | `update_scripts`（内核 `EngineCore`） | 同一个函数对象 | ✅ 一致 |
 | 动画 | `loom_frame_components.update_animations` | `_update_animations` | ✅ 段序一致（实现各一，行为由 P6 门锁） |
 | 物理子步 | pipe 或串行 | `_step_physics` | ✅ 同一 `physics_bridge` |
@@ -972,7 +974,7 @@ flowchart TB
   REG["服务注册表<br/>provides / requires / api_version"]:::contract
   M1["L1 场景契约模块<br/>scene.contract"]:::mod
   M2["L1 渲染后端模块 GL<br/>engine + 14 mixin"]:::mod
-  M3["L1 渲染后端模块 VK<br/>scene_driver + vk_renderer"]:::mod
+  M3["L1 渲染后端模块 VK<br/>render/vk/driver + render/vk/renderer"]:::mod
   M4["L1 物理模块<br/>loom_physics + physics_bridge"]:::mod
   M5["L3 C 组件模块<br/>pipeline/physics/script/ckernels"]:::mod
   U["用户替换目录<br/><modules>/<id>/ 放进即装"]:::user
@@ -1025,14 +1027,14 @@ flowchart TB
 ```mermaid
 flowchart TB
   subgraph HOST["窗口宿主（VK 侧不是引擎建的）"]
-    R1["rendercanvas.GlfwRenderCanvas<br/>vk_player.py 创建"]:::external
+    R1["rendercanvas.GlfwRenderCanvas<br/>render/vk/player.py 创建"]:::external
     R2["canvas._window<br/>★ 私有 GLFW 句柄"]:::external
   end
   subgraph RESOLVE["句柄解析（已有兜底）"]
     P1["_resolve_glfw_window()<br/>getattr(canvas,'_window')<br/>+ glfw.get_window_size 验活"]:::impl
   end
   subgraph ACT["窗口操作"]
-    W1["VkWindowMixin<br/>loom_vk_window.py 273"]:::impl
+    W1["VkWindowMixin<br/>render/vk/window.py 273"]:::impl
     W2["_set_fullscreen()<br/>去边框 / 铺桌面 / 置顶"]:::impl
     W3["_place_fullscreen_window()<br/>Win32 SetWindowPos + argtypes"]:::impl
   end

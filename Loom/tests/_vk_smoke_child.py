@@ -111,7 +111,7 @@ def section_a():
         return None, None
     VkEditorApp = editor_mod.VkEditorApp
     # MRO：VkEditorApp -> _EditorCore -> SceneDriver -> ... -> EngineCore
-    from scene_driver import SceneDriver
+    from render.vk.driver import SceneDriver
     mro = [c.__name__ for c in VkEditorApp.__mro__]
     check('A3 MRO: VkEditorApp -> _EditorCore -> SceneDriver(VkWindowMixin+VkEditorRenderMixin) -> EngineCore',
           mro[:3] == ['VkEditorApp', '_EditorCore', 'SceneDriver']

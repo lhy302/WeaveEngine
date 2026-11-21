@@ -379,7 +379,7 @@ def _maybe_remote_fallback(scene):
     try:
         if (os.environ.get('LOOM_REMOTE_MODE') or '').strip().lower() != 'auto':
             return False
-        import vk_player
+        import render.vk.player as vk_player
         if not vk_player.LAST_FALLBACK_REQUESTED[0]:
             return False
         if not scene or not os.path.exists(scene):
@@ -444,7 +444,7 @@ def _run_backend_impl(api, scene=None, explicit=False, **kw):
 
 
 def _run_vulkan(scene, **kw):
-    from vk_player import run_vk
+    from render.vk.player import run_vk
     return run_vk(scene, **kw)
 
 

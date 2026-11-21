@@ -46,7 +46,7 @@ import time
 import glfw
 import pygame   # 仅键码常量（K_* / KMOD_*）；import 不触发 pygame.init()
 
-from loom_gl_version import GL_MIN_MAJOR, GL_MIN_MINOR   # 2026-11-09 A0: GL 地板 4.3 core
+from render.gl.version import GL_MIN_MAJOR, GL_MIN_MINOR   # 2026-11-09 A0: GL 地板 4.3 core
 
 
 # ======================== GLFW 键码 -> pygame 常量 ========================

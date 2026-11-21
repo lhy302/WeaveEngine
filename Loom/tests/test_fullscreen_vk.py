@@ -73,8 +73,8 @@ os.environ['LOOM_NO_PARALLEL'] = '1'
 os.environ.setdefault('LOOM_NO_DIALOG', '1')
 
 import pygame                                                # noqa: E402
-import loom_vk_window as W                                   # noqa: E402
-import scene_driver as SD                                    # noqa: E402
+import render.vk.window as W                                   # noqa: E402
+import render.vk.driver as SD                                    # noqa: E402
 
 ok = True
 
@@ -167,7 +167,7 @@ print("=== 〇. 真实 SceneDriver 默认允许 F11（修前：属性根本不�
 _d0 = SD.SceneDriver()
 check('SceneDriver 有 allow_fullscreen 属性', hasattr(_d0, 'allow_fullscreen'),
       '缺失 -> 内核 core/engine_core.py:163 的判据恒 False -> F11 死键')
-check('SceneDriver.allow_fullscreen is True（与 GL 的 engine.py:229 同值）',
+check('SceneDriver.allow_fullscreen is True（与 GL 的 render/gl/engine.py:229 同值）',
       getattr(_d0, 'allow_fullscreen', None) is True, getattr(_d0, 'allow_fullscreen', None))
 check('SceneDriver 有 fullscreen 状态位（与 GL 同名）', hasattr(_d0, 'fullscreen'),
       getattr(_d0, 'fullscreen', '<缺失>'))

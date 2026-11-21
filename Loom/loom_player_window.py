@@ -99,7 +99,7 @@ class _PlayerWidget:
                                    QOpenGLContext, QOffscreenSurface)
         from PySide6.QtWidgets import QWidget
         import moderngl
-        from loom_gl_version import (GL_MIN_MAJOR, GL_MIN_MINOR,
+        from render.gl.version import (GL_MIN_MAJOR, GL_MIN_MINOR,
                                      require_gl_version)   # A0: 4.3 core 地板
 
         class PlayerWidget(QWidget):

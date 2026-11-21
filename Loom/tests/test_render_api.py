@@ -236,8 +236,8 @@ def t_mouse_lock_policy():
     import json
     import tempfile
     import runtime
-    import scene_driver
-    import vk_player
+    import render.vk.driver as scene_driver
+    import render.vk.player as vk_player
 
     old_env = {k: os.environ.get(k)
                for k in ('LOOM_GAME_DIR', 'LOOM_USER_ROOT')}
@@ -301,7 +301,7 @@ def t_mouse_lock_policy():
                 print('GL 收尾解锁失败 (忽略): %r' % (e,))
         check('GL/VK 共用同一份后端落地工具 (回读+Win32 兜底)',
               callable(getattr(runtime, 'apply_mouse_lock_backend', None)))
-        vk_src = open(os.path.join(ROOT, 'vk_player.py'), encoding='utf-8').read()
+        vk_src = open(os.path.join(ROOT, 'render', 'vk', 'player.py'), encoding='utf-8').read()
         check('VK 侧调用共享后端工具而非自写 except:pass',
               'apply_mouse_lock_backend' in vk_src)
     finally:
@@ -323,8 +323,8 @@ def t_unlock_sampling_parity():
       ③ 渲染帧采样会把 locked=True 且 unlock_requested=True 的矛盾态按玩家意图消除;
       ④ VK 不复制解锁语义, 且与 GL 走的是同一实现（同按键同结果）。
     """
-    import vk_player
-    import scene_driver
+    import render.vk.player as vk_player
+    import render.vk.driver as scene_driver
     import engine as E
 
     d = scene_driver.SceneDriver()
@@ -351,10 +351,10 @@ def t_unlock_sampling_parity():
           d.mouse_locked is False and d.mouse_unlock_requested is True,
           (d.mouse_locked, d.mouse_unlock_requested))
 
-    vk_src = open(os.path.join(ROOT, 'vk_player.py'), encoding='utf-8').read()
+    vk_src = open(os.path.join(ROOT, 'render', 'vk', 'player.py'), encoding='utf-8').read()
     check('VK 侧不复制解锁语义 (无 def _poll_mouse_unlock_key)',
           'def _poll_mouse_unlock_key' not in vk_src)
-    sd_src = open(os.path.join(ROOT, 'scene_driver.py'), encoding='utf-8').read()
+    sd_src = open(os.path.join(ROOT, 'render', 'vk', 'driver.py'), encoding='utf-8').read()
     check('SceneDriver.poll_unlock 委托 engine.GLEngine 唯一实现',
           'GLEngine._poll_mouse_unlock_key' in sd_src)
 
@@ -401,7 +401,7 @@ def t_run_player_entry_identity():
     mod.__file__ = path
     saved_main = sys.modules.get('__main__')
     saved_rp = sys.modules.pop('run_player', None)
-    saved_vk = sys.modules.pop('vk_player', None)   # 让它重新 import -> 走新登记的 run_player
+    saved_vk = sys.modules.pop('render.vk.player', None)   # 让它重新 import -> 走新登记的 run_player
     saved_argv = sys.argv
     with tempfile.TemporaryDirectory() as tmp:
         try:
@@ -414,7 +414,7 @@ def t_run_player_entry_identity():
             check('脚本入口把自身登记为 run_player 模块',
                   sys.modules.get('run_player') is mod,
                   sys.modules.get('run_player'))
-            import vk_player
+            import render.vk.player as vk_player
             check('VkInitError 类身份唯一 (脚本入口)',
                   vk_player.VkInitError is mod.VkInitError,
                   (vk_player.VkInitError, mod.VkInitError))
@@ -478,9 +478,9 @@ def t_run_player_entry_identity():
             else:
                 sys.modules.pop('run_player', None)
             if saved_vk is not None:
-                sys.modules['vk_player'] = saved_vk
+                sys.modules['render.vk.player'] = saved_vk
             else:
-                sys.modules.pop('vk_player', None)
+                sys.modules.pop('render.vk.player', None)
             sys.argv = saved_argv
 
 # ============ B3. 旧格式迁移 (契约 §6-2 / 审计 P-02-03) ============
@@ -534,15 +534,15 @@ def t_legacy_config_migration():
 
 
 # ============ C. 双后端一致性 (2026-11-06 复核 B 后修正) ============
-# 复核 B 指出原 C 段是半自证: 用 __new__ 跳过 __init__、从不断言 far、只对 engine.py
+# 复核 B 指出原 C 段是半自证: 用 __new__ 跳过 __init__、从不断言 far、只对 render/gl/engine.py
 # 做文本断言。这里改为用真实 SceneDriver 实例 + 走真实加载路径, 断言"数据入口钳制"
 # 与"运行期裸写(与 GL 属性语义一致)"两件事分开验证。
 def t_backend_parity():
-    import scene_driver
+    import render.vk.driver as scene_driver
     from loom_camera import clamp_camera_distance, CAM_DIST_MIN, CAM_DIST_MAX
 
-    # far: 两后端必须同值 (engine.py 的 1000.0 是 GL 契约基准)
-    src = open(os.path.join(ROOT, "engine.py"), encoding="utf-8").read()
+    # far: 两后端必须同值 (render/gl/engine.py 的 1000.0 是 GL 契约基准)
+    src = open(os.path.join(ROOT, "render/gl/engine.py"), encoding="utf-8").read()
     check("GL 引擎视距契约 = 1000.0", "self.far = 1000.0" in src)
     d = scene_driver.SceneDriver()          # 真实实例 (不建 GL)
     check("Vulkan 路径 far 与 GL 对齐 = 1000.0", abs(d.far - 1000.0) < 1e-9, d.far)
@@ -578,9 +578,9 @@ def t_editor_invariant():
     src = open(os.path.join(ROOT, "editor.py"), encoding="utf-8").read()
     check("编辑器不读取 render_api (P6: 编辑器固定 Qt+OpenGL)",
           "render_api" not in src)
-    gl = open(os.path.join(ROOT, "loom_render.py"), encoding="utf-8").read()
+    gl = open(os.path.join(ROOT, "render", "gl", "render.py"), encoding="utf-8").read()
     check("GL 渲染层不用 wgpu (后端边界清晰)", "import wgpu" not in gl)
-    vk = open(os.path.join(ROOT, "vk_renderer.py"), encoding="utf-8").read()
+    vk = open(os.path.join(ROOT, "render", "vk", "renderer.py"), encoding="utf-8").read()
     check("Vk 渲染层不用 moderngl (后端边界清晰)", "moderngl" not in vk)
 
 

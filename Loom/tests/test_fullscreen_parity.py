@@ -94,8 +94,8 @@ import glfw                                                        # noqa: E402
 import pygame                                                      # noqa: E402
 
 import engine as E                                                 # noqa: E402
-import scene_driver as SD                                          # noqa: E402
-from loom_glfw_window import _make_hwnd                            # noqa: E402
+import render.vk.driver as SD                                          # noqa: E402
+from render.gl.window import _make_hwnd                            # noqa: E402
 
 ok = True
 LINES = []

@@ -170,7 +170,7 @@ def main():
     # 只替换 GL 资源 (假 buffer/VAO) —— 被验证的打包/上传逻辑走**真实**代码路径。
     import time as _t
     import types as _types
-    import loom_render
+    import render.gl.render as loom_render
 
     class _FakeBuf:
         def __init__(self, size=0):

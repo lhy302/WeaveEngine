@@ -83,7 +83,7 @@ def _parent_hwnd():
         import glfw
         win = glfw.get_current_context()   # 返回当前线程已 make_current 的窗口
         if win:
-            from loom_glfw_window import _make_hwnd
+            from render.gl.window import _make_hwnd
             hwnd = _make_hwnd(win)
             if hwnd:
                 return hwnd

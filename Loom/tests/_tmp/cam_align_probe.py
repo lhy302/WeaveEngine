@@ -29,7 +29,7 @@ os.environ.setdefault('LOOM_NO_PARALLEL', '1')
 
 import engine as E                 # noqa: E402
 import sceneio as S                # noqa: E402
-import scene_driver as SD          # noqa: E402
+import render.vk.driver as SD          # noqa: E402
 from loom_camera import clamp_camera_distance   # noqa: E402
 from matlib import mat4_view_yaw_pitch, mat4_perspective   # noqa: E402
 

@@ -68,7 +68,7 @@ os.environ['LOOM_NO_PARALLEL'] = '1'
 os.environ.setdefault('LOOM_NO_DIALOG', '1')
 
 import engine as E                                         # noqa: E402
-import scene_driver as SD                                  # noqa: E402
+import render.vk.driver as SD                                  # noqa: E402
 
 ok = True
 

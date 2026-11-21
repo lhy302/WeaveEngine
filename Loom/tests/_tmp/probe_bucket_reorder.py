@@ -32,7 +32,7 @@ os.environ.setdefault('LOOM_NO_PARALLEL', '1')
 os.environ['LOOM_NO_SAVE_MIGRATE'] = '1'
 
 import ab_gl_vk as AB            # noqa: E402
-import vk_renderer as VR         # noqa: E402
+import render.vk.renderer as VR         # noqa: E402
 
 W, H = AB.W, AB.H
 

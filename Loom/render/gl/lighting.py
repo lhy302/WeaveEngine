@@ -179,8 +179,8 @@ class LightingMixin:
                     self._warn_shadow_slot_overflow(light)
         # 2026-11-11 T3c-1: 场景参数**一次 pack + 一次 write + bind**（单点表，
         # 不再逐个 uniform 上传）。阴影采样器数组仍走 sampler 绑定（不能进 UBO）。
-        import loom_scene_ubo as _SU
-        import loom_shader_bindings as _SB
+        import render.contract.scene_ubo as _SU
+        import render.contract.shader_bindings as _SB
         ul = self._u_last
         _cam = (self.camera.x, self.camera.y, self.camera.z)
         raw = _SU.pack_arrays(

@@ -69,7 +69,7 @@ def check(name, cond, detail=""):
         _fails.append(name)
 
 import sceneio
-import scene_driver as SD
+import render.vk.driver as SD
 
 BASE_CAM = {"target": [0, 0, 0], "distance": 10.0, "yaw": 0.6, "pitch": -0.35}
 _MISSING = object()

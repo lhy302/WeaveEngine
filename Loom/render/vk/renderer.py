@@ -30,13 +30,13 @@ from collections import OrderedDict
 
 import numpy as np
 
-from loom_shaders import CLEAR_COLOR_RGBA   # 2026-11-09 Q2=A
+from render.contract.shaders import CLEAR_COLOR_RGBA   # 2026-11-09 Q2=A
 # 2026-11-11 阶段 2a/2b: 目标语义名与后处理阶段/参数都来自**共享描述**（模块级导入，
 # 供 _ensure_post_targets / _record_post / draw_frame 共用；之前误放在 __init__ 局部）。
-from loom_post import HALF_TARGET, HDR_TARGET, QUARTER_TARGET, post_enabled, post_stage
+from render.contract.post import HALF_TARGET, HDR_TARGET, QUARTER_TARGET, post_enabled, post_stage
 # 2026-11-09 C5=B: 上屏健康计数**唯一实现**在 loom_render.PresentHealth（阈值不复制）
 try:
-    from loom_render import PresentHealth as _PresentHealth
+    from render.gl.render import PresentHealth as _PresentHealth
 except Exception as _ph_e:      # 不能静默: 退化成"没有降级判据"必须可见
     _PresentHealth = None
     print('[vk] 上屏健康计数器不可用 (%r) -> present_health/should_fallback_remote 将报错'
@@ -46,7 +46,7 @@ import wgpu
 
 from mathlib.matlib import (mat4_view_yaw_pitch, mat4_view_forward, mat4_perspective,
                     mat4_ortho, mat4_rotation)
-from vk_ui import (VkUIEngine, VkUIPipeline,   # 2026-11-06 Canvas UI / HUD (独立管线)
+from render.vk.ui import (VkUIEngine, VkUIPipeline,   # 2026-11-06 Canvas UI / HUD (独立管线)
                    VkWorldUIPipeline)          # 2026-11-06 R1 world Canvas
 
 _VERT_BYTES = 12 * 4          # 每顶点 48 字节: pos3f + normal3f + color4f + uv2f
@@ -374,7 +374,7 @@ class VkRenderer:
         m = getattr(self, '_main_vs_spv', None)
         if m is not None:
             return m
-        p = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+        p = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
                          'shaders', 'main.vert.spv')
         if not os.path.isfile(p):
             raise RuntimeError('缺少 SPIR-V: %s（先跑 tools/build_shaders.py）' % p)
@@ -387,7 +387,7 @@ class VkRenderer:
         m = getattr(self, '_main_fs_spv', None)
         if m is not None:
             return m
-        p = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+        p = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
                          'shaders', 'main.frag.spv')
         if not os.path.isfile(p):
             raise RuntimeError('缺少 SPIR-V: %s（先跑 tools/build_shaders.py）' % p)
@@ -407,7 +407,7 @@ class VkRenderer:
         m = cache.get(name)
         if m is not None:
             return m
-        p = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+        p = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
                          'shaders', name + '.spv')
         if not os.path.isfile(p):
             raise RuntimeError('缺少 SPIR-V: %s（先跑 tools/build_shaders.py）' % p)
@@ -635,7 +635,7 @@ class VkRenderer:
             return
         d = self.device
         # T3 Phase 1: vs/bright/down/tonemap 全部来自单源 GLSL -> SPIR-V
-        _spv_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'shaders')
+        _spv_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'shaders')
 
         def _mod(name):
             p = os.path.join(_spv_dir, name)
@@ -1638,7 +1638,7 @@ class VkRenderer:
           · misc.x = 全局 PBR 开关
         """
         # 2026-11-11 T3c-1: 打包改由 loom_scene_ubo 单点表提供（布局逐字节不变）
-        import loom_scene_ubo as _sub
+        import render.contract.scene_ubo as _sub
         _dir_slots = getattr(self, "_dir_shadow_slots", {})
         buf = _sub.pack(vp, lights, camera_pos, bool(self.pbr_enabled),
                         point_far=_POINT_FAR, point_res=float(_POINT_SHADOW_RES),
@@ -1741,7 +1741,7 @@ class VkRenderer:
         # 2026-11-11 阶段 2a: 本帧由**共享描述** loom_pass.frame_plan() 驱动 ——
         # 目标语义名 / pass 顺序 / depth-raster 声明 / 绘制源名都读同一份；VK 只保留实现
         # （WGSL、r32float 阴影、f32[352] 参数块、天空在主 pass 内先画）。
-        from loom_pass import frame_plan
+        from render.contract.frame_plan import frame_plan
         plan = frame_plan(include_shadow=bool(lights),
                           include_sky=(sky is not None),
                           include_world_canvas=bool(world_items),
@@ -2017,7 +2017,7 @@ class VkRenderer:
     def _record_post_pass(self, enc, spec, plan, swap_view, w, h, d):
         """按描述执行**单个**后处理 pass（目标/清理来自 spec，参数来自 loom_post）。"""
         import numpy as _np
-        from loom_post import params as _params
+        from render.contract.post import params as _params
         p = _params()
         _fm = {t.name: str(getattr(t, 'format', 'rgba16float')) for t in plan.targets}
         self._ensure_post_pipes((_fm.get(HALF_TARGET, 'rgba16float'),

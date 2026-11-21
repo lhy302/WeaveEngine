@@ -48,7 +48,7 @@ def _gl_engine(data):
 
 
 def _vk_driver(data, base_dir=None):
-    import scene_driver
+    import render.vk.driver as scene_driver
     d = scene_driver.SceneDriver()
     d.load_from_data(data, base_dir=base_dir)
     return d
@@ -211,9 +211,9 @@ def t_a6_camera_identity():
 def t_c5_present_health():
     """C5=B: GL/VK 共用同一上屏健康实现; 连续 3 次失败 -> 建议降级, 成功一次清零。"""
     print("=== F. 上屏健康判据 (C5=B) ===")
-    import loom_render
-    import vk_renderer
-    import vk_player
+    import render.gl.render as loom_render
+    import render.vk.renderer as vk_renderer
+    import render.vk.player as vk_player
     ph = loom_render.PresentHealth()
     for i in range(3):
         ph.note_fail('模拟失败 %d' % i)

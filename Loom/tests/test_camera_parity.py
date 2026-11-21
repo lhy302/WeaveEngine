@@ -64,7 +64,7 @@ def _enforce_fail_exit_code():
   ④ 开发者视角鼠标（apply_dev_camera_mouse）：喂同一串鼠标增量（右键拖动 + 滚轮）→ 两端
                位姿逐值相等且 = 按「0.01 弧度/像素、pitch 钳 ±1.55、distance*=exp(-wheel*0.1)
                再钳 0.5..1000」手算的期望表。VK 的 dev_mouse_enabled 默认 False，按
-               **生产方式**（vk_player.py:610 读 LOOM_VK_DEVMOUSE）开启。
+               **生产方式**（render/vk/player.py:610 读 LOOM_VK_DEVMOUSE）开启。
   ⑤ 相机挂父（运行时变换传播）：相机挂在父物体下，父物体**运行期**移动/旋转后两端位姿
                相等且 = 由父变换手算的期望表（P1 门验的是加载期的场景→相机，本组验运行时）。
   ⑥ 投影参数   fov / near / far / ortho / ortho_size → 两端「投影参数逐项相等 + 投影矩阵逐
@@ -110,9 +110,9 @@ def _enforce_fail_exit_code():
 
 环境前提（只建输入前提，不改任何断言/语义）：
   · LOOM_LOGIC_SYNC=1 —— GL 的异步逻辑线程只在 Qt 宿主（_external_ctx=True）启用
-    （engine.py:1443 注释）。本门是离屏 ctx（_external_ctx=True），故按该注释走同步路径。
+    （render/gl/engine.py:1443 注释）。本门是离屏 ctx（_external_ctx=True），故按该注释走同步路径。
   · LOOM_NO_PHYSICS=1 —— 本门只验相机面，用生产开关关掉物理（段序里的物理段仍在）。
-  · LOOM_VK_DEVMOUSE=1 —— 组 ④ 用生产方式（vk_player.py:610）打开 VK 的开发者视角鼠标。
+  · LOOM_VK_DEVMOUSE=1 —— 组 ④ 用生产方式（render/vk/player.py:610）打开 VK 的开发者视角鼠标。
   · 本门不注入键鼠事件到窗口泵（组 ④ 直接把「本帧鼠标位置/按键/滚轮」写进生产字段，
     与宿主每帧写同一批字段同语义），**不涉及光标落点协议**（P3 的 settle_cursor 不适用）。
 
@@ -125,7 +125,7 @@ def _enforce_fail_exit_code():
     _sync_orbit_camera_state:1955 全读它；camera_yaw/camera_pitch 是**玩家相机**角度）。
     后果：同一份脚本写 engine.camera_yaw 想转轨道相机 → GL 生效、**VK 不生效**
     （VK 下一渲染帧帧首 _sync_orbit_camera_state 还会把 camera_yaw 覆盖回 yaw）。
-    归属：scene_driver.py:624-633 / :899 / :1298 / :1952-1958（字段两组）；GL 是基准，未改。
+    归属：render/vk/driver.py:624-633 / :899 / :1298 / :1952-1958（字段两组）；GL 是基准，未改。
 
 修后绿（2026-11-19，Q-B7-45-1 已修，本门 **195 PASS / 0 FAIL**）：
   · 修法（方案 A = 按模式别名，复刻 GL 的单组语义）：SceneDriver.__setattr__ 按
@@ -133,7 +133,7 @@ def _enforce_fail_exit_code():
     时变成同一份值（双向）；玩家相机模式（orbit_mode=False）下两组互不相干（修前行为不变）。
     帧首 _sync_orbit_camera_state 正常路径不再写这两个字段（两者已相等），只防御
     「绕过 __setattr__ 直写」的情形 —— 脚本刚写的角度不可能被帧首同步覆盖。
-  · 业务代码只改 scene_driver.py（VK 侧）；**GL 一行未动**；本门断言/夹具**一行未改**
+  · 业务代码只改 render/vk/driver.py（VK 侧）；**GL 一行未动**；本门断言/夹具**一行未改**
     （原本绿的 189 条逐条未动，只把 6 条红点变绿）。
   · 反向兼容：VK 的 yaw/pitch 两个名字保留且仍驱动轨道相机（探针
     tests/_tmp/qb745_script_probe.py 15/15：老写法 engine.yaw=x 的位姿 == 手算期望）。
@@ -162,7 +162,7 @@ import loom_camera                                                # noqa: E402  
 import scene.contract as _scene_contract                                        # noqa: E402  场景版本号单点（不写死）
 import moderngl                                                   # noqa: E402
 import runtime                                                    # noqa: E402  GL 打包播放器（生产入口）
-import scene_driver as SD                                         # noqa: E402  VK 播放器（生产入口）
+import render.vk.driver as SD                                         # noqa: E402  VK 播放器（生产入口）
 from scene.entities import wrap_deg                          # noqa: E402  相机角度环绕（唯一实现）
 from core.primitives import Point3D                                    # noqa: E402  脚本写相机的唯一数据形态
 from mathlib.matlib import (mat4_ortho, mat4_perspective, mat4_rotation,   # noqa: E402
@@ -249,7 +249,7 @@ check('结构：轨道相机眼睛位置公式只有 loom_camera.orbit_camera_ey
 _eye_calls = _grep_prod('self.camera = orbit_camera_eye(')
 check('结构：两端各有 1 处把轨道相机合成进 self.camera（GL loom_camera.apply_orbit_camera / '
       'VK scene_driver._sync_orbit_camera_state），没有第三处',
-      sorted(p for (p, _l) in _eye_calls) == ['loom_camera.py', 'scene_driver.py'],
+      sorted(p for (p, _l) in _eye_calls) == ['loom_camera.py', 'render/vk/driver.py'],
       _eye_calls)
 for _hist in ('def _orbit_camera_eye', 'def orbit_eye', 'def _apply_orbit_camera',
               'def sync_orbit_camera_state'):
@@ -260,14 +260,14 @@ check('结构：def apply_orbit_camera 只在 loom_camera.py（VK 不得另起�
       '它走自己的 _sync_orbit_camera_state，两套字段语义不混）',
       [p for (p, _l) in _aoc_defs] == ['loom_camera.py'], _aoc_defs)
 _sync_defs = _grep_prod('def _sync_orbit_camera_state')
-check('结构：def _sync_orbit_camera_state 只在 scene_driver.py',
-      [p for (p, _l) in _sync_defs] == ['scene_driver.py'], _sync_defs)
+check('结构：def _sync_orbit_camera_state 只在 render/vk/driver.py',
+      [p for (p, _l) in _sync_defs] == ['render/vk/driver.py'], _sync_defs)
 _sync_calls = _grep_prod('self._sync_orbit_camera_state()')
 check('结构：VK 的轨道相机每帧/加载各同步一次（恰好 2 个调用点：load_from_data + '
       'advance_logic 帧首）',
-      sorted(p for (p, _l) in _sync_calls) == ['scene_driver.py', 'scene_driver.py'],
+      sorted(p for (p, _l) in _sync_calls) == ['render/vk/driver.py', 'render/vk/driver.py'],
       _sync_calls)
-src_has('loom_render.py', 'self.apply_orbit_camera()', True,
+src_has('render/gl/render.py', 'self.apply_orbit_camera()', True,
         'GL 播放器每渲染帧把轨道相机合成进 self.camera（_prepare_main_pass）')
 src_has('editor.py', 'self.apply_orbit_camera()', True,
         'GL 编辑器每渲染帧同位置同语义合成（editor._prepare_main_pass）')
@@ -275,11 +275,11 @@ src_has('runtime.py', 'self.apply_orbit_camera()', True,
         'GL 播放器加载时也合成一次（与 VK load_from_data 的同步点同位置）')
 _vp_v = _grep_prod('mat4_view_yaw_pitch(')
 check('结构：view 矩阵由同一个 matlib.mat4_view_yaw_pitch 构造（GL 播放器/编辑器 + VK 渲染）',
-      {'loom_render.py', 'editor.py', 'scene_driver.py'} <= {p for (p, _l) in _vp_v},
+      {'render/gl/render.py', 'editor.py', 'render/vk/driver.py'} <= {p for (p, _l) in _vp_v},
       sorted({p for (p, _l) in _vp_v}))
-src_has('scene_driver.py', 'mat4_view_yaw_pitch(np, cam_pos, yaw, pitch, roll)', True,
+src_has('render/vk/driver.py', 'mat4_view_yaw_pitch(np, cam_pos, yaw, pitch, roll)', True,
         'VK 的 render_pose 按模式取 (yaw,pitch,roll) —— 与 GL 同一个构造函数')
-src_has('scene_driver.py', 'mat4_view_yaw_pitch(np, cam_pos, self.yaw, self.pitch)', False,
+src_has('render/vk/driver.py', 'mat4_view_yaw_pitch(np, cam_pos, self.yaw, self.pitch)', False,
         'VK 不得再硬编码 self.yaw/self.pitch 组 VP（那样玩家相机角度永远进不了 view）')
 _bva = _grep_prod('def view_basis_to_angles')
 check('结构：基->角度 的逆映射只有 matlib.view_basis_to_angles 一份（两端 apply_camera 共用）',
@@ -288,25 +288,25 @@ _wrap = _grep_prod('def wrap_deg')
 check('结构：相机角度环绕只有 mathlib.mathutil.wrap_deg 一份（B1 批 P1 前置，原 loom_scene_entities，B2 归位 scene/entities.py）',
       [p for (p, _l) in _wrap] == ['mathlib/mathutil.py'], _wrap)
 _dev_defs = _grep_prod('def apply_dev_camera_mouse')
-check('结构：def apply_dev_camera_mouse 只在 scene_driver.py（VK 侧唯一实现；GL 侧对应'
+check('结构：def apply_dev_camera_mouse 只在 render/vk/driver.py（VK 侧唯一实现；GL 侧对应'
       '能力是 editor._update_camera）',
-      [p for (p, _l) in _dev_defs] == ['scene_driver.py'], _dev_defs)
+      [p for (p, _l) in _dev_defs] == ['render/vk/driver.py'], _dev_defs)
 _dev_calls = _grep_prod('self.apply_dev_camera_mouse()')
 check('结构：开发者视角鼠标在 VK 渲染帧里恰好 1 个调用点',
-      sorted(p for (p, _l) in _dev_calls) == ['scene_driver.py'], _dev_calls)
-src_has('scene_driver.py', "if getattr(self, 'dev_mouse_enabled', False):", True,
+      sorted(p for (p, _l) in _dev_calls) == ['render/vk/driver.py'], _dev_calls)
+src_has('render/vk/driver.py', "if getattr(self, 'dev_mouse_enabled', False):", True,
         'VK 的开发者视角鼠标被 dev_mouse_enabled 门控（默认关闭 = GL 播放器没有该能力）')
-src_has('vk_player.py', 'driver.dev_mouse_enabled = (os.environ.get("LOOM_VK_DEVMOUSE") == "1")',
+src_has('render/vk/player.py', 'driver.dev_mouse_enabled = (os.environ.get("LOOM_VK_DEVMOUSE") == "1")',
         True, 'VK 的开发者视角鼠标按生产方式由 LOOM_VK_DEVMOUSE 置位（本门组 ④ 用它开启）')
 _uc = _grep_prod('def _update_camera')
 check('结构：GL 侧开发者视角鼠标只有 editor._update_camera 一份实现',
       [p for (p, _l) in _uc] == ['editor.py'], _uc)
 for _f, _n, _why in (
         ('editor.py', 'max(-1.55, min(1.55', 'GL 右键拖动 pitch 钳 ±1.55'),
-        ('scene_driver.py', 'max(-1.55, min(1.55', 'VK 右键拖动 pitch 钳 ±1.55（同常数）'),
+        ('render/vk/driver.py', 'max(-1.55, min(1.55', 'VK 右键拖动 pitch 钳 ±1.55（同常数）'),
         ('editor.py', 'math.exp(-self.mouse_wheel * 0.1)', 'GL 滚轮推拉公式'),
-        ('scene_driver.py', 'math.exp(-wheel * 0.1)', 'VK 滚轮推拉公式（同常数）'),
-        ('scene_driver.py', 'self.mouse_look_sens = 0.01', 'VK 鼠标灵敏度 0.01 弧度/像素')):
+        ('render/vk/driver.py', 'math.exp(-wheel * 0.1)', 'VK 滚轮推拉公式（同常数）'),
+        ('render/vk/driver.py', 'self.mouse_look_sens = 0.01', 'VK 鼠标灵敏度 0.01 弧度/像素')):
     src_has(_f, _n, True, _why)
 check('已知差异登记表为空（不许登记任何容差）', not KNOWN_DIFFS, KNOWN_DIFFS)
 
@@ -556,7 +556,7 @@ class Pair:
             self.gl_kind = 'EditorApp'
         self.vk = SD.SceneDriver()
         self.vk._bridge_disabled = True          # 只比相机，不建物理桥
-        # 生产方式（vk_player.py:609-612 逐字同一行）：开发者视角鼠标由环境开关置位，
+        # 生产方式（render/vk/player.py:609-612 逐字同一行）：开发者视角鼠标由环境开关置位，
         # 默认关闭（GL 播放器没有该能力）。组 ④ 靠这一行打开。
         self.vk.dev_mouse_enabled = (os.environ.get("LOOM_VK_DEVMOUSE") == "1")
         self.vk.load_from_data(scene_data)
@@ -755,7 +755,7 @@ _CAM4 = {'target': [1.0, 2.0, 3.0], 'distance': 12.0, 'yaw': 0.6, 'pitch': -0.35
 p = Pair(scene(camera=_CAM4), gl='editor', w=1280, h=800)
 check('④-0 GL 端是编辑器（开发者视角鼠标在 GL 侧只有这一条生产实现）',
       type(p.gl) is editor_mod.EditorApp, type(p.gl).__name__)
-check('④-0 VK 端按生产方式打开了开发者视角鼠标（vk_player.py:610 读 LOOM_VK_DEVMOUSE）',
+check('④-0 VK 端按生产方式打开了开发者视角鼠标（render/vk/player.py:610 读 LOOM_VK_DEVMOUSE）',
       p.vk.dev_mouse_enabled is True, p.vk.dev_mouse_enabled)
 # 夹具前提：两端轨道相机初始位姿同源（编辑器的场景相机恢复路径 _apply_camera）
 p.gl._apply_camera(_CAM4)

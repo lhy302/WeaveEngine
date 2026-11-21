@@ -72,7 +72,7 @@ sys.path.insert(0, os.path.dirname(HERE))
 
 import engine as E
 import sceneio as S
-import scene_driver as SD
+import render.vk.driver as SD
 import undo as U
 import loom_components as C
 import loom_frame_components as LFC
@@ -544,7 +544,7 @@ check('⑤ 管线路径动画确实推进 (静态体 y>0)', objs_pipe[0].positio
       'y=%r' % objs_pipe[0].position.y)
 
 # ---- 逃生门 (render 的 NO_SPLIT 分支) 段次序 + 与分离路径逐位一致 ----
-import loom_render as LR
+import render.gl.render as LR
 
 
 class _EscapeHost:

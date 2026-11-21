@@ -9,7 +9,7 @@
 #   （场景级例外仅 D-06 ab_mip_minify：②③ 用基线行的 mae_abs=1e-3，Q-T2-1=A；① 仍 2e-4）
 #   ④ 相对基线不漂移: MAE <= 基线 + mae_drift 且 NCC >= 基线 - ncc_drift（float64 累加）
 #   ⑤ MAX <= max(max_abs, 基线MAX+0.03)（只在灾难性边缘破坏时触发）
-#   ⑥ UI 场景（有 canvas 的）额外比 UI 三路（阈值 ui_mae_abs，契约见 vk_ui.py:48-60）
+#   ⑥ UI 场景（有 canvas 的）额外比 UI 三路（阈值 ui_mae_abs，契约见 render/vk/ui.py:48-60）
 #
 # 为什么 ① ② 必须有: 只比 GL/VK 时，两端**同时**回归（例如投影矩阵一起改）会让端间
 # 差异反而变小 -> 闸门 PASS。实测: fov 两端同 +15% 时端间 MAE 从 6.8e-5 降到 4.9e-5。
@@ -243,8 +243,8 @@ def _vk_device():
 def render_vk(data, with_ui=False):
     """VK 侧: VkRenderer 直接对离屏纹理渲染（绕过 GLFW 窗口）。"""
     import wgpu
-    import scene_driver as sd
-    import vk_renderer as vr
+    import render.vk.driver as sd
+    import render.vk.renderer as vr
     fmt = 'rgba8unorm'
     device = _vk_device()
     tex = device.create_texture(
@@ -273,7 +273,7 @@ def render_vk(data, with_ui=False):
     if _wcs:
         # billboard 必须显式传 cam_basis：VK 的 _camera_billboard_basis 从 VP
         # 反解 yaw/pitch，与 GL 的 mat4_view_yaw_pitch 行向量在符号/roll 上不保证
-        # 逐位一致（vk_renderer.py:1138-1145 注释自己要求 A/B 工具显式传）。
+        # 逐位一致（render/vk/renderer.py:1138-1145 注释自己要求 A/B 工具显式传）。
         # 这里按 GL 同一函数、同一相机参数构造，避免 world quad 被转成侧面。
         import mathlib.matlib as _ml
         _V = _ml.mat4_view_yaw_pitch(np, drv.camera_pos, drv.yaw, drv.pitch, 0.0)
@@ -683,9 +683,9 @@ def _patch_perspective(factor):
     会把补丁函数绑进模块全局并在还原后继续泄漏（实测导致后续用例假红）。
     """
     import editor  # noqa: F401  （渲染链入口，必须先加载）
-    import loom_render  # noqa: F401
-    import scene_driver  # noqa: F401
-    import vk_renderer  # noqa: F401
+    import render.gl.render as loom_render  # noqa: F401
+    import render.vk.driver as scene_driver  # noqa: F401
+    import render.vk.renderer as vk_renderer  # noqa: F401
     import mathlib.matlib as matlib
     orig = matlib.mat4_perspective
 
@@ -783,7 +783,7 @@ def main(argv):
     #   · LOOM_POST=1（默认）-> 新参考图/新基线；
     #   · LOOM_POST=0        -> 旧参考图/旧基线（回退证明）；
     #   · --update-baseline 默认重建**旧**那套，加 --next 才重建新那套（旧文件不被覆盖）。
-    from loom_post import post_enabled
+    from render.contract.post import post_enabled
     append = ('--append' in argv) or ('--append-baseline' in argv)
     update = ('--update-baseline' in argv) or ('--append-baseline' in argv)
     use_next = ('--next' in argv) or (not update and post_enabled())

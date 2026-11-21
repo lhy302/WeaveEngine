@@ -76,7 +76,7 @@ import numpy as np
 
 import engine as E
 import sceneio as S
-import scene_driver as SD
+import render.vk.driver as SD
 from loom_camera import clamp_camera_distance, CAM_DIST_MIN, CAM_DIST_MAX
 from mathlib.matlib import mat4_view_yaw_pitch, mat4_perspective
 
@@ -496,10 +496,10 @@ def t_gl_contract():
     check("11 PlayerApp 仍按 active_camera 应用相机",
           "self.active_camera_object()" in runtime_src
           and "self.apply_camera(cam)" in runtime_src)
-    render_src = open(os.path.join(root, "loom_render.py"), encoding="utf-8").read()
+    render_src = open(os.path.join(root, "render", "gl", "render.py"), encoding="utf-8").read()
     check("11 GL 渲染仍用 camera_yaw/pitch/roll 组 VP",
           "self.camera_pitch, self.camera_roll)" in render_src)
-    drv_src = open(os.path.join(root, "scene_driver.py"), encoding="utf-8").read()
+    drv_src = open(os.path.join(root, "render", "vk", "driver.py"), encoding="utf-8").read()
     check("11 驱动不再硬编码 self.yaw/self.pitch 组 VP (改为按模式取)",
           "mat4_view_yaw_pitch(np, cam_pos, yaw, pitch, roll)" in drv_src
           and "mat4_view_yaw_pitch(np, cam_pos, self.yaw, self.pitch)" not in drv_src)

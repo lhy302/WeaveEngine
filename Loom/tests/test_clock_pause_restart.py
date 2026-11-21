@@ -161,7 +161,7 @@ def t_vk_driver_pause_no_debt():
     "暂停早退路径也做了重锚"这一形状（换时钟实现/改墙钟口径时不会退化）。
     """
     print("=== C. VK driver 暂停重锚 (恢复首帧不补欠账) ===")
-    import scene_driver
+    import render.vk.driver as scene_driver
     d = scene_driver.SceneDriver()
     d.load_from_data({'version': 10,
                       'camera': {'target': [0, 1, 0], 'distance': 8.0,

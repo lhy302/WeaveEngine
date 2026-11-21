@@ -66,7 +66,7 @@ def _spv_module(device, name):
     m = _SPV_CACHE.get(key)
     if m is not None:
         return m
-    p = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+    p = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
                      'shaders', name + '.spv')
     if not os.path.isfile(p):
         raise RuntimeError('缺少 SPIR-V: %s（先跑 tools/build_shaders.py）' % p)

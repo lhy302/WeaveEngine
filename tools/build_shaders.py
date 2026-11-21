@@ -64,8 +64,8 @@ def _expand(src_path):
     src = src.replace("//@@COMPAT@@", compat)
     # T3c: 绑定号单点表（GL/VK 共用），着色器里只写 B_xxx
     sys.path.insert(0, os.path.join(ROOT, "Loom"))
-    import loom_shader_bindings
-    import loom_scene_ubo
+    import render.contract.shader_bindings as loom_shader_bindings
+    import render.contract.scene_ubo as loom_scene_ubo
     src = src.replace("//@@SCENE_UBO@@",
                       loom_scene_ubo.glsl_block())
     # T3c-2a 桶级 UBO：与 SCENE 完全同一做法（字段表生成，GL/VK 同构）

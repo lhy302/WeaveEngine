@@ -42,7 +42,7 @@ def check(name, cond, detail=''):
         _fails.append(name)
 
 
-import vk_ui as VU
+import render.vk.ui as VU
 
 
 def _engine():
