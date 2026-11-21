@@ -21,11 +21,14 @@
   self._sched_pool / self._interp / self._interp_mode / self._logic_steps / self._prof_t0 / self._prof_add
   self.is_playing / self._last_xform_gen
 """
+import math
+
 import os
 
 import numpy as np
 
-from mathlib.matlib import (mat4_scale, mat4_rotation, mat4_translation, decompose_euler)
+from mathlib.matlib import (mat4_scale, mat4_rotation, mat4_translation, decompose_euler,
+                            view_basis)   # Q-B7-57-1: 相机基构造唯一实现
 from kernels.fastpath import depths as _fp_depths
 # 2026-11-10 V-03: pipeline_glue.depths 的契约是「失败返回 None」（见其 docstring），
 # 但本文件以前直接 depth.max() -> 一旦 C 路径返回 None 就 AttributeError 崩渲染帧。
@@ -55,10 +58,21 @@ class TransformMixin:
 
     # ================ 变换层次 (M14) ================
     def model_world_matrix(self, m):
-        """物体世界模型矩阵 (行向量): local(S@R@T) @ 父世界矩阵 沿父链合成"""
-        M = (mat4_scale(np, m.scale[0], m.scale[1], m.scale[2])
-             @ mat4_rotation(np, m.rotation.x, m.rotation.y, m.rotation.z)
-             @ mat4_translation(np, m.position.x, m.position.y, m.position.z))
+        """物体世界模型矩阵 (行向量): local(S@R@T) @ 父世界矩阵 沿父链合成.
+        Q-B7-57-1 (2026-11-22): CameraState (yaw/pitch/roll 度制, 无缩放) 也是
+        合法父链节点 —— 相机挂相机后相机要当父用; 相机局部旋转 = view_basis
+        行像 (与 loom_camera.camera_world_basis 局部基同源唯一实现),
+        位置换算 (camera_world_position / set_camera_parent 保世界) 因此不崩."""
+        if getattr(m, 'rotation', None) is None and hasattr(m, 'yaw'):
+            # CameraState 分支 (鸭子判据: 无 .rotation 且有 .yaw; GameObject 恒有 .rotation)
+            R4 = np.eye(4, dtype=np.float64)
+            R4[:3, :3] = view_basis(math.radians(m.yaw), math.radians(m.pitch),
+                                    math.radians(m.roll))
+            M = R4 @ mat4_translation(np, m.position.x, m.position.y, m.position.z)
+        else:
+            M = (mat4_scale(np, m.scale[0], m.scale[1], m.scale[2])
+                 @ mat4_rotation(np, m.rotation.x, m.rotation.y, m.rotation.z)
+                 @ mat4_translation(np, m.position.x, m.position.y, m.position.z))
         if m.parent is not None:
             M = M @ self.model_world_matrix(m.parent)
         return M
@@ -325,8 +339,20 @@ class TransformMixin:
         return Point3D(float(p[0]), float(p[1]), float(p[2]))
 
     def world_rotation_matrix(self, m):
-        """物体旋转部分的世界矩阵 (忽略缩放, 供 gizmo 旋转换算)"""
-        R = mat4_rotation(np, m.rotation.x, m.rotation.y, m.rotation.z)
+        """物体旋转部分的世界矩阵 (忽略缩放, 供 gizmo 旋转换算).
+        Q-B7-57-1 (2026-11-22): CameraState (yaw/pitch/roll 度制) 同一入口 ——
+        修前 reparent camera→camera 在这里 AttributeError 崩 (CameraState 无
+        .rotation, Qt 吞异常状态零变化)。相机局部旋转 = view_basis 行像矩阵
+        ([ex;ey;ez] 作行, object->world 行主序, 与 GameObject 的 mat4_rotation
+        同约定), 沿父链右乘合成语义与物体分支逐位一致; 相机挂物体 (既有行为)
+        与相机挂相机 (新语义) 都由这一份代码承载, GL/VK 同走 EngineCore 单源."""
+        if getattr(m, 'rotation', None) is None and hasattr(m, 'yaw'):
+            # CameraState 分支 (鸭子判据: 无 .rotation 且有 .yaw)
+            R = np.eye(4, dtype=np.float64)
+            R[:3, :3] = view_basis(math.radians(m.yaw), math.radians(m.pitch),
+                                   math.radians(m.roll))
+        else:
+            R = mat4_rotation(np, m.rotation.x, m.rotation.y, m.rotation.z)
         if m.parent is not None:
             R = R @ self.world_rotation_matrix(m.parent)
         return R

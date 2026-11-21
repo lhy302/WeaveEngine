@@ -47,6 +47,11 @@ def apply_camera_snapshot(cam, snap, engine=None):
     pid = snap.get('parent')
     if engine is not None and pid:
         new_parent = engine.find_model_by_guid(pid)
+        if new_parent is None:
+            # Q-B7-57-1 (2026-11-22): 相机挂相机后父可以是 CameraState ——
+            # guid 按物体表查不到时兜底查相机表 (否则快照 undo 会把相机父链
+            # 静默断掉, 撤销=破坏状态).
+            new_parent = engine.find_camera(pid)
     if cam.parent is not None and cam in cam.parent.camera_children:
         cam.parent.camera_children.remove(cam)
     cam.parent = new_parent
@@ -117,6 +122,9 @@ class DeleteCameraCommand(Command):
             self.engine.cameras.insert(min(self.index, len(self.engine.cameras)), self.cam)
         if self.parent_guid:
             par = self.engine.find_model_by_guid(self.parent_guid)
+            if par is None:
+                # Q-B7-57-1 (2026-11-22): 父可以是相机 (camera→camera), 兜底查相机表.
+                par = self.engine.find_camera(self.parent_guid)
             if par is not None and self.cam.parent is not par:
                 self.cam.parent = par
                 par.camera_children.append(self.cam)

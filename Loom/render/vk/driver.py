@@ -315,14 +315,6 @@ def object_world_matrix(m):
     return M
 
 
-def object_world_rotation(m):
-    """物体世界旋转矩阵 (忽略缩放) — 与 loom_transform.world_rotation_matrix 同."""
-    R = mat4_rotation(np, m.rotation.x, m.rotation.y, m.rotation.z)
-    if m.parent is not None:
-        R = R @ object_world_rotation(m.parent)
-    return R
-
-
 # ================ 2026-11-07 M36 LOD 进场景序列化 (Vk 侧读取) ================
 # 裁决 A (scan_05 §5 问题 1): LOD 进场景序列化 —— 否则播放器 (独立进程只吃
 # 场景文件) 里 renderer.lod_levels 恒 None, _update_lod 是纯开销的死代码。
@@ -1871,14 +1863,14 @@ class SceneDriver(VkWindowMixin, VkEditorRenderMixin, EngineCore):
             self.pitch = max(-1.55, min(1.55,
                                         self.pitch - my * self.mouse_look_sens))
 
-    # ---- 摄像机实体 (Unity Camera): 与 loom_camera.CameraMixin 同语义 ----
-    def find_camera(self, guid):
-        """按 guid 找摄像机, 找不到返回 None."""
-        for cam in self.cameras:
-            if cam.guid == guid:
-                return cam
-        return None
-
+    # ---- 摄像机实体 (Unity Camera) ----
+    # Q-B7-57-1 (2026-11-22): find_camera / active_camera_object /
+    # camera_world_position / camera_world_basis 的 VK 逐位重复覆写**退役** ——
+    # 修前 VK 私有副本只认 GameObject 父 (object_world_rotation 无相机分支),
+    # 相机挂相机后 camera_world_basis 会 AttributeError; 且与 CameraMixin 同名
+    # 同语义却两份代码 = 两端分叉隐患。现在按 JVM 模型回落 EngineCore.CameraMixin
+    # 唯一实现 (GL/VK 同一函数对象; transform.world_rotation_matrix 单点认相机)。
+    # apply_camera 保留: 它是**真后端差异** (VK 视角广度字段 self.fov vs GL self._fov)。
     def _backend_scene_skybox(self):
         """钩子（VK）：**场景级**天空盒字段 = self.skybox（播放器形状 load_from_data 写）。
 
@@ -1895,48 +1887,13 @@ class SceneDriver(VkWindowMixin, VkEditorRenderMixin, EngineCore):
         """
         return getattr(self, 'skybox', None)
 
-    def active_camera_object(self):
-        """当前玩家视角摄像机对象 (无则 None)."""
-        return self.find_camera(self.active_camera) if self.active_camera else None
-
-    def camera_world_position(self, cam):
-        """摄像机世界位置 (父链合成) — 与 loom_camera.camera_world_position 同:
-        局部位置 @ 父世界矩阵 (含父缩放, 与物体同构)."""
-        p = np.array([cam.position.x, cam.position.y, cam.position.z, 1.0])
-        if cam.parent is not None:
-            p = p @ object_world_matrix(cam.parent)
-        return Point3D(float(p[0]), float(p[1]), float(p[2]))
-
-    def camera_world_basis(self, cam):
-        """摄像机世界正交基 (ex,ey,ez) 行向量 (= 世界->视图旋转) —
-        与 loom_camera.camera_world_basis 同 (同 trig/负绕向, 父链只取旋转部分)."""
-        yaw = math.radians(cam.yaw)
-        pitch = math.radians(cam.pitch)
-        roll = math.radians(cam.roll)
-        cy, sy = math.cos(yaw), math.sin(yaw)
-        cp, sp = math.cos(pitch), math.sin(pitch)
-        ex = (cy, 0.0, -sy)
-        ey = (-sy * sp, cp, -cy * sp)
-        ez = (sy * cp, sp, cy * cp)
-        if roll:
-            cr, sr = math.cos(roll), math.sin(roll)
-            sn = -sr
-            exn = (ex[0] * cr + ey[0] * sn, ex[1] * cr + ey[1] * sn,
-                   ex[2] * cr + ey[2] * sn)
-            eyn = (ey[0] * cr - ex[0] * sn, ey[1] * cr - ex[1] * sn,
-                   ey[2] * cr - ex[2] * sn)
-            ex, ey = exn, eyn
-        if cam.parent is None:
-            return ex, ey, ez
-        R3 = np.asarray(object_world_rotation(cam.parent))[:3, :3]
-        return (tuple(float(v) for v in np.array(ex) @ R3),
-                tuple(float(v) for v in np.array(ey) @ R3),
-                tuple(float(v) for v in np.array(ez) @ R3))
-
     def apply_camera(self, cam):
-        """把某摄像机设为玩家视角 — 与 loom_camera.apply_camera 逐位一致:
+        """把某摄像机设为玩家视角 — 与 loom_camera.apply_camera 同语义.
         世界位置 = 相机世界位置, 世界朝向 = yaw/pitch/roll (度->弧度),
-        视角广度 = 相机 fov, 并关闭轨道相机 (自由相机语义). 返回是否成功."""
+        视角广度 = 相机 fov, 并关闭轨道相机 (自由相机语义). 返回是否成功.
+        Q-B7-57-1 (2026-11-22): 本覆写是**真后端差异钩子** (VK 视角广度字段
+        self.fov, GL 是 self._fov); 位姿合成全部委托 CameraMixin 单源
+        (camera_world_position / camera_world_basis 已回落 EngineCore 共享份)."""
         if cam is None:
             return False
         self.camera = self.camera_world_position(cam)

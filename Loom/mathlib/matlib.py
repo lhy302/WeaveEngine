@@ -142,20 +142,22 @@ def mat4_look_at(xp, eye, target, up):
     ], dtype=xp.float64)
 
 
-def mat4_view_yaw_pitch(xp, camera, yaw, pitch, roll=0.0):
-    """
-    由相机位置 + 偏航/俯仰构造 view 矩阵（行主序, det=+1 无反射）.
-    与旧 project_point 的相机空间数学数值一致（见 mat_validate）:
-      x_view=tx, y_view=fy, z_view=+fz（前方为正, 面向相机=法线 nz<0）
-    三基 ex/ey/ez 作列, 前方为 ez（+z_view）, 纯旋转不含镜像 → 叉积法线不被翻转.
-    投影配合 mat4_perspective（clip.w = z_view）.
-    M41: 新增 roll (弧度, 默认 0) —— 绕视线方向 ez 倾斜 (FPS 侧头/被击倒摄像头歪斜).
-    ex'/ey' 绕 ez 转 θ: ex'=ex·cosθ+ey·sinθ, ey'=ey·cosθ−ex·sinθ (已验 ez×ex=ey, ez×ey=−ex).
-    θ 取 −roll (sn=−sin roll, 与 LightState.up_vector M30 负绕向一致); roll=0 恒等.
+def view_basis(yaw, pitch, roll=0.0):
+    """mat4_view_yaw_pitch 的 view 正交基 (ex, ey, ez) —— **唯一实现**
+    (Q-B7-57-1, 2026-11-22 从 mat4_view_yaw_pitch / loom_camera.camera_world_basis
+    两处逐位相同的 trig 抽出; 修前相机挂相机要在 transform.world_rotation_matrix
+    第三处再用这套 trig, 三处各抄一份必然漂移, 故按解耦规则 3 前置到这里):
+
+      ez = (sin yaw·cos pitch, sin pitch, cos yaw·cos pitch) 前方 (+z_view);
+      ex/ey 绕 ez 转 -roll (M41 负绕向, 与光源 M30 一致).
+
+    返回的 (ex, ey, ez) 是**行像**向量: 以 [ex; ey; ez] 作 3x3 行即相机的
+    object->world 旋转 (行主序, 行 = 局部轴的像), 与 mat4_rotation 同约定;
+    mat4_view_yaw_pitch 的 3x3 (世界->视图, 基作列) 恰是它的转置.
+    角度制状态 (CameraState.yaw/pitch/roll 度) 由调用方先转弧度.
     """
     cy, sy = math.cos(yaw), math.sin(yaw)
     cp, sp = math.cos(pitch), math.sin(pitch)
-    # 旧投影逻辑的 view 正交基（由 yaw/pitch 定义）
     ex = (cy, 0.0, -sy)
     ey = (-sy * sp, cp, -cy * sp)
     ez = (sy * cp, sp, cy * cp)   # 前方 (+z_view 方向)
@@ -168,6 +170,22 @@ def mat4_view_yaw_pitch(xp, camera, yaw, pitch, roll=0.0):
         eyn = (ey[0] * cr - ex[0] * sn, ey[1] * cr - ex[1] * sn,
                ey[2] * cr - ex[2] * sn)
         ex, ey = exn, eyn
+    return ex, ey, ez
+
+
+def mat4_view_yaw_pitch(xp, camera, yaw, pitch, roll=0.0):
+    """
+    由相机位置 + 偏航/俯仰构造 view 矩阵（行主序, det=+1 无反射）.
+    与旧 project_point 的相机空间数学数值一致（见 mat_validate）:
+      x_view=tx, y_view=fy, z_view=+fz（前方为正, 面向相机=法线 nz<0）
+    三基 ex/ey/ez 作列, 前方为 ez（+z_view）, 纯旋转不含镜像 → 叉积法线不被翻转.
+    投影配合 mat4_perspective（clip.w = z_view）.
+    M41: 新增 roll (弧度, 默认 0) —— 绕视线方向 ez 倾斜 (FPS 侧头/被击倒摄像头歪斜).
+    ex'/ey' 绕 ez 转 θ: ex'=ex·cosθ+ey·sinθ, ey'=ey·cosθ−ex·sinθ (已验 ez×ex=ey, ez×ey=−ex).
+    θ 取 −roll (sn=−sin roll, 与 LightState.up_vector M30 负绕向一致); roll=0 恒等.
+    """
+    # Q-B7-57-1 (2026-11-22): 基构造抽 view_basis 唯一实现 (数值逐位不变).
+    ex, ey, ez = view_basis(yaw, pitch, roll)
     cx, cyy, cz = camera
     tex = -(ex[0] * cx + ex[1] * cyy + ex[2] * cz)
     tey = -(ey[0] * cx + ey[1] * cyy + ey[2] * cz)

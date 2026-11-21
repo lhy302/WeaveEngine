@@ -21,6 +21,9 @@
      GUI 右键轨道 / WASDQE 老链路 (editor 事件处理函数) 执行后撤销栈深度不变。
   D (结构): main_window.py 清单内直调归零（AST 定位 self.editor.<op>( 直调,
      白名单=豁免面+_notify 类反馈）; dispatch 的 scope 参数存在且缺省兼容。
+  E (Q-B7-57-1 相机挂相机): reparent camera→camera 修复后 —— GL/VK 两端相机父链
+     计算同源（EngineCore 同一函数对象）+ 数值对拍；相机挂物体 / 物体挂相机
+     既有行为不回归；撤销快照/删除撤销对相机父链不再静默断链。
 """
 
 # 2026-11-06 P-02: Windows 控制台默认 GBK -> 统一 UTF-8(replace) (假失败防治).
@@ -361,9 +364,11 @@ def t_a_reparent():
     check("A6 脱父 GUI ≡ 命令行", observed(edA) == observed(edB)
           and edA.models[1].parent is None and edB.models[1].parent is None)
     # 相机挂父 (camera-camera; GUI 唯一可达的相机挂父形态): 两路走同一条
-    # reparent 命令 —— 引擎侧 set_camera_parent 对 CameraState 父存在**既有缺陷**
-    # (loom_camera.world_rotation_matrix 只认 model 的 .rotation), 两路同样失败、
-    # 同样无状态变化、同样不涨撤销栈 —— 恰好证明 GUI ≡ 命令行 (同一命令同源)。
+    # reparent 命令。Q-B7-57-1 (2026-11-22) 修复后 set_camera_parent 对
+    # CameraState 父**同源同成功** (transform.world_rotation_matrix /
+    # model_world_matrix 认 yaw/pitch 度制状态, view_basis 唯一实现)。
+    # 修前旧断言锁的是等价失败: 引擎层 AttributeError 被 dispatch/_invoke_cmd
+    # 吞掉, 两路同样零状态变化、零撤销栈 (真红原文见 Q-B7-57-1 实施报告)。
     edA._add_camera()
     edA._add_camera()
     edB._add_camera()
@@ -371,15 +376,32 @@ def t_a_reparent():
     depthA = len(edA.undo.undo_stack)
     vA._hier_drop(('camera', 1), ('camera', 0))
     r = ac.dispatch('reparent', {'child': '摄像机2', 'parent': '摄像机1'}, wB)
-    check("A6 相机挂父: 命令行走同一条 reparent (既有引擎缺陷两路同失败)",
-          r.get('ok') is False, r)
-    check("A6 相机挂父: GUI ≡ 命令行 (状态/撤销栈零变化)", observed(edA) == observed(edB)
-          and len(edA.undo.undo_stack) == depthA == len(edB.undo.undo_stack),
-          (observed(edA), observed(edB)))
-    check("A6 GUI 路径写等价命令日志 ×2 (失败命令不出教学日志, 走 _notify)",
-          [x[0] for x in vA.uitree.logs] == ['reparent'] * 2, vA.uitree.logs)
-    check("A6 命令行路径写命令日志环", ring_cmds(seq0).count('reparent') == 2,
-          ring_cmds(seq0))   # 相机挂父那条走 '失败:' 行, 不计 ok 面
+    check("A6 相机挂父: 命令行 reparent -> ok (Q-B7-57-1 修复后)",
+          r.get('ok') is True, r)
+    check("A6 相机挂父: GUI ≡ 命令行 (状态同变 + 撤销栈各 +1)",
+          observed(edA) == observed(edB)
+          and len(edA.undo.undo_stack) == len(edB.undo.undo_stack) == depthA + 1,
+          (observed(edA), observed(edB), depthA))
+    check("A6 相机挂父: 父链生效 + camera_children 维护",
+          edA.cameras[1].parent is edA.cameras[0]
+          and edB.cameras[1].parent is edB.cameras[0]
+          and edA.cameras[0].camera_children == [edA.cameras[1]]
+          and edB.cameras[0].camera_children == [edB.cameras[1]],
+          ([c.parent and c.parent.name for c in edA.cameras],
+           [c.parent and c.parent.name for c in edB.cameras]))
+    edA.undo.undo()
+    edB.undo.undo()
+    check("A6 相机挂父: undo 恢复 (脱回根, children 清空, 栈深还原)",
+          edA.cameras[1].parent is None and edB.cameras[1].parent is None
+          and edA.cameras[0].camera_children == []
+          and edB.cameras[0].camera_children == []
+          and len(edA.undo.undo_stack) == len(edB.undo.undo_stack) == depthA,
+          ([c.parent and c.parent.name for c in edA.cameras],
+           [c.parent and c.parent.name for c in edB.cameras]))
+    check("A6 GUI 路径写等价命令日志 ×3 (模型挂父/脱父/相机挂父, 全成功)",
+          [x[0] for x in vA.uitree.logs] == ['reparent'] * 3, vA.uitree.logs)
+    check("A6 命令行路径写命令日志环", ring_cmds(seq0).count('reparent') == 3,
+          ring_cmds(seq0))   # 相机挂父修复后走 ok 面 (修前走 '失败:' 行不计)
     # 重新挂回 (为成环测试造链, 两路同步): 球体2 -> 立方体1
     vA._hier_drop(('model', 1), ('model', 0))
     ac.dispatch('reparent', {'child': '球体2', 'parent': '立方体1'}, wB)
@@ -672,6 +694,187 @@ def t_d_dispatch_scope_param():
     check("D2 显式 scope='user' 也照常工作", r.get('ok') is True, r)
 
 
+# ====================================================================
+# 断言组 E: Q-B7-57-1 相机挂相机 (reparent camera→camera AttributeError 扫尾)
+# ====================================================================
+
+def _cam_dict(cid, pos, yaw, pitch, roll, parent=None):
+    return {"id": cid, "name": "相机" + cid, "position": list(pos),
+            "yaw": yaw, "pitch": pitch, "roll": roll, "fov": 60.0,
+            "fov_locked": True, "pitch_lock": False,
+            "pitch_min": -85.0, "pitch_max": 85.0, "parent_id": parent,
+            "skybox": None}
+
+
+def _scene_data():
+    import sceneio as _sio
+    return {"version": _sio.SCENE_VERSION,
+            "camera": {"target": [0, 0, 0], "distance": 10.0,
+                       "yaw": 0.6, "pitch": -0.35},
+            "cameras": [_cam_dict("c1", (1.0, 1.6, 0.0), 30.0, 10.0, 5.0),
+                        _cam_dict("c2", (0.6, 1.2, 1.8), 45.0, -20.0, -7.0)],
+            "active_camera": None,
+            "materials": [], "lights": [],
+            "objects": [{"id": "o1", "name": "父物体", "type": "cube",
+                         "params": {"size": 1.0},
+                         "position": [5.0, 0.0, -2.0],
+                         "rotation": [0.2, 0.7853981633974483, 0.35],
+                         "scale": [1.5, 1.5, 1.5], "visible": True}]}
+
+
+def _gl_engine_stub(data):
+    """GL 侧引擎桩 (与 test_vk_camera_align.gl_engine 同款最小字段)."""
+    import copy
+    import math as _m
+    import engine as _E
+    import sceneio as _sio
+    _E.GLEngine._build_gpu = lambda self, m: None   # 无 GL: 不建 GPU 资源 (同 test_vk_camera_align)
+    e = _E.GLEngine.__new__(_E.GLEngine)
+    e.cameras = []; e.active_camera = None
+    e.models = []; e.lights = []; e.materials = []
+    e.camera = _E.Point3D(0, 0, -5)
+    e.camera_yaw = 0.0; e.camera_pitch = 0.0; e.camera_roll = 0.0
+    e.orbit_mode = False
+    e._fov = _m.radians(60.0)
+    e.near = 0.1; e.far = 1000.0
+    e.width = 480; e.height = 320
+    e.gravity = -9.8; e._skybox = None; e.undo = None
+    cam_out = {}
+    _sio.scene_from_dict(e, copy.deepcopy(data), camera_out=cam_out)
+    return e
+
+
+def _vk_driver(data):
+    import copy
+    import render.vk.driver as _SD
+    d = _SD.SceneDriver()
+    d._bridge_disabled = True          # 只比相机父链, 不建物理桥
+    d.load_from_data(copy.deepcopy(data))
+    return d
+
+
+def t_e_backend_camera_chain():
+    import math
+    import numpy as np
+    from mathlib.matlib import view_basis
+    print("---- E1 GL/VK 同源: 相机父链计算走 EngineCore 同一函数对象 ----")
+    from core.engine_core import EngineCore
+    from editor import EditorApp as _EA
+    import render.vk.driver as _SD
+    # apply_camera 除外: 它是**真后端差异钩子** (VK 视角广度字段 self.fov vs
+    # GL self._fov, Q-B7-57-1 退役 VK 冗余覆写时留下的唯一 SceneDriver 覆写);
+    # 其余位姿/父链计算两端必须是同一个函数对象。
+    _shared = ('world_rotation_matrix', 'model_world_matrix',
+               'camera_world_basis', 'camera_world_position',
+               'set_camera_parent')
+    forked = [n for n in _shared
+              if getattr(_EA, n, None) is not getattr(_SD.SceneDriver, n, None)]
+    check("E1 GL 编辑器与 VK SceneDriver 相机父链函数零分叉 (is 同源)",
+          not forked, forked)
+    check("E1 apply_camera = 唯一真后端差异钩子 (VK 覆写, 位姿委托单源)",
+          getattr(_EA, 'apply_camera') is not getattr(_SD.SceneDriver, 'apply_camera')
+          and getattr(_SD.SceneDriver, 'apply_camera').__qualname__.startswith('SceneDriver'),
+          getattr(_SD.SceneDriver, 'apply_camera').__qualname__)
+    # 定义点唯一: 都落在 EngineCore 的内核 mixin (TransformMixin/CameraMixin)
+    for n in _shared:
+        check("E1 %s 定义点唯一 (内核 mixin, 非后端覆写)" % n,
+              getattr(_EA, n).__qualname__.split('.')[0]
+              in ('TransformMixin', 'CameraMixin', 'EngineCore'),
+              getattr(_EA, n).__qualname__)
+
+    print("---- E2 GL/VK 数值对拍: 同一父链 (物体→相机→相机) 同一世界变换 ----")
+    data = _scene_data()
+    gl = _gl_engine_stub(data)
+    vk = _vk_driver(data)
+    check("E2 两端各 1 物体 2 相机", len(gl.models) == 1 and len(gl.cameras) == 2
+          and len(vk.models) == 1 and len(vk.cameras) == 2,
+          (len(gl.models), len(gl.cameras), len(vk.models), len(vk.cameras)))
+    c1g, c2g = gl.cameras
+    c1v, c2v = vk.cameras
+    # 相机挂相机 (修前这里 AttributeError 崩, 两后端同崩)
+    gl.set_camera_parent(c2g, c1g)
+    vk.set_camera_parent(c2v, c1v)
+    for tag, fg, fv in (
+            ('world_rotation_matrix(c2)', gl.world_rotation_matrix(c2g),
+             vk.world_rotation_matrix(c2v)),
+            ('model_world_matrix(c2)', gl.model_world_matrix(c2g),
+             vk.model_world_matrix(c2v)),
+            ('camera_world_position(c2)', tuple(gl.camera_world_position(c2g)),
+             tuple(vk.camera_world_position(c2v))),
+            ('camera_world_basis(c2)', gl.camera_world_basis(c2g),
+             vk.camera_world_basis(c2v))):
+        d = float(np.max(np.abs(np.asarray(fg, dtype=np.float64)
+                                - np.asarray(fv, dtype=np.float64))))
+        check("E2 %s GL ≡ VK (|Δ|=%.2e)" % (tag, d), d <= 1e-12, d)
+    # 再叠一层: 相机挂物体 (既有行为), 混合链 物体→相机→相机 两端仍一致
+    gl.set_camera_parent(c1g, gl.models[0])
+    vk.set_camera_parent(c1v, vk.models[0])
+    for tag, fg, fv in (
+            ('mixed world_rotation_matrix(c2)', gl.world_rotation_matrix(c2g),
+             vk.world_rotation_matrix(c2v)),
+            ('mixed camera_world_position(c2)', tuple(gl.camera_world_position(c2g)),
+             tuple(vk.camera_world_position(c2v))),
+            ('mixed camera_world_basis(c2)', gl.camera_world_basis(c2g),
+             vk.camera_world_basis(c2v))):
+        d = float(np.max(np.abs(np.asarray(fg, dtype=np.float64)
+                                - np.asarray(fv, dtype=np.float64))))
+        check("E2 %s GL ≡ VK (|Δ|=%.2e)" % (tag, d), d <= 1e-12, d)
+
+    print("---- E3 相机挂物体 / 物体挂相机 既有行为不回归 ----")
+    check("E3 相机挂物体: 父链+camera_children 双向维护 (GL)",
+          c1g.parent is gl.models[0]
+          and gl.models[0].camera_children == [c1g],
+          (c1g.parent, gl.models[0].camera_children))
+    check("E3 相机挂物体: 父链+camera_children 双向维护 (VK)",
+          c1v.parent is vk.models[0]
+          and vk.models[0].camera_children == [c1v],
+          (c1v.parent, vk.models[0].camera_children))
+    # c1 保世界: 挂到 o1 后世界基 = 局部基(view_basis) @ 父链旋转, c1 挂前为根
+    ex, ey, ez = gl.camera_world_basis(c1g)
+    want = view_basis(math.radians(30.0), math.radians(10.0), math.radians(5.0))
+    d = max(max(abs(a - b) for a, b in zip(u, v))
+            for u, v in zip((ex, ey, ez), want))
+    check("E3 相机挂物体: c1 世界基 = 局部基 @ 父链旋转 (保世界不跳, |Δ|=%.2e)" % d,
+          d <= 1e-12, d)
+    # 物体挂相机: 既有行为 = 命令层拒绝 (物体只能挂物体); GUI 拖拽预判不发命令
+    ed = make_editor()
+    w = _Win(ed)
+    ed._add_primitive('cube')
+    ed._add_camera()
+    depth = len(ed.undo.undo_stack)
+    r = ac.dispatch('reparent', {'child': '立方体1', 'parent': '摄像机1'}, w)
+    check("E3 物体挂相机: 命令层拒绝 (既有判据不变)", r.get('ok') is False
+          and '物体只能挂物体' in str(r.get('error', '')), r)
+    v = make_view(ed)
+    logs0 = len(v.uitree.logs)
+    v._hier_drop(('model', 0), ('camera', 0))     # GUI 拖物体到相机: 预判不翻译
+    check("E3 物体挂相机: GUI 拖拽不发命令/不涨栈 (既有 UX 不变)",
+          len(v.uitree.logs) == logs0
+          and len(ed.undo.undo_stack) == depth
+          and ed.models[0].parent is None,
+          (len(v.uitree.logs), len(ed.undo.undo_stack)))
+
+    print("---- E4 撤销快照 / 删除撤销对相机父链不再断链 ----")
+    from editor.undo.cmd_camera import (camera_snapshot, apply_camera_snapshot,
+                                        DeleteCameraCommand)
+    ed._add_camera()                    # E4 需要两台相机 (E3 的 ed 只有一台)
+    c1, c2 = ed.cameras
+    ed.set_camera_parent(c2, c1)
+    snap = camera_snapshot(c2)
+    apply_camera_snapshot(c2, snap, ed)           # CameraStateCommand do/undo 同路径
+    check("E4 快照回写保持相机父 (修前 find_model_by_guid 查不到 -> 静默脱父)",
+          c2.parent is c1 and c1.camera_children == [c2], c2.parent)
+    cmd = DeleteCameraCommand("删除摄像机", ed, c2)
+    cmd.do()
+    check("E4 删除挂父相机: 从相机表摘除+脱父", c2 not in ed.cameras
+          and c1.camera_children == [], (len(ed.cameras), c1.camera_children))
+    cmd.undo()
+    check("E4 删除撤销: 按 guid 重连相机父 (兜底 find_camera)",
+          c2 in ed.cameras and c2.parent is c1
+          and c1.camera_children == [c2],
+          (len(ed.cameras), c2.parent, c1.camera_children))
+
+
 if __name__ == "__main__":
     print("========== Q-B7-56-1 GUI 全量命令化 + 相机命令进撤销栈 门 ==========")
     # 逐组异常隔离: 未落地的新 API (修前红) 报 FAIL 并继续, 不许半路崩掉
@@ -682,7 +885,8 @@ if __name__ == "__main__":
                t_b_gui_spin_session_batch_is_not_agent_batch,
                t_b_deny_semantics_preserved,
                t_c_camera_commands_push_undo, t_c_gui_camera_legacy_no_undo,
-               t_d_no_direct_calls, t_d_dispatch_scope_param):
+               t_d_no_direct_calls, t_d_dispatch_scope_param,
+               t_e_backend_camera_chain):
         try:
             _t()
         except Exception as _e:

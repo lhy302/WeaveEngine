@@ -159,9 +159,14 @@ class CameraState:
         self.pitch_min = float(pitch_min)
         self.pitch_max = float(pitch_max)
         # 相机物体化 (2026-08-16): 可挂父到普通 GameObject (如玩家), 世界 = 局部 × 父链合成.
-        # 摄像机只可挂 GameObject (不可当父); children 对称占位, 本期恒空不参与任何迭代.
+        # Q-B7-57-1 (2026-11-22): 相机也可挂相机 (camera→camera, 世界旋转按父相机
+        # yaw/pitch 换算的旋转矩阵合成, Unity 父子语义); camera_children 与
+        # GameObject.camera_children 同名同义 —— 父链维护 (set_camera_parent /
+        # remove_camera / 撤销快照) 对两种父同一份代码, 修前 CameraState 无此字段,
+        # 挂相机后任何父链维护都会 AttributeError. children 为历史占位字段 (无人读), 保留.
         self.parent = None
         self.children = []
+        self.camera_children = []
         # 2026-10-19 第1档序13 天空盒 (C3 决策): 相机级天空盒覆盖。
         # 语义: 非 None 时优先于场景级 engine._skybox；None 时用场景默认。
         # 类型: loom_cubemap.Cubemap 实例或 None。

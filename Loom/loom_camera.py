@@ -19,7 +19,7 @@ import numpy as np
 
 from core.primitives import Point3D
 from scene.entities import CameraState, wrap_deg
-from mathlib.matlib import view_basis_to_angles
+from mathlib.matlib import view_basis, view_basis_to_angles   # noqa: F401  (Q-B7-57-1: 基构造唯一实现)
 
 # ---- 轨道相机距离的**唯一**合法区间 (2026-11-06 R-03 修正) ----------------
 # 为什么放在这里: 双后端 (GL engine / Vk scene_driver) + 场景加载 + 滚轮
@@ -219,20 +219,10 @@ class CameraMixin:
         """摄像机世界正交基 (ex,ey,ez) 行向量 (R=[ex;ey;ez] = 世界→视图旋转).
         按 mat4_view_yaw_pitch 同 trig/负绕向由 cam.yaw/pitch/roll (度) 建局部基,
         再沿父链合成世界旋转 (world_rotation_matrix 纯旋转 -> 基保持单位正交)."""
-        yaw, pitch, roll = math.radians(cam.yaw), math.radians(cam.pitch), math.radians(cam.roll)
-        cy, sy = math.cos(yaw), math.sin(yaw)
-        cp, sp = math.cos(pitch), math.sin(pitch)
-        ex = (cy, 0.0, -sy)
-        ey = (-sy * sp, cp, -cy * sp)
-        ez = (sy * cp, sp, cy * cp)
-        if roll:
-            cr, sr = math.cos(roll), math.sin(roll)
-            sn = -sr
-            exn = (ex[0] * cr + ey[0] * sn, ex[1] * cr + ey[1] * sn,
-                   ex[2] * cr + ey[2] * sn)
-            eyn = (ey[0] * cr - ex[0] * sn, ey[1] * cr - ex[1] * sn,
-                   ey[2] * cr - ex[2] * sn)
-            ex, ey = exn, eyn
+        # Q-B7-57-1 (2026-11-22): 局部基构造改走 mathlib.matlib.view_basis 唯一实现
+        # (与 mat4_view_yaw_pitch / transform 相机分支共用; 数值逐位不变).
+        ex, ey, ez = view_basis(math.radians(cam.yaw), math.radians(cam.pitch),
+                                math.radians(cam.roll))
         if cam.parent is None:
             return ex, ey, ez
         R3 = np.asarray(self.world_rotation_matrix(cam.parent))[:3, :3]
@@ -241,16 +231,18 @@ class CameraMixin:
                 tuple(float(v) for v in np.array(ez) @ R3))
 
     def set_camera_parent(self, cam, new_parent, preserve_world=True):
-        """把摄像机挂到 new_parent (GameObject) 下 (None=根). 只可挂 GameObject,
-        CameraState 无缩放. preserve_world=True (默认, Unity 语义): 换父后局部
-        位置/朝向按新父空间重算, 世界位置/朝向不变. 维护 cam.parent 与
-        parent.camera_children. 相机物体化 2026-08-16.
+        """把摄像机挂到 new_parent 下 (None=根). new_parent 可为 GameObject 或
+        CameraState (Q-B7-57-1, 2026-11-22: 相机挂相机; 修前在这里 AttributeError
+        崩溃 —— world_rotation_matrix 只认 GameObject 的 .rotation). CameraState
+        无缩放. preserve_world=True (默认, Unity 语义): 换父后局部位置/朝向按新
+        父空间重算, 世界位置/朝向不变. 维护 cam.parent 与 parent.camera_children
+        (GameObject / CameraState 同名字段). 相机物体化 2026-08-16.
         (命名 set_camera_parent 避开编辑器 controller 的 reparent_camera(cam,target),
         引擎内部/撤销命令都走本方法.)"""
         if cam.parent is new_parent:
             return
         if new_parent is not None:
-            # 摄像机不是 GameObject 不能当父, 防环防御走链 (正常永不触发)
+            # 防环防御走链 (相机/物体父都可能是父; 正常永不触发)
             cur = new_parent
             while cur is not None:
                 if cur is cam:
