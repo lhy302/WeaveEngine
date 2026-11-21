@@ -421,7 +421,7 @@ if __name__ == "__main__":
                 # 会进程级污染中文输入法(IME)候选框, 编辑器弃用 pygame 做窗口;
                 # QOpenGLWidget 承载 moderngl 视口 + Qt 原生面板 (见记忆
                 # sdl-window-contaminates-ime). 控制器命令层/GL 渲染管线复用.
-                from ui.loom_gui import run_loom_gui
+                from gui.main_window import run_loom_gui
                 run_loom_gui(scene_path=open_scene)
                 sys.exit(0)
             else:

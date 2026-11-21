@@ -137,7 +137,7 @@ flowchart TB
 
 > **这张图 v1 画错过**：原来把 `run_player.py` 画在入口层中间、还画了一条 `run_player → game_player`，方向反了（是 game_player 调 run_player）。
 > 现在按「谁创建谁」重画：编辑器入口缺省直连 GLEngine（EditorApp(_EditorCore, GLEngine)），
-> S4 起显式 `--backend vulkan` 时改走 VkEditorApp(_EditorCore, SceneDriver)（真窗口双视口可用，ui/vk_viewport.py）；
+> S4 起显式 `--backend vulkan` 时改走 VkEditorApp(_EditorCore, SceneDriver)（真窗口双视口可用，B4 归位 editor/viewport/vk_viewport.py）；
 > 播放器入口经 run_player 分叉到 GL（runtime.PlayerApp）或 VK（render/vk/player → SceneDriver）。
 > 编辑器与播放器的播放组件是**同一份**（_EditorCore 中间基类 + 主 pass 相机/挂父相机/LateUpdate/
 > _refresh_play_frame_world 共享实现，「同源不同步」规则 5.5，S5 对拍门四面全绿）。
@@ -146,13 +146,13 @@ flowchart TB
 
 | 场景 | 能选后端吗 | 依据 | 环境不支持时 |
 |---|---|---|---|
-| **编辑器**（`Loom.py` / `Loom.exe`） | **部分能**（S4，Q-B7-47-1 阶段 4）：缺省仍 GL（`EditorApp(_EditorCore, GLEngine)`，零变化）；**显式 `--backend vulkan`** → `VkEditorApp(_EditorCore, SceneDriver)` + `ui/vk_viewport.VkViewport`（QRenderWidget bitmap present） | `Loom.py` 编辑器分支走 `run_player.resolve_backend` 单一事实 | VK 不可用 → `VkViewport.init_error` 报错可见（不静默降级） |
+| **编辑器**（`Loom.py` / `Loom.exe`） | **部分能**（S4，Q-B7-47-1 阶段 4）：缺省仍 GL（`EditorApp(_EditorCore, GLEngine)`，零变化）；**显式 `--backend vulkan`** → `VkEditorApp(_EditorCore, SceneDriver)` + `editor/viewport/vk_viewport.VkViewport`（QRenderWidget bitmap present） | `Loom.py` 编辑器分支走 `run_player.resolve_backend` 单一事实 | VK 不可用 → `VkViewport.init_error` 报错可见（不静默降级） |
 | 编辑器里点「播放」 | **不能**。就在编辑器自己的 GL 引擎里跑 | `editor.toggle_play` 只置 `is_playing`，不起外部播放器 | 同上 |
 | 独立播放器（`--run`） | **能**：`--backend` > 游戏设置 > 引擎设置 > 默认 vulkan | `run_player.resolve_backend:133` | `auto`：VK 初始化失败 → 诊断+弹窗+**同进程转 GL**，并把用户层 `render_api` 写成 opengl（`run_player.py:415-430`、`_persist_backend:186`）；显式 `--backend vulkan` 失败只报错不改配置 |
 | 打包游戏（`game_player.py`） | **能**：同播放器一套逻辑（复用 `run_player`） | `game_player.py:169-235` | 同播放器 |
 | 运行期失败（VK 渲染循环内崩） | — | `VkRunError` | **不回退**：打印原因后非零退出（`run_player.py:419`） |
 
-> 编辑器里那个「渲染 API」下拉框（`ui/loom_gui.py:3686-3707`）写的是**游戏设置**，即「下次启动播放器/打包游戏用哪个」，
+> 编辑器里那个「渲染 API」下拉框（B4 后在 `gui/main_window.py`，原 `ui/loom_gui.py:3686-3707`）写的是**游戏设置**，即「下次启动播放器/打包游戏用哪个」，
 > 不是「编辑器自己用哪个」。`guiloader.py:47` 的注释也这么写：`播放器/发布游戏默认渲染 API (编辑器选)`。
 > 所以同一个键 `render_api` 在编辑器里是「替别人设的」，在播放器里是「我自己用的」—— 这是你看出怪的地方，是真实的不对称。
 
@@ -256,7 +256,7 @@ flowchart LR
 
 ```mermaid
 flowchart TB
-  E1["编辑器打开<br/>editor.py:1245"]:::entry
+  E1["编辑器打开<br/>editor/core.py:1245"]:::entry
   E2["GL 播放器<br/>render/gl/model_gpu.py:285"]:::entry
   E3["VK 播放器 / 打包游戏<br/>render/vk/driver.py:742"]:::entry
   E4["EAI 命令<br/>agent_commands.py:549"]:::entry
@@ -408,20 +408,20 @@ flowchart TB
 
 ```mermaid
 flowchart LR
-  ED["EditorApp<br/>editor.py 3128"]:::facade
+  ED["EditorApp<br/>editor/app.py（B4 拆，本体 editor/core.py）"]:::facade
   GE["GLEngine<br/>render/gl/engine.py"]:::facade
-  V["Qt 视图<br/>ui/loom_gui.py 4338"]:::file
-  U["撤销/重做<br/>undo.py 1391"]:::file
+  V["Qt 视图<br/>gui/main_window.py 3526<br/>（B4 前为 ui/loom_gui.py 4338）"]:::file
+  U["撤销/重做<br/>editor/undo/ 5 文件（B4 前 undo.py 1391）"]:::file
   EAI["EAI 命令面<br/>agent_commands.py 4048"]:::entry
   FD["文件对话框<br/>filedialog.py 294"]:::file
   PW["播放窗口<br/>loom_player_window.py 312"]:::file
   S["场景 I/O<br/>sceneio.py（薄门面）<br/>→ scene/ 按域拆分"]:::file
   ED ==>|继承| GE
   ED -->|通知/刷新| V
-  VKE["VkEditorApp<br/>editor.py（S4）"]:::facade
+  VKE["VkEditorApp<br/>editor/vk_app.py（S4，B4 归位）"]:::facade
   SDV["SceneDriver<br/>render/vk/driver.py"]:::facade
-  VKV["VkViewport<br/>ui/vk_viewport.py 292"]:::file
-  COR["★ _EditorCore<br/>editor.py（S2 中间基类）<br/>编辑器 ~140 方法唯一实现"]:::contract
+  VKV["VkViewport<br/>editor/viewport/vk_viewport.py<br/>（事件桥=viewport/event_bridge.py，B4 收口）"]:::file
+  COR["★ _EditorCore<br/>editor/core.py（S2 中间基类，B4 归位）<br/>编辑器 ~140 方法唯一实现"]:::contract
   LPV["render/vk/pass_vk.py（S3）<br/>VkLineBatch / overlay_scope<br/>VkFrameExecutor（同一份 plan）"]:::contract
   ED ==>|继承| COR
   VKE ==>|继承| COR
@@ -512,14 +512,14 @@ flowchart LR
 sequenceDiagram
   autonumber
   participant U as 用户
-  participant ED as editor.py
+  participant ED as editor/core.py
   participant SIO as sceneio.py（门面）<br/>scene/io.py
   participant GATE as check_engine_version
   participant MIG as migrate()
   participant AP as _apply_* 装配
   U->>ED: 打开场景文件
   ED->>SIO: json.load 读 dict
-  ED->>GATE: 闸门（editor.py:1242，先过一次）
+  ED->>GATE: 闸门（editor/core.py:1242，先过一次）
   GATE-->>ED: 通过 / 抛 SceneVersionError
   ED->>SIO: scene_from_dict(data)
   SIO->>MIG: 第一步 migrate()（scene/contract.py）
@@ -704,10 +704,14 @@ sequenceDiagram
 ### G 编辑器
 | 文件 | 行数 | 职责 |
 |---|---|---|
-| `editor.py` | 3128 | EditorApp/VkEditorApp: 3D 游戏引擎编辑器（GL/VK 双装配，S4） |
+| `editor/core.py` | 2996 | _EditorCore（编辑器 ~140 方法唯一实现 + 文件对话框记忆/场景读写，B4 拆自 editor.py） |
+| `editor/app.py` | 32 | EditorApp(_EditorCore, GLEngine) GL 装配入口（B4 拆） |
+| `editor/vk_app.py` | 157 | VkEditorApp(_EditorCore, SceneDriver) VK 装配 + _VkGlStateShim（S4 建，B4 归位） |
+| `editor/undo/`（5 文件） | 1345 | 撤销/重做按命令域拆：registry / cmd_object / cmd_light / cmd_camera / cmd_scene（B4 拆自 undo.py 1392） |
+| `editor/viewport/` | 390 | 编辑器视口域：event_bridge.py（★三端共用事件桥唯一实现）+ vk_viewport.py（B6 建 B4 归位） |
 | `agent_commands.py` | 4049 | Engine Agent 接口 EAI (2026-08-27) |
-| `undo.py` | 1392 | 撤销/重做 (M15, 命令模式) |
-| `gui.py` | 586 | 即时模式 GUI (ImGui 风格, moderngl 手写, 零新依赖) |
+| `undo.py` | 21 | 薄门面：sys.modules 别名 → editor.undo（保仓外 `import undo` 旧名） |
+| `gui/legacy_view.py` | 586 | 即时模式 GUI（原 gui.py，ImGui 风格；仅 2 个测试引用，历史保留） |
 | `filedialog.py` | 295 | Windows 原生文件对话框 (GetSaveFileNameW / GetOpenF |
 | `loom_player_window.py` | 313 | 玩家模式远程兼容窗口（Qt 离屏 GL + QImage 显示）。 |
 | `loom_mcp.py` | 993 | MCP 服务面（EAI 的 MCP 封装，无模块 docstring） |
@@ -730,14 +734,23 @@ sequenceDiagram
 ### J ui/ 子目录
 | 文件 | 行数 | 职责 |
 |---|---|---|
-| `ui/loom_gui.py` | 4338 | Loom 编辑器 PySide6 原生 Qt 视图 (IEditorView 实现) |
+| `ui/loom_gui.py` | 22 | 薄门面：sys.modules 别名 → gui/main_window.py（B4，保仓外旧名） |
 | `ui/editor_ui.py` | 67 | IEditorView 契约: Loom 编辑器 UI 接口标准 (UI 模块化 202 |
 | `ui/grid.py` | 104 | 无限网格纯几何 (2026-08-14) |
 | `ui/qt_console.py` | 187 | Loom 编辑器内嵌命令行坞 (2026-08-27, EAI P2①) |
 | `ui/qt_uitree.py` | 354 | Loom 编辑器 UI 树编辑器 dock (2026-10-18 阶段5) |
-| `ui/vk_viewport.py` | 292 | VK 编辑器视口：QRenderWidget(bitmap) + 事件桥（S4，Q-B7-47-1 阶段 4） |
+| `ui/vk_viewport.py` | 17 | 薄门面：sys.modules 别名 → editor/viewport/vk_viewport.py（B4） |
 | `ui/minimal_editor_view.py` | 110 | MinimalEditorView: Loom 编辑器第二 UI 实现 (极简只读) |
 | `ui/__init__.py` | 11 | Loom 编辑器 UI 层 (UI 模块化 2026-08-13) |
+
+### J2 gui/ 子目录（B4 新建；Windows 大小写不敏感 —— 磁盘目录名 gui/ 即原插件 GUI 边界目录改为小写）
+| 文件 | 行数 | 职责 |
+|---|---|---|
+| `gui/main_window.py` | 3526 | LoomGUI 主窗口（工具栏/层级/检查器/资源浏览器/控制台坞全部面板方法）+ run_loom_gui 入口（B4 拆自 ui/loom_gui.py 4338） |
+| `gui/gl_viewport.py` | 227 | GLViewport（QOpenGLWidget + moderngl；事件桥继承 editor/viewport/event_bridge.py） |
+| `gui/remote_viewport.py` | 246 | RemoteViewport（离屏 GL readback 兜底；事件桥同上） |
+| `gui/widgets/` | 147 | 自定义控件：AssetListWidget / DraggableSpin / DragBlock |
+| `gui/legacy_view.py` | 586 | 即时模式遗留视图（原 gui.py，历史保留） |
 
 ### K scripts/ 子目录
 | 文件 | 行数 | 职责 |
@@ -841,15 +854,15 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-  subgraph GUIL["Qt 视图 ui/loom_gui.py（4326 行）"]
+  subgraph GUIL["Qt 视图 gui/main_window.py（B4 后，原 ui/loom_gui.py）"]
     G1["工具栏/菜单/对话框<br/>20 个方法 · 23 处直接调用"]:::gui
     G2["UI 树面板<br/>_invoke_ui_cmd（5 处）"]:::gui
     G3["检查器 / gizmo / 层级<br/>（代码注释：不走 dispatch）"]:::gui
     G4["命令行坞 F12<br/>qt_console"]:::gui
   end
   E["EAI 命令层<br/>agent_commands.py · 104 个命令"]:::eai
-  A["EditorApp<br/>editor.py · 2905 行"]:::facade
-  U["UndoManager<br/>undo.py · 1392 行 / 21 个 Command 子类"]:::undo
+  A["EditorApp<br/>editor/core.py（B4 拆）"]:::facade
+  U["UndoManager<br/>editor/undo/registry.py（B4 拆）"]:::undo
   G1 -->|直接调方法| A
   G3 -->|直接调方法| A
   G2 -->|查 _COMMANDS 调命令| E
@@ -963,7 +976,7 @@ flowchart TB
 | 机制 | 扩展点 | 隔离 | 能否替换引擎核心 | 证据 |
 |---|---|---|---|---|
 | ① 普通插件 | 注册脚本类 / 编辑器按钮 / 读插件资产（**3 个**） | 受限环境（有逃逸靶场回归 `test_plugin_sandbox_escape.py`） | ❌ 只能加功能 | `plugin/loader.py:472-518`；未知扩展点只进 `pending` 并打印「L2+ 开放」`:464-470` |
-| ② 核心插件 | 同 3 个扩展点，但**全权** | 无沙箱；人工信任闸 + 全文件 SHA256 + 重启生效 + 篡改拒载 | **名义上可以**，实际只能 monkey-patch | `capability` 全仓只用于校验非空（`:365-367`）与弹窗展示（`loom_gui.py:4190`），**引擎里没有任何地方按 capability 找实现** |
+| ② 核心插件 | 同 3 个扩展点，但**全权** | 无沙箱；人工信任闸 + 全文件 SHA256 + 重启生效 + 篡改拒载 | **名义上可以**，实际只能 monkey-patch | `capability` 全仓只用于校验非空（`:365-367`）与弹窗展示（B4 后 `gui/main_window.py`），**引擎里没有任何地方按 capability 找实现** |
 | ③ C 核心组件 | ABI 函数表（pipeline/script/physics/ckernels） | 进程内 DLL + ABI 版本门 | 结构上可以 | `loom_module.h` v1.0；`official_manifest.py` 把官方件 SHA256 编译进 exe，**设计目标就是外部改不动** |
 | — | — | — | — | `plugins/` 与 `core_plugins/` 只有 README，**0 个真实插件** |
 

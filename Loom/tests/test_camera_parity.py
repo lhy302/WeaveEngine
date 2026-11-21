@@ -269,13 +269,13 @@ check('结构：VK 的轨道相机每帧/加载各同步一次（恰好 2 个调
       _sync_calls)
 src_has('render/gl/render.py', 'self.apply_orbit_camera()', True,
         'GL 播放器每渲染帧把轨道相机合成进 self.camera（_prepare_main_pass）')
-src_has('editor.py', 'self.apply_orbit_camera()', True,
+src_has('editor/core.py', 'self.apply_orbit_camera()', True,
         'GL 编辑器每渲染帧同位置同语义合成（editor._prepare_main_pass）')
 src_has('runtime.py', 'self.apply_orbit_camera()', True,
         'GL 播放器加载时也合成一次（与 VK load_from_data 的同步点同位置）')
 _vp_v = _grep_prod('mat4_view_yaw_pitch(')
 check('结构：view 矩阵由同一个 matlib.mat4_view_yaw_pitch 构造（GL 播放器/编辑器 + VK 渲染）',
-      {'render/gl/render.py', 'editor.py', 'render/vk/driver.py'} <= {p for (p, _l) in _vp_v},
+      {'render/gl/render.py', 'editor/core.py', 'render/vk/driver.py'} <= {p for (p, _l) in _vp_v},
       sorted({p for (p, _l) in _vp_v}))
 src_has('render/vk/driver.py', 'mat4_view_yaw_pitch(np, cam_pos, yaw, pitch, roll)', True,
         'VK 的 render_pose 按模式取 (yaw,pitch,roll) —— 与 GL 同一个构造函数')
@@ -300,11 +300,11 @@ src_has('render/vk/player.py', 'driver.dev_mouse_enabled = (os.environ.get("LOOM
         True, 'VK 的开发者视角鼠标按生产方式由 LOOM_VK_DEVMOUSE 置位（本门组 ④ 用它开启）')
 _uc = _grep_prod('def _update_camera')
 check('结构：GL 侧开发者视角鼠标只有 editor._update_camera 一份实现',
-      [p for (p, _l) in _uc] == ['editor.py'], _uc)
+      [p for (p, _l) in _uc] == ['editor/core.py'], _uc)
 for _f, _n, _why in (
-        ('editor.py', 'max(-1.55, min(1.55', 'GL 右键拖动 pitch 钳 ±1.55'),
+        ('editor/core.py', 'max(-1.55, min(1.55', 'GL 右键拖动 pitch 钳 ±1.55'),
         ('render/vk/driver.py', 'max(-1.55, min(1.55', 'VK 右键拖动 pitch 钳 ±1.55（同常数）'),
-        ('editor.py', 'math.exp(-self.mouse_wheel * 0.1)', 'GL 滚轮推拉公式'),
+        ('editor/core.py', 'math.exp(-self.mouse_wheel * 0.1)', 'GL 滚轮推拉公式'),
         ('render/vk/driver.py', 'math.exp(-wheel * 0.1)', 'VK 滚轮推拉公式（同常数）'),
         ('render/vk/driver.py', 'self.mouse_look_sens = 0.01', 'VK 鼠标灵敏度 0.01 弧度/像素')):
     src_has(_f, _n, True, _why)

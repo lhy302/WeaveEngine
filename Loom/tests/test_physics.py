@@ -56,7 +56,7 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import engine as E
 import script.scripts as scripts
-import undo as U
+import editor.undo as U  # B4: undo.py -> editor/undo/ 包
 import sceneio as S
 from mathlib.mesh import create_cube, create_sphere, create_plane
 

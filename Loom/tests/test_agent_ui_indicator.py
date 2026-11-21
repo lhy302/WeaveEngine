@@ -65,7 +65,7 @@ from PySide6.QtWidgets import QApplication, QMainWindow   # noqa: E402
 
 _APP = QApplication.instance() or QApplication([])
 
-from ui import loom_gui                                   # noqa: E402
+from gui import main_window as loom_gui                                   # noqa: E402
 
 ok = True
 

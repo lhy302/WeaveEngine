@@ -112,7 +112,7 @@ def main():
     data = AB._load_scene(os.path.join(AB.SCENES_DIR, 'ab_sky.json'))
     g0 = AB.render_gl(data)
     v0 = AB.render_vk(data)
-    orig = (loom_pass.frame_plan, loom_render.frame_plan, editor.frame_plan)
+    orig = (loom_pass.frame_plan, loom_render.frame_plan, editor.core.frame_plan)  # B4: GL 消费点在 editor.core.render（frame_plan 全局）
     rows = []
     try:
         for name, mut in MUTS:
@@ -120,17 +120,17 @@ def main():
                 return mut(orig[0](*a, **k))
             loom_pass.frame_plan = wrapper
             loom_render.frame_plan = wrapper
-            editor.frame_plan = wrapper
+            editor.core.frame_plan = wrapper
             try:
                 g = AB.render_gl(data)
                 v = AB.render_vk(data)
             finally:
-                loom_pass.frame_plan, loom_render.frame_plan, editor.frame_plan = orig
+                loom_pass.frame_plan, loom_render.frame_plan, editor.core.frame_plan = orig
             mg, mv = _mae(g, g0), _mae(v, v0)
             rows.append((name, mg, mv))
             print('  %-24s GL=%.5f VK=%.5f' % (name, mg, mv))
     finally:
-        loom_pass.frame_plan, loom_render.frame_plan, editor.frame_plan = orig
+        loom_pass.frame_plan, loom_render.frame_plan, editor.core.frame_plan = orig
     for name, mg, mv in rows:
         check('反例两端同向：%s' % name, (mg > 1e-3) == (mv > 1e-3),
               (mg, mv))
@@ -178,11 +178,11 @@ def main():
     try:
         def _w(*a, **k):
             return _fmt8(orig[0](*a, **k))
-        loom_pass.frame_plan = loom_render.frame_plan = editor.frame_plan = _w
+        loom_pass.frame_plan = loom_render.frame_plan = editor.core.frame_plan = _w
         g3 = AB.render_gl(data3)
         v3 = AB.render_vk(data3)
     finally:
-        loom_pass.frame_plan, loom_render.frame_plan, editor.frame_plan = orig
+        loom_pass.frame_plan, loom_render.frame_plan, editor.core.frame_plan = orig
     mf_g = _mae(g3, g3_0)
     mf_v = _mae(v3, v3_0)
     check('bloom.half.format 两端真生效（GL 变化）', mf_g > 1e-4, mf_g)

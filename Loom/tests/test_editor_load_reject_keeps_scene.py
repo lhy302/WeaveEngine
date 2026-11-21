@@ -63,7 +63,8 @@ os.environ.setdefault('LOOM_NO_SAVE_MIGRATE', '1')
 
 import engine as E                                       # noqa: E402
 import editor                                            # noqa: E402
-from undo import UndoManager                             # noqa: E402
+import editor.core as _edcore                            # noqa: E402  B4: save_last_dir 真源
+from editor.undo import UndoManager                             # noqa: E402
 
 E.GLEngine._build_gpu = lambda self, m: None             # 无头桩
 
@@ -125,8 +126,8 @@ def _write(tmp, name, data):
 
 
 def t_valid_then_cycle_keeps_scene():
-    old_save = editor.save_last_dir
-    editor.save_last_dir = lambda state_file, path: None
+    old_save = _edcore.save_last_dir
+    _edcore.save_last_dir = lambda state_file, path: None
     try:
         with tempfile.TemporaryDirectory() as tmp:
             a_path = _write(tmp, 'A.json', {
@@ -168,7 +169,7 @@ def t_valid_then_cycle_keeps_scene():
                   [m.name for m in ed.models])
             check('非对象场景有错误提示', bool(ed.msg), ed.msg)
     finally:
-        editor.save_last_dir = old_save
+        _edcore.save_last_dir = old_save
 
 
 t_valid_then_cycle_keeps_scene()

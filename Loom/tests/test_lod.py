@@ -63,13 +63,14 @@ sys.argv[0] = os.path.join(BASE, 'Loom.py')
 
 import moderngl
 import editor as editor_mod
+import editor.core as _edcore  # B4: 目录常量真源在 editor.core（monkeypatch 目标）
 # 2026-11-06: 测试不得改动仓库内的 保存/ 目录 —— EditorApp.__init__ 首次运行会把
 # 保存/ 迁移为 Projects/ (线上正确行为), 但测试跑一次就把受版本控制的数据搬走。
 # 把两个目录常量重定向到临时目录, 迁移逻辑面对空目录 = 零副作用。
 import tempfile as _tf_save
 _SAVE_ROOT = _tf_save.mkdtemp(prefix="loom_test_save_")
-editor_mod.DEFAULT_SAVE_DIR = os.path.join(_SAVE_ROOT, "Projects")
-editor_mod._LEGACY_SAVE_DIR = os.path.join(_SAVE_ROOT, "保存")
+_edcore.DEFAULT_SAVE_DIR = os.path.join(_SAVE_ROOT, "Projects")
+_edcore._LEGACY_SAVE_DIR = os.path.join(_SAVE_ROOT, "保存")
 import engine as E
 from mathlib.mesh import create_sphere
 

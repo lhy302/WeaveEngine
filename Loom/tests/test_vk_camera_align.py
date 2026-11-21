@@ -415,7 +415,7 @@ def t_mouse_wheel():
     check("8 拉近钳到 0.5", abs(d.distance - CAM_DIST_MIN) < 1e-12, d.distance)
 
     # 公式与 GL 源码一致 (文本契约: 同一常数, 别两边各写一份)
-    src = open(os.path.join(os.path.dirname(HERE), "editor.py"), encoding="utf-8").read()
+    src = open(os.path.join(os.path.dirname(HERE), "editor", "core.py"), encoding="utf-8").read()
     check("8 GL 侧同公式 exp(-wheel*0.1) 未被改",
           "math.exp(-self.mouse_wheel * 0.1)" in src)
 

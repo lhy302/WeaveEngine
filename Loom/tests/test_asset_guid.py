@@ -52,7 +52,7 @@ import assets.assets as loom_assets                      # noqa: E402
 import build.game_pack as game_pack                      # noqa: E402
 import build.build_game as build_game                    # noqa: E402
 import agent_commands as AC                              # noqa: E402
-from undo import UndoManager                             # noqa: E402
+from editor.undo import UndoManager                             # noqa: E402
 
 E.GLEngine._build_gpu = lambda self, m: None             # 无头桩
 
@@ -839,7 +839,7 @@ def t_p2_6_notice_visible():
     ed2.mark_saved = lambda: None
     ed2.last_dir = None
     ed2.scene_name = 's'
-    import editor as _edmod
+    import editor.core as _edmod   # B4: save_last_dir 真源在 editor.core（编辑器常量/工具函数域）
     old_save = _edmod.save_last_dir
     _edmod.save_last_dir = lambda *a, **k: None
     try:

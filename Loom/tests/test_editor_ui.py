@@ -66,11 +66,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import engine as E
 import editor
+import editor.core as _edcore  # B4: STATE_FILE 真源（monkeypatch 目标）
 from mathlib.mesh import create_cube
-from undo import UndoManager
+from editor.undo import UndoManager
 from editor import EditorApp
 from ui.editor_ui import IEditorView
-from ui.loom_gui import LoomGUI
+from gui.main_window import LoomGUI
 from ui.minimal_editor_view import MinimalEditorView
 
 E.GLEngine._build_gpu = lambda self, m: None   # 无头桩
@@ -235,7 +236,7 @@ def t_rename_light_camera_validation():
 def t_text_input_routing():
     """IME 合成文本 (pygame.TEXTINPUT) -> 命名框缓冲 (2026-08-17)."""
     import pygame
-    from gui import GUI
+    from gui.legacy_view import GUI
     g = GUI.__new__(GUI)
     g._focus = 'insp.name'
     g._input = {'insp.name': ''}
@@ -328,7 +329,7 @@ def t_save_scene():
     ed, m = new_ed()
     _sv = FD.save_file
     _sf = editor.STATE_FILE
-    editor.STATE_FILE = os.path.join(tempfile.mkdtemp(), "state.json")
+    _edcore.STATE_FILE = os.path.join(tempfile.mkdtemp(), "state.json")
     try:
         # 另存为: 总是弹框, 取消 -> False
         ed._scene_path = None
@@ -350,7 +351,7 @@ def t_save_scene():
               and os.path.isfile(ed._scene_path))
     finally:
         FD.save_file = _sv
-        editor.STATE_FILE = _sf
+        _edcore.STATE_FILE = _sf
 
 
 def t_guard_unsaved():

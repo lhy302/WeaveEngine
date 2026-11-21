@@ -230,7 +230,7 @@ def _call_groups():
                 continue
             if rel.startswith('Loom/tests/'):
                 g = 'tests'
-            elif rel.startswith('Loom/') and fn in ('editor.py', 'editor_app.py', 'editor_ui.py'):
+            elif rel.startswith('Loom/') and fn in ('core.py', 'app.py', 'vk_app.py', 'editor_ui.py'):  # B4: editor.py -> editor/{core,app,vk_app}.py
                 g = 'editor'
             elif rel.startswith('Loom/') and fn in ('run_player.py', 'render/vk/player.py', 'game_player.py',
                                                    'build_game.py', 'build_entry.py', 'runtime.py'):

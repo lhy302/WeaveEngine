@@ -74,8 +74,8 @@ _APP = QApplication.instance() or QApplication([])
 
 from editor import EditorApp                             # noqa: E402
 from engine import GameObject                            # noqa: E402
-import undo as U                                          # noqa: E402
-from ui import loom_gui                                   # noqa: E402
+import editor.undo as U                                   # noqa: E402  B4: undo -> editor.undo
+from gui import main_window as loom_gui                                   # noqa: E402
 
 ok = True
 

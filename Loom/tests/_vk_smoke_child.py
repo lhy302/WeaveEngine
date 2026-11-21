@@ -104,7 +104,7 @@ def section_a():
         import editor as editor_mod
         check('A1 editor.VkEditorApp 存在（S2 占位落地）',
               hasattr(editor_mod, 'VkEditorApp'))
-        from ui.vk_viewport import VkViewport
+        from editor.viewport.vk_viewport import VkViewport
         check('A2 ui.vk_viewport.VkViewport 存在', VkViewport is not None)
     except Exception as e:
         check('A0 VK 编辑器模块可导入', False, repr(e))
@@ -147,14 +147,14 @@ def section_b(editor_mod, VkEditorApp):
     print('=== B. 真窗口：VK 编辑器 60 帧 + grab + 编辑态操作 ===')
     from PySide6.QtWidgets import QApplication
     from PySide6.QtCore import QTimer
-    from ui.loom_gui import LoomGUI
+    from gui.main_window import LoomGUI
 
     app = QApplication.instance() or QApplication(['vk-editor-smoke'])
     win = LoomGUI(scene_path=None, width=1280, height=800, backend='vulkan')
-    from ui.vk_viewport import VkViewport
+    from editor.viewport.vk_viewport import VkViewport
     check('B1 backend=vulkan -> viewport 是 VkViewport', isinstance(win.viewport, VkViewport),
           type(win.viewport).__name__)
-    _lg_src = open(os.path.join(ROOT, 'ui', 'loom_gui.py'), encoding='utf-8').read()
+    _lg_src = open(os.path.join(ROOT, 'gui', 'main_window.py'), encoding='utf-8').read()
     check('B2 默认（未传 backend）仍走 GLViewport 分支（GL 路径分支原样保留）',
           'self.viewport = GLViewport(self, scene_path, width, height)' in _lg_src)
     win.show()

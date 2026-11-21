@@ -178,7 +178,7 @@ class _OverlayView:
     def draw(self, ctl, delta_time):
         if ctl.is_playing:
             return
-        import ui.loom_gui as lg
+        import gui.main_window as lg
         # —— 与 LoomGUI.draw（ui/loom_gui.py 视口叠加段）同形（任务口径 = gizmo/选中框）。
         # 网格不在本门范围：GL 侧网格走 depth_test（网格语义），而离屏夹具的
         # _external_fb 深度附件未被主 pass 写入（真窗口里主 pass 深度在同一个

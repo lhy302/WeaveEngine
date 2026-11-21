@@ -24,7 +24,7 @@ UI 模块化 2026-08-13. 用同一个 EditorController, 证明"换 UI 只换实�
 """
 import moderngl
 
-from gui import GUI
+from gui.legacy_view import GUI
 from .editor_ui import IEditorView
 
 

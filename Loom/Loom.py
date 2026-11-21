@@ -500,7 +500,7 @@ if __name__ == "__main__":
                     from run_player import resolve_backend as _resolve_backend
                     if _resolve_backend(_cli) == 'vulkan':
                         _edit_backend = 'vulkan'
-                from ui.loom_gui import run_loom_gui
+                from gui.main_window import run_loom_gui
                 run_loom_gui(scene_path=open_scene, backend=_edit_backend)
                 sys.exit(0)
     except Exception as e:

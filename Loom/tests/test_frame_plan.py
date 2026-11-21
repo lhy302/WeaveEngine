@@ -80,7 +80,7 @@ def t_shared():
           editor.frame_plan is frame_plan, editor.frame_plan)
     check('B2 播放器用 loom_pass.frame_plan',
           loom_render.frame_plan is frame_plan, loom_render.frame_plan)
-    src_e = open(os.path.join(ROOT, 'editor.py'), encoding='utf-8').read()
+    src_e = open(os.path.join(ROOT, 'editor', 'core.py'), encoding='utf-8').read()
     src_p = open(os.path.join(ROOT, 'render', 'gl', 'render.py'), encoding='utf-8').read()
     check('B3 编辑器调用 frame_plan(include_shadow=..., ...)',
           'frame_plan(include_shadow=' in src_e, '')

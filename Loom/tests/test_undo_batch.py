@@ -63,7 +63,7 @@ sys.path.insert(0, os.path.dirname(HERE))
 
 import engine as E
 from mathlib.mesh import create_cube
-import undo as U
+import editor.undo as U  # B4: undo.py -> editor/undo/ 包
 import agent_commands as ac
 
 # 不开窗口的引擎桩: 替换 _build_gpu 为 no-op (同 test_undo.py)

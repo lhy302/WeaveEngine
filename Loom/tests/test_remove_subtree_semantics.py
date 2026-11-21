@@ -63,7 +63,7 @@ sys.path.insert(0, ROOT)
 
 from editor import EditorApp                              # noqa: E402
 from engine import GLEngine, GameObject, Point3D          # noqa: E402
-import undo as U                                          # noqa: E402
+import editor.undo as U                                   # noqa: E402  B4: undo -> editor.undo
 
 ok = True
 

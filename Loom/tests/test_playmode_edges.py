@@ -56,7 +56,7 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import engine as E
 import editor
-import undo
+import editor.undo as undo  # B4: undo.py -> editor/undo/ 包
 from mathlib.mesh import create_cube
 
 E.GLEngine._build_gpu = lambda self, m: None
@@ -173,18 +173,18 @@ app = new_app()
 add(app, create_cube(1.0), (0, 0, 0))
 app.toggle_play()
 check("A9 前置: 已进入播放", app.is_playing is True)
-_real_apply = editor.apply_snapshot
+_real_apply = editor.core.apply_snapshot  # B4: 消费点在 editor.core._exit_play_atomic（apply_snapshot 已进其命名空间）
 
 
 def _boom_apply(m, snap):
     raise RuntimeError('模拟 apply_snapshot 失败')
 
 
-editor.apply_snapshot = _boom_apply
+editor.core.apply_snapshot = _boom_apply
 try:
     ok_exit = app._exit_play_atomic()
 finally:
-    editor.apply_snapshot = _real_apply
+    editor.core.apply_snapshot = _real_apply
 check("A9 退出失败 -> 返回 False", ok_exit is False, str(ok_exit))
 check("A9 退出失败 -> 仍在播放态 (无中间态, 修前会是 is_playing=False)",
       app.is_playing is True, str(app.is_playing))
@@ -199,11 +199,11 @@ check("A9 退出失败 -> 用户可见提示 (toast)",
 check("A9 告警只打一次 (第二次失败只计数)",
       getattr(app, '_play_exit_warned', False) is True,
       str(getattr(app, '_play_exit_warned', None)))
-editor.apply_snapshot = _boom_apply
+editor.core.apply_snapshot = _boom_apply
 try:
     app._exit_play_atomic()
 finally:
-    editor.apply_snapshot = _real_apply
+    editor.core.apply_snapshot = _real_apply
 check("A9 二次失败 -> 计数 +1 且不重复告警",
       getattr(app, '_play_exit_fail_count', 0) == 2,
       str(getattr(app, '_play_exit_fail_count', None)))
@@ -213,7 +213,7 @@ check("A9 故障消除后重试 -> 完整退出",
 check("A9 render 帧末走原子化入口 (不再裸 except)",
       'self._exit_play_atomic()' in open(os.path.join(
           os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-          'editor.py'), encoding='utf-8').read())
+          'editor', 'core.py'), encoding='utf-8').read())
 
 print()
 print("总结果:", "ALL PASS ✅" if ok else "有 FAIL ❌")

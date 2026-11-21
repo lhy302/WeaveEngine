@@ -54,7 +54,7 @@ def _enforce_fail_exit_code():
 
 import sys, os, math
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import undo as U
+import editor.undo as U  # B4: undo.py -> editor/undo/ 包
 from engine import CameraState, Point3D
 from editor import EditorApp
 

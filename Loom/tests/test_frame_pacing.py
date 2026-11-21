@@ -77,7 +77,7 @@ def _load_wait_until():
     """导入 loom_gui.LoomGUI._wait_until (Qt 模块 — PySide6 已装则直导;
     失败=环境缺 Qt, 单测复制公式原地跑, 公式同源铁律见注释)."""
     try:
-        from ui.loom_gui import LoomGUI
+        from gui.main_window import LoomGUI
         return LoomGUI._wait_until
     except Exception:
         def _wait_until(target, min_sleep=0.005, undershoot=0.004):

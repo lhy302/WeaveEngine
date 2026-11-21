@@ -60,15 +60,16 @@ import numpy as np
 # 多核优化守卫: 测试确定性, 不建脚本线程/不设进程亲和性 (2026-08-14)
 os.environ['LOOM_NO_PARALLEL'] = '1'
 import editor
+import editor.core as _edcore  # B4: 目录常量真源（monkeypatch 目标）
 # 2026-11-06: 测试不得改动仓库内的 保存/ 目录 —— EditorApp.__init__ 首次运行会把
 # 保存/ 迁移为 Projects/ (线上正确行为), 但测试跑一次就把受版本控制的数据搬走。
 # 把两个目录常量重定向到临时目录, 迁移逻辑面对空目录 = 零副作用。
 import tempfile as _tf_save
 _SAVE_ROOT = _tf_save.mkdtemp(prefix="loom_test_save_")
-editor.DEFAULT_SAVE_DIR = os.path.join(_SAVE_ROOT, "Projects")
-editor._LEGACY_SAVE_DIR = os.path.join(_SAVE_ROOT, "保存")
+_edcore.DEFAULT_SAVE_DIR = os.path.join(_SAVE_ROOT, "Projects")
+_edcore._LEGACY_SAVE_DIR = os.path.join(_SAVE_ROOT, "保存")
 import sceneio
-import undo as U
+import editor.undo as U  # B4: undo.py -> editor/undo/ 包
 from mathlib.mesh import create_cube, create_plane
 
 TMP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_tmp")
@@ -77,7 +78,7 @@ os.makedirs(TMP, exist_ok=True)
 # 2026-08-13: editor_state.json 指向临时文件, 不污染真实"上次目录".
 # (旧方案"备份+末尾还原"在测试中途异常退出时不会还原 -> 编辑器默认保存路径被
 #  带到 _tmp, 用户实测 A01 时默认目录错乱. 改为直接替换 STATE_FILE 根治.)
-editor.STATE_FILE = os.path.join(TMP, "editor_state_test.json")
+_edcore.STATE_FILE = os.path.join(TMP, "editor_state_test.json")
 ok = True
 _FAILS = []   # 2026-11-06: 失败清单 (原文件无失败退出码, FAIL 也 exit 0 = 假绿)
 

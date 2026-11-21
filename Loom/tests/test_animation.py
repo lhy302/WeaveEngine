@@ -56,7 +56,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import engine as E
 from engine import AnimationClip
 import sceneio as S
-import undo as U
+import editor.undo as U  # B4: undo.py -> editor/undo/ 包
 from mathlib.mesh import create_cube
 
 ok = True

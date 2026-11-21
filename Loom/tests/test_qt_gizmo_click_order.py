@@ -63,7 +63,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 
-import undo as U                                          # noqa: E402
+import editor.undo as U                                   # noqa: E402  B4: undo -> editor.undo
 from editor import EditorApp                              # noqa: E402
 from engine import Point3D                                # noqa: E402
 

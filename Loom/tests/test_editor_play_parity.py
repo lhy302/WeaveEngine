@@ -255,8 +255,8 @@ check('结构：主 pass 相机策略只有 loom_render._apply_main_pass_camera 
 _calls = _grep_prod('self._apply_main_pass_camera()')
 check('结构：主 pass 相机策略恰好两个调用点（loom_render._prepare_main_pass + '
       'editor._prepare_main_pass）—— 编辑器不再有第二份条件',
-      sorted(p for (p, _l) in _calls) == ['editor.py', 'render/gl/render.py'], _calls)
-src_has('editor.py', 'self.is_playing or', False,
+      sorted(p for (p, _l) in _calls) == ['editor/core.py', 'render/gl/render.py'], _calls)
+src_has('editor/core.py', 'self.is_playing or', False,
         '历史缺陷串（S1 修前 editor.py:2410 的第二份相机条件）已从编辑器 0 处'
         '（反模式 10：注释/代码不得与同源裁决不符）')
 _rpdefs = _grep_prod('def _reapply_parent_camera')
@@ -265,17 +265,17 @@ check('结构：挂父激活相机重应用只有 loom_camera._reapply_parent_ca
 _rpcalls = _grep_prod('self._reapply_parent_camera()')
 check('结构：挂父相机重应用恰好两个调用点（loom_render.render + editor.render）'
       '—— 编辑器不再有复制的三行',
-      sorted(p for (p, _l) in _rpcalls) == ['editor.py', 'render/gl/render.py'], _rpcalls)
+      sorted(p for (p, _l) in _rpcalls) == ['editor/core.py', 'render/gl/render.py'], _rpcalls)
 _ludefs = _grep_prod('def _dispatch_late_update')
 check('结构：def _dispatch_late_update 恰好两份（GL render/gl/engine.py + VK render/vk/driver.py，'
       '既有后端分界；编辑器调用的就是 GL 那一份共享 mixin 方法）',
       sorted(p for (p, _l) in _ludefs) == ['render/gl/engine.py', 'render/vk/driver.py'], _ludefs)
-src_has('editor.py', 'self._dispatch_late_update(delta_time)', True,
+src_has('editor/core.py', 'self._dispatch_late_update(delta_time)', True,
         '编辑器渲染帧派发 LateUpdate（与 loom_render.render 同序）—— 修前 0 处，'
         '脚本 on_late_update 在编辑器播放态死掉')
-src_has('editor.py', 'include_ui=', True,
+src_has('editor/core.py', 'include_ui=', True,
         '编辑器 frame_plan 传 include_ui（Canvas UI 走播放器同一条 FramePlan screen_ui 路径）')
-src_has('ui/loom_gui.py', 'ui.draw_all', False,
+src_has('gui/main_window.py', 'ui.draw_all', False,
         'GUI 视图层不再自画 Canvas UI（view.draw 只画编辑器叠加层）')
 src_has('ui/minimal_editor_view.py', 'ui.draw_all', False,
         '最小视图同上（同一条 include_ui 路径）')
@@ -1056,7 +1056,7 @@ check('⑥ S5: 用例 C 生效天空盒 VK 两面 == GL 两面（引擎默认蓝
 print()
 print("=== ⑦. 退出播放 on_disable（Q-B7-48-2）：退出追加恰一次/脚本组件 + 全仓唯一派发点结构锁 ===")
 
-with open(os.path.join(ROOT, 'editor.py'), 'r', encoding='utf-8') as _f7:
+with open(os.path.join(ROOT, 'editor', 'core.py'), 'r', encoding='utf-8') as _f7:
     _ed_src7 = _f7.read()
 _no_dis7 = {fn: open(os.path.join(ROOT, fn), 'r', encoding='utf-8').read().count('inst.on_disable(')
             for fn in ('runtime.py', 'render/gl/engine.py', 'core/engine_core.py', 'render/vk/driver.py',

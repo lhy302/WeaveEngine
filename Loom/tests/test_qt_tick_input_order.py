@@ -109,9 +109,9 @@ def _def_body(src, name):
     return '\n'.join(out)
 
 
-gui_src = _read(os.path.join('ui', 'loom_gui.py'))
+gui_src = _read(os.path.join('gui', 'main_window.py'))
 tick = _def_body(gui_src, '_on_tick')
-check('ui/loom_gui.py 有 _on_tick', tick is not None)
+check('gui/main_window.py 有 _on_tick', tick is not None)
 
 if tick:
     p_clear = tick.find('e.pressed.clear()')
@@ -128,8 +128,10 @@ if tick:
 # RemoteViewport._tick (远程/虚拟显示 readback 模式) 必须与 GLViewport 对齐:
 # 原来它既不调 _update_camera(), 也不清 pressed/released —— 远程模式下相机与
 # UI 树收不到任何输入, 且 pressed 只增不减 (按下一次永远'按下态')。
-rtick = _def_body(gui_src, '_tick')
-check('ui/loom_gui.py 有 RemoteViewport._tick', rtick is not None)
+# B4: RemoteViewport 已拆到 gui/remote_viewport.py（按类拆分），_tick 随类走
+rsrc = _read(os.path.join('gui', 'remote_viewport.py'))
+rtick = _def_body(rsrc, '_tick')
+check('gui/remote_viewport.py 有 RemoteViewport._tick', rtick is not None)
 if rtick:
     r_cam = rtick.find('e._update_camera()')
     r_p = rtick.find('e.pressed.clear()')
@@ -145,7 +147,7 @@ if rtick:
           'e.mouse_wheel = 0' in rtick)
 
 # 顺序修复只有在 _update_camera 内部真的分发 UI 输入时才有意义 —— 锁住这条依赖。
-ed_src = _read('editor.py')
+ed_src = _read(os.path.join('editor', 'core.py'))
 uc = _def_body(ed_src, '_update_camera')
 check('editor._update_camera 存在', uc is not None)
 if uc:
@@ -160,7 +162,7 @@ if disp:
     check('_dispatch_ui_mouse 调 ui.dispatch_mouse', 'dispatch_mouse' in disp)
 
 # 语法可用性: 两个文件都能正常 compile (防止注释搬动弄坏缩进)
-for rel in (os.path.join('ui', 'loom_gui.py'), 'editor.py', 'loom_ui.py',
+for rel in (os.path.join('gui', 'main_window.py'), os.path.join('gui', 'remote_viewport.py'), os.path.join('editor', 'core.py'), 'loom_ui.py',
             'agent_commands.py', 'loom_mcp.py'):
     try:
         compile(_read(rel), rel, 'exec')

@@ -189,7 +189,7 @@ check("非视口按下右键不激活 (检查器走输入模式)", ed._right_dra
 
 # ---- 摄像机方向线顶端指向圆锥 (几何, 2026-08-12 新增) ----
 # UI 模块化 (2026-08-13): _direction_cone 几何 (2026-08-28 迁到 ui.loom_gui)
-from ui.loom_gui import LoomGUI as _EditorView
+from gui.main_window import LoomGUI as _EditorView
 _cone = _EditorView.__new__(_EditorView)
 apex = (0.0, 1.0, 0.0)
 d = (0.0, 0.0, 1.0)                        # +z 方向

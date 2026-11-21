@@ -82,7 +82,7 @@ os.makedirs(os.environ['LOOM_GAME_DIR'], exist_ok=True)
 import engine as E
 E.GLEngine._build_gpu = lambda self, m: None
 import editor
-import undo as U
+import editor.undo as U  # B4: undo.py -> editor/undo/ 包
 import agent_commands as ac
 import sceneio
 from mathlib.mesh import create_cube, create_sphere
@@ -443,9 +443,7 @@ check("undo 后回到透视/默认 size", ED4.ortho is False
 
 print()
 print("=== L. 状态栏文案: Agent 批次进行中（剩余 Xs） ===")
-import ui.loom_gui as LG
-
-
+import gui.main_window as LG
 class _SB(object):
     def __init__(self):
         self.msgs = []

@@ -59,7 +59,7 @@ import engine as E
 import sceneio
 from mathlib.mesh import create_cube
 from mathlib.matlib import mat4_perspective, mat4_view_yaw_pitch
-from undo import UndoManager
+from editor.undo import UndoManager
 from editor import EditorApp
 
 E.GLEngine._build_gpu = lambda self, m: None

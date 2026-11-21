@@ -575,7 +575,7 @@ def t_backend_parity():
 
 # ============ D. 编辑器不变式 (P6: 编辑器不上 Vk) ============
 def t_editor_invariant():
-    src = open(os.path.join(ROOT, "editor.py"), encoding="utf-8").read()
+    src = open(os.path.join(ROOT, "editor", "core.py"), encoding="utf-8").read()
     check("编辑器不读取 render_api (P6: 编辑器固定 Qt+OpenGL)",
           "render_api" not in src)
     gl = open(os.path.join(ROOT, "render", "gl", "render.py"), encoding="utf-8").read()

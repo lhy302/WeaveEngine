@@ -31,7 +31,7 @@ import engine as E                                      # noqa: E402
 import editor                                           # noqa: E402
 import sceneio as S                                     # noqa: E402
 import agent_commands as AC                             # noqa: E402
-from undo import UndoManager                            # noqa: E402
+from editor.undo import UndoManager                            # noqa: E402
 
 E.GLEngine._build_gpu = lambda self, m: None            # 无头桩（同其它编辑器测试）
 
@@ -406,7 +406,7 @@ def t_bad_skybox_type():
               (getattr(eng, '_skybox_valid', None),
                getattr(eng._skybox, '_solid_color', None)))
     # 编辑器路径: 坏 skybox 的场景能正常打开（模型不丢、_scene_path 更新）
-    import editor as _edmod
+    import editor.core as _edmod   # B4: save_last_dir 真源在 editor.core（编辑器常量/工具函数域）
     old_save = _edmod.save_last_dir
     _edmod.save_last_dir = lambda state_file, path: None
     try:

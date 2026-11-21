@@ -61,8 +61,7 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from gui import GUI
-
+from gui.legacy_view import GUI
 _FAILS = []
 
 

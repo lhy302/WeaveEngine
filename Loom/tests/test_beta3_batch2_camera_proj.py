@@ -411,7 +411,8 @@ def t_ui_dispatch():
 # ============ 6) D7=A: 进脏判定 + 进撤销 + 播放前后恒等 ============
 def _new_ed(real_mark_saved=True):
     import editor
-    from undo import UndoManager
+    import editor.core as _edcore  # B4: 常量/工具函数真源
+    from editor.undo import UndoManager
     ed = editor.EditorApp.__new__(editor.EditorApp)
     ed.models = []
     ed.materials = []
@@ -490,7 +491,7 @@ def t_editor_projection_dirty_undo():
     check('停止播放还原编辑态投影', ed._camera_proj_state() == before,
           (before, ed._camera_proj_state()))
     # 接线存在性 (toggle_play 两个分支都用了快照/还原)
-    src = open(os.path.join(ROOT, 'editor.py'), encoding='utf-8').read()
+    src = open(os.path.join(ROOT, 'editor', 'core.py'), encoding='utf-8').read()
     check('toggle_play 进播放时快照投影',
           '_play_edit_proj = self._camera_proj_state()' in src)
     check('toggle_play 退播放时还原投影',
@@ -500,8 +501,9 @@ def t_editor_projection_dirty_undo():
 def t_editor_load_without_camera_resets():
     print('---- 7) 加载无 camera 段的旧场景 -> 投影回默认 ----')
     import editor
-    old_save = editor.save_last_dir
-    editor.save_last_dir = lambda state_file, path: None
+    import editor.core as _edcore  # B4: 常量/工具函数真源
+    old_save = _edcore.save_last_dir
+    _edcore.save_last_dir = lambda state_file, path: None
     try:
         with tempfile.TemporaryDirectory() as tmp:
             p = os.path.join(tmp, 'old.json')
@@ -523,7 +525,7 @@ def t_editor_load_without_camera_resets():
             check('无 camera 段 -> 清空 _scene_cam (防播放沿用上一场景相机)',
                   ed._scene_cam is None, ed._scene_cam)
     finally:
-        editor.save_last_dir = old_save
+        _edcore.save_last_dir = old_save
 
 
 # ============ 8) P-03-10: VK 键位加载真的读到了模板 ============

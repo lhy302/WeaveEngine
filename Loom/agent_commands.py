@@ -2872,7 +2872,7 @@ def cmd_ui_canvas_add(win, args):
             return {'error': 'target 物体不存在: %r' % args['target']}
         c.target = tgt
     idx = len(ui.canvases)
-    import undo as _undo_mod
+    import editor.undo as _undo_mod  # B4: undo.py -> editor/undo/ 包
     cmd = _undo_mod.UIAddCanvasCommand('添加 Canvas', win.editor, c, idx)
     _push_ui_undo(win, cmd)
     out = {'canvas_type': typ, 'width': w, 'height': h, 'z_order': z,
@@ -3072,7 +3072,7 @@ def cmd_ui_add(win, args):
 
     idx = len(parent.children)
     # 2026-10-18 阶段5: 撤销（决策选项2，UI 编辑全进撤销栈）
-    import undo as _undo_mod
+    import editor.undo as _undo_mod  # B4: undo.py -> editor/undo/ 包
     _push_ui_undo(win, _undo_mod.UIAddCommand('添加 UI 元素', win.editor,
                                               parent, elem, idx))
     return {'name': name, 'type': typ, 'parent': parent.name,
@@ -3103,7 +3103,7 @@ def cmd_ui_set(win, args):
         return {'error': str(e)}
 
     # 2026-10-18 阶段5: 改前快照（撤销用）
-    import undo as _undo_mod
+    import editor.undo as _undo_mod  # B4: undo.py -> editor/undo/ 包
     before = _undo_mod.ui_elem_snapshot(elem)
 
     done = {}
@@ -3229,7 +3229,7 @@ def cmd_ui_set(win, args):
     if not done:
         return {'error': '没有可改的字段（检查参数名）', 'type': typ}
     # 2026-10-18 阶段5: 撤销（仅当字段真的有变化时压栈）
-    import undo as _undo_mod
+    import editor.undo as _undo_mod  # B4: undo.py -> editor/undo/ 包
     after = _undo_mod.ui_elem_snapshot(elem)
     if after != before:
         _push_ui_undo(win, _undo_mod.UIStateCommand('修改 UI 属性',
@@ -3320,7 +3320,7 @@ def cmd_ui_remove(win, args):
     if parent is None:
         return {'error': '元素没有父节点，无法删除'}
     # 2026-10-18 阶段5: 撤销
-    import undo as _undo_mod
+    import editor.undo as _undo_mod  # B4: undo.py -> editor/undo/ 包
     cmd = _undo_mod.UIRemoveCommand('删除 UI 元素', win.editor, elem)
     _push_ui_undo(win, cmd)
     return {'removed': name, 'parent': parent.name,
@@ -3402,7 +3402,7 @@ def cmd_ui_reparent(win, args):
         if ni >= 0:
             new_idx = ni
 
-    import undo as _undo_mod
+    import editor.undo as _undo_mod  # B4: undo.py -> editor/undo/ 包
     cmd = _undo_mod.UIReparentCommand('移动 UI 父节点', win.editor,
                                       elem, old_parent, old_idx,
                                       new_parent, new_idx)
@@ -3444,7 +3444,7 @@ def cmd_ui_move_child(win, args):
         return {'name': name, 'moved': False, 'index': cur_idx,
                 'message': '位置相同，未移动'}
 
-    import undo as _undo_mod
+    import editor.undo as _undo_mod  # B4: undo.py -> editor/undo/ 包
     cmd = _undo_mod.UIMoveChildCommand('调整 UI 顺序', win.editor,
                                        elem, cur_idx, to_idx)
     _push_ui_undo(win, cmd)

@@ -57,7 +57,7 @@ import sys, os, math, uuid
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import numpy as np
 import engine as E
-import undo as U
+import editor.undo as U  # B4: undo.py -> editor/undo/ 包
 import sceneio as S
 from mathlib.matlib import mat4_view_yaw_pitch, view_basis_to_angles
 from mathlib.mesh import create_cube

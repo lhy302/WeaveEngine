@@ -88,19 +88,20 @@ import tempfile as _tf_iso
 os.environ.setdefault('LOOM_USER_ROOT', _tf_iso.mkdtemp(prefix='loom_test_eai_'))
 
 import editor
+import editor.core as _edcore  # B4: 目录常量真源（monkeypatch 目标）
 # 2026-11-06: 测试不得改动仓库内的 保存/ 目录 —— EditorApp.__init__ 首次运行会把
 # 保存/ 迁移为 Projects/ (线上正确行为), 但测试跑一次就把受版本控制的数据搬走。
 # 把两个目录常量重定向到临时目录, 迁移逻辑面对空目录 = 零副作用。
 import tempfile as _tf_save
 _SAVE_ROOT = _tf_save.mkdtemp(prefix="loom_test_save_")
-editor.DEFAULT_SAVE_DIR = os.path.join(_SAVE_ROOT, "Projects")
-editor._LEGACY_SAVE_DIR = os.path.join(_SAVE_ROOT, "保存")                      # noqa: E402
+_edcore.DEFAULT_SAVE_DIR = os.path.join(_SAVE_ROOT, "Projects")
+_edcore._LEGACY_SAVE_DIR = os.path.join(_SAVE_ROOT, "保存")                      # noqa: E402
 import agent_commands as ac        # noqa: E402
 
 TMP = os.path.join(HERE, "_tmp")
 os.makedirs(TMP, exist_ok=True)
 # editor_state.json 指向临时文件, 不污染用户"上次目录"
-editor.STATE_FILE = os.path.join(TMP, "editor_state_eai.json")
+_edcore.STATE_FILE = os.path.join(TMP, "editor_state_eai.json")
 
 _FAILS = []
 _USED = set()          # 本文件真正 dispatch 过的命令名 (覆盖率闸门)

@@ -183,7 +183,7 @@ def _capture_fixtures(ed):
         ed.selected_index = 0
         ed._draw_selection_box()
         out['selection'] = cap.pop(0) if cap else None
-        import ui.loom_gui as lg
+        import gui.main_window as lg
         ed.gizmo_mode = 'translate'
         lg.LoomGUI._draw_gizmo(None, ed)   # (self 未用; ctl=ed 走真实视图层代码)
         out['gizmo_translate'] = cap.pop(0) if cap else None
@@ -446,8 +446,8 @@ def section_a():
     import render.vk.driver as SD
     check("A4 SceneDriver 装配 VK 叠加层（公开 overlay_scope/draw_lines 两端同名）",
           all(hasattr(SD.SceneDriver, n) for n in ("overlay_scope", "draw_lines")))
-    src_ed = _read("editor.py")
-    src_gui = _read(os.path.join("ui", "loom_gui.py"))
+    src_ed = _read(os.path.join("editor", "core.py"))
+    src_gui = _read(os.path.join("gui", "main_window.py"))
     check("A5a editor._draw_selection_box 走 overlay_scope（不直接摸 ctx.scope）",
           "with self.overlay_scope(framebuffer=self._screen_fb(), enable_only=0):" in src_ed
           and "self.ctx.scope" not in src_ed)
