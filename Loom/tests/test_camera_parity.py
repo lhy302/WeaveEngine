@@ -274,8 +274,16 @@ src_has('editor/core.py', 'self.apply_orbit_camera()', True,
 src_has('runtime.py', 'self.apply_orbit_camera()', True,
         'GL 播放器加载时也合成一次（与 VK load_from_data 的同步点同位置）')
 _vp_v = _grep_prod('mat4_view_yaw_pitch(')
-check('结构：view 矩阵由同一个 matlib.mat4_view_yaw_pitch 构造（GL 播放器/编辑器 + VK 渲染）',
-      {'render/gl/render.py', 'editor/core.py', 'render/vk/driver.py'} <= {p for (p, _l) in _vp_v},
+# ★审核 1/3 P1-3（2026-11-21）：编辑器 VP 计算收进 loom_render.RenderMixin._compute_view_proj
+# 后，editor/core.py 不再直接调 mat4_view_yaw_pitch —— view 构造点收敛为
+# render/gl/render.py（播放器 + RenderMixin 唯一实现，编辑器经同一函数对象调用）
+# + render/vk/driver.py。判据同步**收紧**：构造点不许出现第三处（尤其 editor/core.py
+# 不许回退成第二份内联 VP），且编辑器必须调 self._compute_view_proj()（同源）。
+check('结构：view 矩阵由同一个 matlib.mat4_view_yaw_pitch 构造（GL RenderMixin._compute_view_proj'
+      ' + VK 渲染；编辑器经同一函数对象调 _compute_view_proj，不再内联）',
+      {'render/gl/render.py', 'render/vk/driver.py'} <= {p for (p, _l) in _vp_v}
+      and 'editor/core.py' not in {p for (p, _l) in _vp_v}
+      and 'self._compute_view_proj()' in (_read_prod('editor/core.py') or ''),
       sorted({p for (p, _l) in _vp_v}))
 src_has('render/vk/driver.py', 'mat4_view_yaw_pitch(np, cam_pos, yaw, pitch, roll)', True,
         'VK 的 render_pose 按模式取 (yaw,pitch,roll) —— 与 GL 同一个构造函数')

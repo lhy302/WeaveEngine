@@ -1645,49 +1645,11 @@ class SceneDriver(VkWindowMixin, VkEditorRenderMixin, EngineCore):
         """
         return self._update_scripts(dt)
 
-    def _dispatch_fixed_update(self, fixed_dt):
-        """2026-10-18 阶段1档序10 FixedUpdate（Vk 后端同步版）。"""
-        try:
-            from script.scripts import Script as _Base
-        except ImportError:
-            return
-        for m in self.models:
-            if not m.scripts:
-                continue
-            for sc in m.scripts:
-                inst = getattr(sc, '_script', None)
-                if inst is None or getattr(sc, '_script_broken', False):
-                    continue
-                if type(inst).on_fixed_update is _Base.on_fixed_update:
-                    continue
-                try:
-                    inst.on_fixed_update(fixed_dt)
-                except Exception as e:
-                    print("[脚本] %s(%s).on_fixed_update 出错: %r"
-                          % (m.name, sc.script_id, e))
-                    sc._script_broken = True
-
-    def _dispatch_late_update(self, render_dt):
-        """2026-10-18 阶段1档序11 LateUpdate（Vk 后端同步版）。"""
-        try:
-            from script.scripts import Script as _Base
-        except ImportError:
-            return
-        for m in self.models:
-            if not m.scripts:
-                continue
-            for sc in m.scripts:
-                inst = getattr(sc, '_script', None)
-                if inst is None or getattr(sc, '_script_broken', False):
-                    continue
-                if type(inst).on_late_update is _Base.on_late_update:
-                    continue
-                try:
-                    inst.on_late_update(render_dt)
-                except Exception as e:
-                    print("[脚本] %s(%s).on_late_update 出错: %r"
-                          % (m.name, sc.script_id, e))
-                    sc._script_broken = True
+    # ★审核 1/3 P1-1（2026-11-21）：_dispatch_fixed_update / _dispatch_late_update
+    # 已搬进 core/engine_core.py（EngineCore 唯一实现）—— 修前本类与
+    # render/gl/engine.py 各一份（有效行 24 vs 21，16 行逐字相同），纯脚本派发、
+    # 零后端依赖，门却断言「恰好两份」把重复制度化。现在
+    # SceneDriver._dispatch_late_update is GLEngine._dispatch_late_update（同一函数对象）。
 
     def _physics_available(self):
         """物理**真的在驱动刚体**吗 (R6 V-09: 与 _ensure_phys_bridge 同构).
@@ -1917,30 +1879,21 @@ class SceneDriver(VkWindowMixin, VkEditorRenderMixin, EngineCore):
                 return cam
         return None
 
-    def effective_skybox(self):
-        """生效天空盒（Q3=A，与 GLEngine.effective_skybox 同口径）: 相机级优先, 否则场景级。
+    def _backend_scene_skybox(self):
+        """钩子（VK）：**场景级**天空盒字段 = self.skybox（播放器形状 load_from_data 写）。
 
-        2026-11-09 与 GL/编辑器对齐: 上层（命令层/场景运行期）把"当前相机天空盒"写在
-        CameraState.skybox，VK 侧不再各写一套优先级。
+        ★审核 1/3 P1-2（2026-11-21）：修前这里有一份**与 GL 分叉的** effective_skybox
+        （GL 只回落 _skybox，VK 回落 skybox→_skybox）—— 一个字段优先级规则两份代码。
+        现在判定规则只有一份（EngineCore.effective_skybox：相机级优先 → 本钩子 →
+        _skybox），本类只表达「VK 多一个场景级字段」这一条后端差异（JVM 模型第 2 步）。
+
+        ★S5（Q-B7-47-1 阶段 5）留痕：编辑器形状（_EditorCore 共享加载路径）写的是 GL
+        同名字段 _skybox（editor._refresh_effective_skybox 每次换场景/天空盒都同步）；
+        内核的回落链在钩子返回 None 后读 _skybox，故 VK 编辑器播放态也能取到场景天空盒
+        （修前 S5 门 ⑥ 组红：effective_skybox() 恒 None → 场景天空盒整体消失）。
+        播放器行为零变化：SceneDriver 没有 _skybox 字段，回落次序不变。
         """
-        try:
-            cam = self.active_camera_object()
-        except Exception as e:
-            print('[驱动] 取激活相机失败 (%r) -> 天空盒回退场景级' % (e,))
-            cam = None
-        cube = getattr(cam, 'skybox', None) if cam is not None else None
-        if cube is not None:
-            return cube
-        # ★S5（Q-B7-47-1 阶段 5）：场景级回落。播放器形状的字段 = self.skybox
-        # （load_from_data 写）；编辑器形状（_EditorCore 共享加载路径）写的是 GL
-        # 同名字段 _skybox（editor._refresh_effective_skybox 每次换场景/天空盒都
-        # 同步）—— 与 GL effective_skybox 的回落字段同一份。修前 VK 编辑器播放态
-        # effective_skybox() 恒 None -> 场景天空盒整体消失（S5 门 ⑥ 组修前红）。
-        # 播放器行为零变化：SceneDriver 没有 _skybox 字段，回落次序不变。
-        scene = getattr(self, 'skybox', None)
-        if scene is None:
-            scene = getattr(self, '_skybox', None)
-        return scene
+        return getattr(self, 'skybox', None)
 
     def active_camera_object(self):
         """当前玩家视角摄像机对象 (无则 None)."""

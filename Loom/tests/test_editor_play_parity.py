@@ -84,7 +84,8 @@ def _enforce_fail_exit_code():
 结构段（「同源，不同步」的牙）：
   · 相机策略只有 loom_render._apply_main_pass_camera 一份，播放器与编辑器各恰好 1 个调用点；
   · 挂父相机重应用只有 loom_camera._reapply_parent_camera 一份，两端各恰好 1 个调用点；
-  · 编辑器调用共享 mixin 方法 _dispatch_late_update（GL 侧 def 只在 render/gl/engine.py）；
+  · 编辑器调用共享内核方法 _dispatch_late_update（全仓唯一 def 在 core/engine_core.py；
+    GLEngine is SceneDriver 同一函数对象 —— 审核 1/3 P1-1 收紧后的判据）；
   · Canvas UI 只走 FramePlan include_ui 路径（view 层 0 处 ui.draw_all）；
   · 历史缺陷串 'self.is_playing or' 与历史名在生产代码 0 处。
 
@@ -135,9 +136,11 @@ def _enforce_fail_exit_code():
   · ③ VK编辑器钩子序双发：['start','update','late','late'] —— SceneDriver.advance_logic
     渲染帧尾派发 LateUpdate（VK 播放器形状没有渲染帧派发点，本就需要）+ 共享 editor.render
     再派发一次 → VK 编辑器播放态每帧 on_late_update ×2（GL 三面恒单发）；
-  · ⑥ VK编辑器生效天空盒恒 None —— SceneDriver.effective_skybox 场景级回落只读播放器字段
-    self.skybox，编辑器共享加载写的是 GL 同名字段 _skybox → 场景天空盒整体消失
-    （include_sky=False；GL/VK播放器 两面正确）；
+  · ⑥ VK编辑器生效天空盒恒 None —— 修前 SceneDriver.effective_skybox 场景级回落只读播放器
+    字段 self.skybox，编辑器共享加载写的是 GL 同名字段 _skybox → 场景天空盒整体消失
+    （include_sky=False；GL/VK播放器 两面正确）。审核 1/3 P1-2 后：判定规则收进
+    EngineCore.effective_skybox（两端同一函数对象），VK 的字段差异只剩钩子
+    _backend_scene_skybox（返回 self.skybox），回落链 = 钩子 → _skybox；
   · ② VK编辑器 _frame_world 冻结在进播放位姿 —— VK _logic_prep 只算碰撞对、不刷新逻辑
     位姿矩阵（GL 侧 P-01 内联块 VK 侧没有）→ 抽 EngineCore._refresh_play_frame_world
     两端 _logic_prep 同调（同源唯一实现）；
@@ -266,10 +269,17 @@ _rpcalls = _grep_prod('self._reapply_parent_camera()')
 check('结构：挂父相机重应用恰好两个调用点（loom_render.render + editor.render）'
       '—— 编辑器不再有复制的三行',
       sorted(p for (p, _l) in _rpcalls) == ['editor/core.py', 'render/gl/render.py'], _rpcalls)
+# ★审核 1/3 P1-1（2026-11-21，Q-B7-52-1）：本条修前断言「def _dispatch_late_update
+# **恰好两份**（GL render/gl/engine.py + VK render/vk/driver.py）」—— 两份逐字雷同
+# （有效行 24 vs 21，16 行相同）、纯脚本派发、零后端依赖，按规则 5.5 合并成一份会让
+# 门**翻红** = 结构断言锁住了缺陷态。现改为**同源断言**（这是收紧，不是放宽）：
+# 全仓只许一份 def，且两端必须解析到**同一个函数对象**（见 〇'' 段的两条 is 判定）。
 _ludefs = _grep_prod('def _dispatch_late_update')
-check('结构：def _dispatch_late_update 恰好两份（GL render/gl/engine.py + VK render/vk/driver.py，'
-      '既有后端分界；编辑器调用的就是 GL 那一份共享 mixin 方法）',
-      sorted(p for (p, _l) in _ludefs) == ['render/gl/engine.py', 'render/vk/driver.py'], _ludefs)
+check('结构：def _dispatch_late_update 全仓恰一份（core/engine_core.py = EngineCore 唯一实现）',
+      [p for (p, _l) in _ludefs] == ['core/engine_core.py'], _ludefs)
+_fudefs = _grep_prod('def _dispatch_fixed_update')
+check('结构：def _dispatch_fixed_update 全仓恰一份（core/engine_core.py = EngineCore 唯一实现）',
+      [p for (p, _l) in _fudefs] == ['core/engine_core.py'], _fudefs)
 src_has('editor/core.py', 'self._dispatch_late_update(delta_time)', True,
         '编辑器渲染帧派发 LateUpdate（与 loom_render.render 同序）—— 修前 0 处，'
         '脚本 on_late_update 在编辑器播放态死掉')
@@ -305,6 +315,37 @@ check('S5 结构：_refresh_play_frame_world 唯一实现（GL/VK 的 _logic_pre
       is getattr(_sd.SceneDriver, '_refresh_play_frame_world', None), '')
 check('S5 结构：compute_world_matrices 是同一份 TransformMixin 函数对象（四面共享）',
       _GLE.compute_world_matrices is _sd.SceneDriver.compute_world_matrices, '')
+# ★审核 1/3 P1-1 / P1-2 / P1-3（2026-11-21）：同源**实现层**收口的三组 is 判定
+# （语义层早已对齐，这里锁的是「同一函数对象」——修前它们各自两份）。
+check('S5 结构：_dispatch_late_update 是同一份函数对象（GLEngine is SceneDriver；'
+      '修前两端各一份、16 行逐字相同）',
+      getattr(_GLE, '_dispatch_late_update', None)
+      is getattr(_sd.SceneDriver, '_dispatch_late_update', None), '')
+check('S5 结构：_dispatch_fixed_update 是同一份函数对象（GLEngine is SceneDriver）',
+      getattr(_GLE, '_dispatch_fixed_update', None)
+      is getattr(_sd.SceneDriver, '_dispatch_fixed_update', None), '')
+check('S5 结构：effective_skybox 是同一份函数对象（GLEngine is SceneDriver；修前两份且'
+      '已分叉：GL 只回落 _skybox / VK 回落 skybox→_skybox）',
+      getattr(_GLE, 'effective_skybox', None)
+      is getattr(_sd.SceneDriver, 'effective_skybox', None), '')
+_skdefs = _grep_prod('def effective_skybox')
+check('结构：def effective_skybox 全仓恰一份（core/engine_core.py；后端字段差异走钩子 '
+      '_backend_scene_skybox）',
+      [p for (p, _l) in _skdefs] == ['core/engine_core.py'], _skdefs)
+check('S5 结构：_compute_view_proj 是同一份函数对象（GLEngine 与 VkEditorApp 都解析到 '
+      'loom_render.RenderMixin 那一份；修前 VP 计算两端逐字复制 15/27 行）',
+      getattr(_GLE, '_compute_view_proj', None) is _RenderMixin._compute_view_proj
+      and editor_mod.VkEditorApp._compute_view_proj is _RenderMixin._compute_view_proj, '')
+_vpdefs = _grep_prod('def _compute_view_proj')
+check('结构：def _compute_view_proj 全仓恰一份（render/gl/render.py）',
+      [p for (p, _l) in _vpdefs] == ['render/gl/render.py'], _vpdefs)
+# 判据取**调用式**（mat4_view_yaw_pitch(np, ...)）而非裸名 —— 裸名在 import 行里
+# 仍然合法存在（未用到的导入不构成第二份实现），调用式才是「内联 VP 计算」的痕迹。
+src_has('editor/core.py', 'mat4_view_yaw_pitch(np,', False,
+        '编辑器 _prepare_main_pass 不再内联 VP 计算（审核 1/3 P1-3：VP 唯一实现 = '
+        'loom_render.RenderMixin._compute_view_proj）')
+src_has('editor/core.py', 'self._compute_view_proj()', True,
+        '编辑器主 pass 调同一份 VP 计算（与播放器同源）')
 check('已知差异登记表为空（不许登记任何容差）', not KNOWN_DIFFS, KNOWN_DIFFS)
 
 
@@ -1062,7 +1103,7 @@ _no_dis7 = {fn: open(os.path.join(ROOT, fn), 'r', encoding='utf-8').read().count
             for fn in ('runtime.py', 'render/gl/engine.py', 'core/engine_core.py', 'render/vk/driver.py',
                        'render/gl/model_gpu.py', 'render/vk/player.py', 'game_player.py',
                        'loom_player_window.py')}
-check('⑦ 结构：inst.on_disable( 生产派发点全仓恰 1 处（editor.py 第 1.5 步）+ 播放器入口 0 处',
+check('⑦ 结构：inst.on_disable( 生产派发点全仓恰 1 处（editor/core.py 第 1.5 步）+ 播放器入口 0 处',
       _ed_src7.count('inst.on_disable(') == 1 and set(_no_dis7.values()) == {0},
       (_ed_src7.count('inst.on_disable('), _no_dis7))
 _i_dis7 = _ed_src7.index('inst.on_disable(')

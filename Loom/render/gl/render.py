@@ -1092,16 +1092,23 @@ class RenderMixin:
         现两端同调本方法，不再有第二份条件。"""
         if self.orbit_mode:
             self.apply_orbit_camera()
-    def _prepare_main_pass(self):
-        """主 pass 的 CPU 侧准备（相机 / VP / uniform 上传）。
 
-        由 FramePlan 执行器在「清屏之后、主 pass 绘制之前」调用一次 —— 与迁移前
-        「use -> clear -> 算 VP/传 uniform -> enable -> draw」的次序逐位一致。
+    def _compute_view_proj(self):
+        """视图×投影矩阵 —— 播放器与编辑器播放态**同源唯一实现**（★审核 1/3 P1-3）。
+
+        审核原文（1/3 号审核，Q-B7-52-2）：「S1 只抽了**相机策略**
+        （_apply_main_pass_camera），没抽 **VP 计算**」—— 修前
+        loom_render._prepare_main_pass 与 editor._prepare_main_pass 各有一段
+        **逐字相同**的 15/27 行（V = mat4_view_yaw_pitch(...) → ortho/persp 分支 →
+        self._vp = V @ P → _backend_upload_lights 的前半）。现在 VP 计算只有这一份，
+        两端只保留各自的**相机策略**（preview_camera / _apply_main_pass_camera）与
+        **prof 记账**。
+
+        口径与修前两端逐位一致：行向量约定 v@M（self._vp = V @ P，供 draw_lines /
+        射线拾取读同一字段）；2D 正交用 ortho_size（可见高度 = ortho_size 世界单位），
+        否则透视用 self._fov；宽高比 = width/max(1,height)（ortho）/ width/height（persp）。
+        返回 self._vp。
         """
-        # MVP: 每帧 CPU 算一次 view_proj, 每模型 model.
-        # uniform 上传: matlib 是行向量约定 v@M (numpy M 存的是标准矩阵的转置),
-        # 要 GLSL 的 u*v 等价 numpy 的 v@M, GPU 需得 M^T = 行主序 M 直接 tobytes (不转置).
-        self._apply_main_pass_camera()
         V = mat4_view_yaw_pitch(np, (self.camera.x, self.camera.y, self.camera.z),
                                 self.camera_yaw, self.camera_pitch, self.camera_roll)
         # 2026-11-07 2D: 播放器 (PlayerApp/GL) 也要支持正交投影 (与编辑器播放同源)
@@ -1114,6 +1121,21 @@ class RenderMixin:
             P = mat4_perspective(np, self._fov, self.width / self.height,
                                  self.near, self.far)
         self._vp = V @ P                                      # 供 draw_lines / 射线拾取
+        return self._vp
+
+    def _prepare_main_pass(self):
+        """主 pass 的 CPU 侧准备（相机 / VP / uniform 上传）。
+
+        由 FramePlan 执行器在「清屏之后、主 pass 绘制之前」调用一次 —— 与迁移前
+        「use -> clear -> 算 VP/传 uniform -> enable -> draw」的次序逐位一致。
+        """
+        # MVP: 每帧 CPU 算一次 view_proj, 每模型 model.
+        # uniform 上传: matlib 是行向量约定 v@M (numpy M 存的是标准矩阵的转置),
+        # 要 GLSL 的 u*v 等价 numpy 的 v@M, GPU 需得 M^T = 行主序 M 直接 tobytes (不转置).
+        self._apply_main_pass_camera()
+        # ★审核 1/3 P1-3（2026-11-21）：VP 计算（mat4_view_yaw_pitch → ortho/persp →
+        # V @ P）唯一实现在 _compute_view_proj，编辑器同调这一份（不再各复制一段）。
+        self._compute_view_proj()
         # T3c-1: u_view_proj / u_view_pos / 灯光数组 / 全局标量 全部进 Scene UBO，
         # 由 _upload_lights() 一次 pack + write + bind 完成（单点表）。
         self._backend_upload_lights()

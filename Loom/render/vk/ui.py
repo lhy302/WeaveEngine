@@ -278,7 +278,9 @@ class VkUIEngine:
         for (p0, p1) in segs:
             # Q-B7-48-1 裁决 B：垂直偏移数学**只许一份** —— 用 loom_line_geometry
             # 的 expand_segment（与编辑器叠加层线宽的 build_line_quads 同一个函数）。
-            # 输出角点/绕序与旧实现逐位相同（本函数的历史 A/B 结论不受影响）。
+            # 输出与旧内联实现**语义等价**（不是逐位相同：角点差 ≤6e-14 = 双精度
+            # 舍入级；退化段判据 1e-6 → 1e-9，长度 <1e-6 的段现在会画 —— 这是行为
+            # 变更，本函数的历史 A/B 结论不受影响）。审核 1/3 P2-3 修正。
             quad = expand_segment(p0, p1, hw)
             if quad is None:                 # 退化段（长度 ~0）：无线段方向
                 continue

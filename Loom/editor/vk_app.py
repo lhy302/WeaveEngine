@@ -40,6 +40,10 @@ class VkEditorApp(_EditorCore, SceneDriver):
     # S1（Q-B7-48-1）：主 pass 相机策略唯一实现在 loom_render.RenderMixin ——
     # SceneDriver 不带 RenderMixin，这里按「同一函数对象再绑定」接入（非复制）。
     _apply_main_pass_camera = RenderMixin._apply_main_pass_camera
+    # ★审核 1/3 P1-3：VP 计算同一份（editor._prepare_main_pass 调它，播放器
+    # _prepare_main_pass 也调它）—— SceneDriver 不带 RenderMixin，按「同一函数对象
+    # 再绑定」接入（非复制，纯 numpy/matlib，零 GL 依赖）。
+    _compute_view_proj = RenderMixin._compute_view_proj
     # 点选/AABB 路径（_pick -> _model_aabbs_par -> _aabbs_batched）：S2 留痕的「纯 numpy
     # 归位」未做（_aabbs_batched 仍在 GL 的 LightingMixin）；同一函数对象再绑定接入
     # （纯 Python/numpy，零 GL 依赖），GL 侧一行不动。

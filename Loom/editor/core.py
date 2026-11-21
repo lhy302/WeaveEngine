@@ -2323,8 +2323,11 @@ class _EditorCore(EngineCore):
     def _prepare_main_pass(self):
         """编辑器主 pass 的 CPU 侧准备（相机 / VP / uniform），由 FramePlan 执行器调用。
 
-        迁移前这段在 render() 里手写；现在编辑器与播放器共用同一份 FramePlan，
-        各自的相机策略留在各自的 prepare 里（播放器见 loom_render._prepare_main_pass）。
+        迁移前这段在 render() 里手写；现在编辑器与播放器共用同一份 FramePlan。
+        ★审核 1/3 P1-3（2026-11-21）：VP 计算**不再在本类内联** —— 与播放器同调
+        loom_render.RenderMixin._compute_view_proj（唯一实现；VkEditorApp 经
+        editor/vk_app.py 同一函数对象再绑定接入）。本方法只保留**编辑器独有**的两件事：
+        preview_camera 分支 + prof 记账（mt_mp_camera / mt_mp_uniforms）。
         """
         self._prof_add('mt_mp_fbo', getattr(self, '_t_mp', 0))
         _t = self._prof_t0()
@@ -2341,18 +2344,8 @@ class _EditorCore(EngineCore):
             self.apply_camera(self.preview_camera)
         else:
             self._apply_main_pass_camera()
-        V = mat4_view_yaw_pitch(np, (self.camera.x, self.camera.y, self.camera.z),
-                                self.camera_yaw, self.camera_pitch, self.camera_roll)
-        if getattr(self, 'ortho', False):
-            # 2026-11-07 2D: 正交投影 (可见高度 = ortho_size 世界单位)
-            _h = float(getattr(self, 'ortho_size', 12.0))
-            _asp = self.width / max(1, self.height)
-            P = mat4_ortho(np, -_h * _asp * 0.5, _h * _asp * 0.5,
-                           -_h * 0.5, _h * 0.5, self.near, self.far)
-        else:
-            P = mat4_perspective(np, self._fov, self.width / self.height,
-                                 self.near, self.far)
-        self._vp = V @ P
+        # ★审核 1/3 P1-3：VP 计算唯一实现（与播放器同一份，不再内联复制 15 行）
+        self._compute_view_proj()
         self._prof_add('mt_mp_camera', _t)
         _t = self._prof_t0()
         # T3c-1: mvp/cam/灯光 全部由 _upload_lights() 一次性写 Scene UBO

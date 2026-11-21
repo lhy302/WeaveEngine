@@ -1308,22 +1308,11 @@ class GLEngine(EngineCore, ShadowMixin, HudMixin, RenderMixin, ModelGpuMixin, Li
         self._light_vps = self._prep_light_vps   # 渲染帧消费面不变
 
     # ---------------- 2026-11-09 天空盒生效源 (人类裁决 Q3=A) ----------------
-    def effective_skybox(self):
-        """**生效**天空盒: 相机级 (active_camera.skybox) 优先, 否则场景级。
-
-        上层（03 号的命令层 / 场景运行期）把"当前相机的天空盒"写到 CameraState.skybox,
-        渲染端只读这里，不再各自实现一套优先级（GL/VK 共用同一判定）。
-        返回 Cubemap 实例或 None。
-        """
-        try:
-            cam = self.active_camera_object()
-        except Exception as e:
-            self._warn_sky_once('effective', '取激活相机失败 (%r)' % (e,))
-            cam = None
-        cube = getattr(cam, 'skybox', None) if cam is not None else None
-        if cube is not None:
-            return cube
-        return getattr(self, '_skybox', None)
+    # ★审核 1/3 P1-2（2026-11-21）：effective_skybox 已收进 core/engine_core.py
+    # （EngineCore 唯一实现，GLEngine is SceneDriver 同一函数对象）。GL 没有场景级
+    # 独立字段 —— 钩子 _backend_scene_skybox 的**默认实现**（返回 None → 回落 _skybox）
+    # 就是 GL 口径，故本类不再覆写。reset_sky_state 仍留本类（GL 渲染状态哨兵：
+    # 程序/VAO/VBO，属后端资源）。
 
     def reset_sky_state(self):
         """复位天空盒渲染状态 (审计 P-04): 哨兵/程序/VAO 全部失效, 下次绘制重编译。
@@ -1538,58 +1527,11 @@ class GLEngine(EngineCore, ShadowMixin, HudMixin, RenderMixin, ModelGpuMixin, Li
             # 脚本线程异常/死亡: 回退内联, 游戏不崩 (本帧脚本照跑)
             self.update_scripts(dt)
 
-    def _dispatch_fixed_update(self, fixed_dt):
-        """2026-10-18 阶段1档序10 FixedUpdate（语义对齐 Unity FixedUpdate）。
-
-        在 _logic_frame 的 _run_scripts 之前调用（用户改速度/位置本步物理生效）。
-        零开销：基类空实现跳过（未覆盖 on_fixed_update 的脚本不进热路径）。
-        异常隔离：打印 + 标记坏脚本（与 _call_collision_cb 一致）。
-        """
-        for m in self.models:
-            if not m.scripts:
-                continue
-            for sc in m.scripts:
-                inst = getattr(sc, '_script', None)
-                if inst is None or getattr(sc, '_script_broken', False):
-                    continue
-                try:
-                    from script.scripts import Script as _Base
-                except ImportError:
-                    continue
-                if type(inst).on_fixed_update is _Base.on_fixed_update:
-                    continue   # 基类空实现：跳过
-                try:
-                    inst.on_fixed_update(fixed_dt)
-                except Exception as e:
-                    print("[脚本] %s(%s).on_fixed_update 出错: %r"
-                          % (m.name, sc.script_id, e))
-                    sc._script_broken = True
-
-    def _dispatch_late_update(self, render_dt):
-        """2026-10-18 阶段1档序11 LateUpdate（语义对齐 Unity LateUpdate）。
-
-        在渲染帧 update 之后、UI 渲染之前调用（相机跟随、HUD 同步用）。
-        零开销 + 异常隔离语义同 _dispatch_fixed_update。
-        """
-        for m in self.models:
-            if not m.scripts:
-                continue
-            for sc in m.scripts:
-                inst = getattr(sc, '_script', None)
-                if inst is None or getattr(sc, '_script_broken', False):
-                    continue
-                try:
-                    from script.scripts import Script as _Base
-                except ImportError:
-                    continue
-                if type(inst).on_late_update is _Base.on_late_update:
-                    continue   # 基类空实现：跳过
-                try:
-                    inst.on_late_update(render_dt)
-                except Exception as e:
-                    print("[脚本] %s(%s).on_late_update 出错: %r"
-                          % (m.name, sc.script_id, e))
-                    sc._script_broken = True
+    # ★审核 1/3 P1-1（2026-11-21）：_dispatch_fixed_update / _dispatch_late_update
+    # 已搬进 core/engine_core.py（纯脚本派发、零后端依赖 —— 修前本类与
+    # render/vk/driver.py 各一份、16 行逐字相同；现在两端解析到同一函数对象）。
+    # _dispatch_application_quit 仍留本类：VK 侧经 editor/vk_app.py 用**同一函数对象
+    # 再绑定**接入（全仓本来就只有这一份 def，无重复可收）。
 
     def _dispatch_application_quit(self):
         """2026-10-19 阶段1档序7 应用级钩子（语义对齐 Unity Application.quitting）。

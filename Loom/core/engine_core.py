@@ -763,6 +763,131 @@ class EngineCore(TransformMixin, PhysicsMixin, InputMixin, CameraMixin,
             return True
         return False
 
+    # ============ 审核 1/3 P1-1 / P1-2（2026-11-21）：脚本派发与天空盒生效源的唯一实现 ============
+    # 审核原文（1/3 号审核，Q-B7-52-1 / Q-B7-52-2）：「『同源』在语义层基本达成……
+    # 在实现层只达成 5/8；文档的『全部同源修法』是过度声称，且门把剩下的重复制度化了。」
+    # 本段把三处**零后端依赖**的重复收进内核（照 _refresh_play_frame_world 先例）：
+    #   · _dispatch_fixed_update / _dispatch_late_update —— 修前 GL render/gl/engine.py 与
+    #     VK render/vk/driver.py 各一份（有效行 24 vs 21，16 行逐字相同），只碰
+    #     self.models / sc._script / inst.on_*（纯脚本派发、零后端依赖）；
+    #   · effective_skybox —— 修前两份且**已分叉**（GL 回落只读 _skybox；VK 回落
+    #     skybox→_skybox）：一个字段优先级规则两份代码。后端差异（VK 播放器形状多一个
+    #     self.skybox 字段）收进钩子 _backend_scene_skybox()。
+    # 纪律：本段不碰任何 GPU 资源；后端差异只经钩子表达（JVM 模型第 2 步）。
+
+    def _dispatch_fixed_update(self, fixed_dt):
+        """2026-10-18 阶段1档序10 FixedUpdate（语义对齐 Unity FixedUpdate）—— 两端唯一实现。
+
+        在 _logic_frame 的 _run_scripts 之前调用（用户改速度/位置本步物理生效）。
+        零开销：基类空实现跳过（未覆盖 on_fixed_update 的脚本不进热路径）。
+        异常隔离：打印 + 标记坏脚本（与 _call_collision_cb 一致）。
+
+        ★审核 1/3 P1-1（2026-11-21）：修前本方法在 GL render/gl/engine.py 与
+        VK render/vk/driver.py 各有一份（16 行逐字相同，差异只有 docstring 与
+        ImportError 处理位置）；纯脚本派发、零后端依赖，门却断言「恰好两份」把这份
+        重复**制度化**。现在两端解析到同一函数对象（GLEngine is SceneDriver）。
+
+        ImportError 处理取 **VK 版**（把 `from script.scripts import Script` 提到循环外、
+        失败即 return），理由：① 每次派发只查一次 sys.modules（GL 版每个脚本查一次，
+        热路径更省）；② 语义等价 —— _Base 只用于 `type(inst).on_x is _Base.on_x` 的
+        基类空实现判据，模块不可导入时 GL 版会对每个脚本各 continue 一次，净效果同样是
+        「一个都不派发」（异常隔离边界不变：只吞 ImportError）。
+        """
+        try:
+            from script.scripts import Script as _Base
+        except ImportError:
+            return
+        for m in self.models:
+            if not m.scripts:
+                continue
+            for sc in m.scripts:
+                inst = getattr(sc, '_script', None)
+                if inst is None or getattr(sc, '_script_broken', False):
+                    continue
+                if type(inst).on_fixed_update is _Base.on_fixed_update:
+                    continue   # 基类空实现：跳过
+                try:
+                    inst.on_fixed_update(fixed_dt)
+                except Exception as e:
+                    print("[脚本] %s(%s).on_fixed_update 出错: %r"
+                          % (m.name, sc.script_id, e))
+                    sc._script_broken = True
+
+    def _dispatch_late_update(self, render_dt):
+        """2026-10-18 阶段1档序11 LateUpdate（语义对齐 Unity LateUpdate）—— 两端唯一实现。
+
+        在渲染帧 update 之后、UI 渲染之前调用（相机跟随、HUD 同步用）。
+        零开销 + 异常隔离语义同 _dispatch_fixed_update（★审核 1/3 P1-1 同批收口：
+        修前两端各一份、16 行逐字相同）。
+        """
+        try:
+            from script.scripts import Script as _Base
+        except ImportError:
+            return
+        for m in self.models:
+            if not m.scripts:
+                continue
+            for sc in m.scripts:
+                inst = getattr(sc, '_script', None)
+                if inst is None or getattr(sc, '_script_broken', False):
+                    continue
+                if type(inst).on_late_update is _Base.on_late_update:
+                    continue   # 基类空实现：跳过
+                try:
+                    inst.on_late_update(render_dt)
+                except Exception as e:
+                    print("[脚本] %s(%s).on_late_update 出错: %r"
+                          % (m.name, sc.script_id, e))
+                    sc._script_broken = True
+
+    def _backend_scene_skybox(self):
+        """钩子（后端差异）：**场景级**天空盒字段 —— 默认 = GL 口径（GL 无独立字段）。
+
+        ★审核 1/3 P1-2（2026-11-21）：VK 播放器形状（SceneDriver.load_from_data 写
+        self.skybox）比 GL 多一个场景级字段；修前这条差异靠**第二份 effective_skybox**
+        表达，而两份已经分叉（GL 只回落 _skybox，VK 回落 skybox→_skybox）。现在判定
+        规则只有一份（effective_skybox），字段差异只在这里（JVM 模型第 2 步）。
+        GL 不覆写本钩子（默认返回 None → 回落 _skybox，与修前 GL 逐位相同）。
+        """
+        return None
+
+    def effective_skybox(self):
+        """**生效**天空盒: 相机级 (active_camera.skybox) 优先, 否则场景级 —— 两端唯一实现。
+
+        上层（03 号的命令层 / 场景运行期）把"当前相机的天空盒"写到 CameraState.skybox,
+        渲染端只读这里，不再各自实现一套优先级（GL/VK 共用同一判定）。
+        返回 Cubemap 实例或 None。
+
+        ★审核 1/3 P1-2（2026-11-21）：修前 GL render/gl/engine.py 与 VK
+        render/vk/driver.py 各一份**且已分叉**（GL 回落只读 _skybox；VK 回落
+        skybox→_skybox）—— 一个字段优先级规则两份代码，S5 声称的「D2 同源修法」
+        不成立。现在回落链 = 钩子 _backend_scene_skybox() → _skybox，两端逐位等价：
+          · GL ：钩子返回 None → _skybox（与修前 GL 逐位相同）；
+          · VK ：钩子返回 self.skybox → 若 None 再 _skybox（与修前 VK 逐位相同；
+            SceneDriver 没有 _skybox 字段 → 播放器回落次序不变）。
+        取激活相机失败时的告警口径仍是后端差异（GL 走 _warn_sky_once 只报一次、
+        VK 每次打印），沿用 RenderMixin._sky_warn 的既有 getattr 回退写法。
+        """
+        try:
+            cam = self.active_camera_object()
+        except Exception as e:
+            _ow = getattr(self, '_warn_sky_once', None)
+            if callable(_ow):
+                try:
+                    _ow('effective', '取激活相机失败 (%r)' % (e,))
+                except Exception:
+                    pass
+            else:
+                print('[驱动] 取激活相机失败 (%r) -> 天空盒回退场景级' % (e,))
+            cam = None
+        cube = getattr(cam, 'skybox', None) if cam is not None else None
+        if cube is not None:
+            return cube
+        scene = self._backend_scene_skybox()
+        if scene is None:
+            scene = getattr(self, '_skybox', None)
+        return scene
+
     # ============ S2（Q-B7-47-1 五阶段·阶段 2）：两个「文件放错」的纯方法归位内核 ============
     # 「B 类」方法 = 文件放在 GL 后端 mixin 里、方法体却一行后端（GL/VK）代码都没有的方法。
     #   · _model_aabbs_par —— 原 loom_lighting.LightingMixin，纯 numpy AABB 批量归约

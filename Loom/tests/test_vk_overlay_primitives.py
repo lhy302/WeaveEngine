@@ -690,6 +690,14 @@ def section_b8():
     device = _vk_device()
     ctx, fbo, ed, _vp = _editor()
     # ---- B8a：同一线宽参数下，单条水平线的线宽像素数两端相等 ----
+    # ★审核 1/3 P1-4（2026-11-21，Q-B7-52-1）：修前判据 = `wg == wv and wg >= 1.0` ——
+    # **两端一起从 2px 变 4px 也全绿**（B8a/B8b/像素门/ab_gl_vk 全过），这是「期望值取自
+    # 某一端」的残留形态：裁决 B 的核心数值 2px 没有被任何独立断言锁住。
+    # 现在由**手算期望值**锁住（期望值不取自任何一端）：
+    #   · 线宽像素数必须 == 2.0（不是「两端相等且 >= 1」）；
+    #   · 手算像素覆盖：identity VP 下水平线 (-0.8,0)..(0.8,0) 在 480x320 上
+    #     x ∈ [0.1W, 0.9W) = 384 列、y 跨 2 行（H/2-1=159 / H/2=160）
+    #     → 恰好 2 行亮像素、共 2 x 384 = 768 亮像素（宽 2px 的半宽 1px 上下各半行）。
     vp_id = np.eye(4, dtype="f4")
     lv = [(-0.8, 0.0, 0.0), (0.8, 0.0, 0.0)]
     lc = [(1.0, 1.0, 1.0), (1.0, 1.0, 1.0)]
@@ -697,8 +705,29 @@ def section_b8():
     v = _vk_render_lines(device, lv, lc, vp_id, depth_on=False)
     wg, wv = _line_width_px(g), _line_width_px(v)
     print("  [水平线 width=2px] 线宽像素数 GL=%s VK=%s" % (wg, wv))
-    check("B8a 同一线宽参数(2px)下两端线宽像素数相等", wg == wv and wg >= 1.0,
-          (wg, wv))
+    check("B8a 同一线宽参数(2px)下两端线宽像素数 == 手算 2.0（不是「两端相等且 >=1」）",
+          abs(wg - 2.0) < 1e-9 and abs(wv - 2.0) < 1e-9, (wg, wv))
+    # 手算断言（独立于「两端相等」）：2 行 x 384 列 = 768 亮像素
+    _exp_cols = int(round((0.8 - (-0.8)) * 0.5 * W))     # NDC 跨度 1.6 -> 0.8*W = 384 列
+    _exp_lit = 2 * _exp_cols                              # 2 行 x 384 列 = 768
+    _hand8 = {}
+    for _nm8, _img8 in (("GL", g), ("VK", v)):
+        _m8 = _mask(_img8)
+        _r8 = np.where(_m8.any(axis=1))[0]
+        _c8 = np.where(_m8.any(axis=0))[0]
+        _hand8[_nm8] = (
+            len(_r8) == 2 and _r8.tolist() == [H // 2 - 1, H // 2]
+            and int(_m8.sum()) == _exp_lit
+            and len(_c8) == _exp_cols
+            and int(_c8.min()) == int(round(0.1 * W))
+            and int(_c8.max()) == int(round(0.9 * W)) - 1)
+        print("  [手算 %s] 亮行=%s 亮列数=%d 亮像素=%d（期望 2 行 / %d 列 / %d px）"
+              % (_nm8, _r8.tolist(), len(_c8), int(_m8.sum()), _exp_cols, _exp_lit))
+    check("B8a 手算：水平线 width=2.0 -> 恰好 2 行亮像素（行 %d/%d）、覆盖 %d px"
+          "（2 行 x %d 列，x∈[%d,%d]）"
+          % (H // 2 - 1, H // 2, _exp_lit, _exp_cols,
+             int(round(0.1 * W)), int(round(0.9 * W)) - 1),
+          _hand8["GL"] and _hand8["VK"], _hand8)
     # ---- B8b：真实夹具（网格/选中框/gizmo）两端线像素数相等 ----
     fx = _capture_fixtures(ed)
     for name in FIXTURE_ORDER:
