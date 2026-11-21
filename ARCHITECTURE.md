@@ -7,7 +7,7 @@
 > **维护纪律**：改架构/加模块/搬文件后**必须**更新对应小图；一张图 ≤ ~15 节点；
 > 节点写真实文件名、边上写关系类型；**不要另起第二份架构文档**。
 
-> **v4 版本说明（2026-11-21，按 HEAD d156cee 的真实状态统一重画）**：
+> **v4 版本说明（2026-11-21，按 HEAD 60ea619 的真实状态统一重画）**：
 > v3 是在 B1~B4 六批目录重构**进行中**分批增量改出来的；B1~B4 全部收口（117 个平铺文件 → 20 个语义包）
 > 加上此后落地的十几项缺陷修复与三轮审核收口之后，本文件按当前 HEAD **逐张重画**：
 > **① 全部节点路径指向重构后的真实路径**（render/ · scene/ · editor/ · gui/ · core/ · kernels/ …，
@@ -22,6 +22,10 @@
 > **v4 的一句话结论**：目录重构收口后，「公共语义在 `EngineCore`（10 共享 mixin）+ 后端差异在 GL/VK mixin」
 > 的形状已经稳定；两端一致性的**证据**（六面 + 编辑器播放态对拍门）全绿；
 > 剩下的缺口是**物理面 / 动画面 / 编辑器 resize 时序 / 打包端到端 / 绑死模式暂停 / 高 DPI**（见图 19.3）。
+>
+> **B7-54 同步（2026-11-21，HEAD 60ea619，代码 commit 09759b9）**：入口后端选择同源收口——
+> Loom.py / build_entry.py 的后端选择同走 `run_player.resolve_backend`（--backend 解析唯一实现 `parse_backend_arg:133`），
+> 图 1 / 9 / 13 / 19 相应更新；文件清单 157→**158 个 .py / 58267 行**；验证体系新增 B7-54 门。
 
 > 相对 v1 的三个改动：**① 拆成多张小图**（一张图超过 ~15 个节点必然乱，这是 mermaid 的排版极限，不是画法问题）；
 > **② 节点里放进真实文件**，功能与文件之间用 `实现于` 连线；**③ 每条线上写清关系**（调用 / 拼装 / 共享契约 / import）。
@@ -39,7 +43,7 @@
 | 顺序 | 图 | 回答什么问题 |
 |---|---|---|
 | **1** | [图 1 全景](#图-1-全景只画层不画文件) | 层与层之间对不对？入口→门面→子系统→契约→数据，有没有跨层直连？ |
-| **2** | [图 13 文件清单](#图-13-文件清单按功能簇归组157-个-py) | **157 个 .py 按功能簇归组** —— 哪个文件混了多个功能？哪个簇缺文件？ |
+| **2** | [图 13 文件清单](#图-13-文件清单按功能簇归组158-个-py) | **158 个 .py 按功能簇归组** —— 哪个文件混了多个功能？哪个簇缺文件？ |
 | **3** | [图 19 验证体系](#图-19-验证体系两端对拍门覆盖了哪些面--本轮最大产出) | 哪个面有门、哪个面没门（19.3 缺口表） |
 
 **其它常用**：
@@ -81,14 +85,15 @@
 
 ```mermaid
 flowchart TB
-  subgraph EDENT["编辑器入口（GL 缺省 / --backend vulkan 走 VkEditorApp，S4）"]
-    A1["Loom.py 522<br/>源码入口"]:::entry
-    A2["build_entry.py 460<br/>编译入口"]:::entry
+  subgraph EDENT["编辑器入口（后端选择同走 run_player.resolve_backend，B7-54）"]
+    A1["Loom.py 524<br/>源码入口"]:::entry
+    A2["build_entry.py 536<br/>编译入口"]:::entry
   end
   subgraph PLENT["播放器入口（两条腿，可切）"]
-    A3["run_player.py 477<br/>resolve_backend:133"]:::entry
+    A3["run_player.py 494<br/>parse_backend_arg:133（唯一解析）<br/>resolve_backend:152"]:::entry
     A4["game_player.py 305<br/>打包游戏（复用 run_player）"]:::entry
     A5["render/vk/player.py 887<br/>VK 窗口循环"]:::entry
+    A6["editor/vk_app.py 161<br/>VkEditorApp（S4 编辑器 VK 面）"]:::entry
   end
   subgraph FACADE["门面（形状不同）"]
     B1["GLEngine<br/>render/gl/engine.py 1638<br/>= EngineCore + 6 个 GL mixin"]:::facade
@@ -104,13 +109,16 @@ flowchart TB
     D2["assets/assets.py 1198"]:::file
     D3["render/contract/<br/>frame_plan 270 · scene_ubo 177"]:::contract
   end
-  A1 -->|创建 EditorApp| B1
-  A2 -->|创建| B1
-  A1 -->|--run 分支调用| A3
+  A1 -->|缺省创建 EditorApp（GL）| B1
+  A2 -->|缺省创建 EditorApp（GL）| B1
+  A1 -->|--backend 决策走 resolve_backend| A3
+  A2 -->|四分支决策走 resolve_backend| A3
   A4 -->|复用后端选择| A3
   A3 -->|opengl 分支经 runtime.PlayerApp| B1
   A3 -->|vulkan 分支| A5
   A5 -->|创建| B2
+  A3 -.->|显式 vulkan → 编辑器面| A6
+  A6 -->|装配| B2
   B1 ==>|拼装| C1
   B2 -->|使用| C2
   B1 ==>|公共内核| B0
@@ -127,8 +135,10 @@ flowchart TB
   classDef file fill:#f1f5f9,stroke:#64748b,color:#334155
 ```
 
-> **读法**：编辑器入口缺省直连 GLEngine（`EditorApp(_EditorCore, GLEngine)`，editor/app.py 32 行装配壳），
+> **读法**：B7-54 后编辑器与编译入口的后端选择**同走一份** `run_player.resolve_backend`（--backend 解析也收敛为
+> `run_player.parse_backend_arg:133` 全仓唯一实现）：编辑器入口缺省仍 GL（`EditorApp(_EditorCore, GLEngine)`，editor/app.py 32 行装配壳），
 > S4 起显式 `--backend vulkan` 时改走 `VkEditorApp(_EditorCore, SceneDriver)`（真窗口双视口，editor/vk_app.py 161 行）；
+> `build_entry.py` 四分支全部经 run_player 后端选择（播放分支 `run_backend` 链路，default/minimal 分支 VK 决策可达）；
 > 播放器入口经 run_player 分叉到 GL（runtime.PlayerApp）或 VK（render/vk/player → SceneDriver）。
 > 编辑器与播放器的播放组件是**同一份**（_EditorCore 中间基类 + 主 pass 相机/挂父相机/LateUpdate/
 > _refresh_play_frame_world 共享实现，「同源不同步」规则 5.5，S5 对拍门 575 条全绿）。
@@ -137,11 +147,11 @@ flowchart TB
 
 | 场景 | 能选后端吗 | 依据 | 环境不支持时 |
 |---|---|---|---|
-| **编辑器**（`Loom.py` / `Loom.exe`） | **部分能**（S4）：缺省仍 GL（`EditorApp(_EditorCore, GLEngine)`，零变化）；**显式 `--backend vulkan`** → `VkEditorApp(_EditorCore, SceneDriver)` + `editor/viewport/vk_viewport.VkViewport`（QRenderWidget bitmap present） | `Loom.py:494-504` 编辑器分支走 `run_player.resolve_backend` 单一事实 | VK 不可用 → `VkViewport.init_error` 报错可见（不静默降级，vk_viewport.py:113） |
+| **编辑器**（`Loom.py` / `Loom.exe`） | **部分能**（S4）：缺省仍 GL（`EditorApp(_EditorCore, GLEngine)`，零变化）；**显式 `--backend vulkan`** → `VkEditorApp(_EditorCore, SceneDriver)` + `editor/viewport/vk_viewport.VkViewport`（QRenderWidget bitmap present） | `Loom.py:497-504` 编辑器分支走 `run_player.resolve_backend` 单一事实（B7-54 后 `build_entry.py` 编辑器面同规则） | VK 不可用 → `VkViewport.init_error` 报错可见（不静默降级，vk_viewport.py:113） |
 | 编辑器里点「播放」 | **不能**。就在编辑器自己的 GL 引擎里跑 | `gui/main_window.py:1385` → `editor.toggle_play` 只置 `is_playing`，不起外部播放器 | 同上 |
-| 独立播放器（`--run`） | **能**：`--backend` > 游戏设置 > 引擎设置 > 默认 vulkan | `run_player.resolve_backend:133` | `auto`：VK 初始化失败 → 诊断+落配置+**同进程转 GL**（`run_player.py:415-430`、`_persist_backend:186`）；显式 `--backend vulkan` 失败只报错不改配置 |
+| 独立播放器（`--run`） | **能**：`--backend` > 游戏设置 > 引擎设置 > 默认 vulkan | `run_player.resolve_backend:152` | `auto`：VK 初始化失败 → 诊断+落配置+**同进程转 GL**（`run_player.py:434-449`、`_persist_backend:205`）；显式 `--backend vulkan` 失败只报错不改配置 |
 | 打包游戏（`game_player.py`） | **能**：同播放器一套逻辑（复用 run_player，`:170` 调同一 resolve_backend） | `game_player.py:170` | 同播放器 |
-| 运行期失败（VK 渲染循环内崩） | — | `VkRunError` | **不回退**：打印原因后非零退出（`run_player.py:419-420`） |
+| 运行期失败（VK 渲染循环内崩） | — | `VkRunError` | **不回退**：打印原因后非零退出（`run_player.py:438-439`） |
 
 > 编辑器里那个「渲染 API」下拉框（`gui/main_window.py:2899-2905`，B4 后归位；原 `ui/loom_gui.py`）写的是**游戏设置**，
 > 即「下次启动播放器/打包游戏用哪个」，不是「编辑器自己用哪个」。
@@ -496,12 +506,14 @@ flowchart LR
   P["hostenv/userpaths.py 142<br/>唯一收口点"]:::contract
   G1["guiloader.py 340<br/>引擎设置"]:::file
   G2["game_settings.py 415<br/>游戏设置"]:::file
-  R1["run_player.py<br/>读 render_api"]:::entry
+  C0["四入口（B7-54 同源）<br/>Loom.py · build_entry.py 536<br/>game_player.py · run_player.__main__"]:::entry
+  R1["run_player.py 494<br/>parse_backend_arg:133（--backend 解析唯一实现）<br/>resolve_backend:152 读 render_api"]:::entry
   R2["render/gl/engine.py / render/vk/driver.py<br/>读 logic_fps / interp_mode"]:::impl
   T -->|delta 覆盖| U
   U -->|路径由它算| P
   G1 -->|读| P
   G2 -->|读| P
+  C0 -->|转调 parse_backend_arg| R1
   R1 -->|读| G1
   R1 -->|读| G2
   R2 -->|读| G1
@@ -630,17 +642,17 @@ sequenceDiagram
 
 ---
 
-# 图 13 文件清单（按功能簇归组，157 个 .py）
+# 图 13 文件清单（按功能簇归组，158 个 .py）
 
 图上画不下的全量在这里 —— 这是「功能分布在哪几个文件」的表格版。行数 2026-11-21 实测（物理行）。
-**20 个包共 135 文件 / 46068 行 + 顶层平铺 22 文件 / 11822 行 = 157 文件 / 57890 行。**
+**20 个包共 135 文件 / 46068 行 + 顶层平铺 22 文件 / 11917 行 + tests 门文件 1 / 282 行 = 158 文件 / 58267 行。**
 
 ### A 入口层（顶层平铺）
 | 文件 | 行数 | 职责 |
 |---|---|---|
-| `Loom.py` | 522 | 源码入口：命令行参数 + 数学管线基准 + 编辑器/播放器分叉（后端选择走 run_player.resolve_backend 单一事实，`:494-504`） |
-| `build_entry.py` | 460 | 编译入口：命令行参数 + 数学管线基准 + 启动引擎 |
-| `run_player.py` | 477 | 播放器渲染 API 选择入口（resolve_backend:133 / _persist_backend:186 / auto 失败同进程转 GL :415-430） |
+| `Loom.py` | 524 | 源码入口：命令行参数 + 数学管线基准 + 编辑器/播放器分叉（后端选择走 run_player.resolve_backend 单一事实，`:497-504`；`_cli_backend:88` 薄转调 parse_backend_arg，B7-54 解析唯一实现） |
+| `build_entry.py` | 536 | 编译入口：命令行参数 + 数学管线基准 + 启动引擎；B7-54 后四分支全走 run_player 后端选择（`_player_backend_choice:102` / `_editor_backend_choice:113` 纯决策函数，播放分支 `run_backend` 链路，default/minimal 分支 VkEditorApp 可达） |
+| `run_player.py` | 494 | 播放器渲染 API 选择入口（parse_backend_arg:133 全仓唯一 --backend 解析 / resolve_backend:152 / _persist_backend:205 / auto 失败同进程转 GL :434-449） |
 | `runtime.py` | 321 | Player 运行时（M17: 引擎/编辑器分层；GL 播放器 _dispatch_ui_mouse:246） |
 | `game_player.py` | 305 | 纯 Player 游戏入口（M38，Unity Build 模型；:170 复用 resolve_backend） |
 | `core/single_instance.py` | 96 | Loom 编辑器单实例锁（2026-10-19） |
@@ -863,7 +875,12 @@ sequenceDiagram
 | `loom_ui_resize.py` | 100 | ★ UI 画布尺寸同步唯一实现（Q-B7-41-1）。 |
 | `undo.py`（顶层） | 21 | **薄门面（B4）**：sys.modules 别名 → editor/undo（保仓外 `import undo` 旧名）。 |
 
-> **共 157 个文件**（20 包 135 + 顶层平铺 22）。行数为实测物理行，与 `git show HEAD` 状态逐文件一致。
+### V tests/（对拍门文件，只单列入台账的新增门）
+| 文件 | 行数 | 职责 |
+|---|---|---|
+| `tests/test_entry_backend_parity.py` | 282 | B7-54 四入口后端选择同源门（94 条断言：A 四入口决策一致 / B 解析单源 grep 级 / C build_entry 决策可达；修前红留痕 089677f）。 |
+
+> **共 158 个文件**（20 包 135 + 顶层平铺 22 + tests 门文件 1）。行数为实测物理行，与 `git show HEAD` 状态逐文件一致。
 > v3 的 97 文件清单里，`loom_types.py`→`core/primitives.py`、`loom_scene_*.py`→`scene/`、`editor.py`→`editor/`、
 > `ui/loom_gui.py`→`gui/`、`undo.py`→`editor/undo/`、`loom_components.py` 尾部→`audio/system.py` 等
 > 搬迁全部按 B1~B4 后的新路径重列；`components/collision.py`、`components/model_data.py`、`scene/identity.py`、
@@ -1163,8 +1180,9 @@ flowchart TB
 # 图 19 验证体系：两端对拍门覆盖了哪些面（★ v4 实测更新）
 
 > 为什么架构图要画验证体系：**门覆盖不到的地方就会漏**。
-> v4 更新说明：下表门数全部为 2026-11-21 在 HEAD d156cee **实跑重测**的值（不是抄 v3）；
-> 与 v3 相比：P6 71→**70**、P7 编辑器四面 566→**575**、S3 叠加层 18→**24**、场景契约门 39→**48**（Q-B7-49-1 G 组扩容）。
+> v4 更新说明：下表门数全部为 2026-11-21 在 HEAD 60ea619 **实跑重测**的值（不是抄 v3）；
+> 与 v3 相比：P6 71→**70**、P7 编辑器四面 566→**575**、S3 叠加层 18→**24**、场景契约门 39→**48**（Q-B7-49-1 G 组扩容）；
+> B7-54 新增四入口决策同源门 **94** 条（test_entry_backend_parity）。
 
 ## 19.1 七面对拍门 + 增补门（全绿）
 
@@ -1187,7 +1205,7 @@ flowchart TB
     G5["test_camera_parity 195<br/>+ test_vk_camera_align 85"]:::gate
     G6["test_pause_parity 70"]:::gate
     G7["test_editor_play_parity 575<br/>test_editor_play_pixel_parity 17<br/>+S3/S4：vk_overlay 24 / vk_editor_smoke 16"]:::gate
-    G8["B7-28/审核1-3 增补门<br/>editor_wheel_semantics 20<br/>wheel_backend_semantics 31<br/>skybox_engine_parity 23"]:::gate
+    G8["B7-28/审核1-3/B7-54 增补门<br/>editor_wheel_semantics 20<br/>wheel_backend_semantics 31<br/>skybox_engine_parity 23<br/>entry_backend_parity 94（四入口决策同源）"]:::gate
   end
   F1 --> G1
   F2 --> G2
@@ -1203,6 +1221,8 @@ flowchart TB
 ```
 
 ## 19.2 全部对拍/回归门（实测数字）
+
+> run_all 汇总：162 文件 / 5861 PASS / 0 FAIL / EXIT 0（2026-11-21，HEAD 60ea619，B7-54 后实测）。
 
 | 门 | 断言数（实测） | 覆盖什么 |
 |---|---|---|
@@ -1231,6 +1251,7 @@ flowchart TB
 | `test_editor_wheel_semantics` | 20 | B7-28：编辑器滚轮语义（视口内缩放/视口外不缩放/暂停态消费） |
 | `test_wheel_backend_semantics` | 31 | 滚轮后端语义（GL/VK + run_player 入口恢复） |
 | `test_skybox_engine_parity` | 23 | 审核 1/3：天空盒引擎面两端对齐 |
+| `test_entry_backend_parity` | 94 | B7-54：四入口（Loom.py / build_entry / game_player / run_player）对同一份 argv+配置产生**同一后端决策**；--backend 解析单源（parse_backend_arg）；build_entry 四分支决策可达 |
 
 ## 19.3 ★ 还没有对拍门的面（缺口，按优先级）
 
