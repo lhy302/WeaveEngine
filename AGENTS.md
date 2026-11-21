@@ -52,7 +52,7 @@
 | **`SystemRoot`** | 必须落**真实** `C:\Windows`，**不能**是 `%SystemRoot%` 展开串 —— 否则 `glfw.create_window` 建 GL 窗口会 **0xC0000005** 崩溃 |
 | `TEMP` / `TMP` | 用 `C:\Users\<用户>\AppData\Local\Temp`；指到 `C:\Windows\TEMP` 会让 `test_agent_commands` 假红 5 条 |
 | `run_all` | **单实例**；某些沙箱会回收后台子进程 → **前台单次调用** |
-| 已知假绿 | `test_hub_update.py` 打印 `FAIL` 却退出码 0（机制未核，归 Hub 0.1.5） |
+| ~~已知假绿~~ | `test_hub_update.py` 打印 `FAIL` 却退出码 0 —— **2026-11-22 终审独立复跑未复现**（74 PASS / 0 FAIL / EXIT 0），且门已带 FAIL 监视 + `_exit(1)` 双保险；若在 Hub 0.1.5 上下文复现再立新项 |
 
 ---
 

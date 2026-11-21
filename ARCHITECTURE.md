@@ -25,7 +25,7 @@
 >
 > **B7-54 同步（2026-11-21，HEAD 60ea619，代码 commit 09759b9）**：入口后端选择同源收口——
 > Loom.py / build_entry.py 的后端选择同走 `run_player.resolve_backend`（--backend 解析唯一实现 `parse_backend_arg:133`），
-> 图 1 / 9 / 13 / 19 相应更新；文件清单 157→**158 个 .py / 58267 行**；验证体系新增 B7-54 门。
+> 图 1 / 9 / 13 / 19 相应更新；文件清单 157→**158 个 .py**（58267 行；2026-11-22 终审 F-2/F-4 复算后 **58350 行**，口径统一说明见图 13 头）；验证体系新增 B7-54 门。
 
 > 相对 v1 的三个改动：**① 拆成多张小图**（一张图超过 ~15 个节点必然乱，这是 mermaid 的排版极限，不是画法问题）；
 > **② 节点里放进真实文件**，功能与文件之间用 `实现于` 连线；**③ 每条线上写清关系**（调用 / 拼装 / 共享契约 / import）。
@@ -86,8 +86,8 @@
 ```mermaid
 flowchart TB
   subgraph EDENT["编辑器入口（后端选择同走 run_player.resolve_backend，B7-54）"]
-    A1["Loom.py 524<br/>源码入口"]:::entry
-    A2["build_entry.py 536<br/>编译入口"]:::entry
+    A1["Loom.py 538<br/>源码入口"]:::entry
+    A2["build_entry.py 537<br/>编译入口"]:::entry
   end
   subgraph PLENT["播放器入口（两条腿，可切）"]
     A3["run_player.py 494<br/>parse_backend_arg:133（唯一解析）<br/>resolve_backend:152"]:::entry
@@ -147,7 +147,7 @@ flowchart TB
 
 | 场景 | 能选后端吗 | 依据 | 环境不支持时 |
 |---|---|---|---|
-| **编辑器**（`Loom.py` / `Loom.exe`） | **部分能**（S4）：缺省仍 GL（`EditorApp(_EditorCore, GLEngine)`，零变化）；**显式 `--backend vulkan`** → `VkEditorApp(_EditorCore, SceneDriver)` + `editor/viewport/vk_viewport.VkViewport`（QRenderWidget bitmap present） | `Loom.py:497-504` 编辑器分支走 `run_player.resolve_backend` 单一事实（B7-54 后 `build_entry.py` 编辑器面同规则） | VK 不可用 → `VkViewport.init_error` 报错可见（不静默降级，vk_viewport.py:113） |
+| **编辑器**（`Loom.py` / `Loom.exe`） | **部分能**（S4）：缺省仍 GL（`EditorApp(_EditorCore, GLEngine)`，零变化）；**显式 `--backend vulkan`** → `VkEditorApp(_EditorCore, SceneDriver)` + `editor/viewport/vk_viewport.VkViewport`（QRenderWidget bitmap present） | `Loom.py:513-520` 编辑器分支走 `_editor_backend_choice` 纯决策函数（真调 `run_player.resolve_backend` 单一事实，B7-54 终审 F-2 抽出；`build_entry.py` 编辑器面同规则，门 A④ 双方真调用同一份决策） | VK 不可用 → `VkViewport.init_error` 报错可见（不静默降级，vk_viewport.py:113） |
 | 编辑器里点「播放」 | **不能**。就在编辑器自己的 GL 引擎里跑 | `gui/main_window.py:1385` → `editor.toggle_play` 只置 `is_playing`，不起外部播放器 | 同上 |
 | 独立播放器（`--run`） | **能**：`--backend` > 游戏设置 > 引擎设置 > 默认 vulkan | `run_player.resolve_backend:152` | `auto`：VK 初始化失败 → 诊断+落配置+**同进程转 GL**（`run_player.py:434-449`、`_persist_backend:205`）；显式 `--backend vulkan` 失败只报错不改配置 |
 | 打包游戏（`game_player.py`） | **能**：同播放器一套逻辑（复用 run_player，`:170` 调同一 resolve_backend） | `game_player.py:170` | 同播放器 |
@@ -644,14 +644,14 @@ sequenceDiagram
 
 # 图 13 文件清单（按功能簇归组，158 个 .py）
 
-图上画不下的全量在这里 —— 这是「功能分布在哪几个文件」的表格版。行数 2026-11-21 实测（物理行）。
-**20 个包共 135 文件 / 46068 行 + 顶层平铺 22 文件 / 11917 行 + tests 门文件 1 / 282 行 = 158 文件 / 58267 行。**
+图上画不下的全量在这里 —— 这是「功能分布在哪几个文件」的表格版。行数 2026-11-22 实测（物理行；口径 = `len(text.split('\n'))`，与包内 135 文件既有口径一致；终审 F-4 复算时把 2026-11-21 混用的三处行数——Loom.py / build_entry.py / 门文件——统一到同一口径）。
+**20 个包共 135 文件 / 46068 行 + 顶层平铺 22 文件 / 11932 行 + tests 门文件 1 / 350 行 = 158 文件 / 58350 行。**
 
 ### A 入口层（顶层平铺）
 | 文件 | 行数 | 职责 |
 |---|---|---|
-| `Loom.py` | 524 | 源码入口：命令行参数 + 数学管线基准 + 编辑器/播放器分叉（后端选择走 run_player.resolve_backend 单一事实，`:497-504`；`_cli_backend:88` 薄转调 parse_backend_arg，B7-54 解析唯一实现） |
-| `build_entry.py` | 536 | 编译入口：命令行参数 + 数学管线基准 + 启动引擎；B7-54 后四分支全走 run_player 后端选择（`_player_backend_choice:102` / `_editor_backend_choice:113` 纯决策函数，播放分支 `run_backend` 链路，default/minimal 分支 VkEditorApp 可达） |
+| `Loom.py` | 538 | 源码入口：命令行参数 + 数学管线基准 + 编辑器/播放器分叉（后端选择走 run_player.resolve_backend 单一事实，编辑器分支 `:513-520`；`_cli_backend:88` 薄转调 parse_backend_arg（B7-54 解析唯一实现）；`_editor_backend_choice:105` 编辑器决策纯函数（B7-54 终审 F-2 抽出，main 与门 A④ 同一份）） |
+| `build_entry.py` | 537 | 编译入口：命令行参数 + 数学管线基准 + 启动引擎；B7-54 后四分支全走 run_player 后端选择（`_player_backend_choice:102` / `_editor_backend_choice:113` 纯决策函数，播放分支 `run_backend` 链路，default/minimal 分支 VkEditorApp 可达） |
 | `run_player.py` | 494 | 播放器渲染 API 选择入口（parse_backend_arg:133 全仓唯一 --backend 解析 / resolve_backend:152 / _persist_backend:205 / auto 失败同进程转 GL :434-449） |
 | `runtime.py` | 321 | Player 运行时（M17: 引擎/编辑器分层；GL 播放器 _dispatch_ui_mouse:246） |
 | `game_player.py` | 305 | 纯 Player 游戏入口（M38，Unity Build 模型；:170 复用 resolve_backend） |
@@ -878,7 +878,7 @@ sequenceDiagram
 ### V tests/（对拍门文件，只单列入台账的新增门）
 | 文件 | 行数 | 职责 |
 |---|---|---|
-| `tests/test_entry_backend_parity.py` | 282 | B7-54 四入口后端选择同源门（94 条断言：A 四入口决策一致 / B 解析单源 grep 级 / C build_entry 决策可达；修前红留痕 089677f）。 |
+| `tests/test_entry_backend_parity.py` | 350 | B7-54 四入口后端选择同源门（111 条断言：A 四入口决策一致（A④/A④b 编辑器面双方真调用各自入口决策函数，终审 F-2）/ B 解析单源 grep 级 + Loom.py 源码结构断言（终审 F-2）/ C build_entry 决策可达；修前红留痕 089677f + F-2 修前红 27 条 2026-11-22）。 |
 
 > **共 158 个文件**（20 包 135 + 顶层平铺 22 + tests 门文件 1）。行数为实测物理行，与 `git show HEAD` 状态逐文件一致。
 > v3 的 97 文件清单里，`loom_types.py`→`core/primitives.py`、`loom_scene_*.py`→`scene/`、`editor.py`→`editor/`、
@@ -1251,7 +1251,7 @@ flowchart TB
 | `test_editor_wheel_semantics` | 20 | B7-28：编辑器滚轮语义（视口内缩放/视口外不缩放/暂停态消费） |
 | `test_wheel_backend_semantics` | 31 | 滚轮后端语义（GL/VK + run_player 入口恢复） |
 | `test_skybox_engine_parity` | 23 | 审核 1/3：天空盒引擎面两端对齐 |
-| `test_entry_backend_parity` | 94 | B7-54：四入口（Loom.py / build_entry / game_player / run_player）对同一份 argv+配置产生**同一后端决策**；--backend 解析单源（parse_backend_arg）；build_entry 四分支决策可达 |
+| `test_entry_backend_parity` | 111 | B7-54：四入口（Loom.py / build_entry / game_player / run_player）对同一份 argv+配置产生**同一后端决策**；--backend 解析单源（parse_backend_arg）+ Loom.py 源码结构断言；编辑器面双方真调用 _editor_backend_choice（终审 F-2 补牙，实数 93→111；旧记 94 含汇总行）；build_entry 四分支决策可达 |
 
 ## 19.3 ★ 还没有对拍门的面（缺口，按优先级）
 
