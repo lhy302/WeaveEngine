@@ -276,11 +276,15 @@ class VkUIEngine:
         hw = max(0.5, float(width) * 0.5)
         verts = []
         for (p0, p1) in segs:
-            # Q-B7-48-1 裁决 B：垂直偏移数学**只许一份** —— 用 loom_line_geometry
+            # Q-B7-48-1 裁决 B：垂直偏移数学**只许一份** —— 用 mathlib/line_geometry
             # 的 expand_segment（与编辑器叠加层线宽的 build_line_quads 同一个函数）。
-            # 输出与旧内联实现**语义等价**（不是逐位相同：角点差 ≤6e-14 = 双精度
-            # 舍入级；退化段判据 1e-6 → 1e-9，长度 <1e-6 的段现在会画 —— 这是行为
-            # 变更，本函数的历史 A/B 结论不受影响）。审核 1/3 P2-3 修正。
+            # 与旧内联实现**语义等价**，不是逐位相同（Q-B7-53-3 审核 1/3 实测）：
+            #   · 长度公式 hypot vs ** 0.5 -> 角点分量差为双精度舍入级
+            #     （审核样本 20 万段 max 6e-14；门里宽域样本 ±2000px max 2.3e-13）；
+            #   · 退化段判据 1e-6 -> 1e-9：长度落在 [1e-9, 1e-6) 的段**旧丢新画**，
+            #     这是**行为变更**不是等价（本函数的历史 A/B 结论不受影响）。
+            # 判据只此一份（expand_segment），GL 粗线与本函数共用 -> 两端一致；
+            # 门：tests/test_line_degenerate_segment_parity.py（含长度 5e-7 段两端同画）。
             quad = expand_segment(p0, p1, hw)
             if quad is None:                 # 退化段（长度 ~0）：无线段方向
                 continue

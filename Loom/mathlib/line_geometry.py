@@ -75,8 +75,9 @@ def mode_kind(mode):
 def expand_segment(p0, p1, half_px):
     """屏幕像素空间：线段 -> 四边形 4 角 (a, b, d, e)；退化段返回 None。
 
-    **这是「垂直偏移」数学的唯一一份实现**（vk_ui 的 UI 描边三角带也调它，
-    见 vk_ui.UiRenderer.draw_screen_lines）。
+    **这是「垂直偏移」数学的唯一一份实现**（VK 的 UI 描边三角带也调它，
+    见 render/vk/ui.py 的 VkUIEngine.draw_screen_lines；判据 1e-9 只此一份，
+    两端一致的门见 tests/test_line_degenerate_segment_parity.py）。
 
     参数：
         p0, p1   : (x, y) 像素坐标（左上原点，y 向下）
