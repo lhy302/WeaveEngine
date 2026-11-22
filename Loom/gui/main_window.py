@@ -18,10 +18,11 @@ QLineEdit / QDoubleSpinBox 等原生面板. QLineEdit 中文输入法原生可�
 模式视图 ui/LoomGUI.py 已删除, 功能 1:1 对照历史)。
 
 实现约定:
-  - 全部写操作走 EditorApp 命令 (edit_*/commit_*/rename*/reparent 等), 视图不
-    直接改模型状态、不自己压撤销栈 (与旧版GUI 相同).
-  - 检查器数值行: valueChanged 实时应用 (edit_model active), editingFinished
-    压撤销栈 (对齐 pygame drag_float 的 右键键入-Enter提交-压栈 语义).
+  - 全部写操作走 EditorApp 命令 (B7-56/B7-56-2 后面板写操作再经 _invoke_cmd
+    翻译成 EAI 命令, 视图不直接改模型状态、不自己压撤销栈).
+  - 检查器数值行: valueChanged 实时应用 (EAI 命令, 会话批合一步撤销),
+    editingFinished 收口会话批 (对齐 pygame drag_float 的
+    右键键入-Enter提交-压栈 语义).
   - 鼠标/键盘事件 -> 引擎状态字段 (mouse_pos/buttons/pressed/released/
     mouse_wheel/_mods/key_state/mouse_rel), _update_camera/render 逻辑复用.
   - 视口叠加 (网格/选中框/gizmo/光源相机图标/播放期游戏 HUD) 在 draw() 里用
@@ -2153,19 +2154,17 @@ class LoomGUI(QMainWindow):
         finally:
             self._building = False
 
-    # ---- 数值行通用 (撤销接线: 拖动 edit_model active / 提交压栈) ----
-    def _spin(self, lay, label, value, lo, hi, key, apply, step=0.1, dec=3,
-              via_cmd=False):
+    # ---- 数值行通用 (撤销接线: 命令化数值行编辑会话批, 合一步撤销) ----
+    def _spin(self, lay, label, value, lo, hi, key, apply, step=0.1, dec=3):
         """数值行通用入口 (2026-08-22 加拖拽调节): QDoubleSpinBox + 聚焦后检查器
         底部弹出 DragBlock 拖区 (按住左右拖动调值, 每像素=step). 后续新增可拖条
-        数值行只需继续调用本函数, 自动获得拖拽调节 + 撤销. apply(v) 写入模型;
-        撤销经 edit_model(active 语义).
-
-        via_cmd=True (Q-B7-56-1 裁定①, 2026-11-22): apply 已翻译成 EAI 命令
-        (每条自带一步撤销), 撤销/教学日志/刷新改由**数值行编辑会话批**协议接管
+        数值行只需继续调用本函数, 自动获得拖拽调节 + 撤销. apply(v) 已翻译成
+        EAI 命令 (每条自带一步撤销; Q-B7-56-1 裁定① + Q-B7-56-2 扫尾后全部
+        数值行命令化): 撤销/教学日志/刷新由**数值行编辑会话批**协议接管
         (_spin_session_begin/end —— 会话内连续命令合成一步撤销, 对齐旧快照协议
-        "一次编辑=一步撤销"的用户可见语义); via_cmd=False 的行保持旧
-        edit_model 快照协议逐位不变 (本批未命令化的数值行: 强度/颜色/fov 等)."""
+        "一次编辑=一步撤销"的用户可见语义). 终审 F-69 (agent-68): 旧
+        via_cmd=False 分支 (edit_model/edit_light/edit_camera 快照直调) 已删
+        —— 本批后所有调用点均走命令会话批, 死分支无引用."""
         sb = DraggableSpin(key, self._spin_focused)
         sb.setRange(lo, hi)
         sb.setDecimals(dec)
@@ -2173,48 +2172,29 @@ class LoomGUI(QMainWindow):
         sb.setValue(float(value))
         self._spins[key] = sb
         e = self.editor
-        kind, obj = self._insp_target()
 
         def edit(active):
             if self._building or e is None:
                 return
-            if via_cmd:
-                # Q-B7-56-1: 命令化数值行 —— 会话批协议 (begin/end 合一步撤销)
-                if active:
-                    self._spin_session_begin(label)
-                else:
-                    self._spin_session_end(label)
-                return
+            # Q-B7-56-1 裁定① + Q-B7-56-2 扫尾: 全部数值行走命令化会话批协议
+            # (begin/end 合一步撤销); 旧 edit_model/edit_light/edit_camera
+            # 快照直调死分支已删 (终审 F-69, agent-68: 本批后无 via_cmd=False
+            # 调用点, 无引用).
             if active:
-                if kind == 'obj':
-                    e.edit_model(obj, label, True, key, lambda: None)
-                elif kind == 'light':
-                    e.edit_light(obj, label, True, key, lambda: None)
-                else:
-                    e.edit_camera(obj, label, True, key, lambda: None)
+                self._spin_session_begin(label)
             else:
-                if kind == 'obj':
-                    e.edit_model(obj, label, False, key, lambda: None)
-                elif kind == 'light':
-                    e.edit_light(obj, label, False, key, lambda: None)
-                else:
-                    e.edit_camera(obj, label, False, key, lambda: None)
+                self._spin_session_end(label)
 
         def on_drag(v):
             if self._building or e is None:
                 return
-            if via_cmd:
-                edit(True)      # 先开会话批: 首条命令也进批 (合一步撤销)
+            edit(True)          # 先开会话批: 首条命令也进批 (合一步撤销)
             apply(v)
-            if not via_cmd:
-                edit(True)
 
         def on_finish():
             if self._building or e is None:
                 return
-            edit(False)
-            if not via_cmd:
-                self._refresh_all()   # via_cmd 行由 _spin_session_end 统一刷
+            edit(False)         # 收口会话批 + _spin_session_end 统一补日志/刷新
 
         sb.valueChanged.connect(on_drag)
         sb.editingFinished.connect(on_finish)
@@ -2475,12 +2455,11 @@ class LoomGUI(QMainWindow):
         lay.addRow(QLabel("位置"))
         for axis, cur in (('X', p.x), ('Y', p.y), ('Z', p.z)):
             # Q-B7-56-1 裁定①: 数值行写位置翻译成 set_transform 命令 (单轴语义
-            # 与旧 vec_set 直写逐字一致 —— 命令体就是 vec_set; via_cmd 会话批把
+            # 与旧 vec_set 直写逐字一致 —— 命令体就是 vec_set; 数值行会话批把
             # 拖拽/连输合一步撤销)
             self._spin(lay, axis, cur, -1000, 1000, 'pos.' + axis,
                        lambda v, a=axis: self._cmd_vec_set(m, 'model',
-                                                           'position', a, v),
-                       via_cmd=True)
+                                                           'position', a, v))
         r = m.rotation
         lay.addRow(QLabel("旋转 (°)"))
         for axis, cur in (('X', r.x), ('Y', r.y), ('Z', r.z)):
@@ -2493,7 +2472,7 @@ class LoomGUI(QMainWindow):
             self._spin(lay, axis, math.degrees(cur), -360, 360, 'rot.' + axis,
                        lambda v, a=axis: self._cmd_vec_set(m, 'model',
                                                            'rotation', a, v),
-                       step=1.0, via_cmd=True)
+                       step=1.0)
         s = m.scale
         lay.addRow(QLabel("缩放"))
         for i, axis in enumerate(('X', 'Y', 'Z')):
@@ -2503,7 +2482,7 @@ class LoomGUI(QMainWindow):
                            'set_transform', {'name': m.name,
                                              's' + a.lower(): v},
                            quiet=True),
-                       step=0.1, via_cmd=True)
+                       step=0.1)
         # 材质 (M23: 材质在 renderer.material, 共享引用语义)
         if e.materials:
             combo = QComboBox()
@@ -2528,7 +2507,7 @@ class LoomGUI(QMainWindow):
                    lambda v: self._invoke_cmd('set_saturation',
                                               {'name': m.name, 'value': v},
                                               quiet=True),
-                   step=0.05, via_cmd=True)
+                   step=0.05)
         # 碰撞 (B1-修复_b 2026-08-30 用户二轮: 按钮措辞陷阱 —— 旧文"碰撞器: 禁用"
         # 出现在**已启用**状态, 状态式误读会把"点此禁用"读成"当前禁用" -> 用户点
         # 一次以为启用, 实际关掉碰撞器; 桥路径下不建体=>浮空 (配合自由积分修复).
@@ -2548,15 +2527,15 @@ class LoomGUI(QMainWindow):
                 self._spin(lay, "摩擦系数", m.collider.friction, 0, 3, 'col.fric',
                            lambda v: self._invoke_cmd(
                                'collider', {'name': m.name, 'friction': v},
-                               quiet=True), step=0.05, via_cmd=True)
+                               quiet=True), step=0.05)
                 self._spin(lay, "弹性", m.collider.restitution, 0, 1, 'col.rest',
                            lambda v: self._invoke_cmd(
                                'collider', {'name': m.name, 'restitution': v},
-                               quiet=True), step=0.05, via_cmd=True)
+                               quiet=True), step=0.05)
                 self._spin(lay, "滚动摩擦", m.collider.rolling_friction, 0, 3, 'col.roll',
                            lambda v: self._invoke_cmd(
                                'collider', {'name': m.name, 'rolling_friction': v},
-                               quiet=True), step=0.05, via_cmd=True)
+                               quiet=True), step=0.05)
             # 2026-10-18 阶段1档序17 Trigger: is_trigger 开关（路线见路线图 §2.7）
             # 语义: is_trigger=True 时物理层建 sensor 体（可重叠穿过, 不产生接触力）,
             # 事件走 on_trigger_enter/exit/stay（双方任一方 trigger 即走 trigger 路径）.
@@ -2588,17 +2567,17 @@ class LoomGUI(QMainWindow):
                        lambda v: self._invoke_cmd(
                            'rigidbody', {'name': m.name, 'action': 'set',
                                          'friction': v}, quiet=True),
-                       step=0.05, via_cmd=True)
+                       step=0.05)
             self._spin(lay, "弹性", m.rigidbody.restitution, 0, 1, 'rb.rest',
                        lambda v: self._invoke_cmd(
                            'rigidbody', {'name': m.name, 'action': 'set',
                                          'restitution': v}, quiet=True),
-                       step=0.05, via_cmd=True)
+                       step=0.05)
             self._spin(lay, "滚动摩擦", m.rigidbody.rolling_friction, 0, 3, 'rb.roll',
                        lambda v: self._invoke_cmd(
                            'rigidbody', {'name': m.name, 'action': 'set',
                                          'rolling_friction': v}, quiet=True),
-                       step=0.05, via_cmd=True)
+                       step=0.05)
         else:
             self._btn_row(lay, [("＋加刚体 (受重力)",
                                  lambda: self._invoke_cmd(
@@ -2631,7 +2610,7 @@ class LoomGUI(QMainWindow):
                                                             'action': 'volume',
                                                             'value': v},
                                                   quiet=True),
-                       step=0.05, via_cmd=True)
+                       step=0.05)
             # 2026-10-18 3D 音频 (契约 §9): 类别决定空间化, music 强制 2D
             cat_combo = QComboBox()
             for _label, _val in (("音效", "sfx"), ("背景音乐", "music"), ("人声", "voice")):
@@ -2674,14 +2653,14 @@ class LoomGUI(QMainWindow):
                                      quiet=True)
 
                 self._spin(lay, "最小距离", au.min_distance, 0.01, 10000, 'au.min',
-                           _min_set, step=0.1, via_cmd=True)
+                           _min_set, step=0.1)
                 self._spin(lay, "最大距离", au.max_distance, 0.01, 10000, 'au.max',
-                           _max_set, step=1.0, via_cmd=True)
+                           _max_set, step=1.0)
                 self._spin(lay, "衰减强度", au.rolloff, 0.01, 10, 'au.roll',
                            lambda v: self._invoke_cmd(
                                'set_audio_3d', {'name': m.name, 'rolloff': v},
                                quiet=True),
-                           step=0.1, via_cmd=True)
+                           step=0.1)
         else:
             self._btn_row(lay, [("＋加音频源",
                                  lambda: self._invoke_cmd(
@@ -2750,7 +2729,7 @@ class LoomGUI(QMainWindow):
                                                       'index': i, 'key': p,
                                                       'value': v},
                                        quiet=True),
-                                   step=0.1, via_cmd=True)
+                                   step=0.1)
                 except Exception:
                     pass
         # 可挂脚本下拉 (2026-08-22 修复: script_options() 返回 (id,name) 元组,
@@ -2815,27 +2794,27 @@ class LoomGUI(QMainWindow):
                                                       {'name': l.name,
                                                        'size': v},
                                                       quiet=True),
-                           step=0.05, via_cmd=True)
+                           step=0.05)
         self._spin(lay, "强度", l.intensity, 0, 10, 'li.intensity',
                    lambda v: self._invoke_cmd('light_set', {'name': l.name,
                                                             'intensity': v},
                                               quiet=True),
-                   step=0.05, via_cmd=True)
+                   step=0.05)
         self._spin(lay, "颜色 R", l.color[0], 0, 1, 'li.cR',
                    lambda v: self._invoke_cmd('light_set', {'name': l.name,
                                                             'r': v},
                                               quiet=True),
-                   step=0.01, via_cmd=True)
+                   step=0.01)
         self._spin(lay, "颜色 G", l.color[1], 0, 1, 'li.cG',
                    lambda v: self._invoke_cmd('light_set', {'name': l.name,
                                                             'g': v},
                                               quiet=True),
-                   step=0.01, via_cmd=True)
+                   step=0.01)
         self._spin(lay, "颜色 B", l.color[2], 0, 1, 'li.cB',
                    lambda v: self._invoke_cmd('light_set', {'name': l.name,
                                                             'b': v},
                                               quiet=True),
-                   step=0.01, via_cmd=True)
+                   step=0.01)
         if l.kind == 'directional':
             # M30: 平行光三角度存度制 (azimuth/elevation/roll), 直接读写不转换
             # Q-B7-56-2 裁定①: 三角度行度制直传 (命令层 light_set 同为度制直写)
@@ -2844,25 +2823,24 @@ class LoomGUI(QMainWindow):
                                                   {'name': l.name,
                                                    'azimuth': v},
                                                   quiet=True),
-                       step=1.0, via_cmd=True)
+                       step=1.0)
             self._spin(lay, "俯仰", l.elevation, -360, 360, 'li.el',
                        lambda v: self._invoke_cmd('light_set',
                                                   {'name': l.name,
                                                    'elevation': v},
                                                   quiet=True),
-                       step=1.0, via_cmd=True)
+                       step=1.0)
             self._spin(lay, "倾斜", l.roll, -180, 180, 'li.roll',
                        lambda v: self._invoke_cmd('light_set',
                                                   {'name': l.name, 'roll': v},
                                                   quiet=True),
-                       step=1.0, via_cmd=True)
+                       step=1.0)
         p = l.position
         for axis, cur in (('X', p.x), ('Y', p.y), ('Z', p.z)):
             # Q-B7-56-1 裁定①: 光源位置行翻译成 light_set 命令
             self._spin(lay, "位置 " + axis, cur, -1000, 1000, 'li.p' + axis,
                        lambda v, a=axis: self._cmd_vec_set(l, 'light',
-                                                           'position', a, v),
-                       via_cmd=True)
+                                                           'position', a, v))
 
     def _build_camera_inspector(self, lay, c):
         e = self.editor
@@ -2876,30 +2854,29 @@ class LoomGUI(QMainWindow):
             # Q-B7-56-1 裁定①: 摄像机位置行翻译成 camera_set 命令
             self._spin(lay, "位置 " + axis, cur, -1000, 1000, 'cam.p' + axis,
                        lambda v, a=axis: self._cmd_vec_set(c, 'camera',
-                                                           'position', a, v),
-                       via_cmd=True)
+                                                           'position', a, v))
         # M41: 摄像机朝向存度制 (yaw/pitch/roll 环绕), 直接读写不转换
         # Q-B7-56-2 裁定①: 相机角度/FOV 行翻译成 camera_set 命令 (度制直传)
         self._spin(lay, "朝向", c.yaw, -360, 360, 'cam.yaw',
                    lambda v: self._invoke_cmd('camera_set', {'name': c.name,
                                                              'yaw': v},
                                               quiet=True),
-                   step=1.0, via_cmd=True)
+                   step=1.0)
         self._spin(lay, "俯仰", c.pitch, -360, 360, 'cam.pitch',
                    lambda v: self._invoke_cmd('camera_set', {'name': c.name,
                                                              'pitch': v},
                                               quiet=True),
-                   step=1.0, via_cmd=True)
+                   step=1.0)
         self._spin(lay, "倾斜", c.roll, -180, 180, 'cam.roll',
                    lambda v: self._invoke_cmd('camera_set', {'name': c.name,
                                                              'roll': v},
                                               quiet=True),
-                   step=1.0, via_cmd=True)
+                   step=1.0)
         self._spin(lay, "FOV", c.fov, 20, 120, 'cam.fov',
                    lambda v: self._invoke_cmd('camera_set', {'name': c.name,
                                                              'fov': v},
                                               quiet=True),
-                   step=1.0, via_cmd=True)
+                   step=1.0)
         # fov_locked 语义 (engine.py): True=锁定玩家调整. 旧代码 "玩家可调" if
         # c.fov_locked 布尔颠倒 (默认 True 却显示"玩家可调"); LoomGUI 是 not
         # Q-B7-56-2 裁定①: fov 锁定/俯仰限制按钮翻译成 camera_set 命令
@@ -2917,13 +2894,13 @@ class LoomGUI(QMainWindow):
                                                   {'name': c.name,
                                                    'pitch_min': v},
                                                   quiet=True),
-                       step=1.0, via_cmd=True)
+                       step=1.0)
             self._spin(lay, "最高仰角", c.pitch_max, -180, 180, 'cam.pmax',
                        lambda v: self._invoke_cmd('camera_set',
                                                   {'name': c.name,
                                                    'pitch_max': v},
                                                   quiet=True),
-                       step=1.0, via_cmd=True)
+                       step=1.0)
         # Q-B7-56-2 裁定①: 预览/激活翻译成 camera_preview / camera_active 命令
         # (exit_preview 走 camera_preview off=true, 不新增命令)
         if e.preview_camera is c:

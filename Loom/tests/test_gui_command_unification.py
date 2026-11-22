@@ -1356,6 +1356,58 @@ def t_f_settings_parallel():
 #   七步: 分类=薄壳命令; 公共实现已在 EngineCore/SceneQueryMixin; 本组=对拍门。
 # ====================================================================
 
+
+def t_f_collider_enabled_invariant():
+    print("---- F9 碰撞器 enabled 不变量: 带字段 collider 命令不翻转 enabled (终审 F-67, agent-68) ----")
+    ed = make_editor()
+    w = _Win(ed)
+    m = ed._add_primitive('cube')
+    en0 = bool(m.collider.enabled)
+    # GUI 触发器按钮 (main_window 触发器行只传 is_trigger, 不传 on): 点击 ×1~×4
+    wants = [True, False, True, False]
+    for i, want in enumerate(wants, 1):
+        r = ac.dispatch('collider', {'name': m.name, 'is_trigger': want}, w,
+                        scope='user')
+        check("F9.%d 触发器点击×%d ok" % (i, i), _ok(r), r)
+        check("F9.%d enabled 不变量 (触发器点击×%d 后)" % (i, i),
+              bool(m.collider.enabled) == en0, m.collider.enabled)
+    check("F9.5 触发器设值生效 (末次 want=False)",
+          bool(getattr(m.collider, 'is_trigger', False)) == wants[-1],
+          getattr(m.collider, 'is_trigger', None))
+    # GUI 摩擦/弹性/滚动摩擦数值行 (只传单字段) + 会话批收尾
+    # (模拟 _spin_session_begin/end: UndoManager begin_batch owner='gui')
+    um = ed.undo
+    um.begin_batch('检查器: 摩擦系数', lease_s=0, absorb=True, owner='gui')
+    try:
+        for j, (field, val) in enumerate((('friction', 0.33),
+                                          ('restitution', 0.44),
+                                          ('rolling_friction', 0.22)), 1):
+            r = ac.dispatch('collider', {'name': m.name, field: val}, w,
+                            scope='user')
+            check("F9.%d 接触材质 %s ok" % (j + 5, field), _ok(r), r)
+            check("F9.%d enabled 不变量 (%s 会话中)" % (j + 5, field),
+                  bool(m.collider.enabled) == en0, m.collider.enabled)
+            check("F9.%d %s 设值生效" % (j + 5, field),
+                  abs(float(getattr(m.collider, field)) - val) < 1e-9,
+                  getattr(m.collider, field, None))
+    finally:
+        um.end_batch()
+    check("F9 会话批收尾后 enabled 恒等初值",
+          bool(m.collider.enabled) == en0, m.collider.enabled)
+    # 对照组 1: 裸 collider {name} 缺 on = 切换 (既有命令行用法不回归)
+    r = ac.dispatch('collider', {'name': m.name}, w, scope='user')
+    check("F9 裸 collider 缺 on 仍切换",
+          _ok(r) and bool(m.collider.enabled) != en0, m.collider.enabled)
+    # 对照组 2: 带字段 + on 显式 → enabled 按 on 设值
+    r = ac.dispatch('collider', {'name': m.name, 'friction': 0.5, 'on': en0},
+                    w, scope='user')
+    check("F9 带字段+on 显式设 enabled",
+          _ok(r) and bool(m.collider.enabled) == en0, m.collider.enabled)
+    # 帮助文本与新语义一致 (cmd_collider 描述)
+    desc = ac.command_names().get('collider', '')
+    check("F9 帮助文本声明新语义", 'enabled 不动' in desc, desc)
+
+
 def t_g_jvm_parity_new_commands():
     print("---- G1 GL/VK 同源: 新命令的公共实现两端同一函数对象 ----")
     from editor import EditorApp as EA
@@ -1452,6 +1504,7 @@ if __name__ == "__main__":
                t_f_components, t_f_script_rows, t_f_light_camera_rows,
                t_f_camera_active_preview, t_f_asset_panel_tps,
                t_f_settings_parallel,
+               t_f_collider_enabled_invariant,
                t_g_jvm_parity_new_commands, t_h_toast_text):
         try:
             _t()

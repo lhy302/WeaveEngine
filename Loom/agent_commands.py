@@ -2020,7 +2020,9 @@ def cmd_set_env(win, args):
             'size': cube.size, 'guid': cube.guid, 'managed': _ctx is not None}
 
 
-@command('collider', '碰撞器: {name?, on?} (缺 on = 切换 enabled); '
+@command('collider', '碰撞器: {name?, on?} (裸 {name} 缺 on = 切换 enabled; '
+                      '带 is_trigger/friction/restitution/rolling_friction 字段时 '
+                      'enabled 不动, on 仍可显式设); '
                       '{name?, is_trigger?} 切/设触发器; '
                       '{name?, friction?/restitution?/rolling_friction?} 设接触材质'
                       ' (Q-B7-56-2 扩参数: GUI 检查器触发器按钮/摩擦数值行同一命令体)')
@@ -2046,10 +2048,23 @@ def cmd_collider(win, args):
             else as_bool(args.get('is_trigger'))
         if want_t is None or want_t != bool(getattr(m.collider, 'is_trigger', False)):
             ed.toggle_trigger(m)
-    # 启用开关: on 缺省切换 (既有语义不变)
-    want = None if args.get('on') is None else as_bool(args.get('on'))
-    if want is None or want != bool(m.collider.enabled):
-        ed.toggle_collider(m)
+    # 启用开关 (终审 F-67, 2026-11-22 agent-68): 裸 collider {name} 缺 on =
+    # 切换 (既有语义不变, 门 F3 对照组 + test_eai_real 锁定); 携带组件字段
+    # (is_trigger/friction/restitution/rolling_friction) 时只改给定字段,
+    # enabled **不动** (on 仍可与字段同传显式设值) —— 命令语义自洽为
+    # "改我给的那些": 本批 GUI 触发器按钮/接触材质行只传单字段, 旧
+    # "缺 on 无条件切换"会把 enabled 静默翻转 (修前红留痕 F9 组).
+    _has_comp_field = 'is_trigger' in args or any(k in args for k, _a
+                                                  in _col_fields)
+    if _has_comp_field:
+        if args.get('on') is not None:
+            want = as_bool(args.get('on'))
+            if want != bool(m.collider.enabled):
+                ed.toggle_collider(m)
+    else:
+        want = None if args.get('on') is None else as_bool(args.get('on'))
+        if want is None or want != bool(m.collider.enabled):
+            ed.toggle_collider(m)
     return {'name': m.name, 'enabled': bool(m.collider.enabled),
             'is_trigger': bool(getattr(m.collider, 'is_trigger', False)),
             'friction': getattr(m.collider, 'friction', None),
