@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# ⚠️ 已过期（2026-11-23）：Q-B7-24-5 形态名统一后本探针的旧形态名活调用（render_pose/camera_pos 等）已失效，
+# 手工复跑会 AttributeError。留档仅作历史取证；如需复用请先改用新名（compute_frame_view_proj / current_camera_position）。
 r"""ab_active_gl_vk.py — 带 active_camera 的场景 GL/VK 逐像素 A/B (2026-11-06).
 
 为什么单独一个脚本: tests\_tmp\ab_gl_vk.py 的 GL 侧是 EditorApp 且**强制轨道相机**

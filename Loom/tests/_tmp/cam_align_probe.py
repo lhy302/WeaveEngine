@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# ⚠️ 已过期（2026-11-23）：Q-B7-24-5 形态名统一后本探针的旧形态名活调用（render_pose/camera_pos 等）已失效，
+# 手工复跑会 AttributeError。留档仅作历史取证；如需复用请先改用新名（compute_frame_view_proj / current_camera_position）。
 r"""cam_align_probe.py — 相机 VP 对齐探针 (GL vs Vulkan 驱动, 2026-11-06)
 
 验收口径: 同一份场景字典, 一侧走 **GL 引擎真实相机代码路径**

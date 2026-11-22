@@ -30,7 +30,7 @@
 > **B7-56/B7-57 同步（2026-11-22，HEAD e397c11，代码 commit 7dc6c5b + 757071e + edf1336）**：
 > **B7-56-1 GUI 全量命令化**——GUI 面板操作（工具栏/菜单 18+2 处、层级树挂父/改名、检查器数值写、同名族）全部改走
 > `main_window._invoke_cmd` → EAI 命令层（与命令行坞/远程共用同一批命令体）；**豁免面**（鼠标拾取/gizmo 拖拽/右键轨道/滚轮/WASDQE
-> 连贯性操作）人类裁定保持直调（`agent_commands.py:1414` 原则不变）；dispatch 增 `scope` 参数（GUI 点击=user 作用域，
+> 连贯性操作）人类裁定保持直调（`agent_commands.py:1436` 原则不变）；dispatch 增 `scope` 参数（GUI 点击=user 作用域，
 > F12/远程=agent 批作用域，D10=A 保持）。**B7-57-1 相机挂相机修复**——`mathlib/matlib.py` 新增 `view_basis` 唯一实现；
 > `render/vk/driver.py` 退役 4 份与 CameraMixin 逐位重复的覆写（2116→**2073** 行，唯一保留覆写 = `apply_camera` 真后端差异钩子）。
 > 图 1/2/2a/2b/4/7/8/11/13/15/16/19 相应更新；文件清单 158→**159 个 .py**（**59649 行**）；
@@ -465,7 +465,7 @@ flowchart TB
   S2["★ UI 画布尺寸同步<br/>loom_ui_resize.py 100"]:::contract
   P1["GL 屏幕空间<br/>render/gl/engine.py draw_screen_lines:730<br/>draw_screen_polygon:771"]:::impl
   P2["GL 世界 Canvas<br/>render/gl/render.py world pass"]:::impl
-  P3["VK 屏幕 + 世界<br/>render/vk/ui.py 930<br/>VkUIEngine/VkUIPipeline/VkWorldUIPipeline"]:::impl
+  P3["VK 屏幕 + 世界<br/>render/vk/ui.py 937<br/>VkUIEngine/VkUIPipeline/VkWorldUIPipeline"]:::impl
   E1["编辑器派发<br/>editor/core.py:526 _dispatch_ui_mouse"]:::entry
   E2["GL 播放器派发<br/>runtime.py:246 _dispatch_ui_mouse"]:::entry
   E3["VK 派发<br/>render/vk/ui.py:785 UIInputBridge"]:::entry
@@ -742,7 +742,7 @@ sequenceDiagram
 | `render/vk/player.py` | 901 | VK 播放器窗口循环（rendercanvas.GlfwRenderCanvas 宿主；`_resolve_glfw_window` 句柄解析；每帧写 ui_consumed = not wants_camera()，B7-43-2）。 |
 | `render/vk/pass_vk.py` | 552 | VK 侧执行器 + 叠加层原语（S3）：VkLineBatch:92 / VkFrameExecutor:226 / VkEditorRenderMixin:327。 |
 | `render/vk/window.py` | 273 | VkWindowMixin：F11 假全屏三步（去边框/铺桌面/Win32 置顶），语义与 GL 逐项一致。 |
-| `render/vk/ui.py` | 930 | VK Canvas UI / HUD 绘制（VkUIEngine:155 / VkUIPipeline:428 / VkWorldUIPipeline:672 / UIInputBridge:785）。 |
+| `render/vk/ui.py` | 937 | VK Canvas UI / HUD 绘制（VkUIEngine:155 / VkUIPipeline:428 / VkWorldUIPipeline:672 / UIInputBridge:785）。 |
 
 ### F core/（引擎内核，10 文件 + __init__）
 | 文件 | 行数 | 职责 |
@@ -1020,7 +1020,7 @@ flowchart LR
     G2["豁免面（人类裁定豁免）<br/>鼠标拾取 / gizmo 拖拽<br/>右键轨道 / 滚轮 / WASDQE"]:::gui
     G3["命令行坞 F12 / 远程 HTTP / MCP<br/>ui/qt_console.py 187"]:::gui
   end
-  E["EAI 命令层<br/>agent_commands.py 4207 · 106 个命令<br/>_COMMANDS 唯一命令体"]:::eai
+  E["EAI 命令层<br/>agent_commands.py 4222 · 106 个命令<br/>_COMMANDS 唯一命令体"]:::eai
   A["_EditorCore<br/>editor/core.py 3101 · 152 方法"]:::facade
   U["UndoManager<br/>editor/undo/registry.py 364"]:::undo
   G1 -->|_invoke_cmd<br/>直调命令函数 · user 作用域| E
@@ -1284,7 +1284,7 @@ flowchart TB
 
 ## 19.2 全部对拍/回归门（实测数字）
 
-> run_all 汇总：~170 文件 / 6341 PASS / 0 FAIL / EXIT 0（2026-11-22，HEAD 01ca8a9，B7-55~59 落地后实测；PASS 计数口径**含文件尾汇总行**——终审 F-74 标注不变）。
+> run_all 汇总：~170 文件 / 6341~6342 PASS / 0 FAIL / EXIT 0（2026-11-22~23 两次全量实测，HEAD 01ca8a9，B7-55~59 落地后；PASS 计数口径**含文件尾汇总行**——终审 F-74 标注不变；终审 agent-83 实测 6342）。
 
 | 门 | 断言数（实测） | 覆盖什么 |
 |---|---|---|

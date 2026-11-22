@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# ⚠️ 已过期（2026-11-23）：Q-B7-24-5 形态名统一后本探针的旧形态名活调用（render_pose/camera_pos 等）已失效，
+# 手工复跑会 AttributeError。留档仅作历史取证；如需复用请先改用新名（compute_frame_view_proj / current_camera_position）。
 r"""ab_gl_vk.py — GL / Vulkan 双后端离屏 A/B 对比 (2026-11-06)
 
 用途: Vulkan 对齐 OpenGL 的**唯一验收口径**（逐像素差异 + 并排图）。

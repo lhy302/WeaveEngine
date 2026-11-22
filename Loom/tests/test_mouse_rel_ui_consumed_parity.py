@@ -370,6 +370,16 @@ class Pair:
         self.gl.set_mouse_locked(True)
         self.vk.set_mouse_locked(True)
         pump(3, 0.02)
+        # 2026-11-23 终审 P1-1 加固（夹具级，断言一字不动；Q-B7-43-1 settle 协议同型）：
+        # GLFW 新进程的首帧可能合成 focus/cursor-enter 事件，使锁后第一帧
+        # GL ui.dispatch_mouse 偶发返回 consumed=True（终审实测 8 次冷跑 1 次，
+        # GL=True/VK=False —— 两端判据序列起点不一致）。上锁后先把 GL 泵到 UI
+        # 稳定（ui_consumed=False，上限 10 帧防死循环），再开始 6 帧判据序列。
+        # 若去掉本加固后仍稳定复现 GL=True，则是产品行为，须另立裁决单（未复现）。
+        for _ in range(10):
+            self.gl._handle_events()
+            if not bool(self.gl.ui_consumed):
+                break
         try:
             self.gl._prev_cursor = None
         except Exception:
