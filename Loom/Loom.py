@@ -57,8 +57,10 @@ def _parse_args(argv):
             open_scene = argv[i + 1]
             i += 1
         elif a == '--ui' and i + 1 < len(argv):
-            # 2026-10-18 选项1: --ui 参数已无实际效果（旧 pygame 视图 --ui default/minimal
-            # 已删，编辑器只剩 Qt）。保留参数解析是为了老启动脚本不报错。
+            # 2026-11-22 Q-B7-55-1（agent-75）: --ui 重新参与执行面决策 ——
+            # qt = LoomGUI；default/minimal = EditorApp 注入视图（gl）或同一条
+            # 可见报错（vulkan，见 hostenv/editor_launch）。旧 2026-10-18 的
+            # 「--ui 已无实际效果」注释随本次执行面统一作废（注释与事实同步）。
             ui = argv[i + 1]
             i += 1
         elif a == '--editor':
@@ -75,7 +77,8 @@ def _make_editor_view(ui_name, base=None):
     2026-11-06 恢复: 487120c「剥离 pygame 窗口」把它与 MinimalEditorView 一并删除,
     但 editor.py:137 仍以 MinimalEditorView 作为"未注入 view 时的兜底", 且
     build_entry.py:77 仍调用本函数 —— 删除直接造成 ModuleNotFoundError。
-    二者按当年实现恢复; Qt 编辑器仍是实际运行入口 (本函数只服务显式 --ui 路径)。"""
+    二者按当年实现恢复; 2026-11-22 Q-B7-55-1 起两入口的 --ui 执行面统一
+    （Loom.py / build_entry.py 都真调用本函数装配非 Qt 视图）。"""
     if ui_name == 'minimal':
         from ui.minimal_editor_view import MinimalEditorView
         return MinimalEditorView()
