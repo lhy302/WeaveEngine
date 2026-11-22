@@ -46,6 +46,13 @@
 > toast 退化（"True"）修复。图 4/13/15/19 更新；159 个 .py（**60497 行**，口径不变）；
 > 门扩到 **203** 条（A 43 / B 17 / C 19 / D 6 / E 23 / F 85 / G 8 / H 2，扩容前基线 108 实跑）。
 
+> **终审 F-67/F-68/F-69 修复同步（2026-11-22，agent-68）**：cmd_collider 改为「裸 {name} 缺 on = 切换 enabled；
+> 带 is_trigger/friction/restitution/rolling_friction 字段时 enabled 不动」（修法 b，命令语义自洽——GUI 触发器
+> 按钮/接触材质行只传单字段，旧"缺 on 无条件切换"把 enabled 静默翻转）；门 D1 禁集实数更正 41→**62 名**
+> （41 是修前残留命中数，被误写成禁集规模；修前残留 41 处归零不变）；门扩到 **225** 条（F 85→107，新增
+> F9 碰撞器 enabled 不变量 22 条，修前红 7 FAIL 留痕）；_spin 旧 via_cmd=False 死分支（edit_model/
+> edit_light/edit_camera 快照直调）删除；159 个 .py（**60539 行**，口径不变）。
+
 > 相对 v1 的三个改动：**① 拆成多张小图**（一张图超过 ~15 个节点必然乱，这是 mermaid 的排版极限，不是画法问题）；
 > **② 节点里放进真实文件**，功能与文件之间用 `实现于` 连线；**③ 每条线上写清关系**（调用 / 拼装 / 共享契约 / import）。
 > 颜色按角色区分，同一张图里看颜色就知道哪个是门面、哪个是契约、哪个是文件。
@@ -664,7 +671,7 @@ sequenceDiagram
 # 图 13 文件清单（按功能簇归组，159 个 .py）
 
 图上画不下的全量在这里 —— 这是「功能分布在哪几个文件」的表格版。行数 2026-11-22 实测（物理行；口径 = `len(text.split('\n'))`，与包内 135 文件既有口径一致；终审 F-4 复算时把 2026-11-21 混用的三处行数——Loom.py / build_entry.py / 门文件——统一到同一口径）。
-**20 个包共 135 文件 / 46603 行 + 顶层平铺 22 文件 / 12079 行 + tests 门文件 2 / 1815 行 = 159 文件 / 60497 行。**（B7-56-2 后 2026-11-22 实测，口径不变 = `len(text.split('\n'))`）
+**20 个包共 135 文件 / 46579 行 + 顶层平铺 22 文件 / 12093 行 + tests 门文件 2 / 1867 行 = 159 文件 / 60539 行。**（终审 F-67 批 2026-11-22 实测，口径不变 = `len(text.split('\n'))`）
 
 ### A 入口层（顶层平铺）
 | 文件 | 行数 | 职责 |
@@ -754,7 +761,7 @@ sequenceDiagram
 ### H gui/（Qt 视图，7 文件 / 5182 行；B4 新建）
 | 文件 | 行数 | 职责 |
 |---|---|---|
-| `gui/main_window.py` | 3940 | LoomGUI 主窗口（工具栏/层级/检查器/资源浏览器/控制台坞全部面板方法，126 个方法）+ run_loom_gui 入口 + render_api 下拉 :3297（B4 拆自 ui/loom_gui.py 4339；B7-56 后面板操作全走 _invoke_cmd:642，B7-56-2 扫尾后检查器/组件/相机/资源面板/TPS/Tag 残留直调也全部命令化）。 |
+| `gui/main_window.py` | 3916 | LoomGUI 主窗口（工具栏/层级/检查器/资源浏览器/控制台坞全部面板方法，126 个方法）+ run_loom_gui 入口 + render_api 下拉 :3297（B4 拆自 ui/loom_gui.py 4339；B7-56 后面板操作全走 _invoke_cmd:642，B7-56-2 扫尾后检查器/组件/相机/资源面板/TPS/Tag 残留直调也全部命令化）。 |
 | `gui/gl_viewport.py` | 227 | GLViewport（_ViewportEventBridge + QOpenGLWidget，只保留 GL 生命周期四方法）。 |
 | `gui/remote_viewport.py` | 246 | RemoteViewport（离屏 GL readback 兜底；事件桥同源）。 |
 | `gui/widgets/widgets.py` | 138 | 自定义控件：AssetListWidget / DraggableSpin / DragBlock。 |
@@ -879,7 +886,7 @@ sequenceDiagram
 ### U 顶层平铺（其余，与入口/门面外的域文件）
 | 文件 | 行数 | 职责 |
 |---|---|---|
-| `agent_commands.py` | 4207 | Engine Agent 接口 EAI（106 个 @command；HTTP 面 + dispatch(scope) + agent 批次租约；GUI 命令壳共用 _COMMANDS（B7-56；B7-56-2 增 logic_pause/logic_step/register_tag 薄壳 + collider/rigidbody 扩参 + cmd_script_var 撤销修正）；scene_load 走 prepare:599）。 |
+| `agent_commands.py` | 4221 | Engine Agent 接口 EAI（106 个 @command；HTTP 面 + dispatch(scope) + agent 批次租约；GUI 命令壳共用 _COMMANDS（B7-56；B7-56-2 增 logic_pause/logic_step/register_tag 薄壳 + collider/rigidbody 扩参 + cmd_script_var 撤销修正）；scene_load 走 prepare:599）。 |
 | `loom_mcp.py` | 993 | MCP 服务面（EAI 的 MCP 封装）。 |
 | `loom_ui.py` | 1728 | Canvas/UI 系统数据模型与布局（15 类：UIElement/Canvas/UIManager/Shape/Panel/Text/Image/Button/Slider/Toggle/ProgressBar/ScrollView/InputField/Dropdown/GridLayout）。 |
 | `loom_input.py` | 631 | InputMixin：按键映射与输入动作层（M30b；UNLOCK_ACTION 引擎独占解锁动作）。 |
@@ -898,9 +905,9 @@ sequenceDiagram
 | 文件 | 行数 | 职责 |
 |---|---|---|
 | `tests/test_entry_backend_parity.py` | 350 | B7-54 四入口后端选择同源门（111 条断言：A 四入口决策一致（A④/A④b 编辑器面双方真调用各自入口决策函数，终审 F-2）/ B 解析单源 grep 级 + Loom.py 源码结构断言（终审 F-2）/ C build_entry 决策可达；修前红留痕 089677f + F-2 修前红 27 条 2026-11-22）。 |
-| `tests/test_gui_command_unification.py` | 1465 | B7-56 + B7-56-2 GUI 全量命令化门（实跑 203 条：A GUI≡命令行 43 / B 批作用域 17 / C 相机裁定 19 / D 结构 6 / E 相机父链 23 / F 扫尾命令化等价 85 / G 新命令 JVM 对拍 8 / H 拒批 toast 文案 2）。 |
+| `tests/test_gui_command_unification.py` | 1517 | B7-56 + B7-56-2 + 终审 F-67 GUI 全量命令化门（实跑 225 条：A GUI≡命令行 43 / B 批作用域 17 / C 相机裁定 19 / D 结构 6 / E 相机父链 23 / F 扫尾命令化等价 107（含 F9 碰撞器 enabled 不变量 22）/ G 新命令 JVM 对拍 8 / H 拒批 toast 文案 2）。 |
 
-> **共 159 个文件**（20 包 135 + 顶层平铺 22 + tests 门文件 2）。行数为实测物理行，与 `git show HEAD` 状态逐文件一致（B7-56-2 后复测）。
+> **共 159 个文件**（20 包 135 + 顶层平铺 22 + tests 门文件 2）。行数为实测物理行，与 `git show HEAD` 状态逐文件一致（B7-56-2 后复测；终审 F-67 批对 3 个改动文件复测）。
 > v3 的 97 文件清单里，`loom_types.py`→`core/primitives.py`、`loom_scene_*.py`→`scene/`、`editor.py`→`editor/`、
 > `ui/loom_gui.py`→`gui/`、`undo.py`→`editor/undo/`、`loom_components.py` 尾部→`audio/system.py` 等
 > 搬迁全部按 B1~B4 后的新路径重列；`components/collision.py`、`components/model_data.py`、`scene/identity.py`、
@@ -1010,7 +1017,8 @@ flowchart LR
 **豁免面**（鼠标拾取 / gizmo 拖拽 / 右键轨道 / 滚轮 / WASDQE / 渲染循环 `e.render`/`_update_camera`/`_dispatch_*`/
 资源面板**拖拽落场景**、`_notify` 反馈与 `_selected`/`get_tps` 等读侧）按人类裁定**保持直调** `_EditorCore`：
 连贯性操作不进命令行（`agent_commands.py:1436` 用户定原则；GUI 命令壳注释 `main_window.py:645` 同款裁定）。
-终审 P0-1 复扫（AST，门 D1 禁集 41 项）确认直调残留 = 0（豁免面之外）。
+终审 P0-1 复扫（AST，门 D1 禁集 **62 名**，修前残留 41 处归零；agent-66 曾把修前残留命中数 41 误写为禁集
+规模，终审 F-68 更正）确认直调残留 = 0（豁免面之外）。
 
 **撤销栈语义照实**：两条入口最终都经方法内 `undo.push()`（37 处）进同一个撤销栈——「撤销效果」统一；
 「作用域」由 scope 参数区分（`agent_commands.py:51` 命令作用域注释）：**GUI 点击 = user 作用域**（进撤销栈、**不进** agent 批、不续租）；
@@ -1207,6 +1215,7 @@ flowchart TB
 > B7-54 新增四入口决策同源门 **94** 条（test_entry_backend_parity；终审 F-2 后实数 111）。
 > B7-56 新增 GUI 全量命令化门 **83** 条（test_gui_command_unification，2026-11-22 在 HEAD e397c11 实跑；当时计数口径少计循环展开断言，同 HEAD 独立复跑实为 **108** 条）。
 > B7-56-2 扫尾批扩到 **203** 条（A 43 / B 17 / C 19 / D 6 / E 23 / F 85 / G 8 / H 2；2026-11-22 修后实跑两次同值）。
+> 终审 F-67 修复再扩到 **225** 条（F 85→107：F9 碰撞器 enabled 不变量 22 条；agent-68；2026-11-22 修前红 7 FAIL → 修后 ALL PASS）。
 
 ## 19.1 七面对拍门 + 增补门（全绿）
 
@@ -1229,7 +1238,7 @@ flowchart TB
     G5["test_camera_parity 195<br/>+ test_vk_camera_align 85"]:::gate
     G6["test_pause_parity 70"]:::gate
     G7["test_editor_play_parity 575<br/>test_editor_play_pixel_parity 17<br/>+S3/S4：vk_overlay 24 / vk_editor_smoke 16"]:::gate
-    G8["B7-28/审核1-3/B7-54/B7-56 增补门<br/>editor_wheel_semantics 20<br/>wheel_backend_semantics 31<br/>skybox_engine_parity 23<br/>entry_backend_parity 111（四入口决策同源）<br/>gui_command_unification 203（GUI≡命令行）"]:::gate
+    G8["B7-28/审核1-3/B7-54/B7-56 增补门<br/>editor_wheel_semantics 20<br/>wheel_backend_semantics 31<br/>skybox_engine_parity 23<br/>entry_backend_parity 111（四入口决策同源）<br/>gui_command_unification 225（GUI≡命令行）"]:::gate
   end
   F1 --> G1
   F2 --> G2
@@ -1246,7 +1255,7 @@ flowchart TB
 
 ## 19.2 全部对拍/回归门（实测数字）
 
-> run_all 汇总：163 文件 / 5987 PASS / 0 FAIL / EXIT 0（2026-11-22，HEAD e397c11，B7-56/B7-57 后实测）。
+> run_all 汇总：163 文件 / 6088 PASS / 0 FAIL / EXIT 0（2026-11-22，HEAD 120164c，B7-56-2 扫尾后实测；PASS 计数口径**含文件尾汇总行**——终审 F-74 标注）。
 
 | 门 | 断言数（实测） | 覆盖什么 |
 |---|---|---|
@@ -1276,7 +1285,7 @@ flowchart TB
 | `test_wheel_backend_semantics` | 31 | 滚轮后端语义（GL/VK + run_player 入口恢复） |
 | `test_skybox_engine_parity` | 23 | 审核 1/3：天空盒引擎面两端对齐 |
 | `test_entry_backend_parity` | 111 | B7-54：四入口（Loom.py / build_entry / game_player / run_player）对同一份 argv+配置产生**同一后端决策**；--backend 解析单源（parse_backend_arg）+ Loom.py 源码结构断言；编辑器面双方真调用 _editor_backend_choice（终审 F-2 补牙，实数 93→111；旧记 94 含汇总行）；build_entry 四分支决策可达 |
-| `test_gui_command_unification` | 203 | B7-56 + B7-56-2：GUI 全量命令化（A GUI 点击≡命令行同命令体 43 / B 批作用域 user·agent 17 / C 相机裁定（连贯性操作豁免）19 / D 结构断言（禁集 41 项直调归零）6 / E 相机父链 23 / F 扫尾命令化等价（Layer·Tag·材质·组件·脚本·光源·相机·资源面板·TPS·并行设置）85 / G 新命令 JVM 对拍（logic_pause·logic_step·register_tag）8 / H 拒批 toast 文案 2） |
+| `test_gui_command_unification` | 225 | B7-56 + B7-56-2 + 终审 F-67：GUI 全量命令化（A GUI 点击≡命令行同命令体 43 / B 批作用域 user·agent 17 / C 相机裁定（连贯性操作豁免）19 / D 结构断言（禁集 62 名直调归零；agent-66 曾误写 41=修前残留命中数，F-68 更正）6 / E 相机父链 23 / F 扫尾命令化等价（Layer·Tag·材质·组件·脚本·光源·相机·资源面板·TPS·并行设置 + F9 碰撞器 enabled 不变量 22 条：带字段 collider 命令不翻转 enabled、裸 {name} 缺 on 切换不回归、帮助文本一致）107 / G 新命令 JVM 对拍（logic_pause·logic_step·register_tag）8 / H 拒批 toast 文案 2） |
 
 ## 19.3 ★ 还没有对拍门的面（缺口，按优先级）
 
