@@ -53,9 +53,35 @@ def _enforce_fail_exit_code():
     _os_gate._exit(1)
 
 
+# 2026-11-22 Q-B7-29-1 T1：封堵「打印 FAIL 但退出码 0」。
+# 根因：进程里存在非守护线程（生产 _quit_for_update 的 0.5s Timer）调 os._exit(0) 时，
+# CPython 收尾顺序是 threading._shutdown()（等非守护线程结束）→ atexit；Timer 先打响，
+# 于是 sys.exit(1) 的 SystemExit 和 atexit 里的 _exit(1) 都来不及生效，进程以 0 退出。
+# 两道保险：
+#   ① threading._register_atexit：在 join 非守护线程**之前**执行，先判 FAIL；
+#   ② 包一层 os._exit：已出现 FAIL 时任何 os._exit(0) 一律升级为 1（含同步调用）。
+_REAL_OS_EXIT = _os_gate._exit
+
+
+def _guarded_os_exit(code):
+    if _fail_gate.failed and not code:
+        code = 1
+    _REAL_OS_EXIT(code)
+
+
+_os_gate._exit = _guarded_os_exit
+
+try:
+    import threading as _threading_gate
+    _threading_gate._register_atexit(_enforce_fail_exit_code)   # 先于 join 非守护线程
+except Exception:
+    pass                  # 老解释器没有该私有钩子时仍保留 atexit 兜底
+
+
 import hashlib
 import json
 import os
+import subprocess
 import sys
 import tempfile
 
@@ -408,15 +434,24 @@ def t_gui_button_and_fail_gate():
         check("④ 下载/校验失败 -> 从未进入安装阶段", called['apply'] == 0, called)
     finally:
         hu.download_update, hu.apply_update = old_dl, old_ap
-    # 成功路径确实会进安装
-    called2 = {'apply': 0}
+    # 成功路径确实会进安装。
+    # Q-B7-29-1 根因：controller.apply_update 成功后 _quit_for_update() 会起
+    # 0.5s 后 os._exit(0) 的**非守护**定时器（生产语义=提交后关 Hub）。测试里必须
+    # 换成记录桩，否则定时器会在解释器收尾时先于 atexit 打响，把整个进程自杀成
+    # 退出码 0 —— 这正是「打印 FAIL 却退出码 0」的假绿通道。
+    called2 = {'apply': 0, 'quit': 0}
     hu.download_update = lambda *a, **k: {'ok': True, 'path': 'C:/x/a.exe'}
     hu.apply_update = lambda *a, **k: (called2.__setitem__('apply', 1) or {'ok': True})
+    old_quit = ctrl._quit_for_update
+    ctrl._quit_for_update = lambda: called2.__setitem__('quit', called2['quit'] + 1)
     try:
         r2 = ctrl.download_and_install()
         check("④ 下载成功 -> 进入安装阶段", r2.get('ok') is True and called2['apply'] == 1, r2)
+        check("④ 提交成功后请求关闭 Hub（_quit_for_update 一次；不真的起自杀定时器）",
+              called2['quit'] == 1, called2)
     finally:
         hu.download_update, hu.apply_update = old_dl, old_ap
+        ctrl._quit_for_update = old_quit
 
 
 def t_p2_fixes():
@@ -459,8 +494,58 @@ def t_p2_fixes():
               picked and picked.get('version'))
 
 
+def t_fail_gate_end_to_end():
+    """Q-B7-29-1 T1：假绿门反证 —— 注入 FAIL 后 run_all 式判定必须为红。
+
+    背景：2026-11-22 前的门只有 atexit + sys.exit(1) 两道，挡不住「非守护线程里
+    os._exit(0)」：CPython 收尾顺序是 threading._shutdown()（先等非守护线程结束）
+    → atexit，0.5s 的 Timer 会先打响，进程以 0 退出。本函数用子进程复现三条通道：
+      ① FAIL + 待定时的 os._exit(0)（本次事故原型）
+      ② FAIL + 同步 os._exit(0)（任何直接自杀调用）
+      ③ 环境变量注入 FAIL 跑完整测试文件（run_all 视角的端到端）
+    """
+    if os.environ.get('LOOM_HUB_TEST_FORCE_FAIL'):
+        return                      # 自检子进程里不再递归
+    test_path = os.path.abspath(__file__)
+    child_src = (
+        "# -*- coding: utf-8 -*-\n"
+        "import importlib.util, os, sys, threading\n"
+        "spec = importlib.util.spec_from_file_location('thu_gate_child', %r)\n"
+        "mod = importlib.util.module_from_spec(spec)\n"
+        "spec.loader.exec_module(mod)\n"
+        "mod.check('注入 FAIL（门禁自检子进程）', False)\n"
+        "%s\n"
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        p1 = os.path.join(tmp, 'child_timer.py')
+        with open(p1, 'w', encoding='utf-8') as fh:
+            fh.write(child_src % (test_path,
+                                  "threading.Timer(0.5, lambda: os._exit(0)).start()"))
+        r1 = subprocess.run([sys.executable, p1], capture_output=True, timeout=60)
+        check("门禁①：FAIL + 0.5s os._exit(0) 定时器 -> 子进程退出码非 0",
+              r1.returncode != 0, r1.returncode)
+
+        p2 = os.path.join(tmp, 'child_sync.py')
+        with open(p2, 'w', encoding='utf-8') as fh:
+            fh.write(child_src % (test_path, "os._exit(0)"))
+        r2 = subprocess.run([sys.executable, p2], capture_output=True, timeout=60)
+        check("门禁②：FAIL + 同步 os._exit(0) -> 子进程退出码非 0",
+              r2.returncode != 0, r2.returncode)
+
+        env = dict(os.environ)
+        env['LOOM_HUB_TEST_FORCE_FAIL'] = '1'
+        r3 = subprocess.run([sys.executable, test_path], env=env,
+                            capture_output=True, timeout=180)
+        check("门禁③：注入 FAIL 后完整测试进程退出码非 0（run_all 会判红）",
+              r3.returncode != 0, r3.returncode)
+        check("门禁③：子进程 stdout 确有 FAIL 行",
+              b'FAIL' in (r3.stdout or b''), (r3.stdout or b'')[:120])
+
+
 if __name__ == "__main__":
     print("========== LoomHub 0.1.3：H1 remote-mode / H2 自更新 ==========")
+    if os.environ.get('LOOM_HUB_TEST_FORCE_FAIL'):
+        check("注入失败（门禁自检 LOOM_HUB_TEST_FORCE_FAIL）", False)
     t_remote_mode_env()
     t_version_compare()
     t_download_verify()
@@ -474,6 +559,7 @@ if __name__ == "__main__":
     t_install_dir_and_allusers()
     t_gui_button_and_fail_gate()
     t_p2_fixes()
+    t_fail_gate_end_to_end()
     if _FAILS:
         print("总结果: FAIL ❌", _FAILS)
         sys.exit(1)
