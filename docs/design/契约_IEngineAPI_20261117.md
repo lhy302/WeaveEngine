@@ -3,7 +3,7 @@
 > **这是什么**：beta7 批 0a 的产物 —— 一份两端（GL `GLEngine` / VK `SceneDriver`）都必须实现的**公共接口白盒契约**。
 > 脚本、内容、工具链**只允许依赖本契约**；契约之外的成员（§6 仅 GL、§7 非契约）**不得**出现在脚本里。
 >
-> **状态**：主审起草（2026-11-17），**等人类复核**。其中 §4.3「B 类形态统一方向」标为 `主审暂定（可推翻）`。
+> **状态**：**已裁决**（2026-11-22）。§4.3「B 类形态统一方向」由人类裁决为「旧形态名不再用，形态名全部统一」，> 执行方向 = 以 GL 形态名为契约名；落地与逐对考古结论见 §4.3。
 > **依据裁决**：Q-B7-24-1 认可 A 边界 · Q-B7-24-2 属性面进契约（口径升 v2）· Q-B7-24-3 仅 GL 面**显式失败** · Q-B7-24-4 批 0 拆 0a/0b。
 > **取证**：[../audit/impl_B7-24_API矩阵_20261117.md](../audit/impl_B7-24_API矩阵_20261117.md) · **门**：`Loom/tests/test_engine_api_matrix.py`
 > **口径**：v2（含普通类属性）。v1（不含属性）数字为 GL 105 / VK 38，两套数字**不可混用**。
@@ -175,42 +175,72 @@ py -3.13 Loom/tests/test_engine_api_matrix.py --list   # 打印矩阵（含签�
 | `update_physics` | `update_physics(self, delta_time, events=True)` | M31: 每帧刚体步进 + 碰撞事件回调 (Unity Rigidbody 理念). | Loom/loom_physics.py:460 |
 | `update_scripts` | `update_scripts(self, delta_time)` | — | Loom/engine.py:1079 |
 
-### 4.2 VK 独有 7 条（GL 侧以别的形态存在）
+### 4.2 VK 独有 6 条（GL 侧以别的形态存在，**已按 Q-B7-24-5 改名/删除**）
 
-| VK 方法 | VK 现状签名 | 语义 | 定义点 |
+> Q-B7-24-5（2026-11-22 人类裁决「旧形态名不再用」）：原 7 条中 `step` 已**删除**，其余 4 条旧名已
+> 改名（`render_pose` → `compute_frame_view_proj`、`load_from_data` → `build_scene_from_data`、
+> `camera_pos` → `current_camera_position`、`apply_dev_camera_mouse` → `apply_editor_camera_mouse`）。
+> 逐对同义性判据见 §4.3 的 T1 表。
+
+| VK 方法（现行名） | VK 现状签名 | 语义 | 定义点 |
 |---|---|---|---|
-| `apply_dev_camera_mouse` | `apply_dev_camera_mouse(self)` | 开发者 (轨道) 相机鼠标: 滚轮推拉 + 右键拖动转视角. | Loom/scene_driver.py:1495 |
-| `camera_pos` | `camera_pos` | 相机世界位置. | Loom/scene_driver.py:777 |
-| `camera_target` | `camera_target(self, v)` | — | Loom/scene_driver.py:1615 |
-| `camera_distance` | `camera_distance(self, v)` | — | Loom/scene_driver.py:1623 |
-| `load_from_data` | `load_from_data(self, data, base_dir=None, ctx=None)` | — | Loom/scene_driver.py:613 |
-| `render_pose` | `render_pose(self, aspect=None)` | 渲染帧: 插值平面状态 + VP 计算 (渲染层每帧调). | Loom/scene_driver.py:1037 |
-| `step` | `step(self, dt, aspect=None)` | 兼容入口 (旧探针/测试直调): advance_logic(dt) + 返回 VP. | Loom/scene_driver.py:1061 |
+| `apply_editor_camera_mouse` | `apply_editor_camera_mouse(self)` | 编辑器(轨道)相机**鼠标输入**: 滚轮推拉 + 右键拖动转视角（GL 对应物 `editor._update_camera`）. | Loom/render/vk/driver.py |
+| `current_camera_position` | `current_camera_position`（`@property`） | 无参取「当前相机世界位置」（轨道反推 / 脚本 `camera`）；GL 对应物是 `self.camera` 属性. | Loom/render/vk/driver.py |
+| `camera_target` | `camera_target(self, v)` | 轨道相机目标点（GL 侧是属性而非方法）. | Loom/render/vk/driver.py |
+| `camera_distance` | `camera_distance(self, v)` | 轨道相机距离（同上）. | Loom/render/vk/driver.py |
+| `build_scene_from_data` | `build_scene_from_data(self, data, base_dir=None, ctx=None)` | 从**已解析 dict** 装配场景（GL 对应物 `sceneio.scene_from_dict`；用户 API 是 `load_scene(path)`）. | Loom/render/vk/driver.py |
+| `compute_frame_view_proj` | `compute_frame_view_proj(self, aspect=None)` | 渲染帧的位姿/VP 计算（LOD 选模 + V@P，返回 `(vp, cam_pos)`）；**不是** GL 的整帧 `render`. | Loom/render/vk/driver.py |
 
-### 4.3 形态统一方向 —— `主审暂定（可推翻）`
+### 4.3 形态统一 —— **已裁决**（人类 2026-11-22）
 
-**裁决：以 GL 形态为契约形态。** 理由（按重要性）：
+> **人类裁决（最高依据，2026-11-22）**：
+> 「Q-B7-24-5：**旧形态名不再用，形态名全部统一**。」
+>
+> **执行方向**：以 **GL 形态名**为契约名。原「主审暂定（可推翻）」一节据此**转正**，
+> 裁决依据原文保留在 §4.3.2 存档。
+>
+> **落地**：commit `a606363`（改名/删除 + 全仓调用点）· `e333133`（门，修前真红）。
+> **门**：`Loom/tests/test_api_form_name_unification.py`（A 组同源/归属 · B 组旧名已消失 · C 组行为不变）
+> 以及回归门 `test_user_api_parity` / `test_engine_api_matrix` / `test_editor_play_parity` /
+> `test_camera_parity` / `test_pause_parity` / `test_eai_real`。
+
+#### 4.3.1 逐对考古表（T1：先出表再动手）
+
+| 旧名（VK） | 契约名（GL） | 是否同义（证据） | 处置 |
+|---|---|---|---|
+| `step(dt, aspect=None)` | `advance_logic(render_dt)` | **否**。`step` 是**复合体**：`advance_logic(dt)` + 位姿计算，返回 `(vp, cam_pos)`；`advance_logic` 只推进时钟，返回 `(steps, phys_steps)`，不含位姿。GL 侧**根本没有** `step` 同名物（矩阵门 GL-only 里也没有它）。 | **删除**（不留别名）：`advance_logic` 与位姿入口都已存在，生产代码零调用点（只有旧探针/文档提过）。 |
+| `render_pose(aspect=None)` | `render(delta_time)` | **否**。GL 的 `render` 是**整帧**（推进时钟 + 阴影 pass + 绘制 + HUD + 交换缓冲，`render/gl/render.py:1262`）；`render_pose` 只算本帧位姿/VP 并做 LOD 选模，**不画不上屏**。VK 的整帧在 `render/vk/player.py` 的 `draw`（`advance_logic → 位姿/VP → VkRenderer.draw_frame → 上屏`）。 | 改名 `compute_frame_view_proj`，登记为**后端内部**；VK **不提供** `render`（A-3 断言：若将来提供，必须与 GL 同一函数对象）。 |
+| `load_from_data(data, base_dir=None, ctx=None)` | `load_scene(path)` | **否**。一个吃**已解析 dict**（后端装配器，GL 对应物是 `sceneio.scene_from_dict`），一个吃**文件路径**（用户 API，两端同一函数对象 `core/engine_core.py:592`，内部经 `_load_scene_data` 调装配器）。 | 改名 `build_scene_from_data`，登记为**后端内部**；`load_scene` 早已两端同源，不动。 |
+| `camera_pos`（`@property`） | `camera_world_position(cam)` | **否**。`camera_pos` 无参、返回「**当前**相机世界位置」（轨道参数反推 / 脚本写的 `self.camera`）；`camera_world_position(cam)` 吃一个**相机实体**。GL 侧「当前相机位置」是 `self.camera` **属性**，不是方法。 | 改名 `current_camera_position`，登记为**后端内部**；`camera_world_position` 早已两端同源（`loom_camera.py:211`），不动。 |
+| `apply_dev_camera_mouse()` | `apply_orbit_camera()` | **否**。前者吃**鼠标增量**改轨道参数（输入 → 状态：滚轮推拉 + 右键转视角，公式同 GL `editor._update_camera`）；后者由轨道参数**合成相机位姿**（状态 → 位姿，`loom_camera.py:71`）。方向相反的两种操作。 | 改名 `apply_editor_camera_mouse`，登记为**后端内部**；`apply_orbit_camera` 早已两端同源，不动。 |
+
+**没有一对是「同义 → 删旧名只留 GL 名」**：5 条旧名里 1 条是复合体（删）、4 条与 GL 名**不同义**
+（改名 + 登记为后端内部）。真正的「同义」三条（`load_scene` / `camera_world_position` /
+`apply_orbit_camera`）**在本次之前就已经是两端同一函数对象**，本项只做复核与加门。
+
+#### 4.3.2 为什么「以 GL 形态为契约形态」（裁决依据，2026-11-17 原文存档）
 
 1. **编辑器只有 GL 一条腿**（`EditorApp(GLEngine)`）—— 脚本在编辑器里写、在编辑器里调，编辑器能跑的那套就是事实标准；
 2. **beta7 零新功能** —— 把 GL 改成 VK 形态 = 改 GL 语义，属于「功能/语义变更」，越界；
 3. **存量内容按 GL 写**（`examples/PacMan2D.json` 的玩法脚本、`Projects/`），改 GL 形态会一次性打碎所有存量；
-4. **VK 侧改名成本低于 GL 侧**：VK 只有 39 个公开成员、消费者是播放器/打包器，共 7 条要改。
+4. **VK 侧改名成本低于 GL 侧**：VK 消费者只有播放器/打包器。
 
-**逐条落法**：
+#### 4.3.3 落地后的现状（2026-11-22 探针实测）
 
-| VK 现状 | 契约形态 | 0b 动作 |
-|---|---|---|
-| `step(dt)` | `advance_logic(dt)` + `render()` 两个入口 | 保留 `step` 作**兼容别名**（标 deprecated），新增两个契约入口 |
-| `render_pose()` | `render()` | 同上（`render` 为契约名，`render_pose` 转内部） |
-| `load_from_data(data)` | `load_scene(path)` | 新增 `load_scene`；`load_from_data` 降为内部/兼容 |
-| `camera_pos` / `camera_target` / `camera_distance` | `camera_world_position()` + `active_camera` 的 `CameraState` 字段 | VK 补 `camera_world_position()`；三个轨道参数降为**非契约**（开发相机内部） |
-| `apply_dev_camera_mouse()` | `apply_orbit_camera()` | 契约名用 GL 的；`apply_dev_camera_mouse` 转内部 |
-| GL `move_camera` / `rotate_camera` | 同名 | VK 补两个「按按键状态驱动相机」的入口（语义照 GL：读 `actions`/键位状态） |
-| GL `apply_orbit_camera` | 同名 | VK 已有等价物 → 改名即可 |
-| GL `update_animations` / `update_audio` / `update_physics` / `update_scripts` | 同名 | **归 B7-26 一起做**（VK `_logic_frame` 段序补齐时把 4 段显式化，见路线登记 B7-26） |
+| 契约名 | GL | VK | 同一函数对象 | 说明 |
+|---|---|---|---|---|
+| `advance_logic` | ✅ `render/gl/engine.py:1422` | ✅ `render/vk/driver.py` | ❌ | **同语义·实现分属各后端**（GL 有异步逻辑线程 / Qt 宿主分支，VK 走 `FixedStepClock`）。名字已统一；是否并成一份属 JVM 模型第 2 步（后端差异进钩子）的待办，不在本项。 |
+| `render` | ✅ `render/gl/render.py:1262` | ❌ | — | GL 独有后端内部（VK 整帧 = `render/vk/player.py` 的 `draw` 三段）。 |
+| `load_scene` | ✅ `core/engine_core.py:592` | ✅ 同左 | ✅ | 用户 API。 |
+| `camera_world_position` | ✅ `loom_camera.py:211` | ✅ 同左 | ✅ | 用户 API。 |
+| `apply_orbit_camera` | ✅ `loom_camera.py:71` | ✅ 同左 | ✅ | 用户 API。 |
+| `move_camera` / `rotate_camera` / `update_animations` / `update_physics` / `update_scripts` | ✅ | ✅ | ✅ | 已在 B7-26 等批次补齐（`update_audio` 两端同名、实现分属各端：GL 走 `FrameComponentMixin`，VK 走 `SceneDriver.update_audio`，同语义）。 |
 
-> **注意**：`update_*` 这 4 条不单独在 0b 里做 —— 它们是 **B7-26（逻辑帧段序一致）的交付物**。
-> 0b 只负责「把契约名写进接口」，实现由 B7-26 落地。这是有意的依赖，不是遗漏。
+**VK 侧仍公开、但已登记为后端内部（类型②）的四条**：`compute_frame_view_proj` /
+`build_scene_from_data` / `current_camera_position` / `apply_editor_camera_mouse`。
+它们**不该是用户 API** 的理由就是上表的「是否同义」列 —— 它们各自对应 GL 的另一件东西
+（整帧 `render` / 装配器 `sceneio.scene_from_dict` / 属性 `self.camera` / `editor._update_camera`），
+把它们当用户 API 会让脚本在切后端时语义漂移。
 
 ---
 
@@ -222,7 +252,7 @@ py -3.13 Loom/tests/test_engine_api_matrix.py --list   # 打印矩阵（含签�
 | `mouse_lock_allowed` | A（只读状态） | `False`（`loom_input.py:227`） | **无** | 同上 |
 | `mouse_unlock_requested` | A（只读状态） | `False` | **无** | 同上（VK 现只有 `poll_unlock()` 消费式接口，需另存一份只读视图） |
 | `render_api_current` | 共享（只读） | `'opengl'`（`engine.py:919`） | `'vulkan'`（`scene_driver.py:831`） | 两端**值不同是正确行为**（如实反映本实例后端）；契约只要求「同名 + 返回字符串 + 与 `get_render_api()` 一致」 |
-| `camera_pos` | B（VK 独有，降为非契约） | 无（GL 用 `camera_world_position()`） | `@property`（`scene_driver.py:777`） | 不进契约；契约名是 `camera_world_position()` |
+| `current_camera_position` | B（VK 独有，降为非契约；Q-B7-24-5 由 `camera_pos` 改名） | 无（GL 用 `self.camera` 属性 + `camera_world_position()`） | `@property`（`render/vk/driver.py`） | 不进契约；契约名是 `camera_world_position()`（吃相机实体，两端同一函数对象） |
 | `script_keys` | **口径假差异**（两端语义相同） | `__init__` 实例属性（`engine.py:418`） | `@property` 别名 `key_state`（`scene_driver.py:1132`） | 不进契约差异清单；但**两端都必须有**（引擎前置检查依赖它），见 §10 |
 
 > **为什么属性必须进契约**：脚本读状态只能靠属性（`if engine.mouse_locked:`）。
@@ -254,7 +284,7 @@ class NotSupportedOnBackend(RuntimeError):
 | `draw_text_quad` | 见签名 | 屏幕像素文字 | `ui` pass（文字图集） | Loom/loom_hud.py:108 |
 | `draw_texture_quad` | 见签名 | 屏幕像素纹理 | `ui` pass | Loom/loom_hud.py:156 |
 | `push_scissor` / `pop_scissor` | 见签名 | 立即模式裁剪栈 | `ui` pass 的 scissor 状态 | Loom/loom_hud.py:178/197 |
-| `render` | 见签名 | GL 渲染一帧（含时钟 advance 与逻辑步） | `render_pose()` + `step()`（§4.3） | Loom/loom_render.py:1128 |
+| `render` | 见签名 | GL 整帧入口（含时钟 advance 与逻辑步 + 绘制 + 上屏） | VK **无**同名物：整帧 = `render/vk/player.py` 的 `draw`（`advance_logic` → `compute_frame_view_proj` → `VkRenderer.draw_frame`）（§4.3） | Loom/render/gl/render.py:1262 |
 | `run` | 见签名 | GL 主运行循环 | 播放器/打包器的自有循环 | Loom/loom_render.py:1301 |
 | `present_health` | 见签名 | 上屏健康快照 | VK 有自己的上屏状态，走诊断接口 | Loom/loom_render.py:1287 |
 | `should_fallback_remote` | 见签名 | 连续上屏失败 → 建议离屏回读 | VK 侧另有回退链 | Loom/loom_render.py:1291 |
@@ -388,7 +418,7 @@ class NotSupportedOnBackend(RuntimeError):
 | `add_light` / `remove_light` | 建 LightState + append / 从 `lights` 摘掉 | 钩子 `_backend_light_added` / `_backend_light_removed`（GL 在 `loom_lighting` 释放阴影贴图；VK 无需定义） |
 | `clear_scene` | 逐个 remove_model + 清 materials / 网格顶点缓存 + current_model_index 归零 | 钩子 `_backend_scene_cleared`（GL 释放桶资源；VK 清碰撞包围盒缓存） |
 | `remove_subtree` | `collect_subtree` + 脱摄像机 + 逐节点 `_remove_one_model` | `_remove_one_model`（GL 在 `loom_model_gpu`，VK 在 `scene_driver`） |
-| `load_scene(path)` | 读文件 → 判类型 → 交装配（返回 bool） | `_load_scene_data(data, base_dir)`（GL: `sceneio.scene_from_dict`；VK: `load_from_data`） |
+| `load_scene(path)` | 读文件 → 判类型 → 交装配（返回 bool） | `_load_scene_data(data, base_dir)`（GL: `sceneio.scene_from_dict`；VK: `build_scene_from_data`） |
 | `get_tps` | 读 `_tps_events` | `_tps_sample()` 由公共 `update_scripts` 每逻辑帧记一次（**VK 现在真的在记**，之前恒 0 = 假实现） |
 | `get_logic_time_ratio` | 读 `_logic_dt_sum` / `_logic_wall_sum` | `_logic_ratio_tick()`：GL 在 `_clock_advance`（floor=True，恒 ≥1），VK 在 `advance_logic`（floor=False，如实记宿主 dt） |
 | `step_logic_once` | 仅暂停态置 `_step_requested` | VK `advance_logic` 暂停分支**真的消费**它（`clk.step_once()` = 恰好 1 个逻辑帧） |
