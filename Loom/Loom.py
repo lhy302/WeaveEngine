@@ -118,6 +118,21 @@ def _editor_backend_choice(argv):
     return 'gl'
 
 
+def _editor_execution_plan(argv, backend=None):
+    """编辑器执行面决策（纯函数，无副作用）：--ui × --backend -> 视图/报错计划。
+
+    Q-B7-55-1: 唯一决策实现在 hostenv.editor_launch（源码入口 / 编译入口共用）。
+    main 的编辑器分支真调用本函数；对拍门 test_entry_execution_parity.py B 组
+    也真调用同一份（不是门内复刻）。backend 缺省时由 _editor_backend_choice
+    现场决策（仍走 run_player 唯一事实源）。
+    """
+    from hostenv.editor_launch import editor_execution_plan
+    _ui = _parse_args(argv)[6]
+    if backend is None:
+        backend = _editor_backend_choice(argv)
+    return editor_execution_plan(_ui, backend)
+
+
 # ==================== E2: 远程模式三态 (2026-11-09 beta5) ====================
 # LOOM_REMOTE_MODE 取值 (Hub 默认**不注入** = off, 见版本计划 E2):
 #   off(未设) / 0  -> 原生 present (旧行为, 不变)
@@ -126,118 +141,38 @@ def _editor_backend_choice(argv):
 #                     **只重启一次**(防死循环), 并打印一行明确原因。
 # 判据只接 loom_render.should_fallback_remote(n) (引擎自己数 consecutive failures),
 # 本层不复制阈值/不猜, 也不改进程形态之外的行为。
-_REMOTE_ON_VALUES = ('1', 'on', 'true', 'yes', 'remote')
-
-
+#
+# 2026-11-22 Q-B7-55-1（agent-75）: 取值集合 / 三态归一 / 上屏监视 / 三态执行面
+# 的**唯一实现**已抽到 hostenv/remote_launch.py（规则 5.5）。本文件只保留下列
+# 函数名做薄转调 —— 不改本文件两处已验证播放调用点，也不在本文件保留任何
+# LOOM_REMOTE_MODE 取值集合或判定逻辑。
 def _remote_mode():
-    """归一 LOOM_REMOTE_MODE -> 'off' | 'on' | 'auto'（未知值按 off，保持旧语义）。"""
-    v = (os.environ.get('LOOM_REMOTE_MODE') or '').strip().lower()
-    if v == 'auto':
-        return 'auto'
-    if v in _REMOTE_ON_VALUES:
-        return 'on'
-    return 'off'
+    """归一 LOOM_REMOTE_MODE -> 'off' | 'on' | 'auto'（唯一实现: hostenv.remote_launch）。"""
+    from hostenv.remote_launch import remote_mode
+    return remote_mode()
 
 
 def _install_present_watch(threshold=3):
-    """auto 模式: 装一个上屏健康监视，命中引擎判据后让原生循环退出。
-
-    为什么包在 PlayerApp.run 上: 原生播放是**阻塞**调用 (run_backend -> eng.run())，
-    入口层拿不到引擎实例；而 present 健康是引擎实例态 (loom_render.present_health /
-    should_fallback_remote)。这里只做"观测 + 请求退出"——判据、阈值、计数全在引擎，
-    本函数不复制。返回 state dict，调用方据此决定是否重启为 remote。
-    """
-    state = {'fallback': False, 'streak': 0, 'last_error': None}
-    try:
-        import threading
-        from runtime import PlayerApp
-    except Exception as e:
-        print('[remote] auto: 无法安装上屏健康监视 (%r) -> 按原生模式运行' % (e,))
-        return state
-    if getattr(PlayerApp, '_loom_present_watch_installed', False):
-        return state
-    orig_run = PlayerApp.run
-
-    def run(self, *a, **k):
-        stop = threading.Event()
-
-        def _watch():
-            while not stop.is_set():
-                try:
-                    if self.should_fallback_remote(threshold):
-                        h = self.present_health()
-                        state['fallback'] = True
-                        state['streak'] = h.get('fail_streak')
-                        state['last_error'] = h.get('last_error')
-                        # 结束原生渲染循环 -> 回到入口层做一次 remote 重启。
-                        # 先等循环真正起来（run() 开头会 self._running=True），
-                        # 否则起跑竞态里这一下会被覆盖，窗口就再也收不掉。
-                        while not stop.is_set():
-                            try:
-                                if getattr(self, '_running', False):
-                                    self._running = False
-                                    return
-                            except Exception:
-                                return
-                            stop.wait(0.02)
-                        return
-                except Exception:
-                    return          # 引擎不支持下屏健康 (无 _present_*) -> 不监视
-                stop.wait(0.1)   # 上屏失败后尽快收口 (白屏停留 <=100ms 级)
-
-        threading.Thread(target=_watch, name='loom-present-watch',
-                         daemon=True).start()
-        try:
-            return orig_run(self, *a, **k)
-        finally:
-            stop.set()
-
-    PlayerApp.run = run
-    PlayerApp._loom_present_watch_installed = True
-    return state
+    """auto 模式上屏健康监视（唯一实现: hostenv.remote_launch.install_present_watch）。"""
+    from hostenv.remote_launch import install_present_watch
+    return install_present_watch(threshold)
 
 
 def _launch_native(scene, width=1280, height=800):
-    """原生 present 启动（--backend > 设置 render_api > 默认）。"""
-    from run_player import resolve_backend, run_backend
-    cli = _cli_backend(sys.argv)
-    run_backend(resolve_backend(cli), scene, width=width, height=height,
-                explicit=(cli is not None))
+    """原生 present 启动（唯一实现: hostenv.remote_launch.launch_native）。"""
+    from hostenv.remote_launch import launch_native
+    return launch_native(scene, width=width, height=height)
 
 
 def _launch_player(scene, width=1280, height=800):
-    """按 --backend > 设置 render_api > 默认 的统一策略启动播放器.
+    """按 --backend > 设置 render_api > 默认 的统一策略启动播放器（三态收口）。
 
-    LOOM_REMOTE_MODE:
-      · on/1  (离屏 GL + Qt 窗口白屏兜底) 强制 GL —— 该模式本身就是"GL 不可见时
-        改走离屏读回", 与 Vulkan 无关, 必须优先（2026-11-07 scan_11 P-07: 该优先
-        规则必须在**本函数体**里实现, 否则"游戏配置.json 双击启动"那条路径没有兜底）。
-      · auto  (2026-11-09 E2): 先按原生 present 启动; 若引擎判 should_fallback_remote(3)
-        为真（连续上屏失败），**重启一次**为 on 等价路径并打印原因。
-      · off/0 (默认): 原生启动, 旧行为。
-
-    显式 --backend 由 _cli_backend 判定, 交给 run_player 的后端策略
-    (Q6: 显式 vulkan 失败只报错不改写设置; 设置/默认走到 vulkan 失败则把
-    设置回退成 opengl 并崩一次)。
+    Q-B7-55-1: on/auto/off 三态逻辑唯一实现在 hostenv.remote_launch.launch_player
+    —— 本文件两处播放分支与 build_entry.py 两个播放分支共用同一份。
     """
-    mode = _remote_mode()
-    if mode == 'on':
-        from loom_player_window import run_player_window
-        run_player_window(scene, width=width, height=height)
-        return
-    if mode != 'auto':
-        _launch_native(scene, width, height)
-        return
-    # ---- auto: 原生优先, 只在引擎判定失败后降级一次 ----
-    state = _install_present_watch(3)
-    _launch_native(scene, width, height)
-    if not state.get('fallback'):
-        return
-    print('[remote] 原生上屏连续失败 %s 次 (最近错误: %r) -> 自动降级为离屏回读'
-          ' (等价于 LOOM_REMOTE_MODE=1), 本次只重启一次'
-          % (state.get('streak'), state.get('last_error')))
-    from loom_player_window import run_player_window
-    run_player_window(scene, width=width, height=height)
+    from hostenv.remote_launch import launch_player
+    return launch_player(scene, width=width, height=height)
+
 
 def _benchmark_math(n_tri=5000, n_iter=100):
     """
@@ -501,24 +436,35 @@ if __name__ == "__main__":
                 _launch_player(_scene)
                 sys.exit(0)
             else:
-                # Qt 编辑器 (2026-08-17): 原生 Qt 控件全重写 —— pygame(SDL) 窗口
-                # 会进程级污染中文输入法(IME)候选框, 编辑器弃用 pygame 做窗口;
-                # QOpenGLWidget 承载 moderngl 视口 + Qt 原生面板 (见记忆
-                # sdl-window-contaminates-ime). 控制器命令层/GL 渲染管线复用.
-                # 2026-10-18 选项1: --ui default/minimal 旧 pygame 视图路径彻底删除.
+                # 编辑器（Q-B7-55-1，2026-11-22 agent-75）: --ui 不再被静默忽略 ——
+                # 执行面决策统一走 _editor_execution_plan（唯一实现在
+                # hostenv.editor_launch，与 build_entry.py 同一份）：
+                #   · --ui qt（默认）                -> LoomGUI（Qt 主窗口，视口按 backend）
+                #   · --ui default/minimal + gl      -> EditorApp + 注入视图（功能不丢）
+                #   · --ui default/minimal + vulkan  -> 两端同一条可见报错 + exit 1
+                #     （VkEditorApp 需要 Qt 宿主注入 device/present_format；不静默降级 GL）
                 # 2026-10-19 单实例锁：仅编辑器模式加锁（--run / --benchmark / 游戏配置
                 # 玩家模式不加锁，允许同时开多个游戏实例）。防止连点开 N 个编辑器。
                 from core.single_instance import ensure_editor_single_instance
                 ensure_editor_single_instance(scene_path=open_scene)
-                # S4（Q-B7-47-1 阶段 4）: 编辑器后端选择 —— 决策在
-                # _editor_backend_choice 纯函数里（2026-11-22 B7-54 终审 F-2 抽出,
-                # 原 :500-505 内联三行逐位上移, 语义零变化）: 只有**显式 --backend
-                # vulkan**才走 VK 视口; 不带 --backend（或缺省 opengl/auto）= GL。
-                # 对拍门 test_entry_backend_parity.A④ 真调用同一份函数（不再是门内复刻）。
+                # S4（Q-B7-47-1 阶段 4）: 后端决策仍在 _editor_backend_choice 纯函数里
+                # （2026-11-22 B7-54 终审 F-2 抽出, 语义零变化）: 只有**显式
+                # --backend vulkan**才走 VK; 不带 --backend（或缺省 opengl/auto）= GL。
+                # Q-B7-55-1: --ui × backend 的装配决策统一交给 hostenv.editor_launch。
+                # B7-54 A④ 门真调用同一份决策函数：先取后端决策，再交给执行面计划。
                 _edit_backend = _editor_backend_choice(sys.argv)
-                from gui.main_window import run_loom_gui
-                run_loom_gui(scene_path=open_scene, backend=_edit_backend)
-                sys.exit(0)
+                _edit_plan = _editor_execution_plan(sys.argv[1:], backend=_edit_backend)
+                if _edit_plan['error']:
+                    print(_edit_plan['error'])
+                    sys.exit(_edit_plan['exit_code'])
+                if _edit_plan['engine'] == 'LoomGUI':
+                    from gui.main_window import run_loom_gui
+                    run_loom_gui(scene_path=open_scene, backend=_edit_plan['backend'])
+                    sys.exit(0)
+                # 非 Qt 视图（--ui default/minimal）+ GL: 与 build_entry 同一装配。
+                from editor import EditorApp
+                engine = EditorApp(1280, 800, scene_path=open_scene,
+                                   view=_make_editor_view(ui))
     except Exception as e:
         print(f"[错误] 无法启动渲染引擎: {e}")
         sys.exit(1)

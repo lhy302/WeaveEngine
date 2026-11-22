@@ -123,6 +123,46 @@ def _editor_backend_choice(argv):
     return 'gl'
 
 
+def _editor_execution_plan(argv, backend=None):
+    """编辑器执行面决策（纯函数，无副作用）：--ui × --backend -> 视图/报错计划。
+
+    Q-B7-55-1: 唯一决策实现在 hostenv.editor_launch（源码入口 / 编译入口共用）。
+    main 的编辑器分支真调用本函数；对拍门 test_entry_execution_parity.py B 组
+    也真调用同一份（不是门内复刻）。backend 缺省时由 _editor_backend_choice
+    现场决策（仍走 run_player 唯一事实源）。
+    """
+    from hostenv.editor_launch import editor_execution_plan
+    _ui = _parse_args(argv)[6]
+    if backend is None:
+        backend = _editor_backend_choice(argv)
+    return editor_execution_plan(_ui, backend)
+
+
+# ==================== Q-B7-55-1: 远程模式三态同源 (2026-11-22) ====================
+# 人类目标态「编译入口和源码入口和打包游戏一样，全部走 run_player.py 后端选择
+# 组件」+「四入口零用户可感知差异」。B7-54 统一了后端**决策**面；本批补**执行**
+# 面：LOOM_REMOTE_MODE 三态（off/on/auto）的唯一实现 = hostenv/remote_launch.py，
+# 本文件播放分支只做薄转调（与 Loom.py 同一份，不许复制第二份取值集合/判定）。
+
+def _remote_mode():
+    """归一 LOOM_REMOTE_MODE -> 'off' | 'on' | 'auto'（唯一实现: hostenv.remote_launch）。"""
+    from hostenv.remote_launch import remote_mode
+    return remote_mode()
+
+
+def _launch_player(scene, width=1280, height=800):
+    """播放分支统一入口（Q-B7-55-1）：--run 与 游戏配置.json 两个调用点共用。
+
+    远程三态与后端启动交给 hostenv.remote_launch.launch_player 唯一实现：
+      · off 的原生启动走 run_player.run_backend（--backend > 设置 render_api > 默认）；
+      · auto 的原生尝试同样走 run_player.run_backend，引擎判上屏失败后
+        只重启一次远程窗口（on 等价路径）；
+      · on 直接走 loom_player_window.run_player_window 离屏回读。
+    """
+    from hostenv.remote_launch import launch_player
+    return launch_player(scene, width=width, height=height)
+
+
 def _benchmark_math(n_tri=5000, n_iter=100):
     """
     纯计算基准 (不弹窗口): 构造随机 mesh, 跑完整 MVP 批量管线
@@ -427,9 +467,9 @@ if __name__ == "__main__":
             # R6-03 的 SceneVersionError 处理不变：run_backend 内部已统一拦截
             # （Q-VER-1: 打印要求/当前版本 + 弹窗 + SystemExit(1)）, 本函数
             # 下方 except 兜底仍在（双保险, SystemExit 不被 except Exception 捕获）。
-            _api, _explicit = _player_backend_choice(sys.argv[1:])
-            import run_player
-            run_player.run_backend(_api, run_scene, explicit=_explicit)
+            # Q-B7-55-1: 远程三态（off/on/auto）+ 后端选择统一在
+            # hostenv.remote_launch.launch_player（与 Loom.py._launch_player 同一份）。
+            _launch_player(run_scene)
             sys.exit(0)
         else:
             # 游戏封装 (M38, Unity Build 模型): 无参数时若 exe/脚本旁有 游戏配置.json
@@ -464,31 +504,34 @@ if __name__ == "__main__":
                 # 打包游戏 (game_player) 对同一路径就是 resolve_backend +
                 # run_backend, 编译入口此前恒 GL = 同一发布物行为分叉。
                 # 阻塞/退出语义同 --run 分支（run_backend 阻塞到窗口关闭）。
-                _api, _explicit = _player_backend_choice(sys.argv[1:])
-                import run_player
-                run_player.run_backend(_api, _scene, explicit=_explicit)
-                sys.exit(0)
-            elif ui == 'qt':
-                # Qt 编辑器 (2026-08-17): 原生 Qt 控件全重写 —— pygame(SDL) 窗口
-                # 会进程级污染中文输入法(IME)候选框, 编辑器弃用 pygame 做窗口;
-                # QOpenGLWidget 承载 moderngl 视口 + Qt 原生面板 (见记忆
-                # sdl-window-contaminates-ime). 控制器命令层/GL 渲染管线复用.
-                from gui.main_window import run_loom_gui
-                # 2026-11-21 B7-54: backend 不再恒缺省 'gl' —— 由 run_player
-                # 后端选择推导（_editor_backend_choice 与 Loom.py S4 同源规则:
-                # 仅显式 --backend 且解析为 vulkan 才走 VK 视口, 其余 gl 与修前
-                # 逐位一致）。
-                run_loom_gui(scene_path=open_scene,
-                             backend=_editor_backend_choice(sys.argv[1:]))
+                # Q-B7-55-1: 双击进游戏与 --run 走同一个 _launch_player
+                # （远程三态 + 后端选择唯一实现 = hostenv.remote_launch）。
+                _launch_player(_scene)
                 sys.exit(0)
             else:
-                # --ui default / minimal: 走 guiloader (自定义 GUI 投放机制) 或
-                # 遗留 pygame 视图 (仅参考, 有 IME 污染)
-                # 2026-11-21 B7-54: 后端决策与 --ui qt 分支同源（此前恒
-                # EditorApp(GL), VkEditorApp 不可达）。VK 分支 = VkEditorApp,
-                # 其参数门会在无 Qt 宿主视图/wgpu device 时**可见报错**
-                # （不许静默降级 GL, 见 editor/vk_app.py __init__）。
-                if _editor_backend_choice(sys.argv[1:]) == 'vulkan':
+                # 编辑器（Q-B7-55-1，2026-11-22 agent-75）: --ui 执行面决策统一走
+                # _editor_execution_plan（唯一实现 hostenv.editor_launch，与
+                # Loom.py 同一份）：
+                #   · --ui qt                        -> LoomGUI（Qt 主窗口，视口按 backend）
+                #   · --ui default/minimal + gl      -> EditorApp + 注入视图（功能不丢）
+                #   · --ui default/minimal + vulkan  -> 两端同一条可见报错 + exit 1
+                #     （VkEditorApp 需要 Qt 宿主注入 device/present_format；不静默降级 GL）
+                # 2026-11-21 B7-54: 后端决策仍由 _editor_backend_choice 转调 run_player
+                # 唯一事实源（只有显式 --backend vulkan 才走 VK，其余 gl 与修前一致）。
+                # B7-54 A④ 门真调用同一份决策函数：先取后端决策，再交给执行面计划。
+                _edit_backend = _editor_backend_choice(sys.argv)
+                _edit_plan = _editor_execution_plan(sys.argv[1:], backend=_edit_backend)
+                if _edit_plan['error']:
+                    print(_edit_plan['error'])
+                    sys.exit(_edit_plan['exit_code'])
+                if _edit_plan['engine'] == 'LoomGUI':
+                    from gui.main_window import run_loom_gui
+                    run_loom_gui(scene_path=open_scene,
+                                 backend=_edit_plan['backend'])
+                    sys.exit(0)
+                if _edit_plan['engine'] == 'VkEditorApp':
+                    # 保留 VkEditorApp 装配点（Qt 宿主注入 device/present_format 时
+                    # 走这里；当前命令行入口无宿主，plan 会先给可见报错）。
                     from editor import VkEditorApp
                     engine = VkEditorApp(1280, 800, scene_path=open_scene,
                                          view=_make_editor_view(ui))
