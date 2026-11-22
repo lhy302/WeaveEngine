@@ -134,7 +134,7 @@ def build_models(data, materials=None):
                             friction=rb.get('friction', 0.5),
                             restitution=rb.get('restitution', 0.0),
                             rolling_friction=rb.get('rolling_friction', 0.1))
-        # 脚本 (M25): 恢复全部脚本组件 (与 engine 语义一致, 惰性实例化见 step)
+        # 脚本 (M25): 恢复全部脚本组件 (与 engine 语义一致, 惰性实例化见 advance_logic)
         scs = obj.get('scripts')
         if scs is None:
             sc = obj.get('script')
@@ -542,7 +542,7 @@ class SceneDriver(VkWindowMixin, VkEditorRenderMixin, EngineCore):
         # 同一场景切后端后可见距离差 10 倍 = "API 自由切换"名不副实。
         # 现值与 engine.GLEngine.far 对齐; near 也与之同值 (0.1)。
         self.far = 1000.0
-        # B1: 物理桥 (首次 step 惰性建) + 重力 (场景文件覆盖, 默认 -9.8 同引擎)
+        # B1: 物理桥 (首次 advance_logic 惰性建) + 重力 (场景文件覆盖, 默认 -9.8 同引擎)
         self._bridge = None
         self._bridge_disabled = getattr(physb, 'cv_available', False) is not True
         self._bridge_warned = False
