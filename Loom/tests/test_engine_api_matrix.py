@@ -203,16 +203,20 @@ EXPECTED_GL_ONLY = frozenset({
 })
 
 EXPECTED_VK_ONLY = frozenset({
-    'apply_dev_camera_mouse', 'camera_distance', 'camera_pos', 'camera_target',
-    'consume_mouse_input', 'feed_mouse_rel', 'load_from_data', 'render_pose',
-    'script_keys', 'step',
+    # Q-B7-24-5（2026-11-22 人类裁决：旧形态名不再用）：4 条旧形态名按 T1 考古结论改名
+    #   step（删，GL 无同名物）/ render_pose → compute_frame_view_proj /
+    #   load_from_data → build_scene_from_data / camera_pos → current_camera_position /
+    #   apply_dev_camera_mouse → apply_editor_camera_mouse（后四条为「非同义 → 后端内部」）。
+    'apply_editor_camera_mouse', 'camera_distance', 'current_camera_position', 'camera_target',
+    'consume_mouse_input', 'feed_mouse_rel', 'build_scene_from_data', 'compute_frame_view_proj',
+    'script_keys',
 })
 
 # 计数断言（防「两端同时改名」这种集合差异看不出来的漂移）
 # v3.4（2026-11-20 S2 阶段2 ④）: GL +1 = overlay_scope（叠加层状态作用域钩子，
 # GL 原样转发 moderngl；S3 补 VK 实现 —— 已登记 test_user_api_parity.BACKEND_ONLY_GL）
 EXPECTED_GL_TOTAL = 113
-EXPECTED_VK_TOTAL = 110      # v3.6 (S4): +1 draw_screen_rect 进 VkEditorRenderMixin（109+1）
+EXPECTED_VK_TOTAL = 109      # v3.7 (Q-B7-24-5): -1 step 删除（110-1；旧形态名不再用）
 
 
 def _call_groups():

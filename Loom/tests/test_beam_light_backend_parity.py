@@ -153,7 +153,7 @@ device = AB._vk_device()
 def vk_light_vps(shadow, mode):
     d = make_scene(shadow, mode, 'circle')
     drv = sd.SceneDriver()
-    drv.load_from_data(d, base_dir=AB.SCENES_DIR)
+    drv.build_scene_from_data(d, base_dir=AB.SCENES_DIR)
     r = vr.VkRenderer(device, 'rgba8unorm')
     worlds = vr.world_matrices(drv.models, interp=None)
     r._pack_light_vps(drv.lights, drv.models, worlds)

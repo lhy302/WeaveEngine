@@ -221,7 +221,7 @@ def build_gl(gap=0.2):
 
 def build_vk(gap=0.2):
     d = SD.SceneDriver()
-    d.load_from_data(make_scene(gap))
+    d.build_scene_from_data(make_scene(gap))
     attach_probe(d.models)
     return d
 

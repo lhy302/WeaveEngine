@@ -100,9 +100,9 @@ def _vk_render_with_renderer(data):
             return tex
 
     drv = sd.SceneDriver()
-    drv.load_from_data(data)
+    drv.build_scene_from_data(data)
     r = vr.VkRenderer(device, fmt)
-    vp, cam_pos = drv.render_pose(aspect=AB.W / AB.H)
+    vp, cam_pos = drv.compute_frame_view_proj(aspect=AB.W / AB.H)
     r.draw_frame(_Ctx(), drv.models, drv.lights, vp, cam_pos, interp=None,
                  sky=getattr(drv, 'skybox', None))
     return r

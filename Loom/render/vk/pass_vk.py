@@ -236,7 +236,7 @@ class VkFrameExecutor:
       _vk_ctx       宿主窗口/离屏上下文（physical_size + get_current_texture）
       models/lights 场景实体
       _vp           渲染 VP（4x4）
-      camera        有 .x/.y/.z（GL 形态）；否则回退 camera_pos 属性（VK 形态）
+      camera        有 .x/.y/.z（GL 形态）；否则回退 current_camera_position 属性（VK 形态）
       effective_skybox()  生效天空盒（可缺失）
       ui            UIManager（可 None）
       _interp       插值平面（可缺省）
@@ -307,7 +307,7 @@ class VkFrameExecutor:
         if cam is not None and all(hasattr(cam, a) for a in ('x', 'y', 'z')):
             camera_pos = (cam.x, cam.y, cam.z)
         else:
-            camera_pos = tuple(getattr(eng, 'camera_pos', (0.0, 0.0, 0.0)))
+            camera_pos = tuple(getattr(eng, 'current_camera_position', (0.0, 0.0, 0.0)))
         r.draw_frame(ctx, eng.models, eng.lights,
                      np.asarray(getattr(eng, '_vp', None), dtype=np.float32),
                      camera_pos,

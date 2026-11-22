@@ -79,7 +79,7 @@ def _enforce_fail_exit_code():
           engine.GLEngine.__init__:405 self.audio = AudioSystem() 建；
           逻辑帧 = engine._logic_frame:1146（8 段，含 update_audio:1195/1218）；
           渲染帧 = engine.advance_logic:1424（暂停门控在 :1452）。
-  VK : scene_driver.SceneDriver() + load_from_data(场景)
+  VK : scene_driver.SceneDriver() + build_scene_from_data(场景)
        —— VK 播放器；音频对象惰性建（render/vk/driver.py:916 _ensure_audio）；
           逻辑帧 = scene_driver._logic_frame:883（8 段，含 update_audio:902）；
           渲染帧 = scene_driver.advance_logic:1043（暂停门控在 :1053）。
@@ -120,10 +120,10 @@ def _enforce_fail_exit_code():
     self.camera 每渲染帧由 render/gl/render.py:1053 apply_orbit_camera() 更新（runtime.py:174
     加载时也调一次）；VK **全仓没有** apply_orbit_camera 调用点（grep 实测 0 处），
     self.camera 恒为 render/vk/driver.py:616 的初始 (0,0,-5)，朝向取 camera_yaw/camera_pitch
-    （:617 恒 0.0），而 VK 轨道相机实际用的是 yaw/pitch（render_pose:1257）。→ 即使修好
+    （:617 恒 0.0），而 VK 轨道相机实际用的是 yaw/pitch（compute_frame_view_proj:1257）。→ 即使修好
     P4-1，VK 的听者也钉在 (0,0,-5)、朝向钉在 0/0。归属：render/vk/driver.py:616-619 +
     无 apply_orbit_camera 调用点；共享函数 loom_frame_components.py:34-40 的取源顺序
-    （getattr(host,'camera') 优先于 camera_pos）是放大器。
+    （getattr(host,'camera') 优先于 current_camera_position）是放大器。
   · P4-3（VK 首帧前 engine.audio 是 None）：GL 在 __init__ 就建 AudioSystem，VK 是
     self.audio = None（render/vk/driver.py:659）+ 首帧 _ensure_audio 惰性建。脚本在 on_start
     里调 self.engine.audio.play_sound(...)（用户脚本最常这么用）→ GL 正常返回 None，
@@ -140,12 +140,12 @@ def _enforce_fail_exit_code():
   · **P4-2 已修**（VK 听者跟随轨道相机）：轨道相机眼睛位置的公式抽成**唯一实现**
     `loom_camera.orbit_camera_eye`（GL 的 `CameraMixin.apply_orbit_camera` 与 VK 都调它）；
     VK 新增 `SceneDriver._sync_orbit_camera_state()`（语义/数值与 GL 的 apply_orbit_camera
-    逐位一致），在两处调用：`load_from_data` 的轨道分支（= GL runtime.PlayerApp 加载路径
+    逐位一致），在两处调用：`build_scene_from_data` 的轨道分支（= GL runtime.PlayerApp 加载路径
     同位置）与 `advance_logic` 帧首（= GL loom_render._prepare_main_pass 同位置，且在任何
     消费相机的地方之前、暂停分支之前）。VK 因数据结构差异（轨道角度在 `yaw/pitch`、玩家
     相机角度在 `camera_yaw/camera_pitch`，GL 两者共用一组）把轨道角度**镜像**到
     `camera_yaw/camera_pitch` —— 共享的 `sync_audio_listener` 读的正是后者。
-    `sync_audio_listener` 的取源顺序**一行未动**（GL 行为零变化），`camera_pos` 里那份
+    `sync_audio_listener` 的取源顺序**一行未动**（GL 行为零变化），`current_camera_position` 里那份
     同公式拷贝改为调共享纯函数（数值不变）。
   · **P4-4 已修**（绑死模式 VK 补音频段）：`advance_logic` 的绑死分支与
     `_step_one_logic_frame` 的无时钟分支各补 `self.update_audio(...)`，位置与 GL 同
@@ -485,7 +485,7 @@ def new_gl(scene):
 
 def new_vk(scene):
     d = SD.SceneDriver()
-    d.load_from_data(scene)
+    d.build_scene_from_data(scene)
     return d
 
 

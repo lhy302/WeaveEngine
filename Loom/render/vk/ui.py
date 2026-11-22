@@ -399,7 +399,7 @@ def hud_lines_from_driver(driver, backend='Vulkan (wgpu)', extra=()):
     VkUIEngine.draw_hud_lines。
     """
     import math
-    cam = getattr(driver, 'camera_pos', None)
+    cam = getattr(driver, 'current_camera_position', None)
     if callable(cam):
         cam = cam()
     cam = cam or (0.0, 0.0, 0.0)

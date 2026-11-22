@@ -64,7 +64,7 @@ def _enforce_fail_exit_code():
   · GL 端 = runtime.PlayerApp(..., scene_data=...)（播放器生产入口），换场景走用户 API
     load_scene(path)（内核公共实现 → _load_scene_data → sceneio.scene_from_dict）；
   · VK 端 = scene_driver.SceneDriver()（播放器生产入口），换场景走同一个 load_scene(path)
-    （→ SceneDriver.load_from_data）；
+    （→ SceneDriver.build_scene_from_data）；
   · 场景脚本用 scripts.register() 注册（= scripts/ 目录加载脚本的同一条生产注册路径），
     经场景文件 scripts:[{"id":...}] → GameObject.add_script 挂载，不手搓假对象。
 

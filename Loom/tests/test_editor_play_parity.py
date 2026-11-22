@@ -667,7 +667,7 @@ def measure_vk_player(drv, prod_vp):
       每逻辑帧维护，float64 —— 与 GL 面同一份生产者）；
     · rw32 = vk_renderer.world_matrices(models, interp)（VK 渲染管线每帧自算的 f32
       渲染矩阵 —— vk_renderer.draw_frame 消费的正是这一份）；
-    · VP = render_pose 生产返回值；「生产字段重建 V@P == 本帧生产 VP」保真断言与
+    · VP = compute_frame_view_proj 生产返回值；「生产字段重建 V@P == 本帧生产 VP」保真断言与
       GL measure_gl 同口径。
     """
     eye = (float(drv.camera.x), float(drv.camera.y), float(drv.camera.z))
@@ -751,10 +751,10 @@ class Pair:
         # ---- S5: VK 两面（同一份场景用户内容；生产构造式） ----
         # VK 播放器面 = scene_driver.SceneDriver（生产 VK 播放器同一类），
         # 装配按 vk_player.run_vk 生产同款：is_playing=True（render/vk/player.py:346，
-        # 「播放器一进来就是正在播放语义」）→ load_from_data → set_fps。
+        # 「播放器一进来就是正在播放语义」）→ build_scene_from_data → set_fps。
         self.v = _sd.SceneDriver()
         self.v.is_playing = True
-        self.v.load_from_data(json.loads(json.dumps(scene_data)))
+        self.v.build_scene_from_data(json.loads(json.dumps(scene_data)))
         # VK 编辑器面 = editor.VkEditorApp（S4 生产类）：wgpu device + 离屏纹理宿主
         # （VkFrameExecutor/叠加层 flush 协议）→ 生产打开路径 _load_scene →
         # toggle_play（与 GL 编辑器共享的同一份 _EditorCore.toggle_play）。
@@ -793,7 +793,7 @@ class Pair:
         """第 k 个渲染帧（1 基）：喂 dt 前清墙钟锚（测试语义，见 _clock_advance docstring）。
 
         S5: 四面同一帧驱动 —— GL 两面走 render()；VK 播放器面走生产 vk_player.draw
-        帧序（advance_logic → interp.alpha 透传 → render_pose；状态面不含 draw_frame，
+        帧序（advance_logic → interp.alpha 透传 → compute_frame_view_proj；状态面不含 draw_frame，
         像素面归 S5 像素门）；VK 编辑器面与 GL 编辑器**同一条** editor.render 生产帧
         （VkFrameExecutor 消费同一份 FramePlan）。"""
         self.gl._logic_wall_last = None
@@ -811,7 +811,7 @@ class Pair:
         self.v.advance_logic(FRAME_DT)
         if getattr(self.v, '_interp', None) is not None and self.v._clock is not None:
             self.v._interp.alpha = self.v._clock.alpha
-        v_vp, _v_cam_pos = self.v.render_pose(W / H)
+        v_vp, _v_cam_pos = self.v.compute_frame_view_proj(W / H)
         vh = REC[id(self.v)][h0v:]
         self.k._logic_wall_last = None
         h0k = len(REC.get(id(self.k), []))

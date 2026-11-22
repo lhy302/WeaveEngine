@@ -24,7 +24,7 @@ from components.components import evaluate_animations, physics_disabled_by_env
 
 def sync_audio_listener(host):
     """监听器隐式跟随相机（契约 §3 / A1 决策）：优先当前玩家视角摄像机，
-    无则用引擎内部相机（GL 的 `camera + camera_yaw/pitch`，VK 的 `camera_pos + yaw/pitch`）。
+    无则用引擎内部相机（GL 的 `camera + camera_yaw/pitch`，VK 的 `current_camera_position + yaw/pitch`）。
     相机看向 -ez，故监听器前向 = -ez，上方向 = ey。失败静默（降级为无 3D 参照）。"""
     try:
         cam = host.active_camera_object()
@@ -34,7 +34,7 @@ def sync_audio_listener(host):
         else:
             pos = getattr(host, 'camera', None)
             if pos is None:
-                pos = host.camera_pos
+                pos = host.current_camera_position
             yaw = getattr(host, 'camera_yaw', None)
             if yaw is None:
                 yaw = getattr(host, 'yaw', 0.0)
@@ -55,7 +55,7 @@ def update_audio(host, dt):
     """M34: 每帧按 AudioSource 组件 playing 状态 play/stop（播放状态变化才操作）。
     逐行照抄原 FrameComponentMixin.update_audio（行为不变），宿主只需提供
     `models / audio / world_position / active_camera_object / camera_world_position /
-    camera_world_basis` 与 `camera 或 camera_pos`。"""
+    camera_world_basis` 与 `camera 或 current_camera_position`。"""
     sync_audio_listener(host)
     for m in host.models:
         a = m.audio_source

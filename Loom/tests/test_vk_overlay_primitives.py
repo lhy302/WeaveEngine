@@ -475,7 +475,7 @@ def section_a7(device):
     import render.vk.renderer as vr
     fmt = "rgba8unorm"
     drv = sd.SceneDriver()
-    drv.load_from_data(_scene_dict())
+    drv.build_scene_from_data(_scene_dict())
     tex = device.create_texture(
         size=(64, 64, 1), format=fmt,
         usage=wgpu.TextureUsage.RENDER_ATTACHMENT | wgpu.TextureUsage.COPY_SRC)
@@ -487,7 +487,7 @@ def section_a7(device):
             return tex
 
     drv._vk_ctx = _Ctx()
-    vp, cam_pos = drv.render_pose(aspect=1.0)
+    vp, cam_pos = drv.compute_frame_view_proj(aspect=1.0)
     drv._vp = np.asarray(vp, dtype="f4")
     r = vr.VkRenderer(device, fmt)
     ex = lpv.VkFrameExecutor(r, drv)

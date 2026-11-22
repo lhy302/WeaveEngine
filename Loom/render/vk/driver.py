@@ -44,7 +44,7 @@ from scene.camera import (_link_camera_parents as link_camera_parents,
 from script.scripts import get_script
 from loom_ui import UIManager, Canvas  # 2026-10-18: Canvas UI (替换 _DriverUI 空壳)
 # 2026-11-19 (P4-2): 轨道相机眼睛位置的**唯一实现**（GL 的 apply_orbit_camera 也调它）。
-# 修前 VK 里另有一份同公式拷贝（camera_pos），且 self.camera 从不由轨道相机更新。
+# 修前 VK 里另有一份同公式拷贝（current_camera_position），且 self.camera 从不由轨道相机更新。
 from loom_camera import orbit_camera_eye
 # 2026-11-18 (Q-B7-32-1 = ①): VK 宿主窗口的假全屏（F11）—— 与 GL 的
 # loom_glfw_window.GlfwWindowMixin._set_fullscreen 同语义（三步：去边框/铺桌面/置顶）。
@@ -460,7 +460,7 @@ def build_cameras(data):
 #   （loom_camera.CameraMixin.apply_orbit_camera 读它）与玩家相机
 #   （apply_camera / loom_render 写它）**共用**，所以用户脚本
 #   「engine.camera_yaw = 1.2 转轨道相机」在 GL 上一定生效。
-#   VK 历史上是**两组**：轨道用 yaw/pitch（render_pose / camera_pos /
+#   VK 历史上是**两组**：轨道用 yaw/pitch（compute_frame_view_proj / current_camera_position /
 #   _sync_orbit_camera_state 全读它），camera_yaw/camera_pitch 是**玩家相机**角度
 #   → 同一份脚本在 VK 上「写了等于没写」（P5 门组 ② 六条红，Q-B7-45-1）。
 #
@@ -488,7 +488,7 @@ _ORBIT_ANGLE_ALIAS = {'camera_yaw': 'yaw', 'camera_pitch': 'pitch',
 class SceneDriver(VkWindowMixin, VkEditorRenderMixin, EngineCore):
     """播放器中间层: 场景 + 每帧步进 (脚本/物理/动画/轨道相机) + VP 计算.
 
-    帧循环 (后端调用):  vp, cam_pos = world.step(dt)  → 后端画 world.models/world.lights
+    帧循环 (后端调用):  world.advance_logic(dt); vp, cam_pos = world.compute_frame_view_proj(aspect)  → 后端画 world.models/world.lights
     """
 
     def __init__(self, data=None):
@@ -506,7 +506,7 @@ class SceneDriver(VkWindowMixin, VkEditorRenderMixin, EngineCore):
         # 2026-11-06 对齐 GL: engine 默认 camera_yaw/pitch = 0/0 (场景无 'camera' 键
         # 时两端必须同视角)。2026-11-07 细化 (scan_05 P-04): 有 camera 键但缺字段时
         # 以 0.6/-0.35 兜底 (= sceneio.scene_from_dict 的 camera_out 默认值),
-        # 具体取值在 load_from_data 的相机段按"有没有 camera 键"决定。
+        # 具体取值在 build_scene_from_data 的相机段按"有没有 camera 键"决定。
         self.yaw = 0.0
         self.pitch = 0.0
         self.fov = math.radians(60.0)
@@ -708,7 +708,7 @@ class SceneDriver(VkWindowMixin, VkEditorRenderMixin, EngineCore):
         if self._clock is not None:
             self._clock.on_logic_step.append(self._logic_frame)
             # 批5: 物理不挂 on_physics_step (已删) — 子步在 _logic_frame 内循环
-        self._interp = None                        # load_from_data 后建 (需 models)
+        self._interp = None                        # build_scene_from_data 后建 (需 models)
         # 2026-11-07 LOD 世界位置缓存: id(model) -> (model, 变换戳, (wx,wy,wz))
         # 只在物体/父链变换变化时重算世界矩阵 (见 _lod_world_pos).
         self._lod_wpos = {}
@@ -717,10 +717,18 @@ class SceneDriver(VkWindowMixin, VkEditorRenderMixin, EngineCore):
         self._lod_models = []
         self._lod_gen = MeshRendererComponent._lod_gen
         if data is not None:
-            self.load_from_data(data)
+            self.build_scene_from_data(data)
 
     # ---------------- 加载 ----------------
-    def load_from_data(self, data, base_dir=None, ctx=None):
+    def build_scene_from_data(self, data, base_dir=None, ctx=None):
+        """VK 侧场景装配器：吃**已解析的 scene dict**（不是文件路径）。
+
+        Q-B7-24-5（2026-11-22 人类裁决「旧形态名不再用」）：本方法原名
+        load_from_data。它与 GL 的 load_scene(path) **并非同义**（一个吃 dict、一个吃
+        路径），故按「非同义 → 后端内部」改名，不再作为用户 API 的另一种形态存在。
+        用户 API 是 EngineCore.load_scene(path)（两端**同一函数对象**），它读文件后
+        经 _load_scene_data 调本方法；GL 的对应物是 sceneio.scene_from_dict。
+        """
         # 2026-11-06 对齐 GL (双后端一致): 先建材质资产库, 再建物体并挂 material_id,
         # 否则 Vk 播放器里所有 PBR/共享材质都会静默退化成默认材质。
         # 2026-11-06 天空盒 (与 GL 对齐): 场景级 skybox -> Cubemap 实例
@@ -841,7 +849,7 @@ class SceneDriver(VkWindowMixin, VkEditorRenderMixin, EngineCore):
         # 2026-11-07 P-05 修复 (相机段坏值不崩 + 默认值不分叉): 场景是外部输入,
         # 相机段此前是裸 float()/tuple(), 而**同一函数内**已有 _f3/_f1 容错助手
         # (sceneio 的对应实现早就用上了) —— 于是一份坏场景 GL 能开、Vk 在
-        # load_from_data 或 render_pose 抛异常, 最后被 draw() 的 except 变成
+        # build_scene_from_data 或 compute_frame_view_proj 抛异常, 最后被 draw() 的 except 变成
         # os._exit(1)。这里与 sceneio.scene_from_dict 的 camera_out 分支逐条对齐:
         #   · 有 camera 键(且非空 dict) -> 缺字段回落 0.6/-0.35 (GL 同值);
         #   · 完全没有 camera 键 / 空 dict -> 保持引擎默认 0/0 (PlayerApp 同值);
@@ -906,23 +914,28 @@ class SceneDriver(VkWindowMixin, VkEditorRenderMixin, EngineCore):
                 self._clock.reset()
 
     def _load_scene_data(self, data, base_dir=None):
-        """VK 侧场景装配（★S4）：直接走本驱动已有的 load_from_data。
+        """VK 侧场景装配（★S4）：直接走本驱动已有的 build_scene_from_data。
 
         公共的 `load_scene(path)` 在 engine_core.EngineCore（读文件 → 判类型 →
         调本方法），所以"按路径换场景"在两端是**同一个函数对象**；差别只剩
         装配器本身（GL: sceneio.scene_from_dict / VK: 本文件 build_* + 相机段）。
         base_dir = 场景文件目录（相对资源：天空盒六面图/贴图按它解析）。
         """
-        self.load_from_data(data, base_dir)
+        self.build_scene_from_data(data, base_dir)
         return True
 
     @property
-    def camera_pos(self):
+    def current_camera_position(self):
         """相机世界位置.
+
+        Q-B7-24-5（2026-11-22 人类裁决「旧形态名不再用」）：本 property 原名 camera_pos，
+        与 GL 的 camera_world_position(cam) **并非同义** —— 本 property 无参，取「当前相机
+        世界位置」（轨道参数反推 / 脚本写入的 self.camera），GL 那个吃一个相机实体；
+        故改名后登记为后端内部。GL 的对应物是 self.camera 属性（两端都维护同一份值）。
         轨道模式: 由 target/yaw/pitch/distance 反推 (与 engine.apply_orbit_camera
         同公式, 即 loom_camera.apply_orbit_camera).
         玩家相机模式 (orbit_mode=False): 场景 active_camera 经 apply_camera 写入的
-        self.camera, 或脚本写入的 self.camera —— 朝向/倾斜由 render_pose 从
+        self.camera, 或脚本写入的 self.camera —— 朝向/倾斜由 compute_frame_view_proj 从
         camera_yaw/camera_pitch/camera_roll 读取 (与 GL loom_render 同源)."""
         if not getattr(self, 'orbit_mode', True):
             c = getattr(self, 'camera', None)
@@ -1173,7 +1186,7 @@ class SceneDriver(VkWindowMixin, VkEditorRenderMixin, EngineCore):
         # (右键转视角/滚轮推拉只存在于 EditorApp 播放态)。默认关闭, 需要时
         # 用 LOOM_VK_DEVMOUSE=1 打开 (vk_player 负责置位)。
         if getattr(self, 'dev_mouse_enabled', False):
-            self.apply_dev_camera_mouse()
+            self.apply_editor_camera_mouse()
         if self._split_enable and self._clock is not None:
             # 2026-11-18 (S4): 逻辑时钟体检样本 —— 与 GL _clock_advance 同一份记账
             # （floor=False: VK 喂给时钟的就是 render_dt，如实记，可能 <1）。
@@ -1246,7 +1259,7 @@ class SceneDriver(VkWindowMixin, VkEditorRenderMixin, EngineCore):
         mouse_wheel = 0, 再写入本帧值)。
 
         2026-11-07 scan_05 P-06 修复: mouse_wheel 的唯一清零点原先在
-        apply_dev_camera_mouse 里, 而该方法被 dev_mouse_enabled 门控 (默认
+        apply_editor_camera_mouse 里, 而该方法被 dev_mouse_enabled 门控 (默认
         False) —— 于是默认配置下滚轮从不清零, 每帧累加, 读到的永远不是
         "本帧滚轮"。现在无论 dev_mouse 开关都清零, 字段契约 (:301) 恢复成立。
         """
@@ -1306,7 +1319,7 @@ class SceneDriver(VkWindowMixin, VkEditorRenderMixin, EngineCore):
         cands = self._lod_models
         if not cands:                       # 早退: 无 LOD 物体 (默认路径)
             return
-        cam = self.camera_pos
+        cam = self.current_camera_position
         cx, cy, cz = cam
         tan_half = math.tan(self.fov * 0.5)
         n_live = 0
@@ -1350,14 +1363,20 @@ class SceneDriver(VkWindowMixin, VkEditorRenderMixin, EngineCore):
         if n_live != len(cands):            # 集合里有失效项 -> 一次性重建剪枝
             self._rebuild_lod_models()
 
-    def render_pose(self, aspect=None):
+    def compute_frame_view_proj(self, aspect=None):
         """渲染帧: 插值平面状态 + VP 计算 (渲染层每帧调).
+
+        Q-B7-24-5（2026-11-22 人类裁决「旧形态名不再用」）：本方法原名 render_pose，
+        与 GL 的 render(delta_time) **并非同义** —— GL 的 render 是**整帧**（绘制 + 上屏），
+        本方法只算本帧位姿/VP（并做 LOD 选模），是 VK 渲染帧内的一个子步骤
+        （VK 整帧 = render/vk/player.py 的 draw：advance_logic → 本方法 →
+        VkRenderer.draw_frame → 上屏）。故改名并登记为后端内部，VK 不提供 render。
         alpha 由 vk_player 从 self._clock.alpha 透传设进 self._interp.
         2026-11-06 对齐 GL (loom_render.render): 轨道相机用 target/yaw/pitch 合成
         (roll 恒 0); 玩家相机 (active_camera / 脚本接管) 用 camera_yaw/pitch/roll
         + 相机自身 fov —— 同一场景两后端看同一台相机。"""
         self._update_lod()          # 2026-11-06: 与 GL 同语义的 LOD 选模
-        cam_pos = self.camera_pos
+        cam_pos = self.current_camera_position
         if getattr(self, 'orbit_mode', True):
             yaw, pitch, roll = self.yaw, self.pitch, 0.0
         else:
@@ -1374,17 +1393,9 @@ class SceneDriver(VkWindowMixin, VkEditorRenderMixin, EngineCore):
             P = mat4_perspective(np, self.fov, aspect or 1.6, self.near, self.far)
         return V @ P, cam_pos
 
-    def step(self, dt, aspect=None):
-        """兼容入口 (旧探针/测试直调): advance_logic(dt) + 返回 VP.
-        语义变化说明: 分离开时 dt 只进 accumulator (不再每调用必步进)."""
-        self.advance_logic(dt)
-        if self._split_enable and self._interp is not None:
-            self._interp.alpha = self._clock.alpha
-        return self.render_pose(aspect)
-
     # ---------------- B1: 物理桥 ----------------
     def _ensure_phys_bridge(self):
-        """惰性建桥 (首次 step 直调; culverin 缺失/建体失败 -> None, 此后不重试)."""
+        """惰性建桥 (首次 advance_logic 直调; culverin 缺失/建体失败 -> None, 此后不重试)."""
         if self._bridge_disabled:
             return None
         if physb is None or not physb.cv_available:
@@ -1845,8 +1856,13 @@ class SceneDriver(VkWindowMixin, VkEditorRenderMixin, EngineCore):
         if self.mouse_locked:
             self.mouse_rel = (int(px), int(py))
 
-    def apply_dev_camera_mouse(self):
+    def apply_editor_camera_mouse(self):
         """开发者 (轨道) 相机鼠标: 滚轮推拉 + 右键拖动转视角.
+
+        Q-B7-24-5（2026-11-22 人类裁决「旧形态名不再用」）：本方法原名
+        apply_dev_camera_mouse，与 GL 的 apply_orbit_camera() **并非同义** —— 本方法吃
+        **鼠标增量**改轨道参数（输入 → 状态），apply_orbit_camera 是由轨道参数合成
+        相机位姿（状态 → 位姿）；GL 的对应物是 editor._update_camera。故改名后登记为后端内部。
         公式与 GL editor._update_camera 逐位一致 (0.01 弧度/像素, pitch 钳 ±1.55,
         distance *= exp(-wheel*0.1) 再钳 0.5..1000). 只在轨道模式生效 ——
         玩家相机 (active_camera) 接管时与 GL 一样不由鼠标直接改相机; 滚轮读后清零."""
@@ -1873,7 +1889,7 @@ class SceneDriver(VkWindowMixin, VkEditorRenderMixin, EngineCore):
     # 唯一实现 (GL/VK 同一函数对象; transform.world_rotation_matrix 单点认相机)。
     # apply_camera 保留: 它是**真后端差异** (VK 视角广度字段 self.fov vs GL self._fov)。
     def _backend_scene_skybox(self):
-        """钩子（VK）：**场景级**天空盒字段 = self.skybox（播放器形状 load_from_data 写）。
+        """钩子（VK）：**场景级**天空盒字段 = self.skybox（播放器形状 build_scene_from_data 写）。
 
         ★审核 1/3 P1-2（2026-11-21）：修前这里有一份**与 GL 分叉的** effective_skybox
         （GL 只回落 _skybox，VK 回落 skybox→_skybox）—— 一个字段优先级规则两份代码。
@@ -1926,7 +1942,7 @@ class SceneDriver(VkWindowMixin, VkEditorRenderMixin, EngineCore):
                 camera_target/camera_yaw/camera_pitch/camera_distance 合成进 self.camera
                 （加载时 runtime.PlayerApp 也调一次）;
           · VK: 本方法由 advance_logic（渲染帧开始、任何消费相机的地方之前）与
-                load_from_data（轨道分支，与 GL 加载路径同位置）调用。
+                build_scene_from_data（轨道分支，与 GL 加载路径同位置）调用。
 
         为什么还要写 camera_yaw/camera_pitch：共享的 loom_frame_components.
         sync_audio_listener 读的是 camera_yaw/camera_pitch（GL 的轨道角度就在那里），

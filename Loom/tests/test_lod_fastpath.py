@@ -13,7 +13,7 @@ MeshRendererComponent._lod_gen 变化惰性重建; 集合为空时 _update_lod �
 
 本文件断言:
   A: 500 物体无 LOD: 候选集合为空, _update_lod 平均耗时 < 0.02ms (验收项)。
-  B: 无 LOD 时 5 帧 render_pose 不触发任何世界矩阵计算 (零扫描)。
+  B: 无 LOD 时 5 帧 compute_frame_view_proj 不触发任何世界矩阵计算 (零扫描)。
   C: 加载时有 LOD 的模型进入集合; 500 物体里只有 1 个时只算 1 次世界矩阵。
   D: 运行期挂 LOD (直接写 renderer.lod_levels) 被自动感知并生效。
   E: 运行期摘 LOD (置 None) 后集合剪枝, 快路径恢复。
@@ -107,7 +107,7 @@ def _best_ms(fn, n=1000, rounds=3):
 
 def _big_driver(n=500):
     d = SD.SceneDriver()
-    d.load_from_data(_scene([_cube_obj(i) for i in range(n)]))
+    d.build_scene_from_data(_scene([_cube_obj(i) for i in range(n)]))
     return d
 
 
@@ -132,7 +132,7 @@ def t_no_lod_zero_matrix():
     d = _big_driver(500)
     with _MatCounter() as c:
         for _ in range(5):
-            d.render_pose(aspect=1.5)
+            d.compute_frame_view_proj(aspect=1.5)
     check("[B] 500 物体无 LOD: 5 帧 0 次世界矩阵", c.n == 0, c.n)
 
 
@@ -144,15 +144,15 @@ def t_load_registers_only_configured():
     objs = [_cube_obj(i) for i in range(500)]
     objs[123]["lod_levels"] = [[5.0, HI], [30.0, LO]]
     d = SD.SceneDriver()
-    d.load_from_data(_scene(objs))
+    d.build_scene_from_data(_scene(objs))
     check("[C] 候选集合只有 1 个", len(d._lod_models) == 1, len(d._lod_models))
     check("[C] 登记的是配置 LOD 的物体", d._lod_models[0] is d.models[123],
           d._lod_models[0].name)
     with _MatCounter() as c:
-        d.render_pose(aspect=1.5)
+        d.compute_frame_view_proj(aspect=1.5)
         first = c.n
         for _ in range(5):
-            d.render_pose(aspect=1.5)
+            d.compute_frame_view_proj(aspect=1.5)
         cached = c.n
     check("[C] 500 物体里只算 1 次世界矩阵", first == 1, first)
     check("[C] 静止 5 帧复用缓存", cached == first, cached)
@@ -208,14 +208,14 @@ def t_remove_model_prunes():
 def t_selection_semantics():
     print("=== G: 注册表路径下选模语义 ===")
     d = SD.SceneDriver()
-    d.load_from_data(_scene([_cube_obj(0, position=[0, 0, 0],
+    d.build_scene_from_data(_scene([_cube_obj(0, position=[0, 0, 0],
                                        lod_levels=[[5.0, HI], [30.0, LO]])]))
     m = d.models[0]
     hi, lo = m.renderer.lod_levels[0][1], m.renderer.lod_levels[1][1]
     picks = []
     for dist in (3.0, 20.0):
         d.distance = dist
-        d.render_pose(aspect=1.5)
+        d.compute_frame_view_proj(aspect=1.5)
         picks.append("hi" if m.mesh is hi else ("lo" if m.mesh is lo else "?"))
     check("[G] 距离 3 -> 高模, 距离 20 -> 低模", picks == ["hi", "lo"], picks)
 

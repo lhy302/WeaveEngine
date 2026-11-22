@@ -7,7 +7,7 @@
 物体 guid -> 保存再加载时相机父链回落根。修前该状态无法达成（会崩），故非回归；
 现在可达 -> 必须能存能读。
 
-本门（全部无头，GL = sceneio.scene_from_dict / VK = SceneDriver.load_from_data）:
+本门（全部无头，GL = sceneio.scene_from_dict / VK = SceneDriver.build_scene_from_data）:
   ① 相机挂相机 -> 保存 -> 加载 -> 父链保持（GL/VK 各一遍，两端父 guid 映射逐值相等）
   ② 三级链 A→B→C 往返保持（父链 guid 序列 + 世界位置逐值相等）
   ③ 防环：A→B 后 B→A 拒绝且状态不变；文件直接写环也拒绝（可见报错，不递归爆栈）
@@ -145,7 +145,7 @@ def _cam_dict(cid, parent=None, pos=(0, 0, 0), yaw=0.0):
 def _vk_driver(data):
     d = SD.SceneDriver()
     d._bridge_disabled = True
-    d.load_from_data(copy.deepcopy(data))
+    d.build_scene_from_data(copy.deepcopy(data))
     return d
 
 
@@ -334,7 +334,7 @@ check("④ GL 孤儿父可见告警（含不存在/脱根字样）",
 
 drv_o = SD.SceneDriver()
 drv_o._bridge_disabled = True
-_ro2, _outo2, _erro2 = _cap(lambda: drv_o.load_from_data(copy.deepcopy(_dorph)))
+_ro2, _outo2, _erro2 = _cap(lambda: drv_o.build_scene_from_data(copy.deepcopy(_dorph)))
 _ovk = {c.guid: c for c in drv_o.cameras}["orphan-child"]
 check("④ VK 孤儿父脱根（parent is None）且不崩溃",
       _erro2 is None and _ovk.parent is None,

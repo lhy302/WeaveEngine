@@ -142,14 +142,14 @@ def vk_driver(data):
     # 本文件测的是"允许锁鼠标"的游戏(第一人称 + Tab 解锁), 显式打开。
     d.mouse_lock_allowed = True
     d._bridge_disabled = True                     # 只比相机, 不建物理桥 (快 + 无日志)
-    d.load_from_data(copy.deepcopy(data))
+    d.build_scene_from_data(copy.deepcopy(data))
     return d
 
 
 def vp_diff(data, driver=None):
     vp_g, pos_g = gl_vp(gl_engine(data))
     d = driver or vk_driver(data)
-    vp_v, pos_v = d.render_pose(aspect=ASPECT)
+    vp_v, pos_v = d.compute_frame_view_proj(aspect=ASPECT)
     dvp = float(np.max(np.abs(np.asarray(vp_g) - np.asarray(vp_v))))
     dpos = float(max(abs(a - b) for a, b in zip(pos_g, pos_v)))
     return dvp, dpos, pos_g, pos_v
@@ -289,7 +289,7 @@ def t_active_parent():
         dv_obj.rotation = E.Point3D(dv_obj.rotation.x, dv_obj.rotation.y + drot,
                                     dv_obj.rotation.z)
         d.advance_logic(1.0 / 60.0)        # 帧首: 鼠标结算 + 挂父相机重应用
-        vp_v, pos_v = d.render_pose(aspect=ASPECT)
+        vp_v, pos_v = d.compute_frame_view_proj(aspect=ASPECT)
         dvp = float(np.max(np.abs(np.asarray(vp_g) - np.asarray(vp_v))))
         dpos = float(max(abs(a - b) for a, b in zip(pos_g, pos_v)))
         check("4 父%s -> 相机跟随且 VP 与 GL 一致 |ΔVP|=%.2e" % (tag, dvp),
@@ -397,21 +397,21 @@ def t_mouse_wheel():
     d = vk_driver(scene(camera={"target": [0, 0, 0], "distance": 10.0,
                                 "yaw": 0.0, "pitch": 0.0}))
     d.mouse_wheel = 1
-    d.apply_dev_camera_mouse()
+    d.apply_editor_camera_mouse()
     check("8 滚轮上推 -> 拉近 (d*exp(-0.1))",
           abs(d.distance - 10.0 * math.exp(-0.1)) < 1e-12, d.distance)
     check("8 滚轮读后清零", d.mouse_wheel == 0)
 
     d.mouse_wheel = -3
-    d.apply_dev_camera_mouse()
+    d.apply_editor_camera_mouse()
     want = 10.0 * math.exp(-0.1) * math.exp(0.3)
     check("8 滚轮下滑 -> 拉远 (同公式连乘)", abs(d.distance - want) < 1e-12, d.distance)
 
     d.mouse_wheel = -100                          # 巨量 -> 钳到上限 1000
-    d.apply_dev_camera_mouse()
+    d.apply_editor_camera_mouse()
     check("8 拉远钳到 1000", abs(d.distance - CAM_DIST_MAX) < 1e-12, d.distance)
     d.mouse_wheel = 100                           # 巨量 -> 钳到下限 0.5
-    d.apply_dev_camera_mouse()
+    d.apply_editor_camera_mouse()
     check("8 拉近钳到 0.5", abs(d.distance - CAM_DIST_MIN) < 1e-12, d.distance)
 
     # 公式与 GL 源码一致 (文本契约: 同一常数, 别两边各写一份)
@@ -423,7 +423,7 @@ def t_mouse_wheel():
     d2 = vk_driver(scene(cameras=[cam_dict()], active="c1"))
     before = (d2.camera.x, d2.camera.y, d2.camera.z, d2.fov)
     d2.mouse_wheel = 5
-    d2.apply_dev_camera_mouse()
+    d2.apply_editor_camera_mouse()
     check("8 玩家相机接管时滚轮不动相机",
           (d2.camera.x, d2.camera.y, d2.camera.z, d2.fov) == before)
     check("8 玩家相机接管时滚轮也清零", d2.mouse_wheel == 0)
@@ -437,24 +437,24 @@ def t_mouse_look():
     d.set_mouse_locked(True)                      # 播放期锁定 (增量才累积)
     d.feed_mouse_rel(100, -50)                    # 无按键 -> 不转视角
     d.consume_mouse_input()
-    d.apply_dev_camera_mouse()
+    d.apply_editor_camera_mouse()
     check("9 无右键不转视角", abs(d.yaw) < 1e-12 and abs(d.pitch) < 1e-12,
           (d.yaw, d.pitch))
 
     d.mouse_buttons = (False, False, True)        # 右键按住
     d.feed_mouse_rel(100, -50)
     d.consume_mouse_input()
-    d.apply_dev_camera_mouse()
+    d.apply_editor_camera_mouse()
     check("9 右键拖动 yaw += dx*0.01", abs(d.yaw - 1.0) < 1e-12, d.yaw)
     check("9 右键拖动 pitch -= dy*0.01 (上拖抬头)", abs(d.pitch - 0.5) < 1e-12, d.pitch)
 
     d.mouse_buttons = (False, False, True)
     d._pending_mouse_rel = (0.0, 0.0)
     d.mouse_rel = (0, -100000)                    # 巨量上拖 -> 钳到 +1.55
-    d.apply_dev_camera_mouse()
+    d.apply_editor_camera_mouse()
     check("9 pitch 上限钳 1.55", abs(d.pitch - 1.55) < 1e-12, d.pitch)
     d.mouse_rel = (0, 100000)
-    d.apply_dev_camera_mouse()
+    d.apply_editor_camera_mouse()
     check("9 pitch 下限钳 -1.55", abs(d.pitch + 1.55) < 1e-12, d.pitch)
 
 

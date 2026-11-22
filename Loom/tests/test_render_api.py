@@ -552,11 +552,11 @@ def t_backend_parity():
     data = {"objects": [], "lights": [],
             "camera": {"target": [0, 0, 0], "distance": 5000.0,
                        "yaw": 0.6, "pitch": -0.35}}
-    d.load_from_data(data)
+    d.build_scene_from_data(data)
     check("加载 distance=5000 -> 钳制到 1000", abs(d.distance - CAM_DIST_MAX) < 1e-9,
           d.distance)
     data["camera"]["distance"] = 0.01
-    d.load_from_data(data)
+    d.build_scene_from_data(data)
     check("加载 distance=0.01 -> 钳制到 0.5", abs(d.distance - CAM_DIST_MIN) < 1e-9,
           d.distance)
 

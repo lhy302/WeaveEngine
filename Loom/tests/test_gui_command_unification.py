@@ -765,7 +765,7 @@ def _vk_driver(data):
     import render.vk.driver as _SD
     d = _SD.SceneDriver()
     d._bridge_disabled = True          # 只比相机父链, 不建物理桥
-    d.load_from_data(copy.deepcopy(data))
+    d.build_scene_from_data(copy.deepcopy(data))
     return d
 
 

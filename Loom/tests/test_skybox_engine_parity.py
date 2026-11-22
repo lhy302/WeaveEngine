@@ -50,7 +50,7 @@ def _gl_engine(data):
 def _vk_driver(data, base_dir=None):
     import render.vk.driver as scene_driver
     d = scene_driver.SceneDriver()
-    d.load_from_data(data, base_dir=base_dir)
+    d.build_scene_from_data(data, base_dir=base_dir)
     return d
 
 

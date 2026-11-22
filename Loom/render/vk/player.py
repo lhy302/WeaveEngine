@@ -349,7 +349,7 @@ def run_vk(scene=None, frames_n=None, keep=False, mini=False, no_shadow=False,
     _base_dir = os.path.dirname(os.path.abspath(scene)) if scene else None
     if assets_base:
         _base_dir = assets_base          # beta6 B1: 游戏包/项目模式显式给项目根
-    driver.load_from_data(data, base_dir=_base_dir)
+    driver.build_scene_from_data(data, base_dir=_base_dir)
     # 2026-11-06 R3: UI 输入桥 —— 2026-11-18（Q-B7-33-1=B）后它只剩**鼠标/滚轮/光标**
     # 一件事：键盘与 IME 文本已全部改走内核（driver.handle_key_event / handle_text_input），
     # 宿主不再预喂 UI（详见 host_key_forward 的说明）。
@@ -678,7 +678,7 @@ def run_vk(scene=None, frames_n=None, keep=False, mini=False, no_shadow=False,
             poll_unlock_frame(driver)
             if getattr(driver, '_interp', None) is not None:
                 driver._interp.alpha = driver._clock.alpha
-            vp, cam_pos = driver.render_pose(aspect=w / h)
+            vp, cam_pos = driver.compute_frame_view_proj(aspect=w / h)
             # 2026-11-06 R1: world Canvas billboard 的 right/up 必须与 GL
             # (mat4_view_yaw_pitch 的 V[0]/V[1] 行) 逐位同源; 这里显式传,
             # 避免渲染层从 VP 反解 yaw/pitch 时丢失 roll 信息.

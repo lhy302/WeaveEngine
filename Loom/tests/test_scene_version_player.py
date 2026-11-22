@@ -117,10 +117,10 @@ def t_real_gate(tmp):
     err = None
     try:
         import render.vk.driver as scene_driver
-        scene_driver.SceneDriver().load_from_data(_newer_scene())
+        scene_driver.SceneDriver().build_scene_from_data(_newer_scene())
     except BaseException as e:
         err = e
-    check('A1 SceneDriver.load_from_data 抛 SceneVersionError',
+    check('A1 SceneDriver.build_scene_from_data 抛 SceneVersionError',
           isinstance(err, sceneio.SceneVersionError), type(err).__name__)
     check('A2 原因含要求版本与当前版本',
           '99.0.0' in str(err) and sceneio.ENGINE_VERSION in str(err), str(err)[:80])

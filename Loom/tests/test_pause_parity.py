@@ -45,9 +45,9 @@
        渲染帧 = loom_render.render(delta_time)（暂停分支 :1153-1193、F10 消费 :1174-1183）。
        画面 = 该帧生产渲染目标 _external_fb 的逐像素回读（test_ab_gl_vk 同口径，
        FBO 回读自下而上 → np.flipud）。
-  VK : scene_driver.SceneDriver() + load_from_data(场景)
-       渲染帧 = advance_logic(render_dt) + render_pose(aspect) + VkRenderer.draw_frame(...)
-       —— 与 vk_player.draw:643-725 的生产调用次序逐项一致（帧首结算 → 时钟 → render_pose
+  VK : scene_driver.SceneDriver() + build_scene_from_data(场景)
+       渲染帧 = advance_logic(render_dt) + compute_frame_view_proj(aspect) + VkRenderer.draw_frame(...)
+       —— 与 vk_player.draw:643-725 的生产调用次序逐项一致（帧首结算 → 时钟 → compute_frame_view_proj
        → draw_frame）。
        画面 = draw_frame 写进的离屏纹理逐像素回读（test_ab_gl_vk 同口径）。
   键事件: 两端同一串 pygame 键常量喂 handle_key_event（内核 S1 唯一入口，两端同一份）——
@@ -556,7 +556,7 @@ class Pair:
         self.gl._clock.set_fps(logic_fps=LOGIC_FPS)
         self.vk = SD.SceneDriver()
         self.vk.is_playing = True
-        self.vk.load_from_data(scene_data())
+        self.vk.build_scene_from_data(scene_data())
         self.vk._clock.set_fps(logic_fps=LOGIC_FPS)
         _vk_renderer()
         # 同一串脚本级调用：起播动画（场景字典不落盘 playing 是设计如此）
@@ -578,7 +578,7 @@ class Pair:
         d.advance_logic(FRAME_DT)                        # render/vk/player.py:674
         if getattr(d, '_interp', None) is not None:
             d._interp.alpha = d._clock.alpha             # render/vk/player.py:679-680
-        vp, cam_pos = d.render_pose(aspect=W / H)        # render/vk/player.py:681
+        vp, cam_pos = d.compute_frame_view_proj(aspect=W / H)        # render/vk/player.py:681
         _yaw, _pitch, _roll = ((d.yaw, d.pitch, 0.0) if getattr(d, 'orbit_mode', True)
                                else (d.camera_yaw, d.camera_pitch, d.camera_roll))
         import mathlib.matlib as matlib

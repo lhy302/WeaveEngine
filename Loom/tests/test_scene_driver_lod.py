@@ -99,7 +99,7 @@ LO = {"type": "sphere", "params": {"radius": 0.5, "stacks": 4, "slices": 6}}
 def t_lod_from_scene_data():
     print("=== LOD 进场景序列化 (scan_05 P-02, 裁决 A) ===")
     d = SD.SceneDriver()
-    d.load_from_data(_scene([_sphere_obj(
+    d.build_scene_from_data(_scene([_sphere_obj(
         lod_levels=[[30.0, LO], [5.0, HI]],          # 故意乱序: 解析后按升序
         lod_screen_levels=[[0.1, HI], [0.0, LO]],
         lod_bias=2.0)]))
@@ -136,9 +136,9 @@ def t_lod_bad_data_tolerated():
         r = None
         try:
             d = SD.SceneDriver()
-            d.load_from_data(_scene([_sphere_obj(**extra)]))
+            d.build_scene_from_data(_scene([_sphere_obj(**extra)]))
             r = d.models[0].renderer
-            d.render_pose(aspect=1.5)
+            d.compute_frame_view_proj(aspect=1.5)
         except BaseException as e:              # noqa: BLE001
             err = "%s: %s" % (type(e).__name__, e)
         check("坏 LOD 段不崩: %s" % name, err is None, err)
@@ -151,13 +151,13 @@ def t_lod_bad_data_tolerated():
 def t_distance_selection():
     print("=== 距离模式选模 ===")
     d = SD.SceneDriver()
-    d.load_from_data(_scene([_sphere_obj(lod_levels=[[5.0, HI], [30.0, LO]])]))
+    d.build_scene_from_data(_scene([_sphere_obj(lod_levels=[[5.0, HI], [30.0, LO]])]))
     m = d.models[0]
     hi, lo = m.renderer.lod_levels[0][1], m.renderer.lod_levels[1][1]
     picks = []
     for dist in (3.0, 20.0):
         d.distance = dist
-        d.render_pose(aspect=1.5)
+        d.compute_frame_view_proj(aspect=1.5)
         picks.append("hi" if m.mesh is hi else ("lo" if m.mesh is lo else "?"))
     check("距离 3 -> 高模, 距离 20 -> 低模", picks == ["hi", "lo"], picks)
 
@@ -165,13 +165,13 @@ def t_distance_selection():
 def t_screen_selection():
     print("=== 屏幕占比模式选模 ===")
     d = SD.SceneDriver()
-    d.load_from_data(_scene([_sphere_obj(lod_screen_levels=[[0.1, HI], [0.0, LO]])]))
+    d.build_scene_from_data(_scene([_sphere_obj(lod_screen_levels=[[0.1, HI], [0.0, LO]])]))
     m = d.models[0]
     hi, lo = m.renderer.lod_screen_levels[0][1], m.renderer.lod_screen_levels[1][1]
     picks = []
     for dist in (2.0, 10.0):
         d.distance = dist
-        d.render_pose(aspect=1.5)
+        d.compute_frame_view_proj(aspect=1.5)
         picks.append("hi" if m.mesh is hi else ("lo" if m.mesh is lo else "?"))
     check("近处 (占比大) -> 高模, 远处 -> 低模", picks == ["hi", "lo"], picks)
 
@@ -206,26 +206,26 @@ def t_no_lod_zero_cost():
              "rotation": [0, 0, 0], "scale": [1, 1, 1], "color": "#808080",
              "visible": True, "scripts": []} for i in range(20)]
     d = SD.SceneDriver()
-    d.load_from_data(_scene(objs))
+    d.build_scene_from_data(_scene(objs))
     with _MatCounter() as c:
         for _ in range(3):
-            d.render_pose(aspect=1.5)
+            d.compute_frame_view_proj(aspect=1.5)
     check("20 物体无 LOD: 3 帧内 0 次世界矩阵计算", c.n == 0, c.n)
 
 
 def t_lod_matrix_cache():
     print("=== 有 LOD 物体: 变换未变 -> 复用缓存 ===")
     d = SD.SceneDriver()
-    d.load_from_data(_scene([_sphere_obj(lod_levels=[[5.0, HI], [30.0, LO]])]))
+    d.build_scene_from_data(_scene([_sphere_obj(lod_levels=[[5.0, HI], [30.0, LO]])]))
     m = d.models[0]
     with _MatCounter() as c:
-        d.render_pose(aspect=1.5)
+        d.compute_frame_view_proj(aspect=1.5)
         first = c.n
         for _ in range(5):
-            d.render_pose(aspect=1.5)
+            d.compute_frame_view_proj(aspect=1.5)
         cached = c.n
         m.position = Point3D(1.0, 0.0, 0.0)      # 物体动 -> 缓存失效
-        d.render_pose(aspect=1.5)
+        d.compute_frame_view_proj(aspect=1.5)
         moved = c.n
     check("首帧算 1 次世界矩阵", first == 1, first)
     check("后续 5 帧静止: 不再重算", cached == first, cached)
@@ -237,7 +237,7 @@ def t_wheel_reset_each_frame():
     print("=== 滚轮帧末清零 (P-06) ===")
     for dev in (False, True):
         d = SD.SceneDriver()
-        d.load_from_data(_scene([_sphere_obj()], dist=10.0))
+        d.build_scene_from_data(_scene([_sphere_obj()], dist=10.0))
         d.dev_mouse_enabled = dev
         seen = []
         for _ in range(3):
@@ -246,7 +246,7 @@ def t_wheel_reset_each_frame():
             seen.append(d.mouse_wheel)
         check("dev_mouse=%s: 每帧读数后归零" % dev, seen == [0, 0, 0], seen)
     d = SD.SceneDriver()
-    d.load_from_data(_scene([_sphere_obj()], dist=10.0))
+    d.build_scene_from_data(_scene([_sphere_obj()], dist=10.0))
     d.dev_mouse_enabled = True
     before = d.distance
     d.mouse_wheel = 3

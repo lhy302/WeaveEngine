@@ -98,7 +98,9 @@ USER_API_PENDING = {
 
 # ============ 后端 / 宿主内部（允许只在一端，但必须写明理由） ============
 BACKEND_ONLY_GL = {
-    'render': 'GL 帧循环入口；VK 由 render_pose/step 承担（宿主驱动一帧，非用户 API）',
+    'render': 'GL 整帧入口（推进时钟 + 绘制 + 上屏）；VK 的整帧由 render/vk/player.py 的 draw 三段组成'
+              '（advance_logic → 位姿/VP → VkRenderer.draw_frame），故 VK 侧不提供同名 render'
+              '（Q-B7-24-5 T1：非同义 → 后端内部）',
     'run': 'GL 主运行循环；嵌入式宿主不进入（VK 播放器有自己的循环）',
     'draw_screen_lines': 'GL 立即模式屏幕绘制原语',
     'draw_screen_polygon': 'GL 立即模式屏幕绘制原语',
@@ -115,13 +117,18 @@ BACKEND_ONLY_GL = {
     # （loom_pass_vk.VkEditorRenderMixin，同签名）→ 升为两端共有，从本白名单删除。
 }
 BACKEND_ONLY_VK = {
-    'render_pose': 'VK 帧循环入口（= GL 的 render；宿主驱动一帧，非用户 API）',
-    'step': 'VK 兼容入口：advance_logic(dt) + 返回 VP（宿主/探针用）',
-    'load_from_data': 'VK 从已解析 dict 装配（= load_scene 的后端层；load_scene 已补为用户 API）',
+    # Q-B7-24-5（2026-11-22 人类裁决「旧形态名不再用」）后仍留在 VK 的四条：都是**非同义**才
+    # 留下的后端内部入口（逐对理由见 docs/design/契约_IEngineAPI_20261117.md §4.3 T1 表）。
+    'compute_frame_view_proj': 'VK 渲染帧的位姿/VP 计算（LOD 选模 + V@P，返回 (vp, cam_pos)）；'
+                              'GL 的 render 是**整帧**（绘制+上屏），非同义 → 后端内部',
+    'build_scene_from_data': 'VK 从**已解析 dict** 装配场景（GL 对应物是 sceneio.scene_from_dict）；'
+                            '用户 API 是 load_scene(path)（两端同一函数对象）',
     'feed_mouse_rel': '宿主喂光标增量（GL 由 GLFW 回调内部做）',
     'consume_mouse_input': '宿主帧首结算鼠标增量（GL 内部做）',
-    'apply_dev_camera_mouse': '开发者轨道相机鼠标（GL 用 apply_orbit_camera）',
-    'camera_pos': 'VK 轨道相机世界位置（GL 用 camera_world_position + CameraState）',
+    'apply_editor_camera_mouse': '编辑器(轨道)相机**鼠标输入**（滚轮推拉/右键转视角）；'
+                                'GL 对应物是 editor._update_camera，非 apply_orbit_camera（后者是位姿合成）',
+    'current_camera_position': '无参取当前相机世界位置（轨道反推 / 脚本 camera）；'
+                               'GL 对应物是 self.camera 属性，非 camera_world_position(cam)（吃相机实体）',
     'camera_target': 'VK 轨道相机目标点（GL 侧是属性而非方法）',
     'camera_distance': 'VK 轨道相机距离（同上）',
     'script_keys': 'GL 是普通实例属性、VK 是 property（同语义，形态不同；is_key 才是 API）',

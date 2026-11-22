@@ -163,7 +163,7 @@ def t_vk_driver_pause_no_debt():
     print("=== C. VK driver 暂停重锚 (恢复首帧不补欠账) ===")
     import render.vk.driver as scene_driver
     d = scene_driver.SceneDriver()
-    d.load_from_data({'version': 10,
+    d.build_scene_from_data({'version': 10,
                       'camera': {'target': [0, 1, 0], 'distance': 8.0,
                                  'yaw': 0.5, 'pitch': -0.3},
                       'objects': [], 'lights': [], 'materials': [],

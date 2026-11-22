@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """test_camera_robust_vk.py — 相机段坏值不崩 + 默认值与 GL/PlayerApp 不分叉.
 
-scan_05 P-05 ([P1]): scene_driver.load_from_data 的相机段是裸 float()/tuple(),
+scan_05 P-05 ([P1]): scene_driver.build_scene_from_data 的相机段是裸 float()/tuple(),
 同一函数内已有的 _f3/_f1 容错助手没用上 -> yaw='abc' / pitch=None /
-target='abc' / target=[1,2] 四种坏场景在 VK 侧抛异常 (load 或 render_pose),
+target='abc' / target=[1,2] 四种坏场景在 VK 侧抛异常 (load 或 compute_frame_view_proj),
 最后被 draw() 的 except 变成进程退出; 同一份文件 GL 全部正常加载。
 
 scan_05 P-04 ([P2]): 默认值分叉 —— 有 camera 键但缺字段时 GL (sceneio) 兜底
@@ -113,15 +113,15 @@ BAD_CASES = [
 
 
 def t_bad_cases_do_not_crash():
-    """5 类坏字段 (加 3 个变体) 都必须加载成功 + render_pose 成功."""
+    """5 类坏字段 (加 3 个变体) 都必须加载成功 + compute_frame_view_proj 成功."""
     print("=== 相机坏值 (scan_05 P-05) ===")
     for name, cam in BAD_CASES:
         drv = None
         err = None
         try:
             drv = SD.SceneDriver()
-            drv.load_from_data(_scene(cam))
-            drv.render_pose(aspect=1.6)
+            drv.build_scene_from_data(_scene(cam))
+            drv.compute_frame_view_proj(aspect=1.6)
         except BaseException as e:            # noqa: BLE001 - 崩了就是缺陷
             err = "%s: %s" % (type(e).__name__, e)
         check("坏相机段不崩: %s" % name, err is None, err)
@@ -146,35 +146,35 @@ def t_defaults_match_backend():
     print("=== 相机默认值 (scan_05 P-04) ===")
     key_only_target = {"target": [1, 2, 3]}
     d = SD.SceneDriver()
-    d.load_from_data(_scene(key_only_target))
+    d.build_scene_from_data(_scene(key_only_target))
     ref = gl_reference(key_only_target)
     check("有 camera 键但缺 yaw/pitch -> 0.6/-0.35 (GL 同)",
           (round(d.yaw, 6), round(d.pitch, 6)) == (0.6, -0.35)
           and (d.yaw, d.pitch) == (ref["yaw"], ref["pitch"]), (d.yaw, d.pitch))
 
     d2 = SD.SceneDriver()
-    d2.load_from_data(_scene(_MISSING))
+    d2.build_scene_from_data(_scene(_MISSING))
     check("完全没有 camera 键 -> 0/0 (PlayerApp 同)",
           (d2.yaw, d2.pitch) == (0.0, 0.0), (d2.yaw, d2.pitch))
 
     d3 = SD.SceneDriver()
-    d3.load_from_data(_scene({}))
+    d3.build_scene_from_data(_scene({}))
     check("空 camera 对象 -> 也算没有 (sceneio 同口径): 0/0",
           (d3.yaw, d3.pitch) == (0.0, 0.0), (d3.yaw, d3.pitch))
 
     d4 = SD.SceneDriver()
-    d4.load_from_data(_scene(dict(BASE_CAM)))
+    d4.build_scene_from_data(_scene(dict(BASE_CAM)))
     check("四字段齐全 -> 原样采用",
           (d4.yaw, d4.pitch, d4.distance) == (0.6, -0.35, 10.0),
           (d4.yaw, d4.pitch, d4.distance))
 
 
-def t_render_pose_stable_after_bad_target():
+def t_compute_frame_view_proj_stable_after_bad_target():
     """坏 target 之后 VP 必须仍有意义 (不是 nan/异常)."""
     import numpy as np
     d = SD.SceneDriver()
-    d.load_from_data(_scene({"target": "abc", "distance": "x", "yaw": None}))
-    vp, cam = d.render_pose(aspect=1.5)
+    d.build_scene_from_data(_scene({"target": "abc", "distance": "x", "yaw": None}))
+    vp, cam = d.compute_frame_view_proj(aspect=1.5)
     arr = np.asarray(vp)
     check("坏值后 VP 有限", bool(np.isfinite(arr).all()), arr.shape)
     check("坏值后相机位置有限", all(abs(v) < 1e6 for v in cam), cam)
@@ -183,7 +183,7 @@ def t_render_pose_stable_after_bad_target():
 def main():
     t_bad_cases_do_not_crash()
     t_defaults_match_backend()
-    t_render_pose_stable_after_bad_target()
+    t_compute_frame_view_proj_stable_after_bad_target()
     print("=" * 60)
     if _fails:
         print("失败:", _fails)

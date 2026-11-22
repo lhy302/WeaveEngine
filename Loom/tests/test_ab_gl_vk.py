@@ -259,9 +259,9 @@ def render_vk(data, with_ui=False):
 
     drv = sd.SceneDriver()
     # 密闭夹具：相对路径（assets/env/*.png）按**场景目录**解析，与 GL 路径一致
-    drv.load_from_data(data, base_dir=SCENES_DIR)
+    drv.build_scene_from_data(data, base_dir=SCENES_DIR)
     r = vr.VkRenderer(device, fmt)
-    vp, cam_pos = drv.render_pose(aspect=W / H)
+    vp, cam_pos = drv.compute_frame_view_proj(aspect=W / H)
     kw = {}
     _ui = getattr(drv, 'ui', None)
     # world Canvas 属于主帧（GL 在 ed.render 里画）；只把 world canvases
@@ -276,7 +276,7 @@ def render_vk(data, with_ui=False):
         # 逐位一致（render/vk/renderer.py:1138-1145 注释自己要求 A/B 工具显式传）。
         # 这里按 GL 同一函数、同一相机参数构造，避免 world quad 被转成侧面。
         import mathlib.matlib as _ml
-        _V = _ml.mat4_view_yaw_pitch(np, drv.camera_pos, drv.yaw, drv.pitch, 0.0)
+        _V = _ml.mat4_view_yaw_pitch(np, drv.current_camera_position, drv.yaw, drv.pitch, 0.0)
         kw['cam_basis'] = (
             (float(_V[0, 0]), float(_V[0, 1]), float(_V[0, 2])),
             (float(_V[1, 0]), float(_V[1, 1]), float(_V[1, 2])))

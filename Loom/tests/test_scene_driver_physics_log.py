@@ -8,7 +8,7 @@ SceneDriver._step_physics 旧实现每帧 except 都 print 一条
 把桥状态搞坏), 播放器每秒刷 60 条日志, 控制台不可读、日志文件暴涨。
 
 修复: 每场只在**首次**异常打印 1 条, 后续只累加 _bridge_err_count; 换场景
-(load_from_data) 重置, 新场景仍会得到自己的那一条。
+(build_scene_from_data) 重置, 新场景仍会得到自己的那一条。
 
 本文件断言:
   A: 假桥每帧抛异常, 5 帧只出 1 条日志 (验收项)。
@@ -114,7 +114,7 @@ def _capture(fn):
 def _new_driver(bridge, data=None):
     d = SD.SceneDriver()
     if data is not None:
-        d.load_from_data(data)
+        d.build_scene_from_data(data)
     d._bridge = bridge            # 跳过惰性建桥, 直接注入假桥
     return d
 
@@ -166,7 +166,7 @@ def t_scene_reset():
     print("=== E: 换场景重置, 新场景再出 1 条 ===")
     d = _new_driver(_BadBridge(), data=_scene(1))
     first = _capture(lambda: [d._step_physics(1 / 60.0) for _ in range(5)])
-    d.load_from_data(_scene(2))          # 新场景: 计数/已打印标志重置
+    d.build_scene_from_data(_scene(2))          # 新场景: 计数/已打印标志重置
     check("[E] 换场景后计数清零", d._bridge_err_count == 0, d._bridge_err_count)
     check("[E] 换场景后未打印标志复位", d._bridge_err_logged is False)
     second = _capture(lambda: [d._step_physics(1 / 60.0) for _ in range(5)])

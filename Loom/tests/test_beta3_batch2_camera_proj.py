@@ -52,7 +52,7 @@ def _driver(cam=None):
     data = {'version': 10, 'objects': []}
     if cam is not None:
         data['camera'] = dict(cam)
-    d.load_from_data(data)
+    d.build_scene_from_data(data)
     return d
 
 
@@ -72,8 +72,8 @@ def t_fov_applied():
     # fov 必须真的改变渲染投影（不是只改了字段）：同场景 60° vs 90° 的 VP 必须不同
     cam60 = dict(BASE_CAM); cam60['fov'] = 60.0
     cam90 = dict(BASE_CAM); cam90['fov'] = 90.0
-    vp60, _ = _driver(cam60).render_pose(aspect=1.6)
-    vp90, _ = _driver(cam90).render_pose(aspect=1.6)
+    vp60, _ = _driver(cam60).compute_frame_view_proj(aspect=1.6)
+    vp90, _ = _driver(cam90).compute_frame_view_proj(aspect=1.6)
     check('fov 60° vs 90° 的 VP 不同（修前两者完全相同 = 死赋值）',
           float(np.max(np.abs(vp60 - vp90))) > 1e-3,
           float(np.max(np.abs(vp60 - vp90))))
@@ -105,7 +105,7 @@ def t_ortho_normalized():
               abs(d.ortho_size - want_sz) < 1e-9 and d.ortho is want_ortho,
               (d.ortho_size, d.ortho))
         if d.ortho:
-            vp, _ = d.render_pose(aspect=1.6)
+            vp, _ = d.compute_frame_view_proj(aspect=1.6)
             check('%r 正交 VP 有限 (修前 0 -> ZeroDivisionError)' % (extra,),
                   bool(np.isfinite(vp).all()))
 
