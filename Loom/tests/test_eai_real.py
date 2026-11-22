@@ -987,6 +987,44 @@ def t_render_keys_proj():
         ED.ortho_size = old_size
 
 
+# ============ 13.7 Q-B7-56-2 扫尾命令化新增命令 (logic_pause/logic_step/register_tag) ============
+def t_logic_tag_commands():
+    """Q-B7-56-2 P0-1 扫尾新增三条命令进"真编辑器"链路 (覆盖率闸门配套)。
+
+    logic_pause/logic_step 是 TPS 按钮命令化薄壳 (公共实现 EngineCore);
+    register_tag 是 Tag 注册命令化薄壳 (公共实现 SceneQueryMixin)。
+    res() 返回 dispatch 的 result 载荷; 应被拒绝的调用用 run(expect_ok=False)。
+    """
+    # logic_pause: 未播放时 toggle 无效 (安全返回, 不崩)
+    r = res('logic_pause')
+    check("logic_pause 未播放时安全返回 paused=False",
+          r.get('paused') is False and r.get('playing') is False, str(r)[:90])
+    # logic_step: 未暂停时拒绝并说明 (stepped=False)。
+    # 真编辑器是全文件共享的 —— 显式置非暂停态再验拒绝, 验完还原。
+    _was_paused = getattr(ED, '_logic_paused', False)
+    ED._logic_paused = False
+    try:
+        r = run('logic_step', expect_ok=False).get('result') or {}
+        check("logic_step 未暂停时拒绝 (stepped=False)",
+              r.get('stepped') is False and '暂停' in str(r.get('error', '')),
+              str(r)[:90])
+    finally:
+        ED._logic_paused = _was_paused
+    # register_tag: 注册 / 幂等 / 非法拒绝
+    import uuid as _uuid
+    tag = 'EAI门%s' % _uuid.uuid4().hex[:8]
+    r = res('register_tag', {'tag': tag})
+    check("register_tag 注册新 Tag (registered=True)",
+          r.get('registered') is True, str(r)[:90])
+    r = res('register_tag', {'tag': tag})
+    check("register_tag 幂等 (registered=False)",
+          r.get('registered') is False, str(r)[:90])
+    r = run('register_tag', {'tag': 'bad tag!'}, expect_ok=False).get('result') or {}
+    check("register_tag 非法字符拒绝", 'error' in r, str(r)[:90])
+    r = run('register_tag', {}, expect_ok=False).get('result') or {}
+    check("register_tag 缺 tag 拒绝", 'error' in r, str(r)[:90])
+
+
 # ============ 14. 覆盖率闸门 ============
 def t_coverage():
     table = set(ac.command_names())
@@ -1016,6 +1054,7 @@ if __name__ == "__main__":
     t_api_contract()
     t_api_coverage_fill()
     t_render_keys_proj()
+    t_logic_tag_commands()
     t_coverage()
     if _FAILS:
         print("总结果: FAIL ❌", _FAILS)

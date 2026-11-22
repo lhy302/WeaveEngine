@@ -1488,9 +1488,10 @@ class LoomGUI(QMainWindow):
         e = self.editor
         if e is None:
             return
-        # toggle 返回"新状态" (True=暂停中/False=恢复) — None 才是失败;
-        # 恢复分支返回 False 会被 if 吞掉 (按钮文字卡住 bug, 用户实测抓到)
-        new_state = e.toggle_logic_paused()
+        # Q-B7-56-2 裁定①: 翻译成 logic_pause 命令 (命令体 = e.toggle_logic_paused(),
+        # EngineCore 公共实现 GL/VK 同源); GUI 保留按钮文字/toast/状态栏反馈。
+        r = self._invoke_cmd('logic_pause', {}, notify_error=False)
+        new_state = r.get('paused')
         if new_state is not None and e.is_playing:
             paused = new_state
             self._act_tps_pause.setText("▶恢复TPS" if paused else "⏸暂停TPS")
@@ -1501,11 +1502,25 @@ class LoomGUI(QMainWindow):
     def _cmd_tps_step(self):
         """步进 1 逻辑帧 (F10 同款, 仅暂停态生效)."""
         e = self.editor
+        if e is None:
+            return
+        # Q-B7-56-2 裁定①: 翻译成 logic_step 命令 (命令体 = e.step_logic_once());
+        # 未暂停时命令层报错, GUI 保留原提示文案/颜色 (notify_error=False 防双 toast)。
+        r = self._invoke_cmd('logic_step', {}, notify_error=False)
+        if r.get('stepped'):
+            self._notify("步进 1 逻辑帧", (240, 200, 90))
+        else:
+            self._notify("先暂停 TPS (⏸暂停TPS / F9) 再步进", (240, 160, 90))
+
+    def _cmd_set_parallel(self, on):
+        """多核并行复选框 (Q-B7-56-2 裁定①): 设置写盘翻译成 settings_set 命令
+        (命令体 = guiloader load/save 同一入口); 重启生效提示保留。
+        网格显隐复选框不在此列 —— 编辑器视图状态, 终审判定豁免。"""
+        self._invoke_cmd('settings_set', {'key': 'parallel_enable',
+                                          'value': bool(on)})
+        e = self.editor
         if e is not None:
-            if e.step_logic_once():
-                self._notify("步进 1 逻辑帧", (240, 200, 90))
-            else:
-                self._notify("先暂停 TPS (⏸暂停TPS / F9) 再步进", (240, 160, 90))
+            e._notify("并行开关重启后生效", (240, 200, 90))
 
     def _cmd_scene_name(self):
         e = self.editor
@@ -1578,10 +1593,19 @@ class LoomGUI(QMainWindow):
 
         注意: LoomGUI 自身没有 _notify (见 ui/qt_uitree.py:_notify_win 的注释),
         toast 走 EditorApp._notify; 拿不到再退回状态栏 showMessage。
+
+        P1-1 (Q-B7-56-2, 2026-11-22): 命令层 _history_result 把 blocked 归一成
+        布尔 True (原因串在 error 键), 旧代码 "res.get('blocked') or ..." 会把
+        toast 文案退化成 "True" —— 修法: 布尔 blocked 用 error 串出声, blocked
+        本身是串 (editor._undo_action 原始返回) 时用本串。
         """
         if not isinstance(res, dict):
             return
-        msg = res.get('blocked') or res.get('error')
+        blk = res.get('blocked')
+        if isinstance(blk, str) and blk:
+            msg = blk
+        else:
+            msg = res.get('error')
         if not msg:
             return
         ed = getattr(self, 'editor', None)
@@ -1939,9 +1963,13 @@ class LoomGUI(QMainWindow):
         elif kind == 'camera' and 0 <= idx < len(e.cameras):
             c = e.cameras[idx]
             menu.addAction("重命名", lambda: self._rename_camera(c))
-            menu.addAction("用此相机预览", lambda: e.toggle_camera_preview(c))
+            # Q-B7-56-2 裁定①: 预览/激活翻译成 camera_preview / camera_active 命令
+            menu.addAction("用此相机预览", lambda: self._invoke_cmd(
+                'camera_preview', {'name': c.name}))
             menu.addAction("取消激活" if e.active_camera == c.guid else "设为激活相机",
-                           lambda: e.set_active_camera(None if e.active_camera == c.guid else c))
+                           lambda: self._invoke_cmd(
+                               'camera_active', {}
+                               if e.active_camera == c.guid else {'name': c.name}))
             if c.parent is not None:
                 # Q-B7-56-1 裁定①: 相机脱父同样走 reparent 命令
                 menu.addAction("脱父", lambda: self._invoke_cmd(
@@ -2012,29 +2040,29 @@ class LoomGUI(QMainWindow):
         d = self._res_item_data(item)
         if e is None or d is None:
             return
-        it = e._find_asset(tuple(d))
-        if it is not None:
-            e._asset_drop_to_scene(it, (e.width / 2, e.height / 2))
-            self._refresh_all()
+        # Q-B7-56-2 裁定①: 双击翻译成 asset_place 命令 (命令体 =
+        # e._asset_drop_to_scene(it, 视口中心), 同一入口; 拖拽落场景仍走鼠标豁免面)
+        self._invoke_cmd('asset_place', {'type': d[0], 'key': d[1]})
+        self._refresh_all()
 
     def _cmd_apply_asset(self):
         e = self.editor
         if e is None or self._res_selected is None:
             return
-        it = e._find_asset(tuple(self._res_selected))
-        m = e._selected()
-        if it is not None and m is not None:
-            e._apply_material_asset(it, m)
-            self._refresh_all()
+        # Q-B7-56-2 裁定①: 应用材质资产翻译成 asset_apply 命令 (命令体 =
+        # e._apply_material_asset(it, m), 同一入口)
+        self._invoke_cmd('asset_apply', {'type': self._res_selected[0],
+                                         'key': self._res_selected[1]})
+        self._refresh_all()
 
     def _cmd_place_asset(self):
         e = self.editor
         if e is None or self._res_selected is None:
             return
-        it = e._find_asset(tuple(self._res_selected))
-        if it is not None:
-            e._asset_drop_to_scene(it, (e.width / 2, e.height / 2))
-            self._refresh_all()
+        # Q-B7-56-2 裁定①: 放入场景按钮翻译成 asset_place 命令 (同双击)
+        self._invoke_cmd('asset_place', {'type': self._res_selected[0],
+                                         'key': self._res_selected[1]})
+        self._refresh_all()
 
     # ---------------- 检查器 ----------------
     def _insp_target(self):
@@ -2384,9 +2412,10 @@ class LoomGUI(QMainWindow):
             nm = e.layer_name(i)
             lay_combo.addItem("%d: %s" % (i, nm if nm else "(未命名)"), i)
         lay_combo.setCurrentIndex(m.layer)
+        # Q-B7-56-2 裁定①: Layer 翻译成 set_layer 命令 (命令体 = commit_model+
+        # set_object_layer 同一撤销路径)
         lay_combo.currentIndexChanged.connect(
-            lambda i: e.commit_model(m, "设置 Layer",
-                                     lambda: e.set_object_layer(m, i))
+            lambda i: self._invoke_cmd('set_layer', {'name': m.name, 'layer': i})
             if i != m.layer else None)
         lay.addRow("Layer", lay_combo)
 
@@ -2410,18 +2439,21 @@ class LoomGUI(QMainWindow):
                 e._notify("Tag 非法: %s" % reason, (220, 80, 80))
                 tag_combo.setEditText(m.tag)
                 return
+            # Q-B7-56-2 裁定① (P2-2): 注册与设置都翻译成命令 —— register_tag
+            # (幂等注册) + set_tag (含同款校验/自动注册); GUI 预校验只保留
+            # toast/回退 UX。tag_exists 是读侧, 豁免。
             if not e.tag_exists(val):
-                try:
-                    e.register_tag(val)
-                except ValueError as ex:
-                    e._notify("Tag 注册失败: %s" % ex, (220, 80, 80))
+                r = self._invoke_cmd('register_tag', {'tag': val},
+                                     notify_error=False)
+                if isinstance(r, dict) and r.get('error'):
+                    e._notify("Tag 注册失败: %s" % r['error'], (220, 80, 80))
                     tag_combo.setEditText(m.tag)
                     return
                 # 注册成功后刷新下拉项 (新 tag 出现在列表里)
                 if tag_combo.findText(val) < 0:
                     tag_combo.addItem(val)
                     tag_combo.setCurrentIndex(tag_combo.count() - 1)
-            e.commit_model(m, "设置 Tag", lambda: e.set_object_tag(m, val))
+            self._invoke_cmd('set_tag', {'name': m.name, 'tag': val})
 
         tag_combo.activated.connect(lambda _i: _apply_tag())
         if tag_combo.lineEdit() is not None:
@@ -2434,7 +2466,10 @@ class LoomGUI(QMainWindow):
         lay.addRow(QLabel(info))
         if m.prefab_ref:
             lay.addRow(QLabel("类型: %s" % (m.primitive or '导入网格')))
-        self._btn_row(lay, [("存网格为资产", e._save_mesh_asset)])
+        # Q-B7-56-2 裁定①: 存网格为资产翻译成 asset_save 命令
+        self._btn_row(lay, [("存网格为资产",
+                             lambda: self._invoke_cmd('asset_save',
+                                                      {'what': 'mesh'}))])
 
         p = m.position
         lay.addRow(QLabel("位置"))
@@ -2462,10 +2497,13 @@ class LoomGUI(QMainWindow):
         s = m.scale
         lay.addRow(QLabel("缩放"))
         for i, axis in enumerate(('X', 'Y', 'Z')):
+            # Q-B7-56-2 裁定①: 缩放行翻译成 set_transform sx/sy/sz 命令
             self._spin(lay, axis, s[i], 0.01, 100, 'scale.' + axis,
-                       lambda v, a=axis: m.set_scale(
-                           tuple(v if ax == a else c for ax, c in zip('XYZ', m.scale))),
-                       step=0.1)
+                       lambda v, a=axis: self._invoke_cmd(
+                           'set_transform', {'name': m.name,
+                                             's' + a.lower(): v},
+                           quiet=True),
+                       step=0.1, via_cmd=True)
         # 材质 (M23: 材质在 renderer.material, 共享引用语义)
         if e.materials:
             combo = QComboBox()
@@ -2474,73 +2512,126 @@ class LoomGUI(QMainWindow):
                 combo.addItem("%s%s" % (mat.name, '  √' if mat is cur_mat else ''), i)
             combo.setCurrentIndex(max(0, next((i for i, x in enumerate(e.materials)
                                               if x is cur_mat), 0)))
+            # Q-B7-56-2 裁定①: 换材质翻译成 set_material 命令 (共享引用语义)
             combo.currentIndexChanged.connect(
-                lambda i: e.commit_model(m, "换材质",
-                                         lambda: setattr(m.renderer, 'material',
-                                                        e.materials[i]))
+                lambda i: self._invoke_cmd('set_material',
+                                           {'name': m.name, 'index': i})
                 if i >= 0 else None)
             lay.addRow("材质", combo)
-        self._btn_row(lay, [("＋新建材质", lambda: e.new_material(m)),
-                            ("存材质为资产", e._save_material_asset)])
+        self._btn_row(lay, [
+            ("＋新建材质", lambda: self._invoke_cmd('material_new',
+                                               {'name': m.name})),
+            ("存材质为资产", lambda: self._invoke_cmd('asset_save',
+                                                  {'what': 'material'}))])
+        # Q-B7-56-2 裁定①: 饱和度行翻译成 set_saturation 命令 (会话批协议)
         self._spin(lay, "饱和度", m.saturation, 0, 2, 'sat',
-                   lambda v: setattr(m, 'saturation', v), step=0.05)
+                   lambda v: self._invoke_cmd('set_saturation',
+                                              {'name': m.name, 'value': v},
+                                              quiet=True),
+                   step=0.05, via_cmd=True)
         # 碰撞 (B1-修复_b 2026-08-30 用户二轮: 按钮措辞陷阱 —— 旧文"碰撞器: 禁用"
         # 出现在**已启用**状态, 状态式误读会把"点此禁用"读成"当前禁用" -> 用户点
         # 一次以为启用, 实际关掉碰撞器; 桥路径下不建体=>浮空 (配合自由积分修复).
         # 改为 状态+动作显式: "启用中(点按禁用)" / "已禁用(点按启用)"。
         if m.collider is not None:
+            # Q-B7-56-2 裁定①: 碰撞器开关翻译成 collider 命令 (缺 on = 切换)
             self._btn_row(lay, [("碰撞器: 启用中(点按禁用)" if m.collider.enabled
                                  else "碰撞器: 已禁用(点按启用)",
-                                 lambda: e.toggle_collider(m))])
+                                 lambda: self._invoke_cmd('collider',
+                                                          {'name': m.name}))])
             # B1 (2026-08-30) 用户新需求: 接触材质 —— 阿蒙东-库仑摩擦 f=μN,
             # 弹性=回弹系数, 滚动摩擦=滚动阻力. B1-P1(2026-08-30) 用户实测
             # "摩擦选项有两个" -> 单组显示: 有刚体只显示刚体组 (动态体用 rb 值),
             # 无刚体只显示碰撞组 (静态/运动学用 col 值) —— 数据仍双通道.
             if m.rigidbody is None:
+                # Q-B7-56-2 裁定①: 接触材质行翻译成 collider 命令 (会话批协议)
                 self._spin(lay, "摩擦系数", m.collider.friction, 0, 3, 'col.fric',
-                           lambda v: setattr(m.collider, 'friction', v), step=0.05)
+                           lambda v: self._invoke_cmd(
+                               'collider', {'name': m.name, 'friction': v},
+                               quiet=True), step=0.05, via_cmd=True)
                 self._spin(lay, "弹性", m.collider.restitution, 0, 1, 'col.rest',
-                           lambda v: setattr(m.collider, 'restitution', v), step=0.05)
+                           lambda v: self._invoke_cmd(
+                               'collider', {'name': m.name, 'restitution': v},
+                               quiet=True), step=0.05, via_cmd=True)
                 self._spin(lay, "滚动摩擦", m.collider.rolling_friction, 0, 3, 'col.roll',
-                           lambda v: setattr(m.collider, 'rolling_friction', v), step=0.05)
+                           lambda v: self._invoke_cmd(
+                               'collider', {'name': m.name, 'rolling_friction': v},
+                               quiet=True), step=0.05, via_cmd=True)
             # 2026-10-18 阶段1档序17 Trigger: is_trigger 开关（路线见路线图 §2.7）
             # 语义: is_trigger=True 时物理层建 sensor 体（可重叠穿过, 不产生接触力）,
             # 事件走 on_trigger_enter/exit/stay（双方任一方 trigger 即走 trigger 路径）.
             # 按钮措辞: 状态+动作显式（"触发器: 开/关"），避免同 toggle_collider 旧措辞陷阱.
+            # Q-B7-56-2 裁定①: 触发器翻译成 collider is_trigger 命令
             self._btn_row(lay, [
                 ("触发器: 开 (点按关闭)" if getattr(m.collider, 'is_trigger', False)
                  else "触发器: 关 (点按开启)",
-                 lambda: e.toggle_trigger(m))])
+                 lambda: self._invoke_cmd(
+                     'collider', {'name': m.name,
+                                  'is_trigger': not getattr(m.collider,
+                                                            'is_trigger',
+                                                            False)}))])
         # 刚体
         if m.rigidbody is not None:
+            # Q-B7-56-2 裁定①: 刚体重力/移除翻译成 rigidbody 命令
             txt = "刚体: 受重力" if m.rigidbody.use_gravity else "刚体: 不受重力"
-            self._btn_row(lay, [(txt, lambda: e.toggle_rigidbody_gravity(m)),
-                                ("移除刚体", lambda: e.remove_rigidbody(m))])
+            self._btn_row(lay, [
+                (txt, lambda: self._invoke_cmd('rigidbody',
+                                               {'name': m.name,
+                                                'action': 'gravity'})),
+                ("移除刚体", lambda: self._invoke_cmd('rigidbody',
+                                                  {'name': m.name,
+                                                   'action': 'remove'}))])
             # B1: 动态体接触材质 (桥透传; pair 值 = 两体几何平均); 滚动摩擦
             # 0=关闭; 桥内衰减系数 f = max(0, 1-μ·rolling·K·dt)
+            # Q-B7-56-2 裁定①: 刚体接触材质行翻译成 rigidbody action=set 命令
             self._spin(lay, "摩擦系数", m.rigidbody.friction, 0, 3, 'rb.fric',
-                       lambda v: setattr(m.rigidbody, 'friction', v), step=0.05)
+                       lambda v: self._invoke_cmd(
+                           'rigidbody', {'name': m.name, 'action': 'set',
+                                         'friction': v}, quiet=True),
+                       step=0.05, via_cmd=True)
             self._spin(lay, "弹性", m.rigidbody.restitution, 0, 1, 'rb.rest',
-                       lambda v: setattr(m.rigidbody, 'restitution', v), step=0.05)
+                       lambda v: self._invoke_cmd(
+                           'rigidbody', {'name': m.name, 'action': 'set',
+                                         'restitution': v}, quiet=True),
+                       step=0.05, via_cmd=True)
             self._spin(lay, "滚动摩擦", m.rigidbody.rolling_friction, 0, 3, 'rb.roll',
-                       lambda v: setattr(m.rigidbody, 'rolling_friction', v), step=0.05)
+                       lambda v: self._invoke_cmd(
+                           'rigidbody', {'name': m.name, 'action': 'set',
+                                         'rolling_friction': v}, quiet=True),
+                       step=0.05, via_cmd=True)
         else:
-            self._btn_row(lay, [("＋加刚体 (受重力)", lambda: e.add_rigidbody(m))])
+            self._btn_row(lay, [("＋加刚体 (受重力)",
+                                 lambda: self._invoke_cmd(
+                                     'rigidbody', {'name': m.name,
+                                                   'action': 'add'}))])
         # 音频 (组件属性名 = audio_source, 与旧版GUI 一致)
         if m.audio_source is not None:
             au = m.audio_source
             clip_edit = QLineEdit(au.clip or "")
             clip_edit.setPlaceholderText("音频文件路径 (wav/ogg)")
+            # Q-B7-56-2 裁定①: 音频组件操作翻译成 audio / set_audio_3d 命令
             clip_edit.editingFinished.connect(
-                lambda: e.set_audio_clip(m, clip_edit.text(), au.clip))
+                lambda: self._invoke_cmd('audio', {'name': m.name,
+                                                   'action': 'clip',
+                                                   'clip': clip_edit.text()}))
             lay.addRow("音频", clip_edit)
             self._btn_row(lay, [("循环: 开" if au.loop else "循环: 关",
-                                 lambda: e.toggle_audio_loop(m)),
+                                 lambda: self._invoke_cmd('audio',
+                                                          {'name': m.name,
+                                                           'action': 'loop'})),
                                 ("→播放" if not au.playing else "■停止",
-                                 lambda: e.toggle_audio_playing(m)),
-                                ("移除", lambda: e.remove_audio_source(m))])
+                                 lambda: self._invoke_cmd('audio',
+                                                          {'name': m.name,
+                                                           'action': 'play'})),
+                                ("移除", lambda: self._invoke_cmd(
+                                    'audio', {'name': m.name,
+                                              'action': 'remove'}))])
             self._spin(lay, "音量", au.volume, 0, 1, 'au.vol',
-                       lambda v: setattr(au, 'volume', v), step=0.05)
+                       lambda v: self._invoke_cmd('audio', {'name': m.name,
+                                                            'action': 'volume',
+                                                            'value': v},
+                                                  quiet=True),
+                       step=0.05, via_cmd=True)
             # 2026-10-18 3D 音频 (契约 §9): 类别决定空间化, music 强制 2D
             cat_combo = QComboBox()
             for _label, _val in (("音效", "sfx"), ("背景音乐", "music"), ("人声", "voice")):
@@ -2552,47 +2643,76 @@ class LoomGUI(QMainWindow):
                 _v = _c.itemData(_i)
                 if not _v or _v == _a.category:
                     return
-                e.commit_model(_m, "设置音频类别",
-                               lambda: setattr(_a, 'category', _v))
+                # Q-B7-56-2 裁定①: 类别翻译成 set_audio_3d 命令 (同款校验+
+                # 一步撤销; 撤销标签为命令层 "设置音频 3D")
+                self._invoke_cmd('set_audio_3d', {'name': _m.name,
+                                                  'category': _v})
                 self._refresh_all()
 
             cat_combo.currentIndexChanged.connect(_on_cat)
             lay.addRow("类别", cat_combo)
             if au.is_spatial():
-                def _mk_set(attr):
-                    def _set(v):
-                        if attr == 'min_distance' and v >= au.max_distance:
-                            e._notify("最小距离必须小于最大距离", (220, 80, 80))
-                            self._refresh_all()
-                            return
-                        if attr == 'max_distance' and v <= au.min_distance:
-                            e._notify("最大距离必须大于最小距离", (220, 80, 80))
-                            self._refresh_all()
-                            return
-                        setattr(au, attr, v)
-                    return _set
+                # Q-B7-56-2 裁定①: 3D 距离行翻译成 set_audio_3d 命令。
+                # GUI 预判 min<max 保留旧 toast UX (不合法不发命令); 合法值由
+                # 命令层再校验一次 (组件 setter 静默回退 → 命令层显式报错)。
+                def _min_set(v):
+                    if v >= au.max_distance:
+                        e._notify("最小距离必须小于最大距离", (220, 80, 80))
+                        self._refresh_all()
+                        return
+                    self._invoke_cmd('set_audio_3d',
+                                     {'name': m.name, 'min_distance': v},
+                                     quiet=True)
+
+                def _max_set(v):
+                    if v <= au.min_distance:
+                        e._notify("最大距离必须大于最小距离", (220, 80, 80))
+                        self._refresh_all()
+                        return
+                    self._invoke_cmd('set_audio_3d',
+                                     {'name': m.name, 'max_distance': v},
+                                     quiet=True)
 
                 self._spin(lay, "最小距离", au.min_distance, 0.01, 10000, 'au.min',
-                           _mk_set('min_distance'), step=0.1)
+                           _min_set, step=0.1, via_cmd=True)
                 self._spin(lay, "最大距离", au.max_distance, 0.01, 10000, 'au.max',
-                           _mk_set('max_distance'), step=1.0)
+                           _max_set, step=1.0, via_cmd=True)
                 self._spin(lay, "衰减强度", au.rolloff, 0.01, 10, 'au.roll',
-                           _mk_set('rolloff'), step=0.1)
+                           lambda v: self._invoke_cmd(
+                               'set_audio_3d', {'name': m.name, 'rolloff': v},
+                               quiet=True),
+                           step=0.1, via_cmd=True)
         else:
-            self._btn_row(lay, [("＋加音频源", lambda: e.add_audio_source(m))])
+            self._btn_row(lay, [("＋加音频源",
+                                 lambda: self._invoke_cmd(
+                                     'audio', {'name': m.name,
+                                               'action': 'add'}))])
         # 动画
         if m.animator is not None:
+            # Q-B7-56-2 裁定①: 动画组件操作翻译成 animator 命令
             an = m.animator
             self._btn_row(lay, [("循环: 开" if an.loop else "循环: 关",
-                                 lambda: e.toggle_anim_loop(m)),
+                                 lambda: self._invoke_cmd('animator',
+                                                          {'name': m.name,
+                                                           'action': 'loop'})),
                                 ("→播放" if not an.playing else "■停止",
-                                 lambda: e.toggle_anim_playing(m)),
-                                ("移除", lambda: e.remove_animator(m))])
+                                 lambda: self._invoke_cmd('animator',
+                                                          {'name': m.name,
+                                                           'action': 'play'})),
+                                ("移除", lambda: self._invoke_cmd(
+                                    'animator', {'name': m.name,
+                                                 'action': 'remove'}))])
             for clip in (an.clips or []):
                 self._btn_row(lay, [("→ " + clip if an.current == clip else clip,
-                                     lambda c=clip: e.play_anim(m, c))])
+                                     lambda c=clip: self._invoke_cmd(
+                                         'animator', {'name': m.name,
+                                                      'action': 'clip',
+                                                      'clip': c}))])
         else:
-            self._btn_row(lay, [("＋加动画组件", lambda: e.add_animator(m))])
+            self._btn_row(lay, [("＋加动画组件",
+                                 lambda: self._invoke_cmd(
+                                     'animator', {'name': m.name,
+                                                  'action': 'add'}))])
         # 脚本
         if m.scripts:
             for i, sc in enumerate(m.scripts):
@@ -2602,18 +2722,35 @@ class LoomGUI(QMainWindow):
                 h.addWidget(QLabel(sc.script_id))
                 b = QPushButton("×")
                 b.setFixedWidth(28)
-                b.clicked.connect(lambda _=False, i=i: e.remove_script(m, i))
+                # Q-B7-56-2 裁定①: 移除脚本翻译成 script_remove 命令
+                b.clicked.connect(lambda _=False, i=i: self._invoke_cmd(
+                    'script_remove', {'name': m.name, 'index': i}))
                 h.addWidget(b)
                 lay.addRow("脚本", row)
                 try:
                     from script.scripts import get_script
                     params = get_script(sc.script_id).params
-                    for pname, pdef in params.items():
-                        val = sc.script_vars.get(pname, pdef.get('default', 0.0))
-                        self._spin(lay, pname, val, -1e6, 1e6, 'svar.%d.%s' % (i, pname),
-                                   lambda v, i=i, p=pname: e.set_script_var(
-                                       m, i, p, v, False, 'svar.%d.%s' % (i, p)),
-                                   step=0.1)
+                    # Q-B7-56-2 附带修正: params 既可能是 dict {key: 默认值规格}
+                    # (旧约定) 也可能是 ((key,label,default,...),...) 元组表
+                    # (scripts.py 现行约定) —— 旧代码一律 .items() 对元组表抛
+                    # AttributeError 被 except 吞掉, 脚本参数行从未渲染过。
+                    if isinstance(params, dict):
+                        pitems = [(k, d.get('default', 0.0))
+                                  for k, d in params.items()]
+                    else:
+                        pitems = [(p[0], p[2] if len(p) > 2 else 0.0)
+                                  for p in params]
+                    for pname, dflt in pitems:
+                        val = sc.script_vars.get(pname, dflt)
+                        # Q-B7-56-2 裁定①: 脚本参数行翻译成 script_var 命令
+                        self._spin(lay, pname, val, -1e6, 1e6,
+                                   'svar.%d.%s' % (i, pname),
+                                   lambda v, i=i, p=pname: self._invoke_cmd(
+                                       'script_var', {'name': m.name,
+                                                      'index': i, 'key': p,
+                                                      'value': v},
+                                       quiet=True),
+                                   step=0.1, via_cmd=True)
                 except Exception:
                     pass
         # 可挂脚本下拉 (2026-08-22 修复: script_options() 返回 (id,name) 元组,
@@ -2629,8 +2766,12 @@ class LoomGUI(QMainWindow):
                 combo.addItem("＋ 添加脚本…", None)
                 for sid, nm in opts:
                     combo.addItem(nm, sid)
+                # Q-B7-56-2 裁定①: 添加脚本翻译成 script_add 命令
                 combo.currentIndexChanged.connect(
-                    lambda i: e.add_script(m, combo.itemData(i)) if combo.itemData(i) else None)
+                    lambda i: self._invoke_cmd('script_add',
+                                               {'sid': combo.itemData(i),
+                                                'target': m.name})
+                    if combo.itemData(i) else None)
                 lay.addRow(QLabel("脚本"), combo)
         except Exception:
             pass
@@ -2638,7 +2779,10 @@ class LoomGUI(QMainWindow):
             # 2026-08-27 修复: _btn_row 的回调是无参调用 f(), 直接挂
             # e.unlink_prefab (签名 unlink_prefab(self, m)) 点一下就 TypeError
             # 被 Qt 吞掉 —— 按钮从来没断开过 Prefab 连接.
-            self._btn_row(lay, [("与 Prefab 断开连接", lambda: e.unlink_prefab(m))])
+            # Q-B7-56-2 裁定①: 断开 Prefab 翻译成 prefab_unlink 命令
+            self._btn_row(lay, [("与 Prefab 断开连接",
+                                 lambda: self._invoke_cmd('prefab_unlink',
+                                                          {'name': m.name}))])
 
     def _build_light_inspector(self, lay, l):
         e = self.editor
@@ -2647,38 +2791,71 @@ class LoomGUI(QMainWindow):
             lambda: self._invoke_cmd('object_rename', {'name': l.name, 'new': name_edit.text()})
             if name_edit.text() != l.name else None)   # Q-B7-56-1 裁定①
         lay.addRow("名称", name_edit)
+        # Q-B7-56-2 裁定①: 光源按钮翻译成 light_set 命令 (同款一步撤销)
         self._btn_row(lay, [("阴影: 开" if l.shadow else "阴影: 关",
-                             lambda: e.commit_light(l, "光源阴影",
-                                                    lambda: setattr(l, 'shadow', not l.shadow)))])
+                             lambda: self._invoke_cmd('light_set',
+                                                      {'name': l.name,
+                                                       'shadow': not l.shadow}))])
         if l.kind == 'directional':
             # 模式: M29 全场景平行光 'full' | 光束 'beam' (截面平行光)
             self._btn_row(lay, [("模式: 全场景" if l.mode != 'beam' else "模式: 光束",
-                                 lambda: e.commit_light(l, "光源模式",
-                                                        lambda: setattr(l, 'mode',
-                                                                       'beam' if l.mode != 'beam' else 'full')))])
+                                 lambda: self._invoke_cmd(
+                                     'light_set', {'name': l.name,
+                                                   'mode': 'beam' if l.mode != 'beam'
+                                                   else 'full'}))])
             if l.mode == 'beam':
                 self._btn_row(lay, [("截面: 圆" if l.shape == 'circle' else "截面: 矩形",
-                                     lambda: e.commit_light(l, "光源截面",
-                                                            lambda: setattr(l, 'shape',
-                                                                           'circle' if l.shape != 'circle' else 'rect')))])
+                                     lambda: self._invoke_cmd(
+                                         'light_set', {'name': l.name,
+                                                       'shape': 'circle' if l.shape != 'circle'
+                                                       else 'rect'}))])
+                # Q-B7-56-2 裁定①: 光源数值行翻译成 light_set 命令 (会话批协议)
                 self._spin(lay, "尺寸", l.size, 0.05, 50, 'li.size',
-                           lambda v: setattr(l, 'size', v))
+                           lambda v: self._invoke_cmd('light_set',
+                                                      {'name': l.name,
+                                                       'size': v},
+                                                      quiet=True),
+                           step=0.05, via_cmd=True)
         self._spin(lay, "强度", l.intensity, 0, 10, 'li.intensity',
-                   lambda v: setattr(l, 'intensity', v))
+                   lambda v: self._invoke_cmd('light_set', {'name': l.name,
+                                                            'intensity': v},
+                                              quiet=True),
+                   step=0.05, via_cmd=True)
         self._spin(lay, "颜色 R", l.color[0], 0, 1, 'li.cR',
-                   lambda v: setattr(l, 'color', (v, l.color[1], l.color[2])), step=0.01)
+                   lambda v: self._invoke_cmd('light_set', {'name': l.name,
+                                                            'r': v},
+                                              quiet=True),
+                   step=0.01, via_cmd=True)
         self._spin(lay, "颜色 G", l.color[1], 0, 1, 'li.cG',
-                   lambda v: setattr(l, 'color', (l.color[0], v, l.color[2])), step=0.01)
+                   lambda v: self._invoke_cmd('light_set', {'name': l.name,
+                                                            'g': v},
+                                              quiet=True),
+                   step=0.01, via_cmd=True)
         self._spin(lay, "颜色 B", l.color[2], 0, 1, 'li.cB',
-                   lambda v: setattr(l, 'color', (l.color[0], l.color[1], v)), step=0.01)
+                   lambda v: self._invoke_cmd('light_set', {'name': l.name,
+                                                            'b': v},
+                                              quiet=True),
+                   step=0.01, via_cmd=True)
         if l.kind == 'directional':
             # M30: 平行光三角度存度制 (azimuth/elevation/roll), 直接读写不转换
+            # Q-B7-56-2 裁定①: 三角度行度制直传 (命令层 light_set 同为度制直写)
             self._spin(lay, "朝向", l.azimuth, -360, 360, 'li.az',
-                       lambda v: setattr(l, 'azimuth', v), step=1.0)
+                       lambda v: self._invoke_cmd('light_set',
+                                                  {'name': l.name,
+                                                   'azimuth': v},
+                                                  quiet=True),
+                       step=1.0, via_cmd=True)
             self._spin(lay, "俯仰", l.elevation, -360, 360, 'li.el',
-                       lambda v: setattr(l, 'elevation', v), step=1.0)
+                       lambda v: self._invoke_cmd('light_set',
+                                                  {'name': l.name,
+                                                   'elevation': v},
+                                                  quiet=True),
+                       step=1.0, via_cmd=True)
             self._spin(lay, "倾斜", l.roll, -180, 180, 'li.roll',
-                       lambda v: setattr(l, 'roll', v), step=1.0)
+                       lambda v: self._invoke_cmd('light_set',
+                                                  {'name': l.name, 'roll': v},
+                                                  quiet=True),
+                       step=1.0, via_cmd=True)
         p = l.position
         for axis, cur in (('X', p.x), ('Y', p.y), ('Z', p.z)):
             # Q-B7-56-1 裁定①: 光源位置行翻译成 light_set 命令
@@ -2702,36 +2879,69 @@ class LoomGUI(QMainWindow):
                                                            'position', a, v),
                        via_cmd=True)
         # M41: 摄像机朝向存度制 (yaw/pitch/roll 环绕), 直接读写不转换
+        # Q-B7-56-2 裁定①: 相机角度/FOV 行翻译成 camera_set 命令 (度制直传)
         self._spin(lay, "朝向", c.yaw, -360, 360, 'cam.yaw',
-                   lambda v: setattr(c, 'yaw', v), step=1.0)
+                   lambda v: self._invoke_cmd('camera_set', {'name': c.name,
+                                                             'yaw': v},
+                                              quiet=True),
+                   step=1.0, via_cmd=True)
         self._spin(lay, "俯仰", c.pitch, -360, 360, 'cam.pitch',
-                   lambda v: setattr(c, 'pitch', v), step=1.0)
+                   lambda v: self._invoke_cmd('camera_set', {'name': c.name,
+                                                             'pitch': v},
+                                              quiet=True),
+                   step=1.0, via_cmd=True)
         self._spin(lay, "倾斜", c.roll, -180, 180, 'cam.roll',
-                   lambda v: setattr(c, 'roll', v), step=1.0)
+                   lambda v: self._invoke_cmd('camera_set', {'name': c.name,
+                                                             'roll': v},
+                                              quiet=True),
+                   step=1.0, via_cmd=True)
         self._spin(lay, "FOV", c.fov, 20, 120, 'cam.fov',
-                   lambda v: setattr(c, 'fov', v), step=1.0)
+                   lambda v: self._invoke_cmd('camera_set', {'name': c.name,
+                                                             'fov': v},
+                                              quiet=True),
+                   step=1.0, via_cmd=True)
         # fov_locked 语义 (engine.py): True=锁定玩家调整. 旧代码 "玩家可调" if
         # c.fov_locked 布尔颠倒 (默认 True 却显示"玩家可调"); LoomGUI 是 not
+        # Q-B7-56-2 裁定①: fov 锁定/俯仰限制按钮翻译成 camera_set 命令
         self._btn_row(lay, [("玩家可调" if not c.fov_locked else "玩家锁定",
-                             lambda: e.toggle_cam_fov_locked(c))])
+                             lambda: self._invoke_cmd('camera_set',
+                                                      {'name': c.name,
+                                                       'fov_lock': not c.fov_locked}))])
         self._btn_row(lay, [("俯仰限制: 已启用" if c.pitch_lock else "俯仰限制: 未启用",
-                             lambda: e.commit_camera(c, "俯仰角限制开关",
-                                                     lambda: setattr(c, 'pitch_lock', not c.pitch_lock)))])
+                             lambda: self._invoke_cmd('camera_set',
+                                                      {'name': c.name,
+                                                       'pitch_lock': not c.pitch_lock}))])
         if c.pitch_lock:
             self._spin(lay, "最低俯角", c.pitch_min, -180, 180, 'cam.pmin',
-                       lambda v: setattr(c, 'pitch_min', v), step=1.0)
+                       lambda v: self._invoke_cmd('camera_set',
+                                                  {'name': c.name,
+                                                   'pitch_min': v},
+                                                  quiet=True),
+                       step=1.0, via_cmd=True)
             self._spin(lay, "最高仰角", c.pitch_max, -180, 180, 'cam.pmax',
-                       lambda v: setattr(c, 'pitch_max', v), step=1.0)
+                       lambda v: self._invoke_cmd('camera_set',
+                                                  {'name': c.name,
+                                                   'pitch_max': v},
+                                                  quiet=True),
+                       step=1.0, via_cmd=True)
+        # Q-B7-56-2 裁定①: 预览/激活翻译成 camera_preview / camera_active 命令
+        # (exit_preview 走 camera_preview off=true, 不新增命令)
         if e.preview_camera is c:
-            self._btn_row(lay, [("退出预览", e.exit_camera_preview)])
+            self._btn_row(lay, [("退出预览",
+                                 lambda: self._invoke_cmd('camera_preview',
+                                                          {'off': True}))])
         else:
-            self._btn_row(lay, [("用此相机预览", lambda: e.toggle_camera_preview(c))])
+            self._btn_row(lay, [("用此相机预览",
+                                 lambda: self._invoke_cmd('camera_preview',
+                                                          {'name': c.name}))])
         # active_camera 在 editor 里存 guid (set_active_camera 写 cam.guid) 非相机
         # 对象 —— 旧代码 e.active_camera is c 永远 False, 点击后按钮文字永不刷新
         # (用户实测 2026-08-22). 与旧版GUI 同款 guid 比较.
         is_active = (e.active_camera == c.guid)
         self._btn_row(lay, [("取消激活" if is_active else "设为激活相机",
-                             lambda: e.set_active_camera(None if is_active else c))])
+                             lambda: self._invoke_cmd(
+                                 'camera_active', {} if is_active
+                                 else {'name': c.name}))])
 
     # ---------------- 300ms 轮询刷新 ----------------
     def _refresh_all(self):
@@ -3081,9 +3291,8 @@ class LoomGUI(QMainWindow):
         lay.addWidget(grid_chk)
         par_chk = QCheckBox("多核并行（重启生效）")
         par_chk.setChecked(bool(getattr(e, 'parallel_enable', True)))
-        par_chk.toggled.connect(lambda v: (s.__setitem__('parallel_enable', bool(v)),
-                                           guiloader.save_settings('loom', s),
-                                           e._notify("并行开关重启后生效", (240, 200, 90))))
+        # Q-B7-56-2 裁定①: 设置写盘翻译成 settings_set 命令 (提示保留)
+        par_chk.toggled.connect(self._cmd_set_parallel)
         lay.addWidget(par_chk)
         # 播放器/发布游戏默认渲染 API (2026-08-29 P5): 编辑器选默认;
         # 发布版玩家可 --backend / 游戏配置.json 自行调整 (Vulkan 失败的设备可切 OpenGL)

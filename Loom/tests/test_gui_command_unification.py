@@ -644,6 +644,22 @@ _FORBIDDEN_CALLS = {
     'rename', 'rename_light', 'rename_camera',
     'reparent', 'reparent_camera', 'detach', 'detach_camera',
     'vec_set',
+    # ---- Q-B7-56-2 扫尾批 (P0-1) 新增禁集: 检查器/相机/资源面板/TPS/Tag ----
+    'commit_model', 'commit_light', 'commit_camera',
+    'set_object_layer', 'set_object_tag', 'register_tag',
+    'toggle_collider', 'toggle_trigger', 'toggle_rigidbody_gravity',
+    'add_rigidbody', 'remove_rigidbody',
+    'toggle_audio_loop', 'toggle_audio_playing', 'set_audio_clip',
+    'add_audio_source', 'remove_audio_source',
+    'toggle_anim_loop', 'toggle_anim_playing', 'play_anim',
+    'add_animator', 'remove_animator',
+    'add_script', 'remove_script', 'set_script_var',
+    'new_material', 'set_saturation',
+    '_save_mesh_asset', '_save_material_asset', 'unlink_prefab',
+    'set_active_camera', 'toggle_camera_preview', 'exit_camera_preview',
+    'toggle_cam_fov_locked',
+    'toggle_logic_paused', 'step_logic_once',
+    '_asset_drop_to_scene', '_apply_material_asset',
 }
 # 白名单: 豁免面 + _notify/_refresh 类反馈 + 清单外未命令化操作 (后续批次)。
 # 命中即报 FAIL (本门要求归零, 白名单只放注释性/非调用形态)。
@@ -875,6 +891,551 @@ def t_e_backend_camera_chain():
           (len(ed.cameras), c2.parent, c1.camera_children))
 
 
+# ====================================================================
+# 断言组 F: Q-B7-56-2 P0-1 扫尾命令化 —— 旧直调语义 ≡ 命令 (GUI≡命令行)
+# ====================================================================
+
+def _ok(r):
+    return isinstance(r, dict) and 'error' not in r
+
+
+def _depth(ed):
+    return len(ed.undo.undo_stack)
+
+
+def _uniq_tag(prefix):
+    import uuid
+    return '%s%s' % (prefix, uuid.uuid4().hex[:8])
+
+
+def t_f_layer_tag_material():
+    print("---- F1 Layer/Tag: 旧 commit_model 直调语义 ≡ set_layer/set_tag 命令 ----")
+    edA = make_editor()
+    edB = make_editor()
+    wB = _Win(edB)
+    mA = edA._add_primitive('cube')
+    mB = edB._add_primitive('cube')
+    seq0 = ac.last_log_seq()
+    # Layer: 旧 = commit_model(set_object_layer(m, 2)); 新 = set_layer 命令
+    edA.commit_model(mA, "设置 Layer", lambda: edA.set_object_layer(mA, 2))
+    r = ac.dispatch('set_layer', {'name': mB.name, 'layer': 2}, wB)
+    check("F1 set_layer 命令 ok", _ok(r), r)
+    check("F1 Layer 值+撤销深度两路一致", mA.layer == mB.layer == 2
+          and _depth(edA) == _depth(edB),
+          (mA.layer, mB.layer, _depth(edA), _depth(edB)))
+    # Tag: 旧 = register_tag + commit_model(set_object_tag); 新 = set_tag (自动注册)
+    tg1 = _uniq_tag('门F1甲')
+    edA.register_tag(tg1)
+    edA.commit_model(mA, "设置 Tag", lambda: edA.set_object_tag(mA, tg1))
+    r = ac.dispatch('set_tag', {'name': mB.name, 'tag': tg1}, wB)
+    check("F1 set_tag 命令 ok (未注册自动注册)", _ok(r) and mB.tag == tg1, r)
+    check("F1 Tag 值+撤销深度两路一致", mA.tag == mB.tag == tg1
+          and _depth(edA) == _depth(edB),
+          (mA.tag, mB.tag, _depth(edA), _depth(edB)))
+    # register_tag 独立命令 (Q-B7-56-2 新增, JVM 薄壳): 幂等
+    tg2 = _uniq_tag('门F1乙')
+    r1 = ac.dispatch('register_tag', {'tag': tg2}, wB)
+    r2 = ac.dispatch('register_tag', {'tag': tg2}, wB)
+    check("F1 register_tag 命令 ok 且幂等 (dispatch 结果在 result 键)",
+          _ok(r1) and _ok(r2)
+          and (r1.get('result') or r1).get('registered') is True
+          and (r2.get('result') or r2).get('registered') is False,
+          (r1, r2))
+    check("F1 命令行路径写命令日志环",
+          {'set_layer', 'set_tag', 'register_tag'} <= set(ring_cmds(seq0)),
+          ring_cmds(seq0))
+
+
+def t_f_material_asset_save():
+    print("---- F2 材质/存资产: 旧直调 ≡ set_material/material_new/asset_save ----")
+    edA = make_editor()
+    edB = make_editor()
+    wB = _Win(edB)
+    mA = edA._add_primitive('cube')
+    mB = edB._add_primitive('cube')
+    matA = edA.add_material(name='门F2材质')
+    matB = edB.add_material(name='门F2材质')
+    # 换材质: 旧 = commit_model(setattr renderer.material, mats[i]); 新 = set_material
+    edA.commit_model(mA, "换材质",
+                     lambda: setattr(mA.renderer, 'material', matA))
+    r = ac.dispatch('set_material', {'name': mB.name, 'index': len(edB.materials) - 1}, wB)
+    check("F2 set_material 命令 ok", _ok(r), r)
+    check("F2 材质引用+撤销深度一致",
+          mB.renderer.material is matB and _depth(edA) == _depth(edB),
+          (_depth(edA), _depth(edB)))
+    # 新建材质: 旧 = ed.new_material(m); 新 = material_new
+    dA = _depth(edA)
+    edA.new_material(mA)
+    r = ac.dispatch('material_new', {'name': mB.name}, wB)
+    check("F2 material_new 命令 ok", _ok(r), r)
+    check("F2 新建材质数量+撤销深度一致",
+          len(edA.materials) == len(edB.materials)
+          and _depth(edA) == dA + 1 == _depth(edB),
+          (len(edA.materials), len(edB.materials), _depth(edA), dA, _depth(edB)))
+    # 存资产按钮: 旧 = e._save_mesh_asset/_save_material_asset (无参绑定);
+    # 新 = asset_save {what} (命令体就是同一方法, path=None 走默认名)
+    savedA = []
+    edA._save_mesh_asset = lambda p=None: savedA.append(('mesh', p))
+    savedB = []
+    edB._save_mesh_asset = lambda p=None: savedB.append(('mesh', p))
+    edA._save_mesh_asset()
+    ac.dispatch('asset_save', {'what': 'mesh'}, wB)
+    check("F2 存网格为资产: 命令体 = 同一方法 (path=None)",
+          savedA == [('mesh', None)] and savedB == [('mesh', None)],
+          (savedA, savedB))
+
+
+def t_f_components():
+    print("---- F3 组件开关: 旧 toggle 直调 ≡ collider/rigidbody/audio/animator 命令 ----")
+    edA = make_editor()
+    edB = make_editor()
+    wB = _Win(edB)
+    mA = edA._add_primitive('cube')
+    mB = edB._add_primitive('cube')
+    # 碰撞器开关: 旧 = toggle_collider; 新 = collider (缺 on = 切换)
+    en0 = mA.collider.enabled
+    edA.toggle_collider(mA)
+    r = ac.dispatch('collider', {'name': mB.name}, wB)
+    check("F3 collider 命令 ok", _ok(r), r)
+    check("F3 碰撞器开关两路一致",
+          mA.collider.enabled == mB.collider.enabled == (not en0),
+          (mA.collider.enabled, mB.collider.enabled))
+    # 触发器: 旧 = toggle_trigger; 新 = collider is_trigger 设值
+    edA.toggle_trigger(mA)
+    r = ac.dispatch('collider', {'name': mB.name,
+                                 'is_trigger': not mB.collider.is_trigger}, wB)
+    check("F3 collider is_trigger 命令 ok", _ok(r), r)
+    check("F3 触发器两路一致",
+          bool(mA.collider.is_trigger) == bool(mB.collider.is_trigger),
+          (mA.collider.is_trigger, mB.collider.is_trigger))
+    # 接触材质数值行: 旧 = 直写 collider.friction (无撤销); 新 = collider {friction}
+    # (新路径多一步撤销 = 本批改进, 状态必须一致)
+    mA.collider.friction = 0.7
+    r = ac.dispatch('collider', {'name': mB.name, 'friction': 0.7}, wB)
+    check("F3 collider friction 命令 ok", _ok(r), r)
+    check("F3 碰撞器摩擦状态一致",
+          mA.collider.friction == mB.collider.friction == 0.7,
+          (mA.collider.friction, mB.collider.friction))
+    # 刚体: 加/重力/移除
+    edA.add_rigidbody(mA)
+    r = ac.dispatch('rigidbody', {'name': mB.name, 'action': 'add'}, wB)
+    check("F3 rigidbody add 命令 ok", _ok(r) and mB.rigidbody is not None, r)
+    edA.toggle_rigidbody_gravity(mA)
+    r = ac.dispatch('rigidbody', {'name': mB.name, 'action': 'gravity'}, wB)
+    check("F3 rigidbody gravity 命令 ok", _ok(r), r)
+    check("F3 刚体重力两路一致",
+          mA.rigidbody.use_gravity == mB.rigidbody.use_gravity,
+          (mA.rigidbody.use_gravity, mB.rigidbody.use_gravity))
+    # 刚体接触材质滚动摩擦数值行 (命令层 action=set 扩 rolling_friction)
+    mA.rigidbody.rolling_friction = 0.3
+    r = ac.dispatch('rigidbody', {'name': mB.name, 'action': 'set',
+                                  'rolling_friction': 0.3}, wB)
+    check("F3 rigidbody set rolling_friction ok", _ok(r), r)
+    check("F3 刚体滚动摩擦状态一致",
+          mA.rigidbody.rolling_friction == mB.rigidbody.rolling_friction == 0.3,
+          (mA.rigidbody.rolling_friction, mB.rigidbody.rolling_friction))
+    edA.remove_rigidbody(mA)
+    r = ac.dispatch('rigidbody', {'name': mB.name, 'action': 'remove'}, wB)
+    check("F3 rigidbody remove 命令 ok", _ok(r) and mB.rigidbody is None, r)
+    # 音频: 加/clip/loop/play/音量/类别/3D 距离
+    edA.add_audio_source(mA)
+    r = ac.dispatch('audio', {'name': mB.name, 'action': 'add'}, wB)
+    check("F3 audio add 命令 ok", _ok(r) and mB.audio_source is not None, r)
+    auA, auB = mA.audio_source, mB.audio_source
+    edA.set_audio_clip(mA, '门F3.wav', auA.clip)
+    r = ac.dispatch('audio', {'name': mB.name, 'action': 'clip', 'clip': '门F3.wav'}, wB)
+    check("F3 audio clip 命令 ok", _ok(r), r)
+    check("F3 音频文件两路一致", auA.clip == auB.clip == '门F3.wav',
+          (auA.clip, auB.clip))
+    edA.toggle_audio_loop(mA)
+    r = ac.dispatch('audio', {'name': mB.name, 'action': 'loop'}, wB)
+    check("F3 audio loop 命令 ok", _ok(r), r)
+    check("F3 音频循环两路一致", auA.loop == auB.loop, (auA.loop, auB.loop))
+    auA.volume = 0.5
+    r = ac.dispatch('audio', {'name': mB.name, 'action': 'volume', 'value': 0.5}, wB)
+    check("F3 audio volume 命令 ok", _ok(r), r)
+    check("F3 音量两路一致", auA.volume == auB.volume == 0.5,
+          (auA.volume, auB.volume))
+    edA.commit_model(mA, "设置音频类别", lambda: setattr(auA, 'category', 'music'))
+    r = ac.dispatch('set_audio_3d', {'name': mB.name, 'category': 'music'}, wB)
+    check("F3 set_audio_3d category ok", _ok(r), r)
+    check("F3 音频类别两路一致", auA.category == auB.category == 'music',
+          (auA.category, auB.category))
+    auA.min_distance = 2.0
+    r = ac.dispatch('set_audio_3d', {'name': mB.name, 'min_distance': 2.0}, wB)
+    check("F3 set_audio_3d min_distance ok", _ok(r), r)
+    check("F3 最小距离两路一致", auA.min_distance == auB.min_distance == 2.0,
+          (auA.min_distance, auB.min_distance))
+    # 非法 (max<=min): 旧 GUI toast 不改; 新命令层报错不改
+    r = ac.dispatch('set_audio_3d', {'name': mB.name, 'max_distance': 1.0}, wB)
+    check("F3 max<=min 命令层拒绝", not _ok(r) and auB.max_distance != 1.0, r)
+    # 动画: 加/loop/play/clip/移除
+    edA.add_animator(mA)
+    r = ac.dispatch('animator', {'name': mB.name, 'action': 'add'}, wB)
+    check("F3 animator add 命令 ok", _ok(r) and mB.animator is not None, r)
+    anA, anB = mA.animator, mB.animator
+    edA.toggle_anim_loop(mA)
+    r = ac.dispatch('animator', {'name': mB.name, 'action': 'loop'}, wB)
+    check("F3 animator loop 命令 ok", _ok(r), r)
+    check("F3 动画循环两路一致", anA.loop == anB.loop, (anA.loop, anB.loop))
+    edA.toggle_anim_playing(mA)
+    r = ac.dispatch('animator', {'name': mB.name, 'action': 'play'}, wB)
+    check("F3 animator play 命令 ok", _ok(r), r)
+    check("F3 动画播放两路一致", anA.playing == anB.playing,
+          (anA.playing, anB.playing))
+    edA.remove_animator(mA)
+    r = ac.dispatch('animator', {'name': mB.name, 'action': 'remove'}, wB)
+    check("F3 animator remove 命令 ok", _ok(r) and mB.animator is None, r)
+
+
+def t_f_script_rows():
+    print("---- F4 脚本行: 旧 add/remove_script·set_script_var ≡ 命令 ----")
+    from script.scripts import script_options, get_script
+    edA = make_editor()
+    edB = make_editor()
+    wB = _Win(edB)
+    mA = edA._add_primitive('cube')
+    mB = edB._add_primitive('cube')
+    for ed2 in (edA, edB):
+        ed2._insp_undo_start = {}   # 裸桩: set_script_var(active=False) 要查
+    sid = next((s for s, _n in script_options()
+                if s and get_script(s).params), None)
+    check("F4 有带参数的内置脚本可选", sid is not None, script_options())
+    r = ac.dispatch('script_add', {'sid': sid, 'target': mB.name}, wB)
+    edA.add_script(mA, sid)
+    check("F4 script_add 命令 ok", _ok(r), r)
+    check("F4 挂脚本两路一致",
+          len(mA.scripts) == len(mB.scripts) == 1
+          and mA.scripts[0].script_id == mB.scripts[0].script_id == sid,
+          (len(mA.scripts), len(mB.scripts)))
+    _pdef = next(iter(get_script(sid).params))
+    pname = _pdef[0] if isinstance(_pdef, (tuple, list)) else _pdef
+    dA = _depth(edA)
+    # 旧行: apply = set_script_var(active=False) 直写 (快照压栈由 edit_model
+    # 会话协议负责, 直写本身不压栈); 新行: script_var 命令每条自带一步撤销
+    # (GUI 会话批把它合成一步 —— 用户可见语义不变, 本批修正面)。
+    edA.set_script_var(mA, 0, pname, 1.5, False, 'svar.0.' + pname)
+    r = ac.dispatch('script_var', {'name': mB.name, 'index': 0,
+                                   'key': pname, 'value': 1.5}, wB)
+    check("F4 script_var 命令 ok", _ok(r), r)
+    check("F4 脚本参数两路一致",
+          mA.scripts[0].script_vars.get(pname)
+          == mB.scripts[0].script_vars.get(pname) == 1.5,
+          (mA.scripts[0].script_vars.get(pname),
+           mB.scripts[0].script_vars.get(pname)))
+    check("F4 旧直写不进撤销 / 新命令自带一步撤销",
+          _depth(edA) == dA and _depth(edB) == dA + 1,
+          (_depth(edA), dA, _depth(edB)))
+    edA.remove_script(mA, 0)
+    r = ac.dispatch('script_remove', {'name': mB.name, 'index': 0}, wB)
+    check("F4 script_remove 命令 ok", _ok(r) and len(mB.scripts) == 0, r)
+    check("F4 移除脚本两路一致", len(mA.scripts) == len(mB.scripts) == 0)
+
+
+def t_f_light_camera_rows():
+    print("---- F5 光源/相机行: 旧 commit_light/camera·edit_ 会话 ≡ light_set/camera_set ----")
+    edA = make_editor()
+    edB = make_editor()
+    wB = _Win(edB)
+    for ed2 in (edA, edB):
+        ed2._light_undo_start = {}
+        ed2._cam_undo_start = {}
+    lA = edA._add_light('dir')
+    lB = edB._add_light('dir')
+    # 阴影/模式/截面按钮: 旧 = commit_light(setattr); 新 = light_set
+    edA.commit_light(lA, "光源阴影", lambda: setattr(lA, 'shadow', not lA.shadow))
+    r = ac.dispatch('light_set', {'name': lB.name, 'shadow': not lB.shadow}, wB)
+    check("F5 light_set shadow ok", _ok(r), r)
+    check("F5 光源阴影两路一致", lA.shadow == lB.shadow, (lA.shadow, lB.shadow))
+    edA.commit_light(lA, "光源模式", lambda: setattr(lA, 'mode', 'beam'))
+    r = ac.dispatch('light_set', {'name': lB.name, 'mode': 'beam'}, wB)
+    check("F5 light_set mode ok", _ok(r), r)
+    check("F5 光源模式两路一致", lA.mode == lB.mode == 'beam', (lA.mode, lB.mode))
+    edA.commit_light(lA, "光源截面", lambda: setattr(lA, 'shape', 'rect'))
+    r = ac.dispatch('light_set', {'name': lB.name, 'shape': 'rect'}, wB)
+    check("F5 light_set shape ok", _ok(r), r)
+    check("F5 光源截面两路一致", lA.shape == lB.shape == 'rect',
+          (lA.shape, lB.shape))
+    # 数值行 (尺寸/颜色/角度): 旧 edit_light 会话快照 1 步撤销;
+    # 新 light_set 命令 + GUI 会话批合 1 步撤销 —— 状态+深度都一致
+    edA.edit_light(lA, "尺寸", True, 'li.size', lambda: None)
+    lA.size = 2.5
+    edA.edit_light(lA, "尺寸", False, 'li.size', lambda: None)
+    vB = make_view(edB)
+    vB._spin_session_begin('尺寸')
+    vB._invoke_cmd('light_set', {'name': lB.name, 'size': 2.5}, quiet=True)
+    vB._spin_session_end('尺寸')
+    check("F5 光源尺寸行 状态+撤销深度一致",
+          lA.size == lB.size == 2.5 and _depth(edA) == _depth(edB),
+          (lA.size, lB.size, _depth(edA), _depth(edB)))
+    edA.edit_light(lA, "颜色R", True, 'li.cR', lambda: None)
+    lA.color = (0.3, lA.color[1], lA.color[2])
+    edA.edit_light(lA, "颜色R", False, 'li.cR', lambda: None)
+    vB._spin_session_begin('颜色R')
+    vB._invoke_cmd('light_set', {'name': lB.name, 'r': 0.3}, quiet=True)
+    vB._spin_session_end('颜色R')
+    check("F5 光源颜色行 状态+撤销深度一致",
+          tuple(lA.color) == tuple(lB.color) == (0.3, 1.0, 1.0)
+          and _depth(edA) == _depth(edB),
+          (tuple(lA.color), tuple(lB.color), _depth(edA), _depth(edB)))
+    edA.edit_light(lA, "朝向", True, 'li.az', lambda: None)
+    lA.azimuth = 45.0
+    edA.edit_light(lA, "朝向", False, 'li.az', lambda: None)
+    vB._spin_session_begin('朝向')
+    vB._invoke_cmd('light_set', {'name': lB.name, 'azimuth': 45.0}, quiet=True)
+    vB._spin_session_end('朝向')
+    check("F5 光源朝向行 状态+撤销深度一致",
+          lA.azimuth == lB.azimuth == 45.0 and _depth(edA) == _depth(edB),
+          (lA.azimuth, lB.azimuth, _depth(edA), _depth(edB)))
+    # 相机: 俯仰限制/fov_lock 按钮; 角度/FOV/俯仰限制数值行
+    cA = edA._add_camera()
+    cB = edB._add_camera()
+    edA.commit_camera(cA, "俯仰角限制开关",
+                      lambda: setattr(cA, 'pitch_lock', not cA.pitch_lock))
+    r = ac.dispatch('camera_set', {'name': cB.name,
+                                   'pitch_lock': not cB.pitch_lock}, wB)
+    check("F5 camera_set pitch_lock ok", _ok(r), r)
+    check("F5 俯仰限制两路一致", cA.pitch_lock == cB.pitch_lock,
+          (cA.pitch_lock, cB.pitch_lock))
+    edA.toggle_cam_fov_locked(cA)
+    r = ac.dispatch('camera_set', {'name': cB.name,
+                                   'fov_lock': not cB.fov_locked}, wB)
+    check("F5 camera_set fov_lock ok (toggle 语义同款)", _ok(r), r)
+    check("F5 fov 锁定两路一致", cA.fov_locked == cB.fov_locked,
+          (cA.fov_locked, cB.fov_locked))
+    edA.edit_camera(cA, "FOV", True, 'cam.fov', lambda: None)
+    cA.fov = 90.0
+    edA.edit_camera(cA, "FOV", False, 'cam.fov', lambda: None)
+    vB._spin_session_begin('FOV')
+    vB._invoke_cmd('camera_set', {'name': cB.name, 'fov': 90.0}, quiet=True)
+    vB._spin_session_end('FOV')
+    check("F5 相机 FOV 行 状态+撤销深度一致",
+          cA.fov == cB.fov == 90.0 and _depth(edA) == _depth(edB),
+          (cA.fov, cB.fov, _depth(edA), _depth(edB)))
+    edA.edit_camera(cA, "朝向", True, 'cam.yaw', lambda: None)
+    cA.yaw = 120.0
+    edA.edit_camera(cA, "朝向", False, 'cam.yaw', lambda: None)
+    vB._spin_session_begin('朝向')
+    vB._invoke_cmd('camera_set', {'name': cB.name, 'yaw': 120.0}, quiet=True)
+    vB._spin_session_end('朝向')
+    check("F5 相机朝向行 状态+撤销深度一致",
+          cA.yaw == cB.yaw == 120.0 and _depth(edA) == _depth(edB),
+          (cA.yaw, cB.yaw, _depth(edA), _depth(edB)))
+    edA.edit_camera(cA, "最低俯角", True, 'cam.pmin', lambda: None)
+    cA.pitch_min = -70.0
+    edA.edit_camera(cA, "最低俯角", False, 'cam.pmin', lambda: None)
+    vB._spin_session_begin('最低俯角')
+    vB._invoke_cmd('camera_set', {'name': cB.name, 'pitch_min': -70.0}, quiet=True)
+    vB._spin_session_end('最低俯角')
+    check("F5 俯仰限制数值行 状态+撤销深度一致",
+          cA.pitch_min == cB.pitch_min == -70.0 and _depth(edA) == _depth(edB),
+          (cA.pitch_min, cB.pitch_min, _depth(edA), _depth(edB)))
+
+
+def t_f_camera_active_preview():
+    print("---- F6 激活相机/预览: 旧 set_active_camera·toggle/exit_preview ≡ 命令 ----")
+    edA = make_editor()
+    edB = make_editor()
+    wB = _Win(edB)
+    cA = edA._add_camera()
+    cB = edB._add_camera()
+    for ed2 in (edA, edB):
+        ed2._refresh_effective_skybox = lambda: None   # 裸桩无天空盒状态
+        ed2._preview_orbit = None
+    edA.set_active_camera(cA)
+    r = ac.dispatch('camera_active', {'name': cB.name}, wB)
+    check("F6 camera_active ok", _ok(r), r)
+    check("F6 激活相机两路一致 (各自指向各自的相机 guid)",
+          edA.active_camera == cA.guid and edB.active_camera == cB.guid,
+          (edA.active_camera, edB.active_camera))
+    edA.set_active_camera(None)
+    r = ac.dispatch('camera_active', {}, wB)
+    check("F6 camera_active 取消激活 ok", _ok(r), r)
+    check("F6 取消激活两路一致",
+          edA.active_camera is None and edB.active_camera is None)
+    edA.toggle_camera_preview(cA)
+    r = ac.dispatch('camera_preview', {'name': cB.name}, wB)
+    check("F6 camera_preview ok", _ok(r), r)
+    check("F6 预览相机两路一致", edA.preview_camera is cA
+          and edB.preview_camera is cB, (edA.preview_camera, edB.preview_camera))
+    edA.exit_camera_preview()
+    r = ac.dispatch('camera_preview', {'off': True}, wB)
+    check("F6 camera_preview off ok (exit_preview 有现成命令)", _ok(r), r)
+    check("F6 退出预览两路一致", edA.preview_camera is None
+          and edB.preview_camera is None)
+
+
+def t_f_asset_panel_tps():
+    print("---- F7 资源面板按钮/双击 + TPS: GUI 处理函数发出等价命令 ----")
+    ed = make_editor()
+    v = make_view(ed)
+    calls = []
+    ed._find_asset = lambda key: {'type': key[0], 'key': key[1]} if key else None
+    ed._asset_drop_to_scene = lambda it, pos: calls.append(('place', dict(it)))
+    ed._apply_material_asset = lambda it, m: calls.append(('apply', dict(it), m.name))
+    seq0 = ac.last_log_seq()
+    # 双击 = asset_place
+    v._res_item_data = lambda item: item
+    v._res_double(('mesh', '门F7'))
+    check("F7 双击发 asset_place 命令",
+          ('asset_place', {'type': 'mesh', 'key': '门F7'}) in v.uitree.logs,
+          v.uitree.logs)
+    # 按钮 放入场景 = asset_place; 应用 = asset_apply
+    v._res_selected = ('material', '门F7m')
+    v._cmd_place_asset()
+    check("F7 放入按钮发 asset_place 命令",
+          any(x[0] == 'asset_place' for x in v.uitree.logs), v.uitree.logs)
+    ed._add_primitive('cube')
+    v._cmd_apply_asset()
+    check("F7 应用按钮发 asset_apply 命令",
+          any(x[0] == 'asset_apply' for x in v.uitree.logs), v.uitree.logs)
+    check("F7 旧直调本体仍被命令体触达 (place/apply 各到位)",
+          [c[0] for c in calls] == ['place', 'place', 'apply'], calls)
+    # 命令行路径: 同一条命令写命令日志环 (GUI 路径写 uitree 教学日志, 两通道)
+    ed2 = make_editor()
+    ed2._find_asset = lambda key: {'type': key[0], 'key': key[1]} if key else None
+    ed2._asset_drop_to_scene = lambda it, pos: None
+    ed2._apply_material_asset = lambda it, m: None
+    ac.dispatch('asset_place', {'type': 'mesh', 'key': '门F7'}, _Win(ed2))
+    ac.dispatch('asset_apply', {'type': 'material', 'key': '门F7m'}, _Win(ed2))
+    check("F7 命令日志环同款",
+          {'asset_place', 'asset_apply'} <= set(ring_cmds(seq0)), ring_cmds(seq0))
+    # TPS 暂停/步进: GUI 处理函数 vs 命令行, 可观察 = 逻辑暂停态 + 步进请求
+    edA = make_editor()
+    vA = make_view(edA)
+    edB = make_editor()
+    wB = _Win(edB)
+    for ed2 in (edA, edB):
+        ed2.is_playing = True
+        clk = type('C', (), {'reset': lambda s: None})()
+        ed2._ensure_split = lambda _c=clk: _c
+    vA._act_tps_pause = type('B', (), {'setText': lambda self, s: None})()
+    vA._refresh_status = lambda: None
+    vA._notify = lambda msg, color=None: edA._notifs.append(str(msg))
+    vA._cmd_tps_pause()
+    r = ac.dispatch('logic_pause', {}, wB)
+    check("F7 logic_pause 命令 ok (新命令, EngineCore 薄壳)", _ok(r), r)
+    check("F7 TPS 暂停两路一致",
+          getattr(edA, '_logic_paused', None) is True
+          and getattr(edB, '_logic_paused', None) is True,
+          (getattr(edA, '_logic_paused', None), getattr(edB, '_logic_paused', None)))
+    vA._cmd_tps_step()
+    r = ac.dispatch('logic_step', {}, wB)
+    check("F7 logic_step 命令 ok (暂停态步进)", _ok(r), r)
+    check("F7 步进请求两路一致",
+          getattr(edA, '_step_requested', False) is True
+          and getattr(edB, '_step_requested', False) is True,
+          (getattr(edA, '_step_requested', None), getattr(edB, '_step_requested', None)))
+    # GUI 暂停/步进按钮写等价命令日志
+    check("F7 TPS 按钮写等价命令日志",
+          any(x[0] == 'logic_pause' for x in vA.uitree.logs)
+          and any(x[0] == 'logic_step' for x in vA.uitree.logs), vA.uitree.logs)
+
+
+def t_f_settings_parallel():
+    print("---- F8 多核并行复选框: 设置写盘翻译成 settings_set 命令 ----")
+    ed = make_editor()
+    v = make_view(ed)
+    check("F8 GUI 有 _cmd_set_parallel 翻译方法", hasattr(v, '_cmd_set_parallel'))
+    if not hasattr(v, '_cmd_set_parallel'):
+        return
+    orig = ac._COMMANDS.get('settings_set')
+    seen = []
+    ac._COMMANDS['settings_set'] = (
+        lambda win, args: seen.append(dict(args)) or {'ok': True})
+    try:
+        v._cmd_set_parallel(False)
+    finally:
+        ac._COMMANDS['settings_set'] = orig
+    check("F8 并行开关写盘走 settings_set 命令",
+          seen == [{'key': 'parallel_enable', 'value': False}], seen)
+
+
+# ====================================================================
+# 断言组 G: Q-B7-56-2 新命令 JVM 对拍 (logic_pause/logic_step/register_tag)
+#   七步: 分类=薄壳命令; 公共实现已在 EngineCore/SceneQueryMixin; 本组=对拍门。
+# ====================================================================
+
+def t_g_jvm_parity_new_commands():
+    print("---- G1 GL/VK 同源: 新命令的公共实现两端同一函数对象 ----")
+    from editor import EditorApp as EA
+    import render.vk.driver as _sd_mod
+    SD = _sd_mod.SceneDriver
+    for n in ('toggle_logic_paused', 'step_logic_once'):
+        check("G1 %s GL ≡ VK (is 同源, EngineCore)" % n,
+              getattr(EA, n, None) is getattr(SD, n, None)
+              and getattr(EA, n).__qualname__.startswith('EngineCore'),
+              (getattr(EA, n, None), getattr(SD, n, None)))
+    check("G1 register_tag GL ≡ VK (is 同源, SceneQueryMixin)",
+          EA.register_tag is SD.register_tag
+          and EA.register_tag.__qualname__.startswith('SceneQueryMixin'),
+          (EA.register_tag, SD.register_tag))
+    check("G1 新命令已入命令表 (薄壳)",
+          {'logic_pause', 'logic_step', 'register_tag'} <= set(ac._COMMANDS),
+          sorted(ac._COMMANDS)[-6:])
+
+    print("---- G2 GL/VK 数值对拍: 暂停/步进/注册 同一可观察结果 ----")
+    gl = _gl_engine_stub(_scene_data())
+    vk = _vk_driver(_scene_data())
+    for eng, clock_attr in ((gl, '_ensure_split'), (vk, '_clock')):
+        eng.is_playing = True
+        clk = type('C', (), {'reset': lambda s: None})()
+        if clock_attr == '_ensure_split':
+            eng._ensure_split = lambda _c=clk: _c
+        else:
+            eng._clock = clk
+    gl._logic_paused = False
+    vk._logic_paused = False
+    check("G2 未暂停时 step 两端都 False",
+          gl.step_logic_once() is False and vk.step_logic_once() is False)
+    # 暂停: 两端 toggle 后同进入暂停态
+    p1 = gl.toggle_logic_paused()
+    p2 = vk.toggle_logic_paused()
+    check("G2 toggle 暂停两端同态",
+          p1 is True and p2 is True
+          and gl._logic_paused_state() == vk._logic_paused_state(),
+          (p1, p2))
+    # 暂停态步进: 两端都置步进请求
+    s1 = gl.step_logic_once()
+    s2 = vk.step_logic_once()
+    check("G2 暂停态 step 两端同真",
+          s1 is True and s2 is True
+          and bool(getattr(gl, '_step_requested', False))
+          and bool(getattr(vk, '_step_requested', False)),
+          (s1, s2, getattr(gl, '_step_requested', None),
+           getattr(vk, '_step_requested', None)))
+    # register_tag 两端同源 (模块态共享): 一端注册另一端可见
+    tga, tgb = _uniq_tag('G2门甲'), _uniq_tag('G2门乙')
+    r1 = gl.register_tag(tga)
+    r2 = vk.register_tag(tgb)
+    check("G2 register_tag 一端注册两端可见",
+          r1 is True and r2 is True and vk.tag_exists(tga)
+          and gl.tag_exists(tgb), (r1, r2))
+
+
+# ====================================================================
+# 断言组 H: P1-1 D10=B 拒批 toast 退化修复 (文案断言)
+# ====================================================================
+
+def t_h_toast_text():
+    print("---- H1 批内 Ctrl+Z: toast 是原因串而非 'True' (P1-1) ----")
+    ed = make_editor()
+    w = _Win(ed)
+    ed._add_primitive('cube')
+    ac.dispatch('agent_batch_begin', {'lease_s': 0}, w)
+    v = make_view(ed)
+    v._cmd_undo()
+    notif = ed._notifs[-1] if ed._notifs else '(无 toast)'
+    check("H1 拒批 toast = 原因串 (非 'True')",
+          notif != 'True' and '批次进行中' in notif
+          and notif.endswith('暂不可撤销'), notif)
+    ac.dispatch('agent_batch_cancel', {}, w)
+    ed._notifs.clear()
+    v._cmd_undo()
+    check("H2 批取消后 undo 正常且无拒批 toast",
+          all('批次进行中' not in n for n in ed._notifs), ed._notifs)
+
+
 if __name__ == "__main__":
     print("========== Q-B7-56-1 GUI 全量命令化 + 相机命令进撤销栈 门 ==========")
     # 逐组异常隔离: 未落地的新 API (修前红) 报 FAIL 并继续, 不许半路崩掉
@@ -886,7 +1447,12 @@ if __name__ == "__main__":
                t_b_deny_semantics_preserved,
                t_c_camera_commands_push_undo, t_c_gui_camera_legacy_no_undo,
                t_d_no_direct_calls, t_d_dispatch_scope_param,
-               t_e_backend_camera_chain):
+               t_e_backend_camera_chain,
+               t_f_layer_tag_material, t_f_material_asset_save,
+               t_f_components, t_f_script_rows, t_f_light_camera_rows,
+               t_f_camera_active_preview, t_f_asset_panel_tps,
+               t_f_settings_parallel,
+               t_g_jvm_parity_new_commands, t_h_toast_text):
         try:
             _t()
         except Exception as _e:

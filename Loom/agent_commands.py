@@ -1038,6 +1038,28 @@ def cmd_play(win, args):
             'paused': bool(getattr(ed, '_logic_paused', False))}
 
 
+@command('logic_pause', '暂停/恢复逻辑时钟 (F9 同款): {} (toggle; 未播放时无效)'
+                   ' (Q-B7-56-2: GUI TPS 按钮与命令行同一命令体)')
+def cmd_logic_pause(win, args):
+    # Q-B7-56-2 JVM 七步: 分类=GUI 点击命令化; 公共实现已在 EngineCore
+    # (toggle_logic_paused: GL/VK 同一函数对象, 见 test_gui_command_unification G1);
+    # 本命令是薄壳 (无新增引擎逻辑, 无后端差异)。
+    ed = win.editor
+    paused = ed.toggle_logic_paused()
+    return {'paused': bool(paused),
+            'playing': bool(getattr(ed, 'is_playing', False))}
+
+
+@command('logic_step', '步进 1 逻辑帧 (F10 同款, 仅暂停态生效): {}')
+def cmd_logic_step(win, args):
+    # Q-B7-56-2 JVM 七步: 薄壳, 公共实现 EngineCore.step_logic_once (两端同源)。
+    ed = win.editor
+    if not ed.step_logic_once():
+        return {'error': '未在暂停态 (先 logic_pause 或 F9), 步进未生效',
+                'stepped': False}
+    return {'stepped': True}
+
+
 @command('light_add', '添加光源: dir|point|spot（2026-10-19 加聚光灯）')
 def cmd_light_add(win, args):
     win.editor._add_light(args.get('kind', 'dir'))
@@ -1998,7 +2020,10 @@ def cmd_set_env(win, args):
             'size': cube.size, 'guid': cube.guid, 'managed': _ctx is not None}
 
 
-@command('collider', '碰撞器开关: {name?, on?} (缺 on = 切换)')
+@command('collider', '碰撞器: {name?, on?} (缺 on = 切换 enabled); '
+                      '{name?, is_trigger?} 切/设触发器; '
+                      '{name?, friction?/restitution?/rolling_friction?} 设接触材质'
+                      ' (Q-B7-56-2 扩参数: GUI 检查器触发器按钮/摩擦数值行同一命令体)')
 def cmd_collider(win, args):
     ed = win.editor
     kind, m = _resolve(ed, args, ('model',))
@@ -2006,10 +2031,30 @@ def cmd_collider(win, args):
         return _no_target(('model',))
     if getattr(m, 'collider', None) is None:
         return {'error': '该物体没有碰撞器组件'}
+    # 接触材质 (B1): friction/restitution/rolling_friction 单设 (一步撤销)
+    _col_fields = (('friction', 'friction'), ('restitution', 'restitution'),
+                   ('rolling_friction', 'rolling_friction'))
+    if any(k in args for k, _a in _col_fields):
+        def _apply_contact():
+            for k, a in _col_fields:
+                if k in args:
+                    setattr(m.collider, a, as_float(args[k]))
+        ed.commit_model(m, "命令: 碰撞器接触材质", _apply_contact)
+    # 触发器 (2026-10-18 档序17): is_trigger 传 bool = 设值, 传 None/缺省带键 = 切换
+    if 'is_trigger' in args:
+        want_t = None if args.get('is_trigger') is None \
+            else as_bool(args.get('is_trigger'))
+        if want_t is None or want_t != bool(getattr(m.collider, 'is_trigger', False)):
+            ed.toggle_trigger(m)
+    # 启用开关: on 缺省切换 (既有语义不变)
     want = None if args.get('on') is None else as_bool(args.get('on'))
     if want is None or want != bool(m.collider.enabled):
         ed.toggle_collider(m)
-    return {'name': m.name, 'enabled': bool(m.collider.enabled)}
+    return {'name': m.name, 'enabled': bool(m.collider.enabled),
+            'is_trigger': bool(getattr(m.collider, 'is_trigger', False)),
+            'friction': getattr(m.collider, 'friction', None),
+            'restitution': getattr(m.collider, 'restitution', None),
+            'rolling_friction': getattr(m.collider, 'rolling_friction', None)}
 
 
 @command('rigidbody', '刚体: {name?, action=add|remove|gravity|set} '
@@ -2044,6 +2089,9 @@ def cmd_rigidbody(win, args):
                 rb.friction = as_float(args['friction'], rb.friction)
             if 'restitution' in args:
                 rb.restitution = as_float(args['restitution'], rb.restitution)
+            if 'rolling_friction' in args:      # Q-B7-56-2: GUI 滚动摩擦行同一命令体
+                rb.rolling_friction = as_float(args['rolling_friction'],
+                                               rb.rolling_friction)
             if 'velocity' in args and args['velocity']:
                 v = list(args['velocity'])
                 if len(v) == 3:
@@ -2273,8 +2321,14 @@ def cmd_script_var(win, args):
     if not key:
         return {'error': '需要 key (参数名; inspect 可看已有参数)'}
     v = as_float(args.get('value'), 0.0)
-    # active=False = 一次到位并压栈 (对齐 GUI 松手提交, 不是拖动中的活跃编辑)
-    ed.set_script_var(m, i, key, v, False, 'cmd.svar.%d.%s' % (i, key))
+    # active=False = 一次到位 (对齐 GUI 松手提交)。
+    # Q-B7-56-2 修正: set_script_var(active=False) 只有在 GUI 会话协议预先登记
+    # 快照 (kkey 已在 _insp_undo_start) 时才压栈 —— 命令行独立调用的 kkey 永远
+    # 不在会话表里, 撤销从未发生 (与本命令"一步撤销"的帮助不符, 实测抓到)。
+    # 包一层 commit_model (快照->写->差异数据才压栈) 保证命令一次写 = 一步撤销;
+    # 写入仍走 set_script_var 单源。
+    ed.commit_model(m, '脚本参数', lambda: ed.set_script_var(
+        m, i, key, v, False, 'cmd.svar.%d.%s' % (i, key)))
     return {'name': m.name, 'index': i, key: m.scripts[i].script_vars.get(key)}
 
 
@@ -2827,6 +2881,25 @@ def cmd_get_layer_tag(win, args):
 def cmd_list_tags(win, args):
     import kernels.layer_tag as layer_tag
     return {'tags': layer_tag.get_tags()}
+
+
+@command('register_tag', '注册新 Tag (幂等): {tag} (非法抛错; 已存在返回 registered=False)'
+                   ' (Q-B7-56-2: GUI Tag 下拉与命令行同一注册入口)')
+def cmd_register_tag(win, args):
+    # Q-B7-56-2 JVM 七步: 分类=GUI 点击命令化; 公共实现已在 SceneQueryMixin
+    # .register_tag (scene/query.py, GL/VK 同一函数对象) + kernels/layer_tag 模块;
+    # 本命令是薄壳。
+    ed = win.editor
+    tg = args.get('tag')
+    if not tg:
+        return {'error': '需要 tag'}
+    if isinstance(tg, str):
+        tg = tg.strip()
+    try:
+        created = ed.register_tag(tg)
+    except ValueError as e:
+        return {'error': str(e)}
+    return {'tag': tg, 'registered': bool(created)}
 
 
 @command('list_layers', '列出所有层编号与层名')
