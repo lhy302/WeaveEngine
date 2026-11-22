@@ -276,21 +276,23 @@ class LoomGUI(QMainWindow):
             self._draw_light_icons(ctl)
             self._draw_camera_icons(ctl)
             return
-        if getattr(ctl, 'show_grid', True):
+        # Q-B7-53-1（2026-11-22 真窗口取证）：GL 侧网格由**帧执行器的场景 pass 内**画
+        # （深度附件 = 刚写完的场景深度，见 render/gl/render.py::_draw_grid_in_scene），
+        # 该后端把 grid_in_scene_pass 置 True -> 这里不再重复画。VK 侧仍走下面的叠加层
+        # 调用点（它的深度视图 = 主 pass 深度视图，语义正确）。
+        if (getattr(ctl, 'show_grid', True)
+                and not getattr(ctl, 'grid_in_scene_pass', False)):
             out = ctl.grid_geometry()
             if out is not None:
                 verts, cols = out
-                # 对齐旧版GUI: 显式绑定 FBO + 开深度/混合 (网格线 alpha 淡出,
-                # 物体在前遮挡网格). 2026-08-18: 不用 scope 的 enable_only ——
-                # Qt 外部模式下 enable_only 会破坏 GL_LINE_WIDTH (线宽 0 线不可见),
-                # 具名 enable + draw_lines 内部重设线宽 (engine.py).
-                # 深度测试: 依赖 _clear_main_fbo 每帧 ctx.clear 清深度到 far
-                # (缓存 FBO 绑定后 clear 有效) -> 网格线 vs far 恒通过, 静止不
-                # 自剔除; 物体深度更近时正确遮挡网格 (对齐 pygame 语义).
-                # S3 (Q-B7-47-1 阶段 3): 叠加层状态走 overlay_scope 钩子（与 gizmo/
-                # 选中框同一条同源路径）—— GL 侧原样转发 scope+enable（作用顺序与
-                # 迁移前逐位一致，行为零变化）；VK 侧映射为「深度开(less+写) +
-                # alpha 混合」的 flush 批次（loom_pass_vk）。
+                # 叠加层状态走 overlay_scope 钩子（与 gizmo/选中框同一条同源路径）。
+                # Q-B7-53-1（2026-11-22 真窗口取证，更正 2026-08-18 的旧说法）：
+                # 「依赖 _clear_main_fbo 每帧清深度到 far、物体深度更近时遮挡网格」
+                # 只在不走后处理链时才成立 —— 后处理开启（默认）时主 pass 的深度写在
+                # color.hdr 上，屏幕 FBO 的深度从没被写过，GL 网格深度测试恒失败（0 像素，
+                # 见 render/gl/render.py::_draw_grid_in_scene 的真因说明）。所以 GL 侧网格
+                # 已改到场景 pass 内绘制（grid_in_scene_pass=True -> 本分支只在 VK 生效）；
+                # VK 的深度附件 = 主 pass 深度视图，本调用点的 depth_test/blend 语义正确。
                 with ctl.overlay_scope(framebuffer=ctl._screen_fb(),
                                        enable=('depth_test', 'blend')):
                     ctl.draw_lines(verts, cols)

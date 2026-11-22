@@ -98,6 +98,9 @@ class MinimalEditorView(IEditorView):
 
     def _draw_grid(self, ctl):
         """无限网格 (2026-08-14): 跟随相机, 远处淡出, 可 show_grid 开关."""
+        if getattr(ctl, 'grid_in_scene_pass', False):
+            # Q-B7-53-1：GL 侧网格由帧执行器画进场景目标（深度 = 场景深度）
+            return
         if not getattr(ctl, 'show_grid', True):
             return
         out = ctl.grid_geometry()

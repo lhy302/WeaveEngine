@@ -678,8 +678,12 @@ class GLEngine(EngineCore, ShadowMixin, HudMixin, RenderMixin, ModelGpuMixin, Li
         # 2026-08-18: 外部模式绘制前绑定缓存 widget FBO (scope 退出会把绑定
         # 破坏成 0, 无 scope 的调用直接画会画到 0 不可见). pygame 模式绑定
         # ctx.screen 无副作用.
+        # Q-B7-53-1（2026-11-22）：帧执行器在**场景目标内部**画网格时必须画到当前
+        # 绑定目标（后处理开启时 = HDR FBO），不能强制回屏幕 FBO —— 用
+        # _line_target_override 显式指定；None = 旧行为（逐位不变）。
         if getattr(self, '_external_ctx', False):
-            self._screen_fb().use()
+            _ovr = getattr(self, '_line_target_override', None)
+            (_ovr if _ovr is not None else self._screen_fb()).use()
         if not hasattr(self, '_line_prog'):
             self._line_prog = self.ctx.program(vertex_shader=_LINE_VERT,
                                                fragment_shader=_LINE_FRAG)

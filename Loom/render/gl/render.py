@@ -560,10 +560,71 @@ class RenderMixin:
         return self._prepare_bucket_frame()
 
     def _backend_execute_frame(self, plan, prepare=None, before_pass=None, after_pass=None):
-        """钩子（GL）：FramePlan 执行，原样转发 _frame_executor.execute（GLFrameExecutor）。"""
+        """钩子（GL）：FramePlan 执行（GLFrameExecutor）+ 编辑器网格进**场景目标**。
+
+        Q-B7-53-1（2026-11-22，真窗口取证）：编辑器网格原本由视图层在 plan 之后用
+        overlay_scope(framebuffer=_screen_fb()) 画。后处理开启（默认）时主 pass 画进
+        color.hdr（深度附件在那），屏幕 FBO 的深度**从未被主 pass 写过**（tonemap 关
+        深度测试）—— 逐 pass 实测：main 后 HDR 深度 1.0 / 中心 0.993，tonemap 后屏幕
+        深度 0.0 / 中心 0.246。于是网格的深度测试恒失败 -> GL 编辑器网格整体不可见
+        （实测 0 像素）。VK 侧叠加层挂的是「主 pass 深度视图」，所以两端表现不同。
+
+        修法（不改叠加层架构、不动 VK）：网格由本钩子在**最后一个 3D pass 之后**
+        （后处理之前）画进**当前场景目标** —— 深度附件就是刚写完的场景深度，深度测试
+        与物体遮挡自然成立；视图层读 grid_in_scene_pass 后不再重复画。
+        """
+        ids = tuple(getattr(p, 'id', '') for p in plan.passes)
+        seq = [pid for pid in ('main', 'sky', 'world_ui') if pid in ids]
+        after_id = seq[-1] if seq else None
+
+
+        def _after(spec, _inner=after_pass):
+            if _inner is not None:
+                _inner(spec)
+            if spec.id == after_id:
+                # 惰性取目标：后处理链在首次执行时才建/重建（尺寸变化会 release
+                # 旧 FBO），提前取会拿到已释放对象（实测 InvalidObject）。
+                self._draw_grid_in_scene(self._grid_scene_target(plan))
         return self._frame_executor.execute(plan, prepare=prepare,
                                             before_pass=before_pass,
-                                            after_pass=after_pass)
+                                            after_pass=_after)
+
+    # Q-B7-53-1：网格在场景 pass 内绘制（视图层据此跳过 plan 之后的重复绘制）
+    grid_in_scene_pass = True
+
+    def _grid_scene_target(self, plan):
+        """本帧 3D 场景目标 FBO：后处理链开启时 = HDR 目标，否则 = 屏幕目标。"""
+        try:
+            if any(getattr(p, 'id', '') == 'tonemap' for p in plan.passes):
+                from render.contract.post import HDR_TARGET
+                import render.gl.post_gl as _post_gl
+                return _post_gl.fbo_for(self, HDR_TARGET)
+        except Exception as e:      # 失败必须可见（不许静默画到错误目标）
+            print('[grid] 取场景目标失败, 网格退回屏幕目标: %r' % (e,))
+        return self._screen_fb()
+
+    def _draw_grid_in_scene(self, framebuffer):
+        """把编辑器网格画进**当前场景目标**（深度 = 刚写完的场景深度）。
+
+        只对编辑器生效（grid_geometry 是 _EditorCore 的方法；播放器没有该方法 ->
+        零开销跳过）。深度语义与旧叠加层一致：开深度测试 + 开 alpha 混合。
+        """
+        if getattr(self, 'is_playing', False) or not getattr(self, 'show_grid', True):
+            return
+        geo = getattr(self, 'grid_geometry', None)
+        if not callable(geo) or framebuffer is None:
+            return
+        out = geo()
+        if out is None:
+            return
+        verts, cols = out
+        self._line_target_override = framebuffer
+        try:
+            with self.overlay_scope(framebuffer=framebuffer,
+                                    enable=('depth_test', 'blend')):
+                self.draw_lines(verts, cols)
+        finally:
+            self._line_target_override = None
 
     def _prepare_bucket_frame(self):
         """A2 (2026-08-29) 每帧一次: 当帧世界矩阵 f32 化 + 按 mesh 桶重排 +
