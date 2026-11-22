@@ -36,6 +36,16 @@
 > 图 1/2/2a/2b/4/7/8/11/13/15/16/19 相应更新；文件清单 158→**159 个 .py**（**59649 行**）；
 > 验证体系新增 B7-56 门（test_gui_command_unification 83 条）。
 
+> **B7-56-2 扫尾批同步（2026-11-22，终审 P0-1+P1-1+P1-2+P1-3 收口）**：裁定① 无范围条款 —— 检查器 commit_*
+> 家族（Layer/Tag/材质/光源/相机/音频类别）、组件开关（碰撞器/触发器/刚体/音频/动画）、组件·脚本·材质·存资产增删、
+> 27+1 条 via_cmd=False 数值行（缩放/饱和度/接触材质/音频 3D/脚本变量/灯尺寸强度颜色角度/相机角度 FOV 俯仰限制）、
+> 相机预览/激活/fov 锁、资源面板按钮/双击、TPS 暂停/步进、多核并行设置写盘 —— **全部改走 _invoke_cmd 命令层**
+> （豁免面只剩鼠标拾取/拖拽、开发者相机连贯移动、渲染循环、_notify 反馈与读侧）；命令表 103→**106 个**
+> （新增 logic_pause / logic_step / register_tag 薄壳，公共实现已在 EngineCore/SceneQueryMixin，G 组两端对拍；
+> collider/rigidbody 扩参接住触发器与接触材质行；cmd_script_var 修"独立调用从不压撤销"）；P1-1 D10=B 拒批
+> toast 退化（"True"）修复。图 4/13/15/19 更新；159 个 .py（**60497 行**，口径不变）；
+> 门扩到 **203** 条（A 43 / B 17 / C 19 / D 6 / E 23 / F 85 / G 8 / H 2，扩容前基线 108 实跑）。
+
 > 相对 v1 的三个改动：**① 拆成多张小图**（一张图超过 ~15 个节点必然乱，这是 mermaid 的排版极限，不是画法问题）；
 > **② 节点里放进真实文件**，功能与文件之间用 `实现于` 连线；**③ 每条线上写清关系**（调用 / 拼装 / 共享契约 / import）。
 > 颜色按角色区分，同一张图里看颜色就知道哪个是门面、哪个是契约、哪个是文件。
@@ -162,7 +172,7 @@ flowchart TB
 | 打包游戏（`game_player.py`） | **能**：同播放器一套逻辑（复用 run_player，`:170` 调同一 resolve_backend） | `game_player.py:170` | 同播放器 |
 | 运行期失败（VK 渲染循环内崩） | — | `VkRunError` | **不回退**：打印原因后非零退出（`run_player.py:438-439`） |
 
-> 编辑器里那个「渲染 API」下拉框（`gui/main_window.py:3104-3110`，B4 后归位；原 `ui/loom_gui.py`）写的是**游戏设置**，
+> 编辑器里那个「渲染 API」下拉框（`gui/main_window.py:3297-3318`，B4 后归位；原 `ui/loom_gui.py`）写的是**游戏设置**，
 > 即「下次启动播放器/打包游戏用哪个」，不是「编辑器自己用哪个」。
 > `guiloader.py:47` 的注释也这么写：`播放器/发布游戏默认渲染 API (编辑器选)`（默认值 vulkan）。
 > 所以同一个键 `render_api` 在编辑器里是「替别人设的」，在播放器里是「我自己用的」—— 这是真实的不对称。
@@ -467,9 +477,9 @@ flowchart LR
   ED["EditorApp<br/>editor/app.py 32（B4 装配壳）<br/>= _EditorCore + GLEngine"]:::facade
   GE["GLEngine<br/>render/gl/engine.py 1638"]:::facade
   COR["★ _EditorCore<br/>editor/core.py 3101 · 152 方法<br/>编辑器能力唯一实现（后端无关）"]:::contract
-  V["Qt 视图<br/>gui/main_window.py 3731<br/>（B4 拆自 ui/loom_gui.py 4339）"]:::file
+  V["Qt 视图<br/>gui/main_window.py 3940<br/>（B4 拆自 ui/loom_gui.py 4339）"]:::file
   U["撤销/重做<br/>editor/undo/ 6 文件 1469 行<br/>registry 364 + cmd_object 400<br/>+ cmd_scene 395 + cmd_camera 148<br/>+ cmd_light 117"]:::file
-  EAI["EAI 命令面<br/>agent_commands.py 4134<br/>103 个 @command"]:::entry
+  EAI["EAI 命令面<br/>agent_commands.py 4207<br/>106 个 @command"]:::entry
   FD["文件对话框<br/>filedialog.py 295"]:::file
   PW["播放窗口<br/>loom_player_window.py 308"]:::file
   S["场景 I/O<br/>sceneio.py 97（薄门面）<br/>→ scene/ 按域拆分"]:::file
@@ -654,7 +664,7 @@ sequenceDiagram
 # 图 13 文件清单（按功能簇归组，159 个 .py）
 
 图上画不下的全量在这里 —— 这是「功能分布在哪几个文件」的表格版。行数 2026-11-22 实测（物理行；口径 = `len(text.split('\n'))`，与包内 135 文件既有口径一致；终审 F-4 复算时把 2026-11-21 混用的三处行数——Loom.py / build_entry.py / 门文件——统一到同一口径）。
-**20 个包共 135 文件 / 46394 行 + 顶层平铺 22 文件 / 12006 行 + tests 门文件 2 / 1249 行 = 159 文件 / 59649 行。**（B7-56/B7-57 后 2026-11-22 实测，口径不变 = `len(text.split('\n'))`）
+**20 个包共 135 文件 / 46603 行 + 顶层平铺 22 文件 / 12079 行 + tests 门文件 2 / 1815 行 = 159 文件 / 60497 行。**（B7-56-2 后 2026-11-22 实测，口径不变 = `len(text.split('\n'))`）
 
 ### A 入口层（顶层平铺）
 | 文件 | 行数 | 职责 |
@@ -741,10 +751,10 @@ sequenceDiagram
 | `editor/viewport/__init__.py` | 13 | viewport 包。 |
 | `editor/__init__.py` | 38 | editor 包门面（re-export EditorApp 等，`from editor import EditorApp` 一行不改）。 |
 
-### H gui/（Qt 视图，7 文件 / 4973 行；B4 新建）
+### H gui/（Qt 视图，7 文件 / 5182 行；B4 新建）
 | 文件 | 行数 | 职责 |
 |---|---|---|
-| `gui/main_window.py` | 3731 | LoomGUI 主窗口（工具栏/层级/检查器/资源浏览器/控制台坞全部面板方法，125 个方法）+ run_loom_gui 入口 + render_api 下拉 :3104（B4 拆自 ui/loom_gui.py 4339；B7-56 后面板操作全走 _invoke_cmd:642）。 |
+| `gui/main_window.py` | 3940 | LoomGUI 主窗口（工具栏/层级/检查器/资源浏览器/控制台坞全部面板方法，126 个方法）+ run_loom_gui 入口 + render_api 下拉 :3297（B4 拆自 ui/loom_gui.py 4339；B7-56 后面板操作全走 _invoke_cmd:642，B7-56-2 扫尾后检查器/组件/相机/资源面板/TPS/Tag 残留直调也全部命令化）。 |
 | `gui/gl_viewport.py` | 227 | GLViewport（_ViewportEventBridge + QOpenGLWidget，只保留 GL 生命周期四方法）。 |
 | `gui/remote_viewport.py` | 246 | RemoteViewport（离屏 GL readback 兜底；事件桥同源）。 |
 | `gui/widgets/widgets.py` | 138 | 自定义控件：AssetListWidget / DraggableSpin / DragBlock。 |
@@ -869,7 +879,7 @@ sequenceDiagram
 ### U 顶层平铺（其余，与入口/门面外的域文件）
 | 文件 | 行数 | 职责 |
 |---|---|---|
-| `agent_commands.py` | 4134 | Engine Agent 接口 EAI（103 个 @command；HTTP 面 + dispatch(scope) + agent 批次租约；GUI 命令壳共用 _COMMANDS（B7-56）；scene_load 走 prepare:599）。 |
+| `agent_commands.py` | 4207 | Engine Agent 接口 EAI（106 个 @command；HTTP 面 + dispatch(scope) + agent 批次租约；GUI 命令壳共用 _COMMANDS（B7-56；B7-56-2 增 logic_pause/logic_step/register_tag 薄壳 + collider/rigidbody 扩参 + cmd_script_var 撤销修正）；scene_load 走 prepare:599）。 |
 | `loom_mcp.py` | 993 | MCP 服务面（EAI 的 MCP 封装）。 |
 | `loom_ui.py` | 1728 | Canvas/UI 系统数据模型与布局（15 类：UIElement/Canvas/UIManager/Shape/Panel/Text/Image/Button/Slider/Toggle/ProgressBar/ScrollView/InputField/Dropdown/GridLayout）。 |
 | `loom_input.py` | 631 | InputMixin：按键映射与输入动作层（M30b；UNLOCK_ACTION 引擎独占解锁动作）。 |
@@ -888,9 +898,9 @@ sequenceDiagram
 | 文件 | 行数 | 职责 |
 |---|---|---|
 | `tests/test_entry_backend_parity.py` | 350 | B7-54 四入口后端选择同源门（111 条断言：A 四入口决策一致（A④/A④b 编辑器面双方真调用各自入口决策函数，终审 F-2）/ B 解析单源 grep 级 + Loom.py 源码结构断言（终审 F-2）/ C build_entry 决策可达；修前红留痕 089677f + F-2 修前红 27 条 2026-11-22）。 |
-| `tests/test_gui_command_unification.py` | 899 | B7-56 GUI 全量命令化门（83 条断言：A GUI≡命令行 / B 批作用域 / C 相机裁定 / D 结构 / E 相机父链）。 |
+| `tests/test_gui_command_unification.py` | 1465 | B7-56 + B7-56-2 GUI 全量命令化门（实跑 203 条：A GUI≡命令行 43 / B 批作用域 17 / C 相机裁定 19 / D 结构 6 / E 相机父链 23 / F 扫尾命令化等价 85 / G 新命令 JVM 对拍 8 / H 拒批 toast 文案 2）。 |
 
-> **共 159 个文件**（20 包 135 + 顶层平铺 22 + tests 门文件 2）。行数为实测物理行，与 `git show HEAD` 状态逐文件一致。
+> **共 159 个文件**（20 包 135 + 顶层平铺 22 + tests 门文件 2）。行数为实测物理行，与 `git show HEAD` 状态逐文件一致（B7-56-2 后复测）。
 > v3 的 97 文件清单里，`loom_types.py`→`core/primitives.py`、`loom_scene_*.py`→`scene/`、`editor.py`→`editor/`、
 > `ui/loom_gui.py`→`gui/`、`undo.py`→`editor/undo/`、`loom_components.py` 尾部→`audio/system.py` 等
 > 搬迁全部按 B1~B4 后的新路径重列；`components/collision.py`、`components/model_data.py`、`scene/identity.py`、
@@ -968,22 +978,22 @@ flowchart LR
 
 ---
 
-# 图 15 编辑器的操作路径（B7-56 GUI 全量命令化后：单一路径 + 豁免面）与撤销栈
+# 图 15 编辑器的操作路径（B7-56-2 扫尾后：单一路径 + 豁免面，检查器/组件/相机/资源面板/TPS/Tag 全走命令层）与撤销栈
 
 ```mermaid
 flowchart LR
-  subgraph GUIL["Qt 视图 gui/main_window.py 3731（B7-56 后）"]
-    G1["GUI 面板操作<br/>工具栏/菜单 18+2 处 · 层级树挂父/改名<br/>检查器数值写 · 同名族<br/>全走 _invoke_cmd:642"]:::gui
+  subgraph GUIL["Qt 视图 gui/main_window.py 3940（B7-56-2 后）"]
+    G1["GUI 面板操作<br/>工具栏/菜单 · 层级树挂父/改名<br/>检查器数值行·组件开关·脚本/材质/资产增删<br/>相机预览/激活 · 资源面板按钮/双击 · TPS · Layer/Tag<br/>全走 _invoke_cmd:642"]:::gui
     G2["豁免面（人类裁定豁免）<br/>鼠标拾取 / gizmo 拖拽<br/>右键轨道 / 滚轮 / WASDQE"]:::gui
     G3["命令行坞 F12 / 远程 HTTP / MCP<br/>ui/qt_console.py 187"]:::gui
   end
-  E["EAI 命令层<br/>agent_commands.py 4134 · 103 个命令<br/>_COMMANDS 唯一命令体"]:::eai
+  E["EAI 命令层<br/>agent_commands.py 4207 · 106 个命令<br/>_COMMANDS 唯一命令体"]:::eai
   A["_EditorCore<br/>editor/core.py 3101 · 152 方法"]:::facade
   U["UndoManager<br/>editor/undo/registry.py 364"]:::undo
   G1 -->|_invoke_cmd<br/>直调命令函数 · user 作用域| E
   G3 -->|dispatch<br/>缺省 agent 作用域| E
   E -->|命令体调同一批方法| A
-  G2 -.->|绕过：连贯性操作豁免<br/>agent_commands.py:1414 原则| A
+  G2 -.->|绕过：连贯性操作豁免<br/>agent_commands.py:1436 原则| A
   A -->|undo.push（37 处）| U
   E -.->|GUI 点击=user 进撤销栈不进批<br/>F12/远程=agent 批作用域（D10=A）| U
   classDef gui fill:#dbeafe,stroke:#2563eb,color:#1e3a8a
@@ -992,12 +1002,15 @@ flowchart LR
   classDef undo fill:#dcfce7,stroke:#16a34a,color:#14532d
 ```
 
-**读法**：B7-56 后 GUI 只剩**一条路径**——面板操作 → `main_window._invoke_cmd`（:642，直调命令函数并自带 user 作用域包裹，不经 dispatch）
+**读法**：B7-56-2 后 GUI 只剩**一条路径**——面板操作（检查器/组件/相机/资源面板/TPS/Tag **全部**命令化，豁免面见下）
+→ `main_window._invoke_cmd`（:642，直调命令函数并自带 user 作用域包裹，不经 dispatch）
 → EAI 命令层 → `_EditorCore` 方法；命令行坞 F12 / 远程 HTTP / MCP 走 `dispatch`（缺省 agent 作用域）。
-两条入口**共用同一批命令体**（`agent_commands._COMMANDS`，103 个）——GUI 点击 ≡ 命令行（门 A 组逐命令对拍）。
+两条入口**共用同一批命令体**（`agent_commands._COMMANDS`，106 个）——GUI 点击 ≡ 命令行（门 A/F 组逐命令对拍）。
 
-**豁免面**（鼠标拾取 / gizmo 拖拽 / 右键轨道 / 滚轮 / WASDQE）按人类裁定**保持直调** `_EditorCore`：
-连贯性操作不进命令行（`agent_commands.py:1414` 用户定原则；GUI 命令壳注释 `main_window.py:645` 同款裁定）。
+**豁免面**（鼠标拾取 / gizmo 拖拽 / 右键轨道 / 滚轮 / WASDQE / 渲染循环 `e.render`/`_update_camera`/`_dispatch_*`/
+资源面板**拖拽落场景**、`_notify` 反馈与 `_selected`/`get_tps` 等读侧）按人类裁定**保持直调** `_EditorCore`：
+连贯性操作不进命令行（`agent_commands.py:1436` 用户定原则；GUI 命令壳注释 `main_window.py:645` 同款裁定）。
+终审 P0-1 复扫（AST，门 D1 禁集 41 项）确认直调残留 = 0（豁免面之外）。
 
 **撤销栈语义照实**：两条入口最终都经方法内 `undo.push()`（37 处）进同一个撤销栈——「撤销效果」统一；
 「作用域」由 scope 参数区分（`agent_commands.py:51` 命令作用域注释）：**GUI 点击 = user 作用域**（进撤销栈、**不进** agent 批、不续租）；
@@ -1192,7 +1205,8 @@ flowchart TB
 > v4 更新说明：下表门数全部为 2026-11-21 在 HEAD 60ea619 **实跑重测**的值（不是抄 v3）；
 > 与 v3 相比：P6 71→**70**、P7 编辑器四面 566→**575**、S3 叠加层 18→**24**、场景契约门 39→**48**（Q-B7-49-1 G 组扩容）；
 > B7-54 新增四入口决策同源门 **94** 条（test_entry_backend_parity；终审 F-2 后实数 111）。
-> B7-56 新增 GUI 全量命令化门 **83** 条（test_gui_command_unification，2026-11-22 在 HEAD e397c11 实跑）。
+> B7-56 新增 GUI 全量命令化门 **83** 条（test_gui_command_unification，2026-11-22 在 HEAD e397c11 实跑；当时计数口径少计循环展开断言，同 HEAD 独立复跑实为 **108** 条）。
+> B7-56-2 扫尾批扩到 **203** 条（A 43 / B 17 / C 19 / D 6 / E 23 / F 85 / G 8 / H 2；2026-11-22 修后实跑两次同值）。
 
 ## 19.1 七面对拍门 + 增补门（全绿）
 
@@ -1215,7 +1229,7 @@ flowchart TB
     G5["test_camera_parity 195<br/>+ test_vk_camera_align 85"]:::gate
     G6["test_pause_parity 70"]:::gate
     G7["test_editor_play_parity 575<br/>test_editor_play_pixel_parity 17<br/>+S3/S4：vk_overlay 24 / vk_editor_smoke 16"]:::gate
-    G8["B7-28/审核1-3/B7-54/B7-56 增补门<br/>editor_wheel_semantics 20<br/>wheel_backend_semantics 31<br/>skybox_engine_parity 23<br/>entry_backend_parity 111（四入口决策同源）<br/>gui_command_unification 83（GUI≡命令行）"]:::gate
+    G8["B7-28/审核1-3/B7-54/B7-56 增补门<br/>editor_wheel_semantics 20<br/>wheel_backend_semantics 31<br/>skybox_engine_parity 23<br/>entry_backend_parity 111（四入口决策同源）<br/>gui_command_unification 203（GUI≡命令行）"]:::gate
   end
   F1 --> G1
   F2 --> G2
@@ -1262,7 +1276,7 @@ flowchart TB
 | `test_wheel_backend_semantics` | 31 | 滚轮后端语义（GL/VK + run_player 入口恢复） |
 | `test_skybox_engine_parity` | 23 | 审核 1/3：天空盒引擎面两端对齐 |
 | `test_entry_backend_parity` | 111 | B7-54：四入口（Loom.py / build_entry / game_player / run_player）对同一份 argv+配置产生**同一后端决策**；--backend 解析单源（parse_backend_arg）+ Loom.py 源码结构断言；编辑器面双方真调用 _editor_backend_choice（终审 F-2 补牙，实数 93→111；旧记 94 含汇总行）；build_entry 四分支决策可达 |
-| `test_gui_command_unification` | 83 | B7-56：GUI 全量命令化（A GUI 点击≡命令行同命令体 / B 批作用域 user·agent / C 相机裁定（连贯性操作豁免） / D 结构断言 / E 相机父链） |
+| `test_gui_command_unification` | 203 | B7-56 + B7-56-2：GUI 全量命令化（A GUI 点击≡命令行同命令体 43 / B 批作用域 user·agent 17 / C 相机裁定（连贯性操作豁免）19 / D 结构断言（禁集 41 项直调归零）6 / E 相机父链 23 / F 扫尾命令化等价（Layer·Tag·材质·组件·脚本·光源·相机·资源面板·TPS·并行设置）85 / G 新命令 JVM 对拍（logic_pause·logic_step·register_tag）8 / H 拒批 toast 文案 2） |
 
 ## 19.3 ★ 还没有对拍门的面（缺口，按优先级）
 
