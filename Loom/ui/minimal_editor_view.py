@@ -99,7 +99,9 @@ class MinimalEditorView(IEditorView):
     def _draw_grid(self, ctl):
         """无限网格 (2026-08-14): 跟随相机, 远处淡出, 可 show_grid 开关."""
         if getattr(ctl, 'grid_in_scene_pass', False):
-            # Q-B7-53-1：GL 侧网格由帧执行器画进场景目标（深度 = 场景深度）
+            # Q-B7-53-1：该后端已在场景 pass 内画过网格（深度 = 场景深度），不重复画。
+            # 能力声明在 core/engine_core.py::EngineCore（两端显式覆写；getattr 仅
+            # 用于无头桩/测试替身）。
             return
         if not getattr(ctl, 'show_grid', True):
             return

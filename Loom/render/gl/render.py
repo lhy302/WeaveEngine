@@ -589,8 +589,10 @@ class RenderMixin:
                                             before_pass=before_pass,
                                             after_pass=_after)
 
-    # Q-B7-53-1：网格在场景 pass 内绘制（视图层据此跳过 plan 之后的重复绘制）
-    grid_in_scene_pass = True
+    # Q-B7-53-1：网格在场景 pass 内绘制的**能力声明在 GLEngine 自己的类体里**
+    # （grid_in_scene_pass = True），不写在本 mixin：GLEngine 的基类顺序是
+    # (EngineCore, ShadowMixin, HudMixin, RenderMixin, ...)，EngineCore 在前且已声明
+    # 同名属性（公共语义 False），写在这里会被它遮蔽 —— 两处定义只会打架。
 
     def _grid_scene_target(self, plan):
         """本帧 3D 场景目标 FBO：后处理链开启时 = HDR 目标，否则 = 屏幕目标。"""

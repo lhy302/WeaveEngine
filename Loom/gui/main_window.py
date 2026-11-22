@@ -276,10 +276,14 @@ class LoomGUI(QMainWindow):
             self._draw_light_icons(ctl)
             self._draw_camera_icons(ctl)
             return
-        # Q-B7-53-1（2026-11-22 真窗口取证）：GL 侧网格由**帧执行器的场景 pass 内**画
-        # （深度附件 = 刚写完的场景深度，见 render/gl/render.py::_draw_grid_in_scene），
-        # 该后端把 grid_in_scene_pass 置 True -> 这里不再重复画。VK 侧仍走下面的叠加层
-        # 调用点（它的深度视图 = 主 pass 深度视图，语义正确）。
+        # Q-B7-53-1（2026-11-22 真窗口取证）：网格由谁画由**后端能力**决定 ——
+        # EngineCore.grid_in_scene_pass（公共语义，默认 False）由各后端显式覆写：
+        #   GL = True  -> 帧执行器在最后一个 3D pass 之后画进当前场景目标
+        #                 （深度附件 = 刚写完的场景深度，见 render/gl/render.py::
+        #                 _draw_grid_in_scene）-> 这里不再重复画；
+        #   VK = False -> 仍走下面的叠加层调用点（其深度视图 = 主 pass 深度视图）。
+        # 两端都显式有值，不是「属性不存在 = False」的隐式分支；getattr 仅用于
+        # 无头桩/测试替身（它们不必声明该属性）。
         if (getattr(ctl, 'show_grid', True)
                 and not getattr(ctl, 'grid_in_scene_pass', False)):
             out = ctl.grid_geometry()

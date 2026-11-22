@@ -202,6 +202,15 @@ def gc_play_exit():
 # 重名的 _prof_* 已由 loom_render._mro_prof 做成 MRO 顺序无关）。详见 engine_core.py。
 class GLEngine(EngineCore, ShadowMixin, HudMixin, RenderMixin, ModelGpuMixin, LightingMixin,
                GlfwWindowMixin):
+    # Q-B7-53-1（2026-11-22）：后端能力覆写 —— GL 的编辑器网格由帧执行器在**最后一个
+    # 3D pass 之后**画进当前场景目标（render/gl/render.py::_draw_grid_in_scene），
+    # 深度附件 = 刚写完的场景深度，所以深度测试与物体遮挡成立；共享视图层读本属性后
+    # 不再叠加绘制一遍。语义见 core/engine_core.py::EngineCore.grid_in_scene_pass。
+    # ⚠️ 必须写在 GLEngine 自己的类体里：基类顺序是
+    # (EngineCore, ShadowMixin, HudMixin, RenderMixin, ...) —— EngineCore 在前，
+    # 写在 RenderMixin 里会被 EngineCore 的同名默认值遮蔽。
+    grid_in_scene_pass = True
+
     # 组2 (2026-08-30) _ancestry_ranges 结果缓存 (tin/tout, 类级):
     # key=(id(models 列表对象), _ANCESTRY_GEN 版本号); 五个结构变更点
     # (add_model/remove_model/clear_scene/set_parent/remove_camera) 写 _ANCESTRY_GEN

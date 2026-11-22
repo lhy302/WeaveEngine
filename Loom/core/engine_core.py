@@ -69,6 +69,20 @@ class EngineCore(TransformMixin, PhysicsMixin, InputMixin, CameraMixin,
     S2-2 会把其中后端无关的部分搬进来。
     """
 
+    # ---- 后端能力契约（Q-B7-53-1，2026-11-22）----
+    # grid_in_scene_pass：该后端画编辑器网格时是否**已经带上场景深度**。
+    #   False = 网格由共享视图层在 plan 之后叠加绘制（VK 现状：叠加层 flush 挂的是
+    #           主 pass 深度视图，深度测试与物体遮挡天然成立）；
+    #   True  = 网格由后端自己在**场景 pass 内**画进当前场景目标（GL 现状：深度附件
+    #           就是刚写完的场景深度，见 render/gl/render.py::_draw_grid_in_scene），
+    #           共享视图层据此**不再**重复画一遍。
+    # 纪律：两端都**显式**声明（GL 覆写 True，VK 保持本默认 False）—— 不许用
+    # 「属性不存在」表达 False。共享视图层（gui/main_window.py::draw、
+    # ui/minimal_editor_view.py::_draw_grid）按本属性分支；若靠 hasattr 隐式分支，
+    # 就是「不可见分叉」：将来加第三个后端忘了声明会画两遍网格。
+    # 门：tests/test_grid_occlusion_parity.py（两端各一遍真窗口 + B1 断言两端显式有值）。
+    grid_in_scene_pass = False
+
     # ============ S2-2：后端无关的状态与生命周期（两端同一份） ============
     # 2026-11-17（独立审查抓到的一整类问题）：SceneDriver 继承内核后，共享方法里凡是
     # 「硬引用某个字段」的，在 VK 上都会 AttributeError（set_parent 缺 _bump_struct、
