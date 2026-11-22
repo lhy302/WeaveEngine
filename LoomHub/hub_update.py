@@ -421,6 +421,9 @@ def read_sidecar(package_path):
 # ---------------- 安装（写 updater 脚本 + 提权） ----------------
 
 _PROGRAM_FILES_ENV = ('ProgramFiles', 'ProgramFiles(x86)', 'ProgramW6432')
+# 2026-11-22 Q-B7-29-1：env 缺失时不能 fail-open 成"不是 Program Files"——那会让
+# Program Files 安装漏掉 /ALLUSERS 和 UAC。按 SystemDrive 补标准目录兜底。
+_PROGRAM_FILES_FALLBACK = (r'Program Files', r'Program Files (x86)')
 
 
 def install_dir():
@@ -431,20 +434,68 @@ def install_dir():
     return os.path.dirname(os.path.abspath(sys.argv[0])) or os.getcwd()
 
 
+def _long_path(path):
+    r"""尽力把 8.3 短名（如 C:\PROGRA~1）解析成长名；非 Windows/失败时原样返回。"""
+    if os.name != 'nt' or not path:
+        return path
+    try:
+        import ctypes
+        buf = ctypes.create_unicode_buffer(32768)
+        n = ctypes.windll.kernel32.GetLongPathNameW(str(path), buf, len(buf))
+        if 0 < n < len(buf):
+            return buf.value or path
+    except Exception:
+        pass
+    return path
+
+
+def _norm_dir(path):
+    """路径比较规范化：去引号/首尾空白 -> 展开 %VAR% -> 8.3 长名 -> 绝对路径 ->
+    去尾分隔符 -> normcase（Windows 大小写不敏感）。空串返回 ''。"""
+    s = str(path or '').strip().strip('"').strip()
+    if not s:
+        return ''
+    s = os.path.expandvars(s)
+    if os.name == 'nt' and os.path.isabs(s):
+        s = _long_path(s)
+    s = os.path.normpath(os.path.abspath(s))
+    drive, tail = os.path.splitdrive(s)
+    tail = tail.rstrip('\\/')
+    if drive and not tail:
+        s = drive + '\\'          # 盘根（C:\）保留根分隔符
+    else:
+        s = drive + tail
+    return os.path.normcase(s)
+
+
 def _program_files_roots():
+    """Program Files 根目录集合：env 三兄弟 + SystemDrive 标准目录兜底（去重）。"""
+    raw = [os.environ.get(k) for k in _PROGRAM_FILES_ENV]
+    drive = (os.environ.get('SystemDrive') or 'C:').strip().rstrip('\\/') or 'C:'
+    raw += [drive + '\\' + name for name in _PROGRAM_FILES_FALLBACK]
     roots = []
-    for k in _PROGRAM_FILES_ENV:
-        v = os.environ.get(k)
-        if v:
-            roots.append(os.path.normcase(os.path.abspath(v)))
+    for v in raw:
+        n = _norm_dir(v)
+        if n and n not in roots:
+            roots.append(n)
     return roots
 
 
 def is_program_files(path):
-    """安装目录是否在 Program Files 下（决定要不要 /ALLUSERS + UAC）。"""
-    p = os.path.normcase(os.path.abspath(path or ''))
+    r"""安装目录是否在 Program Files 下（决定要不要 /ALLUSERS + UAC）。
+
+    Q-B7-29-1：以前只看 env 且直接 abspath 比较 —— env 缺失时静默 False（fail-open，
+    装到 Program Files 不加 /ALLUSERS、不触发 UAC）。现在：
+      · ProgramFiles / ProgramFiles(x86) / ProgramW6432 三个 env 都认；
+      · env 缺失时用 SystemDrive 下的标准目录兜底；
+      · 统一规范化：引号/尾随空格/正斜杠/尾分隔符/大小写/8.3 短名/%VAR% 未展开；
+      · 前缀匹配带路径分隔符边界，"C:\Program FilesX" 不会被误判。
+    """
+    p = _norm_dir(path)
+    if not p:
+        return False
     for root in _program_files_roots():
-        if p == root or p.startswith(root + os.sep):
+        if p == root or p.startswith(root + '\\'):
             return True
     return False
 

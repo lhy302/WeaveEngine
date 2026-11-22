@@ -405,6 +405,134 @@ def t_install_dir_and_allusers():
           hu.install_dir())
 
 
+class _PfEnv:
+    """临时控制 ProgramFiles 三兄弟 + SystemDrive，退出时精确还原。"""
+
+    _KEYS = ('ProgramFiles', 'ProgramFiles(x86)', 'ProgramW6432', 'SystemDrive')
+
+    def __init__(self, **vals):
+        self.vals = vals
+
+    def __enter__(self):
+        self.old = {k: os.environ.get(k) for k in self._KEYS}
+        for k in self._KEYS:
+            os.environ.pop(k, None)
+        os.environ.update(self.vals)
+        return self
+
+    def __exit__(self, *exc):
+        for k, v in self.old.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        return False
+
+
+def t_is_program_files_matrix():
+    """Q-B7-29-1 T2：is_program_files 正/负样本矩阵（正 9 条、负 8 条）。"""
+    with _PfEnv(ProgramFiles=r'C:\Program Files',
+                **{'ProgramFiles(x86)': r'C:\Program Files (x86)',
+                   'ProgramW6432': r'C:\Program Files',
+                   'SystemDrive': 'C:'}):
+        positives = [
+            (r'C:\Program Files\LoomHub', '标准 Program Files 子目录'),
+            (r'C:\Program Files\LoomHub\sub\deeper', '多层子目录'),
+            (r'C:\Program Files (x86)\LoomHub', 'Program Files (x86) 子目录'),
+            (r'c:\program files\loomhub', '大小写不敏感'),
+            (r'C:/Program Files/LoomHub', '正斜杠'),
+            (r'C:\Program Files\LoomHub ', '尾随空格'),
+            (r'C:\Program Files', '根目录本身'),
+            (r'%ProgramFiles%\LoomHub', '未展开的 %ProgramFiles%'),
+        ]
+        for idx, (pth, why) in enumerate(positives, 1):
+            check("T2 正样本%d: %s（%s）" % (idx, pth, why),
+                  hu.is_program_files(pth) is True, pth)
+        if os.path.isdir(r'C:\PROGRA~1'):
+            check("T2 正样本9: C:\\PROGRA~1\\LoomHub（8.3 短名）",
+                  hu.is_program_files(r'C:\PROGRA~1\LoomHub') is True)
+
+        negatives = [
+            (r'C:\Program FilesX\LoomHub', '前缀相同但不是子目录'),
+            (r'C:\Program Files-old\LoomHub', '相似前缀'),
+            (r'C:\Program Files (x86)X\LoomHub', 'x86 相似前缀'),
+            (r'C:\Users\Administrator\AppData\Local\Programs\LoomHub', '用户级目录'),
+            (r'D:\Program Files\LoomHub', '非系统盘同名目录'),
+            (r'C:\Program Files\..\Windows\System32', '.. 逃逸'),
+            (r'C:\Program Files\LoomHub2\..\..\Windows', '.. 逃逸（深层）'),
+            ('', '空路径'),
+        ]
+        for idx, (pth, why) in enumerate(negatives, 1):
+            check("T2 负样本%d: %s（%s）" % (idx, pth or '<空>', why),
+                  hu.is_program_files(pth) is False, pth)
+
+    # 核心回归：ProgramFiles 环境变量全缺失时，硬编码兜底必须仍判 True（不许 fail-open）
+    with _PfEnv(SystemDrive='C:'):
+        check("T2 正样本10: env 全缺失 -> C:\\Program Files\\LoomHub 仍判 True",
+              hu.is_program_files(r'C:\Program Files\LoomHub') is True)
+        check("T2 负样本9: env 全缺失时用户目录仍判 False",
+              hu.is_program_files(os.path.join(
+                  os.environ.get('LOCALAPPDATA') or r'C:\Users\x\AppData\Local',
+                  'Programs', 'LoomHub')) is False)
+
+    # ProgramW6432 / ProgramFiles(x86) / 自定义 ProgramFiles 各自独立生效
+    with _PfEnv(ProgramFiles=r'D:\PF',
+                **{'ProgramFiles(x86)': r'E:\PFx86',
+                   'ProgramW6432': r'F:\PF64', 'SystemDrive': 'C:'}):
+        check("T2 ProgramW6432 根命中", hu.is_program_files(r'F:\PF64\LoomHub') is True)
+        check("T2 ProgramFiles(x86) 根命中", hu.is_program_files(r'E:\PFx86\LoomHub') is True)
+        check("T2 自定义 ProgramFiles 根命中", hu.is_program_files(r'D:\PF\LoomHub') is True)
+        check("T2 不在任何根下 -> False", hu.is_program_files(r'G:\Other\LoomHub') is False)
+
+
+def t_allusers_chain():
+    """Q-B7-29-1 T3：is_program_files -> /ALLUSERS + runas(UAC) 消费者链路证据。"""
+    with tempfile.TemporaryDirectory() as tmp:
+        setup = os.path.join(tmp, 'LoomHub-0.1.5-Setup.exe')
+        open(setup, 'wb').write(b'x')
+        hu._write_sidecar(setup, {'size': 1, 'digest': '', 'version': '0.1.5',
+                                  'asset_name': os.path.basename(setup),
+                                  'download_url': 'https://example.invalid/x.exe'})
+        old_install = hu.install_dir
+        old_runas, old_spawn = hu._shell_execute_runas, hu._spawn_no_uac
+        calls = {'runas': 0, 'spawn': 0}
+        hu._shell_execute_runas = lambda cmd: (calls.__setitem__('runas', calls['runas'] + 1)
+                                               or (True, ''))
+        hu._spawn_no_uac = lambda cmd: (calls.__setitem__('spawn', calls['spawn'] + 1)
+                                        or (True, ''))
+        try:
+            # A. Program Files 安装：即使 ProgramFiles env 全缺失，也必须是提权路径
+            before = dict(calls)
+            with _PfEnv(SystemDrive='C:'):
+                hu.install_dir = lambda: r'C:\Program Files\LoomHub'
+                r = hu.apply_update(setup)
+                body = open(r.get('script') or '', encoding='utf-8-sig').read()
+            check("T3-A PF 安装：needs_admin=True（走 runas/UAC，不走 spawn）",
+                  r.get('ok') is True and r.get('needs_admin') is True
+                  and calls['runas'] == before['runas'] + 1
+                  and calls['spawn'] == before['spawn'], (r, calls))
+            check("T3-A PF 安装：all_users=True 且脚本文本含 /ALLUSERS",
+                  r.get('all_users') is True and '/ALLUSERS' in body,
+                  [l for l in body.splitlines() if 'SETUP%' in l])
+
+            # B. 用户级安装：不加 /ALLUSERS、不弹 UAC、走免提权 spawn
+            user_dir = os.path.join(tmp, 'Programs', 'LoomHub')
+            os.makedirs(user_dir, exist_ok=True)
+            hu.install_dir = lambda: user_dir
+            before2 = dict(calls)
+            r2 = hu.apply_update(setup)
+            body2 = open(r2.get('script') or '', encoding='utf-8-sig').read()
+            check("T3-B 用户级安装：needs_admin=False（不弹 UAC/走 spawn）",
+                  r2.get('ok') is True and r2.get('needs_admin') is False
+                  and calls['spawn'] == before2['spawn'] + 1
+                  and calls['runas'] == before2['runas'], (r2, calls))
+            check("T3-B 用户级安装：脚本不含 /ALLUSERS", '/ALLUSERS' not in body2,
+                  [l for l in body2.splitlines() if 'SETUP%' in l])
+        finally:
+            hu.install_dir = old_install
+            hu._shell_execute_runas, hu._spawn_no_uac = old_runas, old_spawn
+
+
 def t_gui_button_and_fail_gate():
     """C2=A: 两个视图都有「下载并安装」、无新版本禁用、下载失败不进安装阶段。"""
     for name, rel in (('TkHubView', 'LoomHub/hub_view_tk.py'),
@@ -557,6 +685,8 @@ if __name__ == "__main__":
     t_pick_latest_semver()
     t_startup_wiring()
     t_install_dir_and_allusers()
+    t_is_program_files_matrix()
+    t_allusers_chain()
     t_gui_button_and_fail_gate()
     t_p2_fixes()
     t_fail_gate_end_to_end()
