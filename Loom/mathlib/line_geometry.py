@@ -206,8 +206,15 @@ def build_line_quads(verts, colors, view_proj, width_px=DEFAULT_WIDTH_PX,
             continue
         a, b, d, e = quad
         z0, z1 = n0[2], n1[2]
-        na, nb = _ndc(a, z0, W, H), _ndc(b, z0, W, H)
-        nd, ne = _ndc(d, z1, W, H), _ndc(e, z1, W, H)
+        # Q-B7-53-1（2026-11-22 真窗口取证）：z 必须按**角点所属端点**取 ——
+        # a/e 在 p0（z0），b/d 在 p1（z1）。旧实现把 b 取了 z0、e 取了 z1（互换），
+        # 四边形被拧成两块深度不连续的三角形：网格这种 ±60 的长线段一端常在相机
+        # 背后（近平面裁剪 -> w≈0 -> 屏幕坐标上万像素、z=0），被拧的那半个三角形
+        # 在屏幕空间横跨整个视口，插值出的深度比地面真实深度小得多（实测 0.648 vs
+        # 0.993）-> 网格线穿过物体（"网格永远在最上层"的真因之一）。
+        # 门：tests/test_line_depth_plane.py（插值深度 == 地面真实深度 + 角点同 z 结构锁）。
+        na, nb = _ndc(a, z0, W, H), _ndc(b, z1, W, H)
+        nd, ne = _ndc(d, z1, W, H), _ndc(e, z0, W, H)
         # 绕序：引擎的 GL front_face='cw'（engine.py:308，网格绕序同款），
         # CULL_FACE 在主 pass 后是开着的 -> 四边形必须 **CW-in-NDC** 才是正面。
         # 实测（tests/_tmp 探针）：CCW 版四边形在 CULL_FACE 开时整块被剔掉（0 像素）。
