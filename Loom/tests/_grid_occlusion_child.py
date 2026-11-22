@@ -144,17 +144,22 @@ def cpu_gates():
             pass
 
     # ---- B1 归属：谁负责画网格 ----
+    # B7-58：能力契约落在**类体**上（EngineCore 默认 False / GLEngine 覆写 True），所以
+    # 断言读 GLEngine / SceneDriver 的类属性，不再读 RenderMixin / VkEditorApp ——
+    # RenderMixin 已不定义该属性（写在那里会被 EngineCore 的同名默认值遮蔽：MRO 上
+    # EngineCore 在 RenderMixin 前面，见 render/gl/render.py 的 B7-58 注释）。
     if BACKEND == 'gl':
-        _guard('gl B1 网格绘制归属：GL 由场景 pass 内绘制（grid_in_scene_pass=True）',
-               lambda: check('gl B1 网格绘制归属：GL 由场景 pass 内绘制（grid_in_scene_pass=True）',
-                             getattr(RenderMixin, 'grid_in_scene_pass', False) is True,
-                             getattr(RenderMixin, 'grid_in_scene_pass', None)))
+        from render.gl.engine import GLEngine
+        _guard('gl B1 网格绘制归属：GL 由场景 pass 内绘制（GLEngine.grid_in_scene_pass=True）',
+               lambda: check('gl B1 网格绘制归属：GL 由场景 pass 内绘制（GLEngine.grid_in_scene_pass=True）',
+                             getattr(GLEngine, 'grid_in_scene_pass', None) is True,
+                             getattr(GLEngine, 'grid_in_scene_pass', None)))
     else:
-        from editor.vk_app import VkEditorApp
-        _guard('vk B1 网格绘制归属：VK 由视图叠加层绘制（未声明 grid_in_scene_pass）',
-               lambda: check('vk B1 网格绘制归属：VK 由视图叠加层绘制（未声明 grid_in_scene_pass）',
-                             getattr(VkEditorApp, 'grid_in_scene_pass', False) is False,
-                             getattr(VkEditorApp, 'grid_in_scene_pass', None)))
+        from render.vk.driver import SceneDriver
+        _guard('vk B1 网格绘制归属：VK 由视图叠加层绘制（SceneDriver.grid_in_scene_pass=False）',
+               lambda: check('vk B1 网格绘制归属：VK 由视图叠加层绘制（SceneDriver.grid_in_scene_pass=False）',
+                             getattr(SceneDriver, 'grid_in_scene_pass', None) is False,
+                             getattr(SceneDriver, 'grid_in_scene_pass', None)))
 
     # ---- B2 播放态：两端都不许画网格（与播放器一致：播放器没有 grid_geometry）----
     if BACKEND == 'gl':
@@ -307,3 +312,4 @@ sys.stdout.flush()
 # Qt + wgpu 真窗口进程收尾会非确定性卡在驱动 teardown（test_vk_editor_smoke 同款
 # 已知问题），判定已落盘 -> 直接硬退，父门只认 verdict 文件。
 os._exit(0 if verdict['ok'] else 1)
+

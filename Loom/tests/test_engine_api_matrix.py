@@ -215,8 +215,12 @@ EXPECTED_VK_ONLY = frozenset({
 # 计数断言（防「两端同时改名」这种集合差异看不出来的漂移）
 # v3.4（2026-11-20 S2 阶段2 ④）: GL +1 = overlay_scope（叠加层状态作用域钩子，
 # GL 原样转发 moderngl；S3 补 VK 实现 —— 已登记 test_user_api_parity.BACKEND_ONLY_GL）
-EXPECTED_GL_TOTAL = 113
-EXPECTED_VK_TOTAL = 109      # v3.7 (Q-B7-24-5): -1 step 删除（110-1；旧形态名不再用）
+# v3.8（2026-11-22 B7-58 Q-B7-53-1）: grid_in_scene_pass 提升为两端显式能力契约 ——
+# EngineCore 类体声明默认 False、GLEngine 类体覆写 True → 两端各 +1 个**共同**公开
+# 属性（GL 113 → 114、VK 109 → 110，GL 独有 / VK 独有基线均不变）。它是能力声明，
+# 不是漂移；语义见 core/engine_core.py::EngineCore.grid_in_scene_pass。
+EXPECTED_GL_TOTAL = 114
+EXPECTED_VK_TOTAL = 110      # v3.8 (B7-58): +1 grid_in_scene_pass（共同，EngineCore 声明）
 
 
 def _call_groups():
