@@ -36,6 +36,11 @@ import components.frame_components as _lfc
 # 场景 cameras/active_camera 在 Vk 侧也要还原, 否则"场景里的 Camera 实体"
 # 在 Vulkan 播放器里完全不存在, 只能看轨道相机。
 from scene.entities import CameraState
+# Q-B7-57-1（2026-11-22 序列化补全）: 相机父链解析 = scene.camera 的唯一实现，
+# 本模块只 import 同一函数对象（GL 侧 sceneio._link_camera_parents 也是它）——
+# 修前这里有一份逐行重复的副本（id_map 只含物体 -> 相机挂相机加载回落根）。
+from scene.camera import (_link_camera_parents as link_camera_parents,
+                          camera_parent_links)
 from script.scripts import get_script
 from loom_ui import UIManager, Canvas  # 2026-10-18: Canvas UI (替换 _DriverUI 空壳)
 # 2026-11-19 (P4-2): 轨道相机眼睛位置的**唯一实现**（GL 的 apply_orbit_camera 也调它）。
@@ -444,16 +449,9 @@ def build_cameras(data):
     return out
 
 
-def link_camera_parents(cameras, cam_dicts, models):
-    """摄像机父链 (相机挂到 GameObject 下) — 与 sceneio._link_camera_parents 同:
-    parent_id -> GameObject.guid; 找不到的父忽略 (孤儿引用保持根)。"""
-    id_map = {m.guid: m for m in models if getattr(m, 'guid', None)}
-    for cam, d in zip(cameras, cam_dicts or []):
-        pid = d.get('parent_id') if isinstance(d, dict) else None
-        if pid and pid in id_map:
-            parent = id_map[pid]
-            cam.parent = parent
-            parent.camera_children.append(cam)
+# Q-B7-57-1（2026-11-22）: 相机父链解析已并入 scene/camera.py 唯一实现
+# （link_camera_parents = scene.camera._link_camera_parents，import 见文件头）。
+# 本文件不再保留第二份副本 —— 相机挂相机保存/加载两端同源。
 
 
 # ============ Q-B7-45-1（2026-11-19）: 轨道角度字段的「按模式别名」 ============
@@ -835,7 +833,10 @@ class SceneDriver(VkWindowMixin, VkEditorRenderMixin, EngineCore):
                 print('[驱动] %d 个相机未按身份匹配到场景段 -> 不配 skybox' % (_unmatched,))
         except Exception as e:
             print('[驱动] 相机天空盒解析失败 (%r) -> 该相机沿用场景级' % (e,))
-        link_camera_parents(self.cameras, data.get('cameras'), self.models)
+        # 相机父链解析走 scene.camera 唯一实现（相机/物体都能当父；按身份配对，
+        # 非 dict 段被 build_cameras 跳过也不会错位）。
+        link_camera_parents(self, camera_parent_links(self.cameras,
+                                                  data.get('cameras')))
         self.active_camera = data.get('active_camera')
         # 2026-11-07 P-05 修复 (相机段坏值不崩 + 默认值不分叉): 场景是外部输入,
         # 相机段此前是裸 float()/tuple(), 而**同一函数内**已有 _f3/_f1 容错助手

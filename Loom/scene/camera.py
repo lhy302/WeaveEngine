@@ -5,7 +5,7 @@
   投影归一: ORTHO_SIZE_*/FOV_*/_TRUE_WORDS/_FALSE_WORDS/_b_strict/
             norm_ortho_size/norm_fov_deg（D7=A / Q4=B，editor 与 scene_driver 复用）
   摄像机:   _emit_camera / _emit_camera_skybox / _keep_cam_skybox_ref /
-            _apply_cameras / _link_camera_parents
+            _apply_cameras / camera_parent_links / _link_camera_parents
 """
 import math
 
@@ -126,7 +126,7 @@ def _emit_camera(cam, base_dir=None, ctx=None):
         "pitch_lock": cam.pitch_lock,     # M41 俯仰角限制: 启用?
         "pitch_min": cam.pitch_min,       # 度 最低俯角 (含)
         "pitch_max": cam.pitch_max,       # 度 最高仰角 (含)
-        "parent_id": cam.parent.guid if cam.parent is not None else None,
+        "parent_id": cam.parent.guid if cam.parent is not None else None,   # 父 guid：物体或相机
         # 2026-10-19 第1档序13 天空盒 (C3): 相机级 skybox 覆盖（None=用场景默认）
         # A3=B: 相机级同样受"必须在场景目录内"限制；越界 -> 不写出 + 出声
         "skybox": _emit_camera_skybox(cam, base_dir, ctx),
@@ -159,7 +159,7 @@ def _keep_cam_skybox_ref(cam, raw, valid):
 
 def _apply_cameras(engine, cam_dicts, base_dir=None, ctx=None):
     """摄像机 dict 列表 -> engine.cameras (清空重建; 文件 id 覆盖 guid).
-    返回 [(cam, parent_id)] 供 _link_camera_parents 在物体建链后连父 (相机引用物体)."""
+    返回 [(cam, parent_id)] 供 _link_camera_parents 在物体建链后连父 (相机引用物体/相机)."""
     engine.cameras.clear()
     links = []
     for _ci, d in enumerate(cam_dicts):
@@ -213,11 +213,141 @@ def _apply_cameras(engine, cam_dicts, base_dir=None, ctx=None):
 
 
 
+# ---------------- 相机父链（GL/VK 唯一实现，Q-B7-57-1 序列化补全） ----------------
+
+def camera_parent_links(cameras, cam_dicts):
+    """CameraState 列表与场景 cameras[] 原始段配对 -> [(cam, parent_id)]（唯一配对实现）。
+
+    正常场景两者等长 -> 按序配对（旧场景相机段可能没有 id，按序才连得上父）。
+    _apply_cameras / build_cameras 会跳过非 dict 段（数量不等）-> 按身份 id 配对；
+    无 id 且匹配不到的相机没有可引用身份，parent 视为 None（保持根）。
+    """
+    cams = list(cameras or ())
+    ds = list(cam_dicts or ())
+    if len(cams) == len(ds):
+        return [(cam, (d.get('parent_id') if isinstance(d, dict) else None))
+                for cam, d in zip(cams, ds)]
+    by_id = {}
+    for d in ds:
+        if isinstance(d, dict) and d.get('id'):
+            by_id[str(d['id'])] = d
+    out = []
+    for cam in cams:
+        d = by_id.get(str(getattr(cam, 'guid', '') or ''))
+        out.append((cam, (d.get('parent_id') if isinstance(d, dict) else None)))
+    return out
+
+
+def _camera_link_set_parent(cam, parent):
+    """只改父指针 + 父/旧父的 camera_children（加载期不做世界换算）。"""
+    old = getattr(cam, 'parent', None)
+    if old is parent:
+        if parent is not None:
+            kids = getattr(parent, 'camera_children', None)
+            if kids is not None and cam not in kids:
+                kids.append(cam)
+        return
+    if old is not None:
+        kids = getattr(old, 'camera_children', None)
+        if kids is not None and cam in kids:
+            kids.remove(cam)
+    cam.parent = parent
+    if parent is not None:
+        kids = getattr(parent, 'camera_children', None)
+        if kids is not None and cam not in kids:
+            kids.append(cam)
+
+
 def _link_camera_parents(engine, links, id_map=None):
-    """摄像机父链 (在物体创建并建链后调用): parent_id -> GameObject.guid.
-    找不到的 parent_id 忽略 (相机保持根, 防御孤儿引用). 相机物体化 2026-08-16."""
-    id_map = id_map or {m.guid: m for m in engine.models}
-    for cam, pid in links:
-        if pid and pid in id_map:
-            cam.parent = id_map[pid]
-            id_map[pid].camera_children.append(cam)
+    """摄像机父链解析（GL/VK 唯一实现）: parent_id -> GameObject.guid | CameraState.guid.
+
+    Q-B7-57-1（2026-11-22）: 相机也能当父（相机挂相机）。修前 id_map 只含物体，
+    相机段里的 parent_id 指向相机 guid 时被静默忽略 -> 保存再加载回落根。
+    本实现同时收物体与相机 guid，并处理两种坏引用（场景是不可信输入）:
+      · 成环（含 A→B 后再 B→A、自指、文件里直接写出的环）-> **整次链接拒绝**，
+        打印「[场景] 相机父链成环: ...」原因，已存在的父指针一个不动（迭代遍历，不递归爆栈）；
+      · 父 guid 不存在（父已删除/悬空引用）-> 该相机脱根 + 打印告警，不崩溃；
+      · 空/缺 parent_id -> 根（显式 null 也会脱掉旧父，与场景数据语义一致）。
+
+    id_map: 可选既有映射（旧调用面）；仍会补进 engine.cameras 的 guid。
+    返回实际建立的链接数（成环拒绝时 0，且不改任何状态）。
+    """
+    cams = list(getattr(engine, 'cameras', None) or ())
+    maps = {}
+    for m in (getattr(engine, 'models', None) or ()):
+        g = getattr(m, 'guid', None)
+        if g:
+            maps[g] = m
+    for cam in cams:
+        g = getattr(cam, 'guid', None)
+        if g:
+            maps[g] = cam
+    if id_map:
+        maps.update(id_map)          # 旧调用面显式给的映射优先（语义与旧实现一致）
+
+    pairs = list(links or ())
+    cam_by_guid = {}
+    desired = {}
+    for cam in cams:
+        g = getattr(cam, 'guid', None)
+        if not g:
+            continue
+        cam_by_guid[g] = cam
+        par = getattr(cam, 'parent', None)
+        pg = getattr(par, 'guid', None)
+        desired[g] = pg if (pg and pg in maps) else None
+
+    explicit = {}
+    for cam, pid in pairs:
+        g = getattr(cam, 'guid', None)
+        if not g:
+            continue
+        pid = pid if isinstance(pid, str) and pid else None
+        explicit[id(cam)] = pid          # 按对象身份存，重复 guid 的坏场景也不会串
+        desired[g] = pid
+
+    # 防环：沿"期望父链"逐跳走（只跟相机 guid；物体父是终点），迭代 + visited，绝不递归。
+    for start in cam_by_guid:
+        seen = []
+        seen_set = set()
+        cur = start
+        while cur is not None:
+            if cur in seen_set:
+                try:
+                    i = seen.index(cur)
+                except ValueError:
+                    i = 0
+                cyc = seen[i:] + [cur]
+                print('[场景] 相机父链成环: %s -> 拒绝本次相机父链链接'
+                      '（相机保持原样，不递归）' % ' -> '.join(cyc))
+                return 0
+            seen.append(cur)
+            seen_set.add(cur)
+            if cur not in cam_by_guid:
+                break
+            cur = desired.get(cur)
+
+    applied = 0
+    for cam, pid in pairs:
+        g = getattr(cam, 'guid', None)
+        if not g or id(cam) not in explicit:
+            continue
+        pid = explicit[id(cam)]
+        if pid is None:
+            if getattr(cam, 'parent', None) is not None:
+                _camera_link_set_parent(cam, None)
+            continue
+        parent = maps.get(pid)
+        if parent is None:
+            if getattr(cam, 'parent', None) is not None:
+                _camera_link_set_parent(cam, None)
+            print('[场景] 相机 %r 的父 guid=%r 不存在（父已删除）-> 脱根（不崩溃）'
+                  % (getattr(cam, 'name', '?'), pid))
+            continue
+        _camera_link_set_parent(cam, parent)
+        applied += 1
+    return applied
+
+
+# 兼容旧名：GL sceneio 门面 / VK driver 都 import 这一份（函数对象 is 同源）。
+link_camera_parents = _link_camera_parents
