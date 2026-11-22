@@ -543,9 +543,9 @@ def run_vk(scene=None, frames_n=None, keep=False, mini=False, no_shadow=False,
 
             # ---- 鼠标 (与 GL 同语义; 2026-11-06 R3: 先进 UI, 再决定相机) ----
             def _on_cursor(w, x, y):
-                # 只记录位置; 光标增量在 draw() 帧首统一结算 —— 这样本帧
-                # UI 是否捕获鼠标 (点击/拖动) 能决定是否喂给相机, 与 GL 的
-                # ui_consumed 门控同语义。
+                # 只记录位置; 光标增量在 draw() 帧首统一结算（无条件喂 = 本帧物理增量，
+                # Q-B7-43-2 裁决 A；UI 消费位单独暴露为 driver.ui_consumed，
+                # 相机消费点用它早退 —— 不再靠「不喂」）。
                 ui_bridge.on_cursor(x, y)
                 # 2026-11-18（F-6，Q-B7-40）: 与 GL loom_glfw_window._on_cursor_pos_cb
                 # 同源 —— 脚本可读的 **int 像素坐标** 落在这里（float 版留在宿主桥给 UI
@@ -626,8 +626,9 @@ def run_vk(scene=None, frames_n=None, keep=False, mini=False, no_shadow=False,
             return
         try:
             w, h = ctx.physical_size
-            # 2026-11-06 R3: 帧首把窗口事件结算给 UI (鼠标按下/松开/滚轮),
-            # 再决定光标增量是否喂相机 —— UI 捕获鼠标时不转视角.
+            # 2026-11-06 R3: 帧首把窗口事件结算给 UI (鼠标按下/松开/滚轮)。
+            # 2026-11-22（Q-B7-43-2 裁决 A）: 光标增量无条件喂给 mouse_rel（物理增量），
+            # 「UI 消费帧不转视角」由消费点的 ui_consumed 早退承担（见下方喂入处注释）。
             _ui_now = getattr(driver, 'ui', None)
             if _ui_now is not None and _ui_now is not ui_bridge.ui:
                 ui_bridge.ui = _ui_now          # 场景切换/重建后重新绑定
@@ -651,10 +652,23 @@ def run_vk(scene=None, frames_n=None, keep=False, mini=False, no_shadow=False,
             if not getattr(driver, 'fullscreen', False):
                 sync_ui_canvas(_ui_now, getattr(driver, '_vk_glfw_window', None), (w, h))
             ui_bridge.begin_frame()
+            # 2026-11-22（Q-B7-43-2，人类裁决「选 A，并且同时给 VK 补 ui_consumed」）:
+            # 每帧把「本帧鼠标事件被 UI 消费」落到 driver.ui_consumed —— 与 GL
+            # runtime.PlayerApp._dispatch_ui_mouse 的 self.ui_consumed = consumed
+            # （runtime.py:297）同语义、同位置（帧首、相机/脚本消费之前）；
+            # 脚本 if engine.ui_consumed: 两端都能跑。写入点全仓库仅此一处（对拍门锁定）。
+            driver.ui_consumed = not ui_bridge.wants_camera()
             try:
                 _x, _y = ui_bridge.pos
                 _p = _prev[0]
-                if _p is not None and ui_bridge.wants_camera():
+                # 裁决 A（Q-B7-43-2）: **无条件**喂 —— mouse_rel = 本帧鼠标物理位移增量，
+                # 不管本帧是否被 UI 消费（与 GL loom_glfw_window._update_mouse_rel 的
+                # 无条件结算同语义）。修前这里的 ui_bridge.wants_camera() 门控使 UI 消费帧
+                # mouse_rel 结算成 (0,0)，与 GL 分叉（消费位现在由上一行单独暴露）；
+                # 「消费帧不转视角」改由消费点的 ui_consumed 早退承担
+                # （apply_editor_camera_mouse，对齐 GL editor._update_camera 的 _ui_lock）。
+                # feed_mouse_rel 自身仍只在锁定态累积（= GL 的 CURSOR_DISABLED 判据，不变）。
+                if _p is not None:
                     driver.feed_mouse_rel(_x - _p[0], _y - _p[1])
                 _prev[0] = (_x, _y)
                 # 滚轮: 只有"滚轮本身"被 UI (ScrollView) 消费才不给脚本/相机。

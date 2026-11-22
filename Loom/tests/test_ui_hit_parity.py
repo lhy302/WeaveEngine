@@ -46,8 +46,9 @@
   VK : scene_driver.SceneDriver + 真 GLFW(NO_API) 窗口句柄（vk_player._register_input:525
        的真实注入点 driver._vk_glfw_window）
        · 光标/按键/滚轮 → vk_ui.UIInputBridge（生产桥，构造式与 render/vk/player.py:371 逐字相同）
-       · 帧首 → vk_player.draw:646-674 逐行镜像（begin_frame → wants_camera 门控
-                feed_mouse_rel → 滚轮专属判据 → advance_logic）—— 镜像保真由结构段源码
+       · 帧首 → vk_player.draw 帧首逐行镜像（Q-B7-43-2 修后：begin_frame →
+                driver.ui_consumed 写入 → **无条件** feed_mouse_rel → 滚轮专属判据 →
+                advance_logic；修前是 wants_camera 门控喂）—— 镜像保真由结构段源码
                 锚点断言守住
        · int 像素落点 → SceneDriver._on_cursor_event（= vk_player._on_cursor:568 的生产调用）
   键盘/文本（两端同一份）→ 内核 EngineCore.handle_key_event 第③步 / handle_text_input
@@ -96,10 +97,13 @@ tests/ 与 __pycache__/_tmp），并同时覆盖**当前名与历史名** ——
     dispatch_mouse 的拖动分支每帧返回 consumed=True）；render/vk/ui.py 里那段「与 GL 的
     ui_consumed 不同」的注释已同步删改为事实（反模式 10）。门 = ⑧ 组。
 
-已知残差（本门**不锁**、只报告 —— 属另一面，需另立单）：GL 的 engine.mouse_rel 在
-「本帧被 UI 消费」时仍是非 0（脚本可读），VK 因为 feed 被 wants_camera 门控所以是 0。
-两者**相机**行为已一致（GL 的 move_camera/rotate_camera 在 ui_consumed 时早退），差的只是
-「脚本在 UI 消费帧读 mouse_rel」这一面。
+~~已知残差~~（**Q-B7-43-2 已修**，2026-11-22 人类裁决「选 A，并且同时给 VK 补 ui_consumed」）：
+GL 的 engine.mouse_rel 在「本帧被 UI 消费」时仍是非 0（脚本可读）—— 现两端同语义：
+VK 的 vk_player.draw 帧首也**无条件**喂（mouse_rel = 本帧物理增量），且消费位单独暴露为
+driver.ui_consumed（= GL 的 PlayerApp.ui_consumed 同语义）。「消费帧相机不转」由相机
+消费点的 ui_consumed 早退承担（GL: runtime.PlayerApp.move_camera/rotate_camera；
+VK: SceneDriver.apply_editor_camera_mouse，编辑器路径两端共用 _EditorCore._ui_lock）。
+门 = tests/test_mouse_rel_ui_consumed_parity.py（A/B/C/D 四组）；本门 ⑧ 组口径同步更新（夹具镜像 + 注释，断言表达式一字未改）。
 
 Q-B7-43-1 修后（2026-11-18，**只改本门夹具 + 注释**，业务代码一行未动、断言表达式一字未改）：
   · 症状：本门 ①/②/③ 组偶发假红，签名 GL=('root','root',None,None) 而 VK 正确
@@ -530,9 +534,13 @@ class Pair:
                                           getattr(self.vk, '_vk_glfw_window', None),
                                           None)
         self.bridge.begin_frame()
+        # Q-B7-43-2（2026-11-22 裁决 A）：生产 vk_player.draw 帧首改为「begin_frame →
+        # driver.ui_consumed 写入 → **无条件** feed」—— 修前的 wants_camera 门控已删，
+        # 本夹具逐行镜像同步（镜像漂移由 〇 段结构锚点守住）。
+        self.vk.ui_consumed = (not self.bridge.wants_camera())
         _x, _y = self.bridge.pos
-        _fed = (0, 0)                    # 本帧**真的**喂给相机的增量（0 = 被 UI 挡住）
-        if self._prev is not None and self.bridge.wants_camera():
+        _fed = (0, 0)                    # 本帧喂给 driver 的物理增量（裁决 A：无条件）
+        if self._prev is not None:
             _fed = (_x - self._prev[0], _y - self._prev[1])
             self.vk.feed_mouse_rel(_fed[0], _fed[1])
         self._prev = (_x, _y)
@@ -553,8 +561,11 @@ class Pair:
             'wheel_consumed': bool(self.bridge.last_wheel_consumed),
             'wants_camera': bool(self.bridge.wants_camera()),
             'wheel': wheel_visible,
-            'cam_rel': _fed,                 # ⑧：本帧喂给相机的增量（被挡 = (0,0)）
-            'rel': tuple(self.vk.mouse_rel),  # ⑧ 对照用（driver 结算值）
+            'cam_rel': ((0, 0) if bool(self.vk.ui_consumed) else tuple(_fed)),
+            # ⑧：相机实际拿到的增量 —— Q-B7-43-2 修后口径：喂入无条件（裁决 A），但
+            # 相机消费点（apply_editor_camera_mouse / 脚本消费路径）在 ui_consumed=True
+            # 时早退（对齐 GL PlayerApp.move_camera/rotate_camera 早退），消费帧 = (0,0)。
+            'rel': tuple(self.vk.mouse_rel),  # ⑧ 对照用（driver 结算值 = 本帧物理增量）
             'keys_true': tuple(sorted(k for k, v in (self.vk.key_state or {}).items() if v)),
         }
 
@@ -1189,12 +1200,15 @@ check('⑧ 两端都已上锁（生产脚本 API；mouse_rel 的生产前提，�
 def press_step(label, x, y, press=False, release=False, exp_consumed=None, exp_rel=None):
     """一帧：喂同一串光标/按键 -> 比「消费位 + 相机门控 + 相机实际拿到的增量」。
 
-    口径（写清，防"拿自报数字当证据"）：
+    口径（写清，防"拿自报数字当证据"；Q-B7-43-2 修后更新）：
       · GL 的相机增量 = ui_consumed 时 (0,0)，否则生产泵结算出的 engine.mouse_rel
         —— 因为 runtime.PlayerApp.move_camera / rotate_camera 在 ui_consumed=True 时
         **早退**（runtime.py:306-316），本帧相机拿到的就是 0；
-      · VK 的相机增量 = vk_player.draw 里**真的**喂进 feed_mouse_rel 的那一份
-        （wants_camera()=False 时根本没喂 = (0,0)）。
+      · VK 的相机增量 = driver.ui_consumed 时 (0,0)，否则本帧喂进 driver 的物理增量
+        —— Q-B7-43-2（2026-11-22 裁决 A）修后：vk_player.draw **无条件**喂
+        （mouse_rel = 本帧物理增量，与 GL 同语义），「消费帧相机不转」由相机消费点的
+        ui_consumed 早退承担（SceneDriver.apply_editor_camera_mouse，= GL
+        editor._update_camera 的 _ui_lock 同语义）。
     两端都取"相机实际拿到的增量"，不是"引擎自报的鼠标值"。
     """
     g, v = p.frame(x, y, press, release)

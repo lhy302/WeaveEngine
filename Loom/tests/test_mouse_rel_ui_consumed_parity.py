@@ -241,10 +241,18 @@ check('结构（Q-B7-43-2·C）：VK apply_editor_camera_mouse 有 ui_consumed �
       (_vk_driver_src[_vk_driver_src.find('def apply_editor_camera_mouse'):
                       _vk_driver_src.find('def apply_editor_camera_mouse') + 4000]
        if 'def apply_editor_camera_mouse' in _vk_driver_src else ''))
+_i_apm = _vk_driver_src.find('def apply_editor_camera_mouse')
+_apm_body = _vk_driver_src[_i_apm: _vk_driver_src.find('def ', _i_apm + 10)] if _i_apm >= 0 else ''
 check('结构：VK apply_editor_camera_mouse 的早退**只锁转视角、不连坐滚轮**'
-      '（对齐 GL editor._update_camera 的 B7-28 P-09 语义）',
-      'def apply_editor_camera_mouse' in _vk_driver_src and
-      _vk_driver_src.find("ui_consumed") > _vk_driver_src.find('def apply_editor_camera_mouse'))
+      '（早退点在滚轮消费之后、mouse_rel 消费之前 = 对齐 GL editor._update_camera 的 '
+      'B7-28 P-09 语义）',
+      _i_apm >= 0
+      and "getattr(self, 'ui_consumed', False)" in _apm_body
+      and _apm_body.find("getattr(self, 'ui_consumed', False)") > _apm_body.find('self.mouse_wheel = 0')
+      and _apm_body.find("getattr(self, 'ui_consumed', False)") < _apm_body.find('mx, my = self.mouse_rel'),
+      '早退相对位置 wheel=%s look=%s 早退=%s' % (_apm_body.find('self.mouse_wheel = 0'),
+                                                _apm_body.find('mx, my = self.mouse_rel'),
+                                                _apm_body.find("getattr(self, 'ui_consumed', False)")))
 check('结构：共享编辑器相机的早退仍在（两端共用的 _EditorCore._update_camera _ui_lock）',
       "_ui_lock = bool(getattr(self, 'ui_consumed', False))" in _editor_src)
 check('结构：GL 泵的无条件结算语义仍在（window.py：self.mouse_rel = (int(dx), int(dy))）',
@@ -393,9 +401,9 @@ class Pair:
     def vk_frame(self, x, y, press=False, release=False):
         """VK 生产帧：vk_player 回调逐行镜像 + vk_player.draw 帧首逐行镜像。
 
-        修前镜像（本门随修前提交）：begin_frame → wants_camera 门控 feed_mouse_rel。
-        修后镜像（Q-B7-43-2）：begin_frame → driver.ui_consumed 写入 → 无条件 feed。
-        镜像漂移由 D 组结构断言守住（两边必须同步改）。
+        修后镜像（Q-B7-43-2 落地，2026-11-22）：begin_frame → driver.ui_consumed 写入
+        → 无条件 feed_mouse_rel。修前版（随修前提交 077a3bd）是 begin_frame →
+        wants_camera 门控 feed。镜像漂移由 D 组结构断言守住（两边必须同步改）。
         """
         # ---- vk_player._on_cursor / _on_mouse_button ----
         self.bridge.on_cursor(x, y)
@@ -408,11 +416,13 @@ class Pair:
             self.bridge.on_mouse_button(1, True)
         if release:
             self.bridge.on_mouse_button(1, False)
-        # ---- vk_player.draw 帧首 ----
+        # ---- vk_player.draw 帧首（Q-B7-43-2 修后镜像：begin_frame → ui_consumed 写入
+        #      → 无条件 feed）----
         self.bridge.begin_frame()
+        self.vk.ui_consumed = (not self.bridge.wants_camera())   # 生产：player.py 帧首新增行
         _x, _y = self.bridge.pos
         _p = self._prev
-        if _p is not None and self.bridge.wants_camera():
+        if _p is not None:                                        # 生产：无条件喂（裁决 A）
             self.vk.feed_mouse_rel(_x - _p[0], _y - _p[1])
         self._prev = (_x, _y)
         # ---- vk_player.draw: advance_logic（帧首 consume_mouse_input 结算） ----

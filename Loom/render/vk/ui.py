@@ -772,8 +772,11 @@ class VkWorldUIPipeline:
 #         on_key / on_text 两个转发方法**保留兼容**，播放器路径不再调用它们。
 #   相机: **本帧**鼠标事件被 UI 消费 -> wants_camera()=False（与 GL 的 ui_consumed
 #         同一语义，Q-B7-41-2 人类裁决「以 GL 为准」）；拖动滑条时 dispatch_mouse 的
-#         拖动分支每帧都返回 consumed=True，所以拖动期照常抢相机。播放器本帧不喂
-#         mouse_rel (UI 捕获鼠标时不同时转视角).
+#         拖动分支每帧都返回 consumed=True，所以拖动期照常抢相机。
+#         2026-11-22（Q-B7-43-2，人类裁决「选 A」）：mouse_rel 改为**无条件**喂
+#         （= 本帧物理增量，与 GL loom_glfw_window._update_mouse_rel 同语义）；
+#         消费位由 vk_player.draw 帧首落到 driver.ui_consumed（= not wants_camera()，
+#         与 GL runtime.PlayerApp.ui_consumed 同语义），相机侧在消费点早退。
 #   滚轮: last_wheel_consumed 只回答"本帧滚轮是否被 ScrollView 消费",
 #         与 last_consumed (本帧鼠标事件整体) 分开, 见 _wheel_taken_by_scrollview.
 _PENDING_UP_BUG_WARNED = False

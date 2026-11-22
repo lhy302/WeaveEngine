@@ -605,6 +605,14 @@ class SceneDriver(VkWindowMixin, VkEditorRenderMixin, EngineCore):
         # ★不是转发宿主桥 vk_ui.UIInputBridge.pos —— 那个是 **float** 元组（给 UI 命中用），
         #   直接暴露会造出一个新的 float vs int 差异。更新点见 _on_cursor_event（唯一）。
         self.mouse_pos = (0, 0)
+        # 2026-11-22（Q-B7-43-2，人类裁决「选 A，并且同时给 VK 补 ui_consumed」）:
+        # 本帧鼠标事件被 UI 消费的标志 —— 与 GL runtime.PlayerApp.ui_consumed
+        # 同名同类型同语义（bool；GL 由 _dispatch_ui_mouse 每帧写 = dispatch_mouse
+        # 返回值，runtime.py:259/297）。VK 的**每帧写入点**在 vk_player.draw 帧首
+        # （= not ui_bridge.wants_camera()），与 GL「帧首派发、相机/脚本消费之前」同序。
+        # 相机侧的消费点早退在 apply_editor_camera_mouse（对齐 GL editor._update_camera
+        # 的 _ui_lock 与 PlayerApp.move_camera/rotate_camera 的早退）。
+        self.ui_consumed = False
         # 2026-11-08 人类裁决（鼠标锁定语义重构）: **默认不锁** —— 没人要求就不锁。
         # 规则:
         #   · 只有游戏配置里**显式**写了 mouse_lock_allowed / mouse_locked 才生效；
@@ -1865,7 +1873,9 @@ class SceneDriver(VkWindowMixin, VkEditorRenderMixin, EngineCore):
         相机位姿（状态 → 位姿）；GL 的对应物是 editor._update_camera。故改名后登记为后端内部。
         公式与 GL editor._update_camera 逐位一致 (0.01 弧度/像素, pitch 钳 ±1.55,
         distance *= exp(-wheel*0.1) 再钳 0.5..1000). 只在轨道模式生效 ——
-        玩家相机 (active_camera) 接管时与 GL 一样不由鼠标直接改相机; 滚轮读后清零."""
+        玩家相机 (active_camera) 接管时与 GL 一样不由鼠标直接改相机; 滚轮读后清零.
+        Q-B7-43-2（2026-11-22）: 本帧鼠标事件被 UI 消费（ui_consumed=True）时右键
+        转视角早退（= GL editor._update_camera 的 _ui_lock）；滚轮不连坐."""
         from loom_camera import CAM_DIST_MIN, CAM_DIST_MAX
         wheel = self.mouse_wheel
         self.mouse_wheel = 0
@@ -1874,6 +1884,16 @@ class SceneDriver(VkWindowMixin, VkEditorRenderMixin, EngineCore):
         if wheel:
             self.distance = max(CAM_DIST_MIN, min(
                 CAM_DIST_MAX, self.distance * math.exp(-wheel * 0.1)))
+        # 2026-11-22（Q-B7-43-2，人类裁决「选 A，并且同时给 VK 补 ui_consumed」）:
+        # 本帧鼠标事件被 UI 消费 -> 右键转视角**不消费本帧 mouse_rel** —— 与 GL
+        # editor._update_camera 的 _ui_lock = ui_consumed 早退同语义
+        # （editor/core.py:2809/2821/2868）。修前「消费帧不转视角」靠 vk_player 不喂
+        # mouse_rel 实现；裁决 A 把喂入改成无条件（mouse_rel = 物理增量）后，
+        # 早退必须挪到消费点（本处），否则 UI 拖动时相机会开始转视角（回归）。
+        # 滚轮**不连坐**：上面已消费（B7-28 P-09 —— 只有「滚轮本身被 ScrollView
+        # 吃掉」才不给相机，同帧「点按钮 + 滚轮」滚轮照给）。
+        if getattr(self, 'ui_consumed', False):
+            return
         mx, my = self.mouse_rel
         if self.mouse_buttons[2]:          # 右键按住拖动 = 转视角 (GL 同)
             self.yaw += mx * self.mouse_look_sens

@@ -417,8 +417,11 @@ class Pair:
         self.bridge.begin_frame()                      # render/vk/player.py:643
         _x, _y = self.bridge.pos
         _p = self._prev[0]
-        if _p is not None and self.bridge.wants_camera():
-            self.vk.feed_mouse_rel(_x - _p[0], _y - _p[1])   # render/vk/player.py:647-648
+        # Q-B7-43-2（2026-11-22 裁决 A）：生产已改为**无条件**喂（mouse_rel = 物理增量）；
+        # 修前的 wants_camera() 门控已删 —— 本夹具逐行镜像同步。本门场景无 UI，
+        # wants_camera() 恒 True，故行为零变化（断言表达式一字未改）。
+        if _p is not None:
+            self.vk.feed_mouse_rel(_x - _p[0], _y - _p[1])   # render/vk/player.py 帧首喂入
         self._prev[0] = (_x, _y)
         self.vk.advance_logic(FRAME_DT)                # render/vk/player.py:664（结算在其帧首）
         vk_player.poll_unlock_frame(self.vk)           # render/vk/player.py:668
