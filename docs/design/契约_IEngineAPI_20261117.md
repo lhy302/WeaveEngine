@@ -254,6 +254,8 @@ py -3.13 Loom/tests/test_engine_api_matrix.py --list   # 打印矩阵（含签�
 | `render_api_current` | 共享（只读） | `'opengl'`（`engine.py:919`） | `'vulkan'`（`scene_driver.py:831`） | 两端**值不同是正确行为**（如实反映本实例后端）；契约只要求「同名 + 返回字符串 + 与 `get_render_api()` 一致」 |
 | `current_camera_position` | B（VK 独有，降为非契约；Q-B7-24-5 由 `camera_pos` 改名） | 无（GL 用 `self.camera` 属性 + `camera_world_position()`） | `@property`（`render/vk/driver.py`） | 不进契约；契约名是 `camera_world_position()`（吃相机实体，两端同一函数对象） |
 | `script_keys` | **口径假差异**（两端语义相同） | `__init__` 实例属性（`engine.py:418`） | `@property` 别名 `key_state`（`scene_driver.py:1132`） | 不进契约差异清单；但**两端都必须有**（引擎前置检查依赖它），见 §10 |
+| `mouse_rel` | A（只读状态，Q-B7-43-2 裁决 A） | 每帧由生产泵无条件结算（`loom_glfw_window._update_mouse_rel`，暂停期 (0,0)） | `feed_mouse_rel`（仅锁定态累积）→ `consume_mouse_input` 帧首结算（`render/vk/driver.py`）；喂入由 `vk_player.draw` 帧首**无条件**做 | **两端同语义（2026-11-22 人类裁决「选 A」）**：`mouse_rel` = **本帧鼠标物理位移增量**（int 像素元组），**不管**本帧鼠标事件是否被 UI 消费；「UI 消费帧不转视角」由相机消费点的 `ui_consumed` 早退承担，**不许**再靠「不喂 mouse_rel」实现 |
+| `ui_consumed` | A（只读状态，Q-B7-43-2 裁决「补 ui_consumed」） | `runtime.PlayerApp._dispatch_ui_mouse` 每帧写 = 本帧 `dispatch_mouse` 返回值（`runtime.py:297`） | `render/vk/driver.py` 实例属性（初值 `False`）；**每帧写入点**在 `vk_player.draw` 帧首 `driver.ui_consumed = not ui_bridge.wants_camera()`（与 GL 同序：帧首、相机/脚本消费之前） | **两端同语义（bool）**：「本帧鼠标事件被 UI 消费」；脚本 `if engine.ui_consumed:` 两端都能跑。写入点每端各一处（GL `runtime.py` / VK `player.py`）。门 = `tests/test_mouse_rel_ui_consumed_parity.py`（A/B/C/D 四组，修前红证据见该文件头与提交信息） |
 
 > **为什么属性必须进契约**：脚本读状态只能靠属性（`if engine.mouse_locked:`）。
 > 只对齐方法不对齐属性，结果是「API 都对齐了，读状态还是 `AttributeError`」—— 正是 Q-B7-24-2 裁决要堵的洞。
