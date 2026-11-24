@@ -64,6 +64,14 @@
 > ⑦ Q-B7-43-2 mouse_rel 裁决 A 落地（VK 无条件喂 + SceneDriver.ui_consumed，契约 §5 登记）；
 > ⑧ 台账状态批量更正（10 条）。文件清单 159→**168 个 .py**（**63431 行**，口径不变）；验证体系新增 7 门 + run_all 汇总刷新（图 19）。
 
+> **Q-B7-60-1 同步（2026-11-24，HEAD 9dcac22，代码 commit 67bc72c + 2d0b3f4）**：编辑器渲染后端改为**配置驱动**
+> ——决策单源 `hostenv/editor_launch.editor_backend_choice:48`（显式 `--backend` > 配置 `render_api` > 默认；无显式时转调
+> `run_player.resolve_backend(None)`，与播放器同一条解析链），Loom.py:108-121 / build_entry.py:113-123 两处逐位重复实现降为薄转调；
+> 设置面板改名「渲染后端（编辑器与播放共用，重启生效）」+ 写盘走 `_cmd_set_render_api`（settings_set 命令壳）。
+> **行为变化**：`render_api` 缺省 vulkan（`guiloader.py:47`）→ 编辑器**默认改走 VK 视口**（修前默认 GL）；
+> VK 不可用时 `VkViewport.init_error` 可见、窗口仍可开、可在设置面板改回 opengl 后重启（不做运行期回退，裁决①）。
+> 图 1 / 1.1 / 8 / 9 / 13 / 19 相应更新；文件清单 168→**169 个 .py**（**64100 行**，口径不变）；新增门 test_editor_backend_config_parity 69 条。
+
 > 相对 v1 的三个改动：**① 拆成多张小图**（一张图超过 ~15 个节点必然乱，这是 mermaid 的排版极限，不是画法问题）；
 > **② 节点里放进真实文件**，功能与文件之间用 `实现于` 连线；**③ 每条线上写清关系**（调用 / 拼装 / 共享契约 / import）。
 > 颜色按角色区分，同一张图里看颜色就知道哪个是门面、哪个是契约、哪个是文件。
@@ -80,7 +88,7 @@
 | 顺序 | 图 | 回答什么问题 |
 |---|---|---|
 | **1** | [图 1 全景](#图-1-全景只画层不画文件) | 层与层之间对不对？入口→门面→子系统→契约→数据，有没有跨层直连？ |
-| **2** | [图 13 文件清单](#图-13-文件清单按功能簇归组168-个-py) | **168 个 .py 按功能簇归组** —— 哪个文件混了多个功能？哪个簇缺文件？ |
+| **2** | [图 13 文件清单](#图-13-文件清单按功能簇归组169-个-py) | **169 个 .py 按功能簇归组** —— 哪个文件混了多个功能？哪个簇缺文件？ |
 | **3** | [图 19 验证体系](#图-19-验证体系两端对拍门覆盖了哪些面--本轮最大产出) | 哪个面有门、哪个面没门（19.3 缺口表） |
 
 **其它常用**：
@@ -122,15 +130,15 @@
 
 ```mermaid
 flowchart TB
-  subgraph EDENT["编辑器入口（后端选择同走 run_player.resolve_backend，B7-54）"]
-    A1["Loom.py 487<br/>源码入口"]:::entry
-    A2["build_entry.py 580<br/>编译入口"]:::entry
+  subgraph EDENT["编辑器入口（后端决策 hostenv.editor_launch.editor_backend_choice，Q-B7-60-1；与播放同一条解析链）"]
+    A1["Loom.py 489<br/>源码入口"]:::entry
+    A2["build_entry.py 581<br/>编译入口"]:::entry
   end
   subgraph PLENT["播放器入口（两条腿，可切）"]
     A3["run_player.py 494<br/>parse_backend_arg:133（唯一解析）<br/>resolve_backend:152"]:::entry
     A4["game_player.py 305<br/>打包游戏（复用 run_player）"]:::entry
     A5["render/vk/player.py 901<br/>VK 窗口循环"]:::entry
-    A6["editor/vk_app.py 161<br/>VkEditorApp（S4 编辑器 VK 面）"]:::entry
+    A6["editor/vk_app.py 161<br/>VkEditorApp（编辑器 VK 面；Q-B7-60-1 起缺省走它）"]:::entry
   end
   subgraph FACADE["门面（形状不同）"]
     B1["GLEngine<br/>render/gl/engine.py 1651<br/>= EngineCore + 6 个 GL mixin"]:::facade
@@ -146,15 +154,15 @@ flowchart TB
     D2["assets/assets.py 1198"]:::file
     D3["render/contract/<br/>frame_plan 270 · scene_ubo 177"]:::contract
   end
-  A1 -->|缺省创建 EditorApp（GL）| B1
-  A2 -->|缺省创建 EditorApp（GL）| B1
-  A1 -->|--backend 决策走 resolve_backend| A3
-  A2 -->|四分支决策走 resolve_backend| A3
+  A1 -->|gl 分支 → EditorApp| B1
+  A2 -->|gl 分支 → EditorApp| B1
+  A1 -->|编辑视口后端 editor_backend_choice| A3
+  A2 -->|编辑视口后端 editor_backend_choice| A3
   A4 -->|复用后端选择| A3
   A3 -->|opengl 分支经 runtime.PlayerApp| B1
   A3 -->|vulkan 分支| A5
   A5 -->|创建| B2
-  A3 -.->|显式 vulkan → 编辑器面| A6
+  A3 -.->|vulkan → 编辑器面 VkEditorApp / VkViewport| A6
   A6 -->|装配| B2
   B1 ==>|拼装| C1
   B2 -->|使用| C2
@@ -173,8 +181,12 @@ flowchart TB
 ```
 
 > **读法**：B7-54 后编辑器与编译入口的后端选择**同走一份** `run_player.resolve_backend`（--backend 解析也收敛为
-> `run_player.parse_backend_arg:133` 全仓唯一实现）：编辑器入口缺省仍 GL（`EditorApp(_EditorCore, GLEngine)`，editor/app.py 32 行装配壳），
-> S4 起显式 `--backend vulkan` 时改走 `VkEditorApp(_EditorCore, SceneDriver)`（真窗口双视口，editor/vk_app.py 161 行）；
+> `run_player.parse_backend_arg:133` 全仓唯一实现）；**Q-B7-60-1 起编辑器视口后端也由这条链决定** —— 唯一实现
+> `hostenv/editor_launch.editor_backend_choice:48`（显式 `--backend` > 配置 `render_api` > 默认；无显式时直接转调
+> `run_player.resolve_backend(None)`）：`vulkan` → `VkEditorApp(_EditorCore, SceneDriver)`（真窗口双视口，editor/vk_app.py 161 行；
+> `--ui qt` 下是 LoomGUI + `editor/viewport/vk_viewport.VkViewport`），`opengl` / `auto` → GL（`EditorApp(_EditorCore, GLEngine)`，
+> editor/app.py 32 行装配壳；auto 在编辑器侧取保底 gl，编辑器不做运行期回退 = 裁决①）；`guiloader` 缺省 `render_api=vulkan`，
+> 故编辑器**缺省走 VK 视口**（修前缺省 GL）；
 > `build_entry.py` 四分支全部经 run_player 后端选择（播放分支 `run_backend` 链路，default/minimal 分支 VK 决策可达）；
 > 播放器入口经 run_player 分叉到 GL（runtime.PlayerApp）或 VK（render/vk/player → SceneDriver）。
 > 编辑器与播放器的播放组件是**同一份**（_EditorCore 中间基类 + 主 pass 相机/挂父相机/LateUpdate/
@@ -186,17 +198,20 @@ flowchart TB
 
 | 场景 | 能选后端吗 | 依据 | 环境不支持时 |
 |---|---|---|---|
-| **编辑器**（`Loom.py` / `Loom.exe`） | **部分能**（S4）：缺省仍 GL（`EditorApp(_EditorCore, GLEngine)`，零变化）；**显式 `--backend vulkan`** → `VkEditorApp(_EditorCore, SceneDriver)` + `editor/viewport/vk_viewport.VkViewport`（QRenderWidget bitmap present） | `Loom.py:441-470` 编辑器分支走 `_editor_backend_choice` 纯决策函数（真调 `run_player.resolve_backend` 单一事实，B7-54 终审 F-2 抽出；`build_entry.py` 编辑器面同规则，门 A④ 双方真调用同一份决策） | VK 不可用 → `VkViewport.init_error` 报错可见（不静默降级，vk_viewport.py:113） |
-| 编辑器里点「播放」 | **不能**。就在编辑器自己的 GL 引擎里跑 | `gui/main_window.py:1480` → `_invoke_cmd('play')` → `editor.toggle_play` 只置 `is_playing`，不起外部播放器 | 同上 |
+| **编辑器**（`Loom.py` / `Loom.exe`） | **能，以配置文件为准**（Q-B7-60-1）：`render_api` 决定编辑视口后端 + 播放后端（一个键全局消费）；`--backend` 命令行显式最高优先级。`vulkan` → `VkEditorApp(_EditorCore, SceneDriver)`（`--ui qt` 下是 LoomGUI + `editor/viewport/vk_viewport.VkViewport`，QRenderWidget bitmap present）；`opengl` / `auto` → `EditorApp(_EditorCore, GLEngine)`（auto 在编辑器侧取保底 gl） | `hostenv/editor_launch.py::editor_backend_choice:48` **唯一实现**（`Loom.py:108-121` / `build_entry.py:113-123` 只薄转调；无显式时转调 `run_player.resolve_backend(None)`，与播放器同一解析链；门 `test_editor_backend_config_parity` 69 条 + `test_entry_backend_parity` A④/C1 同源） | VK 不可用 → `VkViewport.init_error` 报错可见（不静默降级，vk_viewport.py:110-113）；**窗口仍可开**，可在设置面板改回 `opengl` 后重启生效（不做运行期回退，Q-B7-60-1 裁决①） |
+| 编辑器里点「播放」 | **不能**。就在编辑器自己的视口后端里跑（GL 或 VK，播放组件同源） | `gui/main_window.py:1480` → `_invoke_cmd('play')` → `editor.toggle_play` 只置 `is_playing`，不起外部播放器 | 同上 |
 | 独立播放器（`--run`） | **能**：`--backend` > 游戏设置 > 引擎设置 > 默认 vulkan | `run_player.resolve_backend:152` | `auto`：VK 初始化失败 → 诊断+落配置+**同进程转 GL**（`run_player.py:434-449`、`_persist_backend:205`）；显式 `--backend vulkan` 失败只报错不改配置 |
 | 打包游戏（`game_player.py`） | **能**：同播放器一套逻辑（复用 run_player，`:170` 调同一 resolve_backend） | `game_player.py:170` | 同播放器 |
 | 运行期失败（VK 渲染循环内崩） | — | `VkRunError` | **不回退**：打印原因后非零退出（`run_player.py:438-439`） |
 | **运行环境屏幕不可见（远程/无头）** | **env 接管，不手选**：`LOOM_REMOTE_MODE` 三态 off / on / auto（auto = 上屏健康监视失败才转远程） | 三态收口**唯一实现** = `hostenv/remote_launch.py`（151 行；Loom.py / build_entry.py 四个播放分支全走同一 `launch_player`，Q-B7-55-1） | 编辑器面：`--ui minimal/default` + vulkan → 两入口同一条可见报错 EXIT 1（唯一决策 `hostenv/editor_launch.py`，不静默降级 GL） |
 
-> 编辑器里那个「渲染 API」下拉框（`gui/main_window.py:3297-3318`，B4 后归位；原 `ui/loom_gui.py`）写的是**游戏设置**，
-> 即「下次启动播放器/打包游戏用哪个」，不是「编辑器自己用哪个」。
-> `guiloader.py:47` 的注释也这么写：`播放器/发布游戏默认渲染 API (编辑器选)`（默认值 vulkan）。
-> 所以同一个键 `render_api` 在编辑器里是「替别人设的」，在播放器里是「我自己用的」—— 这是真实的不对称。
+> 编辑器里那个下拉框（`gui/main_window.py:3299-3332`，B4 后归位；原 `ui/loom_gui.py`）在 **Q-B7-60-1（2026-11-23 人类裁决）
+> 之后是「编辑器与播放共用的项目后端设置」**：同一个键 `render_api` 既决定编辑视口后端，也决定播放/打包游戏的后端
+> （编辑器读它走 `hostenv.editor_launch.editor_backend_choice` → `run_player.resolve_backend(None)` 同一条解析链）。
+> 标签已改为「渲染后端（编辑器与播放共用，重启生效）」，tooltip 写明「以配置文件为准 / 编辑器视口与播放打包共用 /
+> 重启生效 / `--backend` 可临时覆盖」；写盘走 `_cmd_set_render_api`（settings_set 命令壳，B7-56-2 裁定①），选中项以配置文件为准。
+> 修前那套「同一个键在编辑器里是替别人设的、在播放器里是自己用的」的不对称**已被本裁决消除**（一个键全局消费）。
+> `guiloader.py:47` 缺省仍是 `render_api: 'vulkan'` → 编辑器**缺省走 VK 视口**（修前缺省 GL），这是 Q-B7-60-1 的行为变化。
 
 ---
 
@@ -501,7 +516,7 @@ flowchart LR
   ED["EditorApp<br/>editor/app.py 32（B4 装配壳）<br/>= _EditorCore + GLEngine"]:::facade
   GE["GLEngine<br/>render/gl/engine.py 1651"]:::facade
   COR["★ _EditorCore<br/>editor/core.py 3101 · 152 方法<br/>编辑器能力唯一实现（后端无关）"]:::contract
-  V["Qt 视图<br/>gui/main_window.py 3923<br/>（B4 拆自 ui/loom_gui.py 4339）"]:::file
+  V["Qt 视图<br/>gui/main_window.py 3948<br/>（B4 拆自 ui/loom_gui.py 4339）"]:::file
   U["撤销/重做<br/>editor/undo/ 6 文件 1469 行<br/>registry 364 + cmd_object 400<br/>+ cmd_scene 395 + cmd_camera 148<br/>+ cmd_light 117"]:::file
   EAI["EAI 命令面<br/>agent_commands.py 4222<br/>106 个 @command"]:::entry
   FD["文件对话框<br/>filedialog.py 295"]:::file
@@ -549,7 +564,7 @@ flowchart LR
   P["hostenv/userpaths.py 142<br/>唯一收口点"]:::contract
   G1["guiloader.py 340<br/>引擎设置"]:::file
   G2["game_settings.py 415<br/>游戏设置"]:::file
-  C0["四入口（B7-54 同源）<br/>Loom.py · build_entry.py 536<br/>game_player.py · run_player.__main__"]:::entry
+  C0["四入口（B7-54 同源）<br/>Loom.py · build_entry.py 581<br/>game_player.py · run_player.__main__"]:::entry
   R1["run_player.py 494<br/>parse_backend_arg:133（--backend 解析唯一实现）<br/>resolve_backend:152 读 render_api"]:::entry
   R2["render/gl/engine.py / render/vk/driver.py<br/>读 logic_fps / interp_mode"]:::impl
   T -->|delta 覆盖| U
@@ -685,16 +700,16 @@ sequenceDiagram
 
 ---
 
-# 图 13 文件清单（按功能簇归组，168 个 .py）
+# 图 13 文件清单（按功能簇归组，169 个 .py）
 
-图上画不下的全量在这里 —— 这是「功能分布在哪几个文件」的表格版。行数 2026-11-23 实测（物理行；口径 = `len(text.split('\n'))`，与包内 135 文件既有口径一致；终审 F-4 复算时把 2026-11-21 混用的三处行数——Loom.py / build_entry.py / 门文件——统一到同一口径）。
-**20 个包共 137 文件 / 47096 行 + 顶层平铺 22 文件 / 12086 行 + tests 门文件 9 / 4249 行 = 168 文件 / 63431 行。**（B7-55~59 批 2026-11-23 实测，口径不变 = `len(text.split('\n'))`）
+图上画不下的全量在这里 —— 这是「功能分布在哪几个文件」的表格版。行数 2026-11-24 实测（物理行；口径 = `len(text.split('\n'))`，与包内 135 文件既有口径一致；终审 F-4 复算时把 2026-11-21 混用的三处行数——Loom.py / build_entry.py / 门文件——统一到同一口径）。
+**20 个包共 137 文件 / 47165 行 + 顶层平铺 22 文件 / 12089 行 + tests 门文件 10 / 4846 行 = 169 文件 / 64100 行。**（Q-B7-60-1 批 2026-11-24 实测，口径不变 = `len(text.split('\n'))`）
 
 ### A 入口层（顶层平铺）
 | 文件 | 行数 | 职责 |
 |---|---|---|
-| `Loom.py` | 487 | 源码入口：命令行参数 + 数学管线基准 + 编辑器/播放器分叉（后端选择走 run_player.resolve_backend 单一事实，编辑器分支 `:441-470`；`_cli_backend:91` 薄转调 parse_backend_arg（B7-54 解析唯一实现）；`_editor_backend_choice:108` 编辑器决策纯函数（B7-54 终审 F-2 抽出，main 与门 A④ 同一份）；Q-B7-55-1：远程三态与 --ui×backend 执行面薄转调 hostenv.remote_launch / hostenv.editor_launch 唯一实现） |
-| `build_entry.py` | 580 | 编译入口：命令行参数 + 数学管线基准 + 启动引擎；B7-54 后四分支全走 run_player 后端选择（`_player_backend_choice:102` / `_editor_backend_choice:113` 纯决策函数，播放分支 `run_backend` 链路，default/minimal 分支 VkEditorApp 可达）；Q-B7-55-1：四个播放分支全走 hostenv.remote_launch.launch_player 同一份 |
+| `Loom.py` | 489 | 源码入口：命令行参数 + 数学管线基准 + 编辑器/播放器分叉（后端选择走 run_player.resolve_backend 单一事实，编辑器分支 `:441-472`；`_cli_backend:91` 薄转调 parse_backend_arg（B7-54 解析唯一实现）；`_editor_backend_choice:108` 编辑器决策**薄转调**（Q-B7-60-1 起唯一实现 = `hostenv.editor_launch.editor_backend_choice`，配置驱动；main 与门 A④ / 新门 test_editor_backend_config_parity 都真调用同一份）；Q-B7-55-1：远程三态与 --ui×backend 执行面薄转调 hostenv.remote_launch / hostenv.editor_launch 唯一实现） |
+| `build_entry.py` | 581 | 编译入口：命令行参数 + 数学管线基准 + 启动引擎；B7-54 后四分支全走 run_player 后端选择（`_player_backend_choice:102` / `_editor_backend_choice:113` 决策函数，播放分支 `run_backend` 链路，default/minimal 分支 VkEditorApp 可达）；Q-B7-60-1：`_editor_backend_choice:113` 降为**薄转调** hostenv.editor_launch.editor_backend_choice（与 Loom.py 同名函数同一份，配置驱动）；Q-B7-55-1：四个播放分支全走 hostenv.remote_launch.launch_player 同一份 |
 | `run_player.py` | 494 | 播放器渲染 API 选择入口（parse_backend_arg:133 全仓唯一 --backend 解析 / resolve_backend:152 / _persist_backend:205 / auto 失败同进程转 GL :434-449） |
 | `runtime.py` | 321 | Player 运行时（M17: 引擎/编辑器分层；GL 播放器 _dispatch_ui_mouse:246） |
 | `game_player.py` | 305 | 纯 Player 游戏入口（M38，Unity Build 模型；:170 复用 resolve_backend） |
@@ -775,10 +790,10 @@ sequenceDiagram
 | `editor/viewport/__init__.py` | 13 | viewport 包。 |
 | `editor/__init__.py` | 38 | editor 包门面（re-export EditorApp 等，`from editor import EditorApp` 一行不改）。 |
 
-### H gui/（Qt 视图，7 文件 / 5165 行；B4 新建）
+### H gui/（Qt 视图，7 文件 / 5190 行；B4 新建）
 | 文件 | 行数 | 职责 |
 |---|---|---|
-| `gui/main_window.py` | 3923 | LoomGUI 主窗口（工具栏/层级/检查器/资源浏览器/控制台坞全部面板方法，126 个方法）+ run_loom_gui 入口 + render_api 下拉 :3297（B4 拆自 ui/loom_gui.py 4339；B7-56 后面板操作全走 _invoke_cmd:642，B7-56-2 扫尾后检查器/组件/相机/资源面板/TPS/Tag 残留直调也全部命令化）。 |
+| `gui/main_window.py` | 3948 | LoomGUI 主窗口（工具栏/层级/检查器/资源浏览器/控制台坞全部面板方法，126 个方法）+ run_loom_gui 入口 + 「渲染后端（编辑器与播放共用，重启生效）」下拉 :3299-3332（Q-B7-60-1：选中项以配置文件 render_api 为准，写盘走 `_cmd_set_render_api` settings_set 命令壳，删原直写 lambda；B4 拆自 ui/loom_gui.py 4339；B7-56 后面板操作全走 _invoke_cmd:642，B7-56-2 扫尾后检查器/组件/相机/资源面板/TPS/Tag 残留直调也全部命令化）。 |
 | `gui/gl_viewport.py` | 227 | GLViewport（_ViewportEventBridge + QOpenGLWidget，只保留 GL 生命周期四方法）。 |
 | `gui/remote_viewport.py` | 246 | RemoteViewport（离屏 GL readback 兜底；事件桥同源）。 |
 | `gui/widgets/widgets.py` | 138 | 自定义控件：AssetListWidget / DraggableSpin / DragBlock。 |
@@ -884,14 +899,14 @@ sequenceDiagram
 | `ui/editor_ui.py` | 67 | IEditorView 契约：Loom 编辑器 UI 接口标准。 |
 | `ui/__init__.py` | 11 | Loom 编辑器 UI 层。 |
 
-### S hostenv/（宿主环境，6 文件 / 941 行）
+### S hostenv/（宿主环境，6 文件 / 985 行）
 | 文件 | 行数 | 职责 |
 |---|---|---|
 | `hostenv/crash_reporter.py` | 295 | Loom 崩溃落盘（dbghelp Minidump + 场景自动备份）。 |
 | `hostenv/backend_guard.py` | 250 | 渲染后端兼容性诊断 + 可见失败（2026-11-09 批次 A / 阶段 1）。 |
 | `hostenv/userpaths.py` | 142 | 用户可写配置目录的**唯一**收口点。 |
 | `hostenv/remote_launch.py` | 151 | ★ LOOM_REMOTE_MODE 三态（off/on/auto）**唯一实现**（Q-B7-55-1）：取值集合 / 归一 / 上屏健康监视 / launch_player；Loom.py 与 build_entry.py 四个播放分支薄转调同一份。 |
-| `hostenv/editor_launch.py` | 68 | ★ 编辑器 --ui × --backend 执行面**唯一决策**（Q-B7-55-1）：--ui minimal/default + vulkan → 两入口同一条可见报错 EXIT 1（不静默降级 GL）。 |
+| `hostenv/editor_launch.py` | 112 | ★ 编辑器**两个唯一实现**：①`editor_backend_choice:48` 后端决策（Q-B7-60-1：显式 `--backend` > 配置 `render_api` > 默认；无显式时转调 `run_player.resolve_backend(None)`；vulkan→vk / opengl·auto→gl，编辑器不做运行期回退）；②`editor_execution_plan:85` --ui × --backend 执行面（Q-B7-55-1）：--ui minimal/default + vulkan → 两入口同一条可见报错 EXIT 1（不静默降级 GL）。 |
 
 ### T build/ + audio/ + net/（其余包）
 | 文件 | 行数 | 职责 |
@@ -923,17 +938,18 @@ sequenceDiagram
 ### V tests/（对拍门文件，只单列入台账的新增门）
 | 文件 | 行数 | 职责 |
 |---|---|---|
-| `tests/test_entry_backend_parity.py` | 350 | B7-54 四入口后端选择同源门（111 条断言：A 四入口决策一致（A④/A④b 编辑器面双方真调用各自入口决策函数，终审 F-2）/ B 解析单源 grep 级 + Loom.py 源码结构断言（终审 F-2）/ C build_entry 决策可达；修前红留痕 089677f + F-2 修前红 27 条 2026-11-22）。 |
+| `tests/test_entry_backend_parity.py` | 379 | B7-54 四入口后端选择同源门（111 条断言：A 四入口决策一致（A④/A④b 编辑器面双方真调用各自入口决策函数，终审 F-2）/ B 解析单源 grep 级 + Loom.py 源码结构断言（终审 F-2）/ C build_entry 决策可达；修前红留痕 089677f + F-2 修前红 27 条 2026-11-22）。Q-B7-60-1 期望同步 2 处（A④ expected_edit 与 C1 缺省：从「恒 gl」升级为「读配置 / `resolve_backend(None)` 同源」，判据强度不降，修前红 3 FAIL = A④×2 + C1×1；断言数仍 111）。 |
+| `tests/test_editor_backend_config_parity.py` | 558 | Q-B7-60-1：编辑器渲染后端配置驱动门（69 checks：A 配置驱动——引擎层 `render_api` 三态 × 无 argv，配置写入走真实 settings_set 命令壳，两入口决策一致且 = 期望 / B 显式覆盖——`--backend` 仍显式最高优先级 / C 编辑态零逻辑回归锁 13 条——真调用 `advance_logic`，编辑态逻辑步 0、alpha==0、脚本 update 触发点 0，各带播放态对照组防空转 / D 结构单源 + 设置面板——决策实现全仓恰 1 份、两入口真调用同一实现（monkeypatch 计数）、标签/tooltip/settings_set 命令壳就位；修前红 17 FAIL = A 组 3 + B 组 3 + D 组 11）。 |
 | `tests/test_gui_command_unification.py` | 1518 | B7-56 + B7-56-2 + 终审 F-67 GUI 全量命令化门（实跑 225 条：A GUI≡命令行 43 / B 批作用域 17 / C 相机裁定 19 / D 结构 6 / E 相机父链 23 / F 扫尾命令化等价 107（含 F9 碰撞器 enabled 不变量 22）/ G 新命令 JVM 对拍 8 / H 拒批 toast 文案 2）。 |
 | `tests/test_entry_execution_parity.py` | 592 | B7-55：入口执行面同源门（57 条：A 远程四态——LOOM_REMOTE_MODE 三态在 Loom.py/build_entry 四播放分支同走 hostenv.remote_launch.launch_player / B --ui×backend——minimal+vulkan 两入口同一条可见报错 EXIT 1 / C 结构唯一）。 |
 | `tests/test_camera_parent_serialization.py` | 369 | B7-57：相机父链序列化门（28 条：id_map 纳相机 guid / 防环整次拒绝 / 孤儿父脱根+告警；scene.camera._link_camera_parents is driver.link_camera_parents）。 |
 | `tests/test_api_form_name_unification.py` | 276 | B7-24-5：API 形态名统一门（21 条：VK 旧形态名 5 条全清 + 契约 §4.3 转正为已裁决）。 |
-| `tests/test_mouse_rel_ui_consumed_parity.py` | 626 | B7-43-2：mouse_rel 裁决 A + ui_consumed 门（45 条：VK 无条件喂 = GL 本帧物理增量语义；UI 拖动不转视角、滚轮不连坐）。 |
+| `tests/test_mouse_rel_ui_consumed_parity.py` | 636 | B7-43-2：mouse_rel 裁决 A + ui_consumed 门（45 条：VK 无条件喂 = GL 本帧物理增量语义；UI 拖动不转视角、滚轮不连坐）。 |
 | `tests/test_grid_occlusion_parity.py` | 167 | B7-53：网格遮挡真窗口像素对拍（子进程隔离探针：GL/VK 各 8 条 + 父门 13 条；根因1 角点 z 互换 / 根因2 GL 网格画进场景 pass）。 |
 | `tests/test_line_depth_plane.py` | 162 | B7-53：粗线四边形角点 z / 深度平面门（6 条：扩宽输出配恒等 VP 逐像素插值深度 == 地面真实深度）。 |
 | `tests/test_line_degenerate_segment_parity.py` | 189 | B7-53-3：expand_segment 门（13 条：语义等价非逐位 + 退化段判据 1e-9 两端同源，修前内联实现留痕）。 |
 
-> **共 168 个文件**（20 包 137 + 顶层平铺 22 + tests 门文件 9）。行数为实测物理行，与 `git show HEAD` 状态逐文件一致（B7-56-2 后复测；终审 F-67 批对 3 个改动文件复测）。
+> **共 169 个文件**（20 包 137 + 顶层平铺 22 + tests 门文件 10）。行数为实测物理行，与 `git show HEAD` 状态逐文件一致（B7-56-2 后复测；终审 F-67 批对 3 个改动文件复测）。
 > v3 的 97 文件清单里，`loom_types.py`→`core/primitives.py`、`loom_scene_*.py`→`scene/`、`editor.py`→`editor/`、
 > `ui/loom_gui.py`→`gui/`、`undo.py`→`editor/undo/`、`loom_components.py` 尾部→`audio/system.py` 等
 > 搬迁全部按 B1~B4 后的新路径重列；`components/collision.py`、`components/model_data.py`、`scene/identity.py`、
@@ -1245,6 +1261,9 @@ flowchart TB
 > B7-55~59 同步（2026-11-23，HEAD 01ca8a9）：新增 7 门（entry_execution 57 / camera_parent_serialization 28 / api_form_name 21 /
 > mouse_rel_ui_consumed 45 / grid_occlusion 真窗口（GL/VK 各 8 + 父门 13）/ line_depth_plane 6 / line_degenerate 13）+
 > test_hub_update 扩到 **106** 条（Q-B7-29-1 Hub 假绿封堵 + is_program_files 修复）；run_all 汇总刷新见下。
+> Q-B7-60-1（2026-11-24，HEAD 9dcac22，代码 commit 67bc72c）：新增编辑器后端配置驱动门 **69** 条
+> （test_editor_backend_config_parity；修前红 17 FAIL = A 组 3 + B 组 3 + D 组 11）；test_entry_backend_parity 期望同步 2 处（A④ / C1），
+> 断言数仍 **111**。run_all 汇总数字本批未重测（仍为上一批实测值，待全量实测后补）。
 
 ## 19.1 七面对拍门 + 增补门（全绿）
 
@@ -1267,7 +1286,7 @@ flowchart TB
     G5["test_camera_parity 195<br/>+ test_vk_camera_align 85"]:::gate
     G6["test_pause_parity 70"]:::gate
     G7["test_editor_play_parity 575<br/>test_editor_play_pixel_parity 17<br/>+S3/S4：vk_overlay 24 / vk_editor_smoke 16"]:::gate
-    G8["B7-28/审核1-3/B7-54~59 增补门<br/>editor_wheel_semantics 20<br/>wheel_backend_semantics 31<br/>skybox_engine_parity 23<br/>entry_backend_parity 111（决策同源）<br/>gui_command_unification 225（GUI≡命令行）<br/>entry_execution_parity 57（执行面同源）<br/>camera_parent_serialization 28<br/>api_form_name_unification 21<br/>mouse_rel_ui_consumed_parity 45<br/>grid_occlusion（真窗口）/line_depth/line_degenerate 3 门"]:::gate
+    G8["B7-28/审核1-3/B7-54~60 增补门<br/>editor_wheel_semantics 20<br/>wheel_backend_semantics 31<br/>skybox_engine_parity 23<br/>entry_backend_parity 111（决策同源）<br/>gui_command_unification 225（GUI≡命令行）<br/>entry_execution_parity 57（执行面同源）<br/>camera_parent_serialization 28<br/>api_form_name_unification 21<br/>mouse_rel_ui_consumed_parity 45<br/>grid_occlusion（真窗口）/line_depth/line_degenerate 3 门<br/>editor_backend_config_parity 69（编辑器后端配置驱动）"]:::gate
   end
   F1 --> G1
   F2 --> G2
@@ -1314,6 +1333,7 @@ flowchart TB
 | `test_wheel_backend_semantics` | 31 | 滚轮后端语义（GL/VK + run_player 入口恢复） |
 | `test_skybox_engine_parity` | 23 | 审核 1/3：天空盒引擎面两端对齐 |
 | `test_entry_backend_parity` | 111 | B7-54：四入口（Loom.py / build_entry / game_player / run_player）对同一份 argv+配置产生**同一后端决策**；--backend 解析单源（parse_backend_arg）+ Loom.py 源码结构断言；编辑器面双方真调用 _editor_backend_choice（终审 F-2 补牙，实数 93→111；旧记 94 含汇总行）；build_entry 四分支决策可达 |
+| `test_editor_backend_config_parity` | 69 | Q-B7-60-1：编辑器渲染后端配置驱动（A 配置驱动：引擎层 `render_api` 三态 × 无 argv，写盘走真实 settings_set 命令壳 / B 显式 `--backend` 覆盖 / C 编辑态零逻辑回归锁 13 条 / D 结构单源：决策实现全仓恰 1 份 + 两入口真调用同一实现 + 设置面板标签·tooltip·命令壳） |
 | `test_gui_command_unification` | 225 | B7-56 + B7-56-2 + 终审 F-67：GUI 全量命令化（A GUI 点击≡命令行同命令体 43 / B 批作用域 user·agent 17 / C 相机裁定（连贯性操作豁免）19 / D 结构断言（禁集 62 名直调归零；agent-66 曾误写 41=修前残留命中数，F-68 更正）6 / E 相机父链 23 / F 扫尾命令化等价（Layer·Tag·材质·组件·脚本·光源·相机·资源面板·TPS·并行设置 + F9 碰撞器 enabled 不变量 22 条：带字段 collider 命令不翻转 enabled、裸 {name} 缺 on 切换不回归、帮助文本一致）107 / G 新命令 JVM 对拍（logic_pause·logic_step·register_tag）8 / H 拒批 toast 文案 2） |
 | `test_entry_execution_parity` | 57 | B7-55：入口执行面同源（A 远程四态：LOOM_REMOTE_MODE 三态在 Loom.py/build_entry 四播放分支同走 hostenv.remote_launch.launch_player；B --ui×backend：minimal+vulkan 两入口同一条可见报错 EXIT 1；C 结构唯一） |
 | `test_camera_parent_serialization` | 28 | B7-57：相机父链序列化（id_map 纳相机 guid / 防环整次拒绝 / 孤儿父脱根+告警；scene.camera._link_camera_parents is driver.link_camera_parents） |
