@@ -573,10 +573,14 @@ def t_backend_parity():
         check("clamp_camera_distance(%r) -> %.1f" % (bad, want),
               abs(clamp_camera_distance(bad) - want) < 1e-9, clamp_camera_distance(bad))
 
-# ============ D. 编辑器不变式 (P6: 编辑器不上 Vk) ============
+# ============ D. 编辑器不变式（后端决策分层） ============
+# Q-B7-60-1（2026-11-23 人类裁决）: 编辑器视口后端**不再恒 OpenGL** —— 它读配置里
+# 的 render_api（唯一决策实现 = hostenv/editor_launch.editor_backend_choice，vulkan
+# 走 VkViewport）。本组锁的**分层不变式**未变：`_EditorCore`（editor/core.py）本身
+# 不读 render_api —— 后端决策属入口/editor_launch 层，编辑器内核与后端无关。
 def t_editor_invariant():
     src = open(os.path.join(ROOT, "editor", "core.py"), encoding="utf-8").read()
-    check("编辑器不读取 render_api (P6: 编辑器固定 Qt+OpenGL)",
+    check("editor/core.py 不读 render_api（后端决策在 hostenv/editor_launch 层，内核与后端无关）",
           "render_api" not in src)
     gl = open(os.path.join(ROOT, "render", "gl", "render.py"), encoding="utf-8").read()
     check("GL 渲染层不用 wgpu (后端边界清晰)", "import wgpu" not in gl)
