@@ -106,19 +106,19 @@ def _cli_backend(argv):
 
 
 def _editor_backend_choice(argv):
-    """S4（Q-B7-47-1 阶段 4）编辑器后端决策（纯函数，无副作用）。
+    """编辑器后端决策（纯函数，无副作用）: 显式 --backend > 配置 render_api > 默认。
 
-    只有**显式 --backend vulkan** 才走 VK 视口; 不带 --backend（或缺省
-    opengl/auto）= GL, 与修前逐位一致（零用户可感知差异）。
-    2026-11-22 B7-54 终审 F-2: 从 main 的 S4 内联分支**逐位上移**成纯函数
-    （决策三行原样搬入, 语义零变化）—— main 分支真调用它, 对拍门
-    tests/test_entry_backend_parity.py A④ 也真调用同一份（门不再用
-    门内复刻做期望, 解析/决策层坏会真红）。"""
-    from run_player import resolve_backend
-    _cli = _cli_backend(argv)
-    if _cli is not None and resolve_backend(_cli) == 'vulkan':
-        return 'vulkan'
-    return 'gl'
+    Q-B7-60-1（人类 2026-11-23 裁决「编辑器里的后端只取决于文件里的后端是啥」+
+    「一个键全局消费」+「--backend 命令行仍是显式最高优先级」+「重启编辑器生效」）:
+    唯一实现 = hostenv.editor_launch.editor_backend_choice（规则 5.5），本函数只做
+    **薄转调**。修前这里自己判「只有显式 --backend vulkan 才走 VK」，与
+    build_entry.py 的同名函数是两份逐位重复实现，且配置里的 render_api 对编辑器
+    视口完全无效（同一个键在编辑器里只是「替播放器设的」）。
+    2026-11-22 B7-54 终审 F-2 保留本函数名做薄转调: main 的 S4 分支与对拍门
+    tests/test_entry_backend_parity.py A④ / tests/test_editor_backend_config_parity.py
+    都真调用它（不是门内复刻）。"""
+    from hostenv.editor_launch import editor_backend_choice
+    return editor_backend_choice(argv)
 
 
 def _editor_execution_plan(argv, backend=None):
@@ -450,11 +450,13 @@ if __name__ == "__main__":
                 # 玩家模式不加锁，允许同时开多个游戏实例）。防止连点开 N 个编辑器。
                 from core.single_instance import ensure_editor_single_instance
                 ensure_editor_single_instance(scene_path=open_scene)
-                # S4（Q-B7-47-1 阶段 4）: 后端决策仍在 _editor_backend_choice 纯函数里
-                # （2026-11-22 B7-54 终审 F-2 抽出, 语义零变化）: 只有**显式
-                # --backend vulkan**才走 VK; 不带 --backend（或缺省 opengl/auto）= GL。
+                # 后端决策在 _editor_backend_choice 纯函数里（唯一实现 =
+                # hostenv.editor_launch.editor_backend_choice）: Q-B7-60-1 人类裁决
+                # 2026-11-23「编辑器里的后端只取决于文件里的后端是啥」+「一个键全局
+                # 消费」+「--backend 命令行仍是显式最高优先级」-> 显式 --backend >
+                # 配置 render_api > 默认；vulkan 走 VK 视口，其余 GL。
                 # Q-B7-55-1: --ui × backend 的装配决策统一交给 hostenv.editor_launch。
-                # B7-54 A④ 门真调用同一份决策函数：先取后端决策，再交给执行面计划。
+                # B7-54 A④ / Q-B7-60-1 门真调用同一份决策函数：先取后端决策，再交给执行面计划。
                 _edit_backend = _editor_backend_choice(sys.argv)
                 _edit_plan = _editor_execution_plan(sys.argv[1:], backend=_edit_backend)
                 if _edit_plan['error']:

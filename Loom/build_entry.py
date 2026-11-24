@@ -113,14 +113,14 @@ def _player_backend_choice(argv):
 def _editor_backend_choice(argv):
     """编辑器分支（--ui qt / --ui default|minimal）的后端决策（纯函数）。
 
-    与 Loom.py S4（Q-B7-47-1 阶段 4）同源规则：只有**显式 --backend** 且
-    resolve_backend 解析为 vulkan 才走 VK（qt = VK 视口 / default = VkEditorApp）；
-    不带 --backend（或缺省 opengl/auto）= GL，与修前逐位一致（零用户可感知差异）。"""
-    import run_player
-    _cli = run_player.parse_backend_arg(argv)
-    if _cli is not None and run_player.resolve_backend(_cli) == 'vulkan':
-        return 'vulkan'
-    return 'gl'
+    Q-B7-60-1（人类 2026-11-23 裁决「编辑器里的后端只取决于文件里的后端是啥」+
+    「一个键全局消费」+「--backend 命令行仍是显式最高优先级」+「重启编辑器生效」）:
+    唯一实现 = hostenv.editor_launch.editor_backend_choice（规则 5.5），本函数只做
+    **薄转调**（与 Loom.py 同名函数调同一份，修前是两份逐位重复实现）。
+    决策口径：显式 --backend > 配置 render_api > 默认；vulkan -> VK（qt = VK 视口 /
+    default|minimal = VkEditorApp），其余 -> GL。"""
+    from hostenv.editor_launch import editor_backend_choice
+    return editor_backend_choice(argv)
 
 
 def _editor_execution_plan(argv, backend=None):
@@ -516,8 +516,9 @@ if __name__ == "__main__":
                 #   · --ui default/minimal + gl      -> EditorApp + 注入视图（功能不丢）
                 #   · --ui default/minimal + vulkan  -> 两端同一条可见报错 + exit 1
                 #     （VkEditorApp 需要 Qt 宿主注入 device/present_format；不静默降级 GL）
-                # 2026-11-21 B7-54: 后端决策仍由 _editor_backend_choice 转调 run_player
-                # 唯一事实源（只有显式 --backend vulkan 才走 VK，其余 gl 与修前一致）。
+                # Q-B7-60-1（人类 2026-11-23 裁决）: 后端决策 = 唯一实现
+                # hostenv.editor_launch.editor_backend_choice（显式 --backend > 配置
+                # render_api > 默认；vulkan -> VK，其余 GL），与 Loom.py 同一份。
                 # B7-54 A④ 门真调用同一份决策函数：先取后端决策，再交给执行面计划。
                 _edit_backend = _editor_backend_choice(sys.argv)
                 _edit_plan = _editor_execution_plan(sys.argv[1:], backend=_edit_backend)

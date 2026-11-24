@@ -46,6 +46,23 @@ B7-54 终审 F-3 更正；C2 的静态 import 断言修前即 PASS，不属红�
   修前红（新断言就位、Loom.py 尚未抽函数时真跑留痕）: 27 条 FAIL =
   A④ 12 + A④b 12 + B 组结构断言 3（_editor_backend_choice 未定义 /
   main 未真调用 / 旧内联 as _resolve_backend 仍在）。修后全绿。
+
+2026-11-24 Q-B7-60-1 期望升级（agent-85）—— 人类 2026-11-23 裁决「编辑器里的后端
+只取决于文件里的后端是啥」+「一个键全局消费」+「--backend 命令行仍是显式最高优先
+级」: 编辑器后端决策从「只有显式 --backend vulkan 才 VK，其余恒 gl」升级为
+「显式 --backend > 配置 render_api > 默认」。本门**只改了两处期望值**，判据强度一律
+不降（改后更严）：
+  · A④ expected_edit: 旧 = cli_ref 非 None 且 resolve 为 vulkan 才 vulkan，否则 gl
+    （「恒 gl」缺省）；新 = 直接取 run_player.resolve_backend(cli_ref)，cli_ref 为
+    None 时走配置解析链。理由: 编辑器与播放器同一事实源（一个键全局消费）。仍是门
+    内独立算出的期望（不调入口决策函数），A④b「两入口真调用结果逐位一致」判据原样
+    保留。
+  · C1「缺省 → gl（与修前逐位一致）」→「缺省 → 与 resolve_backend(None) 同源
+    （配置驱动）」，期望同样由门独立算。理由同上；比「== gl」更严（要求真的与播放器
+    同一事实源）。
+  两处改动后的修前红实测（HEAD af49677 + 本门新期望，git worktree 临时树真跑）: 3 FAIL =
+  A④×2（argv=<缺省> × 未配置 / render_api=vulkan: loom='gl' expected='vulkan'）+
+  C1×1（缺省: got='gl' exp='vulkan'）；修后 111 checks 全 PASS / EXIT 0。
 """
 import sys as _sys_utf8
 try:
@@ -199,8 +216,15 @@ def t_parity():
             #    现在 Loom.py 侧真调用 loom._editor_backend_choice（main S4 分支
             #    用的同一份决策函数），build_entry 侧真调用其同名纯函数；
             #    expected_edit 仅作独立第三判据（防两边决策函数一起坏）。
-            expected_edit = 'vulkan' if (cli_ref is not None
-                                         and run_player.resolve_backend(cli_ref) == 'vulkan') else 'gl'
+            #    Q-B7-60-1（人类 2026-11-23 裁决「编辑器里的后端只取决于文件里的后端
+            #    是啥」+「一个键全局消费」+「--backend 命令行仍是显式最高优先级」）:
+            #    编辑器期望从「恒 gl（只有显式 --backend vulkan 才 VK）」升级为
+            #    「显式 --backend > 配置 render_api > 默认」—— cli_ref 为 None 时
+            #    resolve_backend(None) 走配置解析链（与播放器同一事实源）。判据强度
+            #    不降：期望仍由门**独立**算出（不调入口决策函数），A④b 仍要求两入口
+            #    真调用结果逐位一致。
+            expected_edit = ('vulkan' if run_player.resolve_backend(cli_ref) == 'vulkan'
+                             else 'gl')
             loom_edit = None
             try:
                 loom_edit = loom._editor_backend_choice(list(argv))
@@ -307,8 +331,13 @@ def t_build_entry_branches():
               build_entry._editor_backend_choice(['--backend', 'vulkan']) == 'vulkan')
         check('C1 build_entry 编辑器分支决策: --backend opengl → gl（与修前逐位一致）',
               build_entry._editor_backend_choice(['--backend', 'opengl']) == 'gl')
-        check('C1 build_entry 编辑器分支决策: 缺省 → gl（与修前逐位一致）',
-              build_entry._editor_backend_choice([]) == 'gl')
+        # Q-B7-60-1: 缺省从「恒 gl」升级为「读配置」（显式 --backend > 配置 > 默认），
+        # 期望直接取 run_player.resolve_backend(None) —— 门独立算，不调入口函数；
+        # 判据强度不降（比「== gl」更严：要求真的与播放器同一事实源）。
+        _exp_default = ('vulkan' if run_player.resolve_backend(None) == 'vulkan' else 'gl')
+        check('C1 build_entry 编辑器分支决策: 缺省 → 与 resolve_backend(None) 同源（配置驱动）',
+              build_entry._editor_backend_choice([]) == _exp_default,
+              'got=%r exp=%r' % (build_entry._editor_backend_choice([]), _exp_default))
     except AttributeError as e:
         check('C1 build_entry 决策函数存在且可达', False, e)
 

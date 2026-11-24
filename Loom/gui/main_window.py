@@ -1529,6 +1529,25 @@ class LoomGUI(QMainWindow):
         if e is not None:
             e._notify("并行开关重启后生效", (240, 200, 90))
 
+    def _cmd_set_render_api(self, index):
+        """渲染后端下拉框（Q-B7-60-1 裁定①②）: 设置写盘翻译成 settings_set 命令
+        （命令体 = guiloader load/save 同一入口，与 _cmd_set_parallel 同型）。
+
+        人类 2026-11-23 裁决「一个键全局消费」: 这里写的 render_api 既是播放/打包
+        游戏的后端，也是**编辑器视口**的后端（编辑器侧读它走
+        hostenv.editor_launch.editor_backend_choice -> run_player.resolve_backend）。
+        裁决①「重启编辑器生效」: 不做视口热切换，故只落盘 + 提示重启，不重建视口。
+        """
+        combo = getattr(self, '_render_api_combo', None)
+        api = combo.itemData(index) if combo is not None else None
+        if not api:
+            return
+        self._invoke_cmd('settings_set', {'key': 'render_api', 'value': api})
+        e = self.editor
+        if e is not None:
+            e._notify("渲染后端已保存：编辑器视口与播放/打包游戏共用此键，"
+                      "重启编辑器/播放器后生效", (240, 200, 90))
+
     def _cmd_scene_name(self):
         e = self.editor
         if e is not None:
@@ -3277,17 +3296,24 @@ class LoomGUI(QMainWindow):
         # Q-B7-56-2 裁定①: 设置写盘翻译成 settings_set 命令 (提示保留)
         par_chk.toggled.connect(self._cmd_set_parallel)
         lay.addWidget(par_chk)
-        # 播放器/发布游戏默认渲染 API (2026-08-29 P5): 编辑器选默认;
-        # 发布版玩家可 --backend / 游戏配置.json 自行调整 (Vulkan 失败的设备可切 OpenGL)
+        # 渲染后端（Q-B7-60-1，人类 2026-11-23 裁决「一个键全局消费」）: 同一个
+        # render_api 键既决定**编辑器视口**后端，也决定播放/打包游戏的后端
+        # （编辑器读它走 run_player.resolve_backend 同一条解析链）；玩家侧仍可
+        # --backend / 游戏设置.json 自行覆盖，底层设置 API 留给开发者 UI。
+        # 裁决①: 重启编辑器生效，**不做视口热切换**（编辑器里 VK 装配失败可见报错，
+        # 不静默降级 GL）。
         api_row = QWidget()
         ha = QHBoxLayout(api_row)
         ha.setContentsMargins(0, 0, 0, 0)
-        ha.addWidget(QLabel("播放器渲染 API（默认）"))
+        ha.addWidget(QLabel("渲染后端（编辑器与播放共用，重启生效）"))
         api_combo = QComboBox()
         # 2026-11-06 R-05 (复核 B 指出): 下拉此前只有 vulkan/opengl, 设计文档 P5
         # 明写的 auto(vk 失败自动回退 gl) 因此无法从 UI 选到; 设置里存成 auto 时
         # 下拉还会错误地显示成 Vulkan。三项与 run_player.resolve_backend 的合法值
         # 集合严格一致。
+        # Q-B7-60-1: 选中项以配置文件为准（s.get('render_api')，与编辑器视口读的
+        # 是同一个键）；auto 在编辑器侧取保底 gl（编辑器不做运行期回退，见
+        # hostenv/editor_launch.editor_backend_choice 的 docstring）。
         for i, (txt, aid) in enumerate((
                 ("自动（Vulkan 失败回退 OpenGL）", "auto"),
                 ("Vulkan（新，推荐）", "vulkan"),
@@ -3296,13 +3322,12 @@ class LoomGUI(QMainWindow):
             if aid == s.get('render_api', 'vulkan'):
                 api_combo.setCurrentIndex(i)
         api_combo.setToolTip(
-            "仅对播放器/发布游戏生效；编辑器固定 OpenGL（Qt 内嵌 Vk 会被回读拖慢，"
-            " P6 决策）。修改后需重新启动才生效。")
-        api_combo.currentIndexChanged.connect(
-            lambda i: (s.__setitem__('render_api', api_combo.itemData(i)),
-                       guiloader.save_settings('loom', s),
-                       e._notify("默认渲染 API 已保存：仅播放器/发布游戏生效（编辑器固定 OpenGL），重启后生效",
-                                 (240, 200, 90))))
+            "设置当前项目的渲染后端（以配置文件为准）。编辑器视口与播放/打包游戏共用此键；"
+            "修改后重启编辑器/播放器生效。--backend 命令行参数可临时覆盖本次启动。")
+        self._render_api_combo = api_combo
+        # Q-B7-60-1 裁定②: 写盘翻译成 settings_set 命令壳（与 _cmd_set_parallel 同型），
+        # 不再直写 guiloader（违反 Q-B7-56-2 裁定①）。重启生效提示保留。
+        api_combo.currentIndexChanged.connect(self._cmd_set_render_api)
         ha.addWidget(api_combo)
         lay.addWidget(api_row)
         # 帧率上限 (2026-08-19): 档位即时生效 (渲染定时器周期直接改)
