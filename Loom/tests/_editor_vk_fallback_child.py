@@ -10,6 +10,8 @@
     ③ self.viewport 是 GLViewport（本次回退成功，且真建出 GL 编辑器 = 真可用）；
     ④ 可见提示被发出（show_blocking_dialog 被调用 + 文案含原因/已改写/已回退）。
   B 组（mode=b，显式 --backend vulkan）：配置不变（仍 vulkan），但仍有提示 + 回退 GL。
+  C 组（mode=c，配置 auto，P1-2 两端同义）：先试 VK 失败 -> 回退 GL，但配置**不变**
+    （仍 auto；与播放器 run_player 对 auto 的 Q1/Q7=A 裁决同义），提示里说明「未改写」。
 
 VK 不可用的模拟方式（**不打桩被测代码**）: 把 hostenv.backend_guard.vulkan_api_version
 改成返回 (1, 0, 0) —— 即「显卡驱动只支持 Vulkan 1.0，低于 wgpu-native 的 1.1 地板」，
@@ -71,11 +73,14 @@ def main():
     import hostenv.backend_guard as bg
     import hostenv.editor_launch as el
 
-    print('=== mode=%s 起点: 引擎层 render_api=vulkan（%s） ==='
-          % (MODE, '显式 --backend vulkan' if MODE == 'b' else '来自配置文件'))
-    # 起点配置：引擎层 render_api=vulkan（缺省配置就是 vulkan，显式写一遍免得受模板影响）
+    # 起点配置：a/b = vulkan（配置来的 / 显式 --backend），c = auto（P1-2 两端同义）。
+    _START_API = 'auto' if MODE == 'c' else 'vulkan'
+    print('=== mode=%s 起点: 引擎层 render_api=%s（%s） ==='
+          % (MODE, _START_API,
+             {'a': '来自配置文件', 'b': '显式 --backend vulkan',
+              'c': '配置 auto: 先试 VK 失败回退 GL'}[MODE]))
     guiloader.save_settings('loom', dict(guiloader.load_settings('loom'),
-                                        render_api='vulkan'))
+                                        render_api=_START_API))
     print('[child] 起点配置 render_api=%r' % (guiloader.load_settings('loom').get('render_api'),))
 
     # ---- 模拟 VK 装配失败：驱动只到 Vulkan 1.0（低于 wgpu-native 1.1 地板）----
@@ -143,12 +148,21 @@ def main():
               eff == 'opengl', 'eff=%r err=%s' % (eff, eff_err))
         check('A4 改写走的是唯一写盘路径（editor_launch.write_render_api_choice）',
               writes == ['opengl'], 'writes=%r（面板/回退同一份实现）' % (writes,))
-    else:
+    elif MODE == 'b':
         check('B2 显式 --backend vulkan：配置不变（仍 vulkan，Q6 先例）',
               cfg == 'vulkan', 'render_api=%r' % (cfg,))
         check('B3 显式不改写 -> 生效值仍 vulkan',
               eff == 'vulkan', 'eff=%r err=%s' % (eff, eff_err))
         check('B4 显式不改写：未调用写盘路径', writes == [], 'writes=%r' % (writes,))
+    else:
+        # P1-2（auto 两端同义）: 先试 VK 失败 -> 回退 GL 但**不改写配置**
+        # （与播放器 run_player._handle_vk_init_failure 对 auto 的 Q1/Q7=A 裁决同义）
+        check('C2 配置 auto：失败后配置不变（仍 auto，与播放器同义）',
+              cfg == 'auto', 'render_api=%r' % (cfg,))
+        check('C3 配置 auto：生效值仍 auto（下次启动继续先试 VK）',
+              eff == 'auto', 'eff=%r err=%s' % (eff, eff_err))
+        check('C4 配置 auto：未调用写盘路径（auto 没有偏好可持久化）',
+              writes == [], 'writes=%r' % (writes,))
 
     # ---- ④ 可见提示 ----
     check('A5 发出可见提示（show_blocking_dialog 被调用恰 1 次）',
@@ -163,9 +177,12 @@ def main():
     if MODE == 'a':
         check('A8 提示含「已把配置改为 opengl」',
               '已把配置' in text and 'opengl' in text, text[:200])
-    else:
+    elif MODE == 'b':
         check('B5 提示含「未改写配置」（显式选择被尊重）',
               '未改写' in text and '显式' in text, text[:200])
+    else:
+        check('C5 提示含「auto 未改写配置」（与播放器同义，用户看得见）',
+              '未改写' in text and 'auto' in text, text[:200])
     printed = text.strip()
     check('A8b 提示文案同时打印到 stdout（Loom.exe 无控制台时靠弹窗，控制台靠这行）',
           bool(printed), 'len=%d' % len(printed))
@@ -200,7 +217,7 @@ def main():
           % (len(_RecDialog.made), _RecDialog.exec_calls[0], dlg_err, win.editor))
     combo = getattr(win, '_render_api_combo', None)
     # 选中项 = **生效值**：A 组（配置被改写）是 opengl；B 组（显式不改写）仍是 vulkan。
-    _exp_combo = 'opengl' if MODE == 'a' else 'vulkan'
+    _exp_combo = {'a': 'opengl', 'b': 'vulkan', 'c': 'auto'}[MODE]
     check('A10 面板渲染后端下拉无条件渲染，选中项 = 生效值（%s）' % _exp_combo,
           combo is not None and str(combo.currentData()) == _exp_combo,
           'currentData=%r' % (None if combo is None else combo.currentData(),))

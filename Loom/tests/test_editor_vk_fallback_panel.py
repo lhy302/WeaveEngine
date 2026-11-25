@@ -19,6 +19,8 @@
      ④ 可见提示被发出（文案含原因 / 已改写 / 已回退）。
   B（mode=b）: 显式 --backend vulkan + VK 装配失败 → 配置**不变**（仍 vulkan），
      但仍有可见提示 + 本次回退 GL。
+  C（mode=c）: 配置 auto + VK 装配失败 → 配置**不变**（仍 auto，P1-2 与播放器同义：
+     auto 没有偏好可持久化）+ 可见提示 + 本次回退 GL。
 
 为什么新建文件而不是扩 test_editor_backend_config_parity.py: 那条门按设计是**纯 python、
 不真开窗口**（docstring 原文「真调用生产函数 / 真写配置，不真开窗口」），69 条跑完 ~1s；
@@ -32,7 +34,11 @@ test_editor_backend_config_parity.py 的 E/F 段（同一份被测实现，不�
     提示 0 次、面板对话框创建 0 次（editor is None 首行 return）、GL 视口 90s 未就绪；
   · B 组（显式 --backend vulkan）**3 PASS / 12 FAIL** —— 配置不变/未写盘三条修前即绿
     （修前根本没有改写逻辑），其余同 A 组。
-修后 A/B 各 **16 PASS / 0 FAIL**（父门 4 条 PASS，EXIT 0）。
+修后 A/B/C 各 **16 PASS / 0 FAIL**（父门 6 条 PASS，EXIT 0）。
+C 组（配置 auto）是**修后追加的回归锁**，没有单独跑修前态（修前 auto 在编辑器侧被
+editor_backend_choice 直接归成 gl、根本不会去试 VK，所以它的修前红由
+test_editor_backend_config_parity 的 F2/F3/F5~F8 与 A/B 两组的逐条红承载）；它锁的是
+「auto 失败后**不改写配置**」这条与播放器同义的语义，防止以后把 auto 也当成 vulkan 改写。
 注: 子探针的 A10b（editor 为 None 时面板改后端真的落盘）是**回归锁**不是修前红证据 ——
 修前面板的「写盘」本身是通的，坏的是「面板根本打不开」+「显示值不等于生效值」；
 A10b 锁的是「可达之后真的能用」，防止以后把面板做成只有个壳。
@@ -52,7 +58,7 @@ _fails = []
 _pass_n = 0
 
 # 每组断言条数（子进程 verdict 里 pass_count 必须 >= 这个数，防止「少跑也绿」）
-_MIN_CHECKS = {'a': 16, 'b': 16}
+_MIN_CHECKS = {'a': 16, 'b': 16, 'c': 16}
 
 
 def check(name, cond, detail=''):
@@ -106,7 +112,9 @@ def run_child(mode):
 
 
 def main():
-    for mode, tag in (('a', 'A 组（配置来的 vulkan）'), ('b', 'B 组（显式 --backend vulkan）')):
+    for mode, tag in (('a', 'A 组（配置来的 vulkan）'),
+                      ('b', 'B 组（显式 --backend vulkan）'),
+                      ('c', 'C 组（配置 auto，P1-2 两端同义）')):
         v, rc = run_child(mode)
         fails = (v or {}).get('fails')
         check('%s 真窗口探针 verdict 全绿（判定以 verdict 文件为准；rc/僵尸收尾属已知驱动问题）'
