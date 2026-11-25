@@ -39,7 +39,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)          # 子进程住在 tests/，引擎根 = Loom/
 sys.path.insert(0, ROOT)
 os.environ.setdefault('LOOM_NO_DIALOG', '1')
-os.environ.setdefault('LOOM_USER_ROOT', tempfile.mkdtemp(prefix='loom_vkfallback_'))
+os.environ['LOOM_USER_ROOT'] = tempfile.mkdtemp(prefix='loom_vkfallback_')   # 强制覆盖：绝不写共享 root（2026-11-26 污染修复）
 os.environ.setdefault('LOOM_NO_PARALLEL', '1')
 os.environ['LOOM_NO_SAVE_MIGRATE'] = '1'
 os.environ.setdefault('QT_ENABLE_HIGHDPI_SCALING', '1')

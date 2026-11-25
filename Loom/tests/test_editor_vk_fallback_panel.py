@@ -81,6 +81,11 @@ def run_child(mode):
     env = dict(os.environ)
     env.setdefault('LOOM_NO_DIALOG', '1')
     env.setdefault('PYTHONUNBUFFERED', '1')
+    # 2026-11-26 污染修复：run_all 给全部测试文件共享同一个 LOOM_USER_ROOT
+    # （run_all.py:24 mkdtemp 一次），而本门的子探针会把 render_api 改写成 opengl
+    # —— 若沿用共享 root，会污染同轮后跑的门（实测 test_entry_backend_parity /
+    # test_render_api 假红）。子进程强制用**独立** root，写穿也只写自己的沙箱。
+    env['LOOM_USER_ROOT'] = tempfile.mkdtemp(prefix='loom_vkfallback_root_')
     print('---- 子进程 mode=%s: %s ----' % (mode, os.path.basename(CHILD)))
     proc = subprocess.Popen([sys.executable, CHILD, mode, verdict_path],
                             env=env, cwd=ROOT)
