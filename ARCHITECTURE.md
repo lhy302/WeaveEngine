@@ -202,9 +202,9 @@ flowchart TB
 
 | 场景 | 能选后端吗 | 依据 | 环境不支持时 |
 |---|---|---|---|
-| **编辑器**（`Loom.py` / `Loom.exe`） | **能，以配置文件为准**（Q-B7-60-1）：`render_api` 决定编辑视口后端 + 播放后端（一个键全局消费）；`--backend` 命令行显式最高优先级。`vulkan` → `VkEditorApp(_EditorCore, SceneDriver)`（`--ui qt` 下是 LoomGUI + `editor/viewport/vk_viewport.VkViewport`，QRenderWidget bitmap present）；`opengl` / `auto` → `EditorApp(_EditorCore, GLEngine)`（auto 在编辑器侧取保底 gl） | `hostenv/editor_launch.py::editor_backend_choice:52` **唯一实现**（`Loom.py:108-121` / `build_entry.py:113-123` 只薄转调；无显式时转调 `run_player.resolve_backend(None)`，与播放器同一解析链；门 `test_editor_backend_config_parity` 101 条 + `test_entry_backend_parity` A④/C1 同源） | **启动时先探测**（`editor/viewport/vk_viewport.probe_vk_ready:65`，与延迟 init 共用唯一实现 `_acquire_vk_device`）；失败不建 VkViewport，**本次启动直接回退 GL 视口** + 可见提示（`show_blocking_dialog`，`LOOM_NO_DIALOG=1` 降级 print，main_window `_handle_vk_init_failure:246`）。配置来源的 vulkan → **自动改写配置为 opengl**（唯一写盘路径 `hostenv.editor_launch.write_render_api_choice:164` = 引擎层 settings_set + 清游戏层覆盖键）；显式 `--backend vulkan` → 不改写配置（Q6 先例），同样回退 + 提示。设置面板**无条件可达**（`_cmd_settings` 两段式，editor 未就绪时 GUI 界面/保存目录/渲染后端下拉照常渲染） |
+| **编辑器**（`Loom.py` / `Loom.exe`） | **能，以配置文件为准**（Q-B7-60-1）：`render_api` 决定编辑视口后端 + 播放后端（一个键全局消费）；`--backend` 命令行显式最高优先级。`vulkan` → `VkEditorApp(_EditorCore, SceneDriver)`（`--ui qt` 下是 LoomGUI + `editor/viewport/vk_viewport.VkViewport`，QRenderWidget bitmap present）；`opengl` → `EditorApp(_EditorCore, GLEngine)`；`auto` → 决策为 vulkan **先试 VK**，启动期探测失败自动回退 GL 视口且不改写配置（P1-2 两端同义，与播放器 Q1/Q7=A 一致） | `hostenv/editor_launch.py::editor_backend_choice:52` **唯一实现**（`Loom.py:108-121` / `build_entry.py:113-123` 只薄转调；无显式时转调 `run_player.resolve_backend(None)`，与播放器同一解析链；门 `test_editor_backend_config_parity` 101 条 + `test_entry_backend_parity` A④/C1 同源） | **启动时先探测**（`editor/viewport/vk_viewport.probe_vk_ready:65`，与延迟 init 共用唯一实现 `_acquire_vk_device`）；失败不建 VkViewport，**本次启动直接回退 GL 视口** + 可见提示（`show_blocking_dialog`，`LOOM_NO_DIALOG=1` 降级 print，main_window `_handle_vk_init_failure:246`）。配置来源的 vulkan → **自动改写配置为 opengl**（唯一写盘路径 `hostenv.editor_launch.write_render_api_choice:164` = 引擎层 settings_set + 清游戏层覆盖键）；显式 `--backend vulkan` → 不改写配置（Q6 先例），同样回退 + 提示。设置面板**无条件可达**（`_cmd_settings` 两段式，editor 未就绪时 GUI 界面/保存目录/渲染后端下拉照常渲染） |
 | 编辑器里点「播放」 | **不能**。就在编辑器自己的视口后端里跑（GL 或 VK，播放组件同源） | `gui/main_window.py:1480` → `_invoke_cmd('play')` → `editor.toggle_play` 只置 `is_playing`，不起外部播放器 | 同上 |
-| 独立播放器（`--run`） | **能**：`--backend` > 游戏设置 > 引擎设置 > 默认 vulkan | `run_player.resolve_backend:152` | `auto`：VK 初始化失败 → 诊断+落配置+**同进程转 GL**（`run_player.py:434-449`、`_persist_backend:224`）；显式 `--backend vulkan` 失败只报错不改配置 |
+| 独立播放器（`--run`） | **能**：`--backend` > 游戏设置 > 引擎设置 > 默认 vulkan | `run_player.resolve_backend:152` | `auto`：VK 初始化失败 → 诊断+落配置+**同进程转 GL**（`run_player.py:434-470`、`_persist_backend:224`）；显式 `--backend vulkan` 失败只报错不改配置 |
 | 打包游戏（`game_player.py`） | **能**：同播放器一套逻辑（复用 run_player，`:170` 调同一 resolve_backend） | `game_player.py:170` | 同播放器 |
 | 运行期失败（VK 渲染循环内崩） | — | `VkRunError` | **不回退**：打印原因后非零退出（`run_player.py:438-439`） |
 | **运行环境屏幕不可见（远程/无头）** | **env 接管，不手选**：`LOOM_REMOTE_MODE` 三态 off / on / auto（auto = 上屏健康监视失败才转远程） | 三态收口**唯一实现** = `hostenv/remote_launch.py`（151 行；Loom.py / build_entry.py 四个播放分支全走同一 `launch_player`，Q-B7-55-1） | 编辑器面：`--ui minimal/default` + vulkan → 两入口同一条可见报错 EXIT 1（唯一决策 `hostenv/editor_launch.py`，不静默降级 GL） |
@@ -1272,7 +1272,7 @@ flowchart TB
 > Q-B7-60-1（2026-11-24，HEAD 9dcac22，代码 commit 67bc72c）：新增编辑器后端配置驱动门 **69** 条
 > （test_editor_backend_config_parity；修前红 17 FAIL = A 组 3 + B 组 3 + D 组 11）；test_entry_backend_parity 期望同步 2 处（A④ / C1），
 > 断言数终审修复批 111→**112**。run_all 汇总数字本批未重测（仍为上一批实测值，待全量实测后补）。
-> Q-B7-60-1 终审修复批（2026-11-26，HEAD 6258ff1）：新增 test_editor_vk_fallback_panel **55** 条（真窗口父子进程，修前红 15 FAIL）；test_editor_backend_config_parity 69→**101**、test_entry_backend_parity 111→**112**；run_all 全量重测 **171 文件 / 6497 PASS / 0 FAIL / EXIT 0**（详见 19.2）。
+> Q-B7-60-1 终审修复批（2026-11-26，HEAD 6258ff1）：新增 test_editor_vk_fallback_panel **55** 条（真窗口父子进程，修前红 15 FAIL）；test_editor_backend_config_parity 69→**101**、test_entry_backend_parity 111→**112**；run_all 全量重测 **172 文件 / 6498 PASS 行 / 0 FAIL / EXIT 0**（终审 agent-91 两遍复跑一致，详见 19.2）。
 
 ## 19.1 七面对拍门 + 增补门（全绿）
 
@@ -1312,7 +1312,7 @@ flowchart TB
 
 ## 19.2 全部对拍/回归门（实测数字）
 
-> run_all 汇总：**171 文件 / 6497 PASS 行 / 0 FAIL / EXIT 0**（2026-11-26 lead 实跑，HEAD 6258ff1，Q-B7-60-1 终审修复批落地后；PASS 计数口径**含文件尾汇总行**——终审 F-74 标注不变。历史实测：2026-11-24 为 171 文件 / 6411 PASS，HEAD 23f2853；2026-11-22~23 为 ~170 文件 / 6341~6342 PASS，HEAD 01ca8a9）。
+> run_all 汇总：**172 文件 / 6498 PASS 行 / 0 FAIL / EXIT 0**（2026-11-26 终审 agent-91 两遍复跑实测，HEAD 6258ff1，Q-B7-60-1 终审修复批落地后；PASS 计数口径**含文件尾汇总行**——终审 F-74 标注不变。历史实测：2026-11-24 为 171 文件 / 6411 PASS，HEAD 23f2853；2026-11-22~23 为 ~170 文件 / 6341~6342 PASS，HEAD 01ca8a9）。
 
 | 门 | 断言数（实测） | 覆盖什么 |
 |---|---|---|
