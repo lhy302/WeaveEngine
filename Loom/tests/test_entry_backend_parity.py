@@ -63,6 +63,19 @@ B7-54 终审 F-3 更正；C2 的静态 import 断言修前即 PASS，不属红�
   两处改动后的修前红实测（HEAD af49677 + 本门新期望，git worktree 临时树真跑）: 3 FAIL =
   A④×2（argv=<缺省> × 未配置 / render_api=vulkan: loom='gl' expected='vulkan'）+
   C1×1（缺省: got='gl' exp='vulkan'）；修后 111 checks 全 PASS / EXIT 0。
+
+2026-11-25 终审 P1-3/T4（agent-89）—— 恢复 A④ 的**独立**判据 + auto 期望同步:
+  · 缺陷（终审 agent-87 实测）: 上一轮把 expected_edit 写成
+    `'vulkan' if run_player.resolve_backend(cli_ref) == 'vulkan' else 'gl'`，与被测实现
+    （hostenv/editor_launch.editor_backend_choice）的核心表达式**逐字同式** —— 从「独立
+    第三判据」退化成「是否转调了那份实现」，两端同步改坏仍绿；门内注释「expected_edit
+    仅作独立第三判据」已失真。
+  · 修法: 期望改取文件顶部**手写期望表 _EDITOR_EXPECT**（按 (argv 元组, 配置状态) 逐条
+    写死，依据人类裁决而不是实现表达式），A④ 与 C1 都用它；注释改成如实描述（期望从
+    哪张表来、为什么这样写）。表里若缺一格会拿到 '<表里没有这一格>' 直接判红，不会静默。
+  · 同轮同步 auto 期望（P1-2）: auto 在编辑器侧改为「先试 VK，失败回退 GL」，故
+    `--backend auto` 与配置 auto 的编辑器期望 = 'vulkan'（旧表是 'gl'）。
+  · 本门 112 checks 全 PASS / EXIT 0（期望表 12 格 × 入口对拍不变，判据强度不降）。
 """
 import sys as _sys_utf8
 try:
@@ -158,6 +171,32 @@ ARGV_CASES = [
 # 配置三态：未配置 / opengl / vulkan（经 game_settings 用户层真写真读，非打桩）
 CONFIG_STATES = [('未配置', None), ('render_api=opengl', 'opengl'), ('render_api=vulkan', 'vulkan')]
 
+# 编辑器面**独立硬编码**期望表（2026-11-25 终审 P1-3/T4）: (argv 元组, 配置状态) -> 期望。
+#
+# 判据来源 = 人类裁决原文，**不是**被测实现的表达式:
+#   · Q-B7-60-1: 显式 --backend > 配置 render_api > 默认（默认 render_api = vulkan）；
+#   · P1-2（2026-11-25）: auto 两端同义 = 「先试 VK，失败回退 GL」，所以 auto（无论来自
+#     --backend 还是配置）在编辑器侧都先走 VK -> 'vulkan'；
+#   · opengl（显式或配置）-> 'gl'。
+# 修前 A④ 的期望是门内**复刻**实现表达式
+# （'vulkan' if resolve_backend(cli_ref) == 'vulkan' else 'gl'）—— 与被测实现逐字同式，
+# 判据退化成「有没有转调那份实现」，两端同步改坏仍绿（P1-3 实测）。改成手写表后，
+# 实现若偏离裁决（例如把 auto 又归成 gl），本表不会跟着漂。
+_EDITOR_EXPECT = {
+    ((), '未配置'): 'vulkan',
+    ((), 'render_api=opengl'): 'gl',
+    ((), 'render_api=vulkan'): 'vulkan',
+    (('--backend', 'vulkan'), '未配置'): 'vulkan',
+    (('--backend', 'vulkan'), 'render_api=opengl'): 'vulkan',
+    (('--backend', 'vulkan'), 'render_api=vulkan'): 'vulkan',
+    (('--backend', 'opengl'), '未配置'): 'gl',
+    (('--backend', 'opengl'), 'render_api=opengl'): 'gl',
+    (('--backend', 'opengl'), 'render_api=vulkan'): 'gl',
+    (('--backend', 'auto'), '未配置'): 'vulkan',
+    (('--backend', 'auto'), 'render_api=opengl'): 'vulkan',
+    (('--backend', 'auto'), 'render_api=vulkan'): 'vulkan',
+}
+
 
 def _set_render_api(v):
     import game_settings
@@ -211,20 +250,16 @@ def t_parity():
                       gp_api == ref, 'gp=%r ref=%r' % (gp_api, ref))
             except AttributeError as e:
                 check('A③ game_player 决策与 run_player 一致 (%s)' % tag, False, e)
-            # ④ 编辑器面（2026-11-22 终审 F-2 补牙）：旧版期望是门内复刻的
-            #    「S4 规则」，不触达 Loom.py 真分支源码 → 两端同步坏仍绿。
-            #    现在 Loom.py 侧真调用 loom._editor_backend_choice（main S4 分支
-            #    用的同一份决策函数），build_entry 侧真调用其同名纯函数；
-            #    expected_edit 仅作独立第三判据（防两边决策函数一起坏）。
-            #    Q-B7-60-1（人类 2026-11-23 裁决「编辑器里的后端只取决于文件里的后端
-            #    是啥」+「一个键全局消费」+「--backend 命令行仍是显式最高优先级」）:
-            #    编辑器期望从「恒 gl（只有显式 --backend vulkan 才 VK）」升级为
-            #    「显式 --backend > 配置 render_api > 默认」—— cli_ref 为 None 时
-            #    resolve_backend(None) 走配置解析链（与播放器同一事实源）。判据强度
-            #    不降：期望仍由门**独立**算出（不调入口决策函数），A④b 仍要求两入口
-            #    真调用结果逐位一致。
-            expected_edit = ('vulkan' if run_player.resolve_backend(cli_ref) == 'vulkan'
-                             else 'gl')
+            # ④ 编辑器面（2026-11-22 终审 F-2 补牙 + 2026-11-25 终审 P1-3/T4 加固）：
+            #    Loom.py 侧真调用 loom._editor_backend_choice（main S4 分支用的同一份
+            #    决策函数），build_entry 侧真调用其同名纯函数。
+            #    expected_edit 的**判据来源**（如实描述，不再自称「独立第三判据」而不
+            #    交代怎么算的）: 期望取自本文件顶部的**手写期望表 _EDITOR_EXPECT**
+            #    （按 (argv, 配置状态) 逐条写死，依据是人类裁决：显式 --backend > 配置 >
+            #    默认；auto 先试 VK）。它**不复用**被测实现的任何表达式 —— 修前这里是
+            #    'vulkan' if run_player.resolve_backend(cli_ref) == 'vulkan' else 'gl'，
+            #    与被测实现逐字同式，两端同步坏也绿（P1-3 实测）。
+            expected_edit = _EDITOR_EXPECT.get((tuple(argv), state_name), '<表里没有这一格>')
             loom_edit = None
             try:
                 loom_edit = loom._editor_backend_choice(list(argv))
@@ -331,10 +366,11 @@ def t_build_entry_branches():
               build_entry._editor_backend_choice(['--backend', 'vulkan']) == 'vulkan')
         check('C1 build_entry 编辑器分支决策: --backend opengl → gl（与修前逐位一致）',
               build_entry._editor_backend_choice(['--backend', 'opengl']) == 'gl')
-        # Q-B7-60-1: 缺省从「恒 gl」升级为「读配置」（显式 --backend > 配置 > 默认），
-        # 期望直接取 run_player.resolve_backend(None) —— 门独立算，不调入口函数；
-        # 判据强度不降（比「== gl」更严：要求真的与播放器同一事实源）。
-        _exp_default = ('vulkan' if run_player.resolve_backend(None) == 'vulkan' else 'gl')
+        # Q-B7-60-1: 缺省从「恒 gl」升级为「读配置」（显式 --backend > 配置 > 默认）。
+        # 2026-11-25 终审 P1-3/T4: 期望改取**手写期望表**（同一份 _EDITOR_EXPECT），
+        # 不再门内复刻 resolve_backend 表达式 —— 那时与被测实现逐字同式，判据退化。
+        # 此处配置状态 = 「未配置」（t_parity 末尾已 _set_render_api(None) 复位）。
+        _exp_default = _EDITOR_EXPECT[((), '未配置')]
         check('C1 build_entry 编辑器分支决策: 缺省 → 与 resolve_backend(None) 同源（配置驱动）',
               build_entry._editor_backend_choice([]) == _exp_default,
               'got=%r exp=%r' % (build_entry._editor_backend_choice([]), _exp_default))

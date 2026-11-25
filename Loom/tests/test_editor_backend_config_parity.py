@@ -34,6 +34,28 @@
      （hostenv/editor_launch.editor_backend_choice）；两入口只薄转调且**真调用同一
      实现**（monkeypatch 计数，不是门内复刻）；设置面板标签/tooltip/写盘命令壳就位。
 
+2026-11-25 终审（agent-89）追加两段（P1-1 / P1-2），并把 auto 期望从 gl 改为 vulkan:
+
+  E. 写盘闭环（P1-1 单层化）: 目标不变量 = 面板显示值 == 重启后生效值 ==
+     editor_backend_choice([])。面板写盘走**唯一写盘路径**
+     editor_launch.write_render_api_choice（引擎层 settings_set 命令壳 + 清游戏层覆盖键 +
+     复核生效值）；面板显示值取 editor_launch.effective_render_api（= 解析链最终结果）。
+     反例组: 先在游戏层写 opengl（= 播放器 VK 失败回退 _persist_backend 同款），断言
+     面板如实显示 opengl（来源层 game），再在面板改回 vulkan -> 生效值真为 vulkan
+     （修前: 游戏层覆盖键把引擎层压住，改了无效）。
+  F. auto 语义两端同义（P1-2）: 播放器 resolve_backend(None)=='auto' 原样透传；编辑器
+     决策 = 'vulkan'（先试 VK，失败由启动期回退 GL）；失败写盘策略单源
+     editor_launch.should_rewrite_config_on_vk_failure —— auto 不改写配置（与播放器
+     Q1/Q7=A 同义）、显式 --backend 不改写（Q6 先例）、配置来的 vulkan 改写 opengl
+     （人类 2026-11-24 指令）。
+
+修前红（2026-11-25，HEAD 14e2408 + 本门，实跑原文见交付报告）: **29 FAIL / EXIT 1**
+  = A5/A6（auto 期望升级后两入口仍返回 gl）+ B1/B2（显式 auto）+ D12/D12b/D15/D16/D17
+  （唯一写盘路径 / 失败处理 / 面板显示生效值 / 面板可达段落尚不存在）+ E1~E9（写盘
+  闭环全组）+ F2~F8（auto 同义与失败策略）。
+修后 **101 checks** 全 PASS / EXIT 0（原 69 条一条不减；D12 判据随单层化迁移到唯一写盘
+路径并**新增** D12b 锁「唯一实现体内真的走 settings_set 命令壳」，强度不降）。
+
 修前红（2026-11-24，HEAD af49677 + 本门，git worktree 临时树真跑）: **17 FAIL / EXIT 1**
   = A 组 3（A5/A6/A8，决策不读配置）+ B 组 3（B1/B2/B4，配置不生效、显式优先无从体现）
   + D 组 11（D1/D2/D5×2/D7 决策非单源、D9~D14 设置面板旧文案与直写）。C 组 13 条修前
@@ -197,7 +219,7 @@ def _entry_edit_choice(mod, argv):
 _CONFIG_CASES = [
     ('vulkan', 'vulkan', '配置 vulkan -> VK 视口'),
     ('opengl', 'gl', '配置 opengl -> GL 视口'),
-    ('auto', 'gl', 'auto 是播放器失败回退语义；编辑器视口不做运行期回退 -> gl'),
+    ('auto', 'vulkan', 'P1-2 后 auto 两端同义：先试 VK，失败由编辑器启动期回退 GL（不改写配置）'),
 ]
 
 
@@ -262,7 +284,8 @@ def t_explicit_override():
     cases = [
         ('opengl', ['--backend', 'vulkan'], 'vulkan', '显式 vulkan 压过配置 opengl'),
         ('vulkan', ['--backend', 'opengl'], 'gl', '显式 opengl 压过配置 vulkan'),
-        ('vulkan', ['--backend', 'auto'], 'gl', '显式 auto -> gl（编辑器不做运行期回退）'),
+        ('vulkan', ['--backend', 'auto'], 'vulkan',
+         'P1-2 后显式 auto 也先试 VK（失败由启动期回退 GL，不改写配置）'),
         ('vulkan', [], 'vulkan', '无显式 -> 配置生效'),
         ('opengl', [], 'gl', '无显式 -> 配置生效（另一向）'),
     ]
@@ -532,20 +555,173 @@ def t_single_source():
           and '--backend 命令行参数可临时覆盖本次启动' in mw)
     check('D11 旧文案「编辑器固定 OpenGL」已从设置面板移除',
           '编辑器固定 OpenGL' not in mw)
+    # P1-1 单层化（2026-11-25）后：写盘实现搬到唯一写盘路径 write_render_api_choice
+    # （hostenv/editor_launch.py），面板只转调它。D12 判据随之迁移，强度不降反升 ——
+    # 原来只锁「面板函数体里有 settings_set 字样」，现在同时锁「面板真转调唯一实现」+
+    # 「唯一实现体内确实走 settings_set 命令壳与 render_api 键」。
     body = _func_body_src(mw, '_cmd_set_render_api')
-    check('D12 下拉框写盘走 settings_set 命令壳（与 _cmd_set_parallel 同型）',
-          bool(body) and 'settings_set' in body and 'render_api' in body,
+    check('D12 下拉框写盘转调唯一写盘路径（write_render_api_choice，面板与 VK 失败回退同一份）',
+          bool(body) and 'write_render_api_choice' in body,
           'body=%r' % ((body or '')[:200],))
+    _el_src = open(os.path.join(ROOT, 'hostenv', 'editor_launch.py'), encoding='utf-8').read()
+    _wbody = _func_body_src(_el_src, 'write_render_api_choice')
+    check('D12b 唯一写盘路径体内走 settings_set 命令壳 + render_api 键（与设置面板同一条写盘）',
+          bool(_wbody) and 'settings_set' in _wbody and 'render_api' in _wbody,
+          'body=%r' % ((_wbody or '')[:200],))
     check('D13 下拉框 currentIndexChanged 接到 _cmd_set_render_api（不再直写 guiloader）',
           'currentIndexChanged.connect(self._cmd_set_render_api)' in mw)
     check('D14 旧直写 lambda（s.__setitem__(\'render_api\'）已删',
           "s.__setitem__('render_api'" not in mw)
+    # ---- VK 装配失败处理（P0-1）的单源结构：写盘走同一份、失败策略走同一份 ----
+    hbody = _func_body_src(mw, '_handle_vk_init_failure')
+    check('D15 VK 装配失败处理（P0-1）唯一实现在 gui/main_window._handle_vk_init_failure，'
+          '且转调唯一写盘路径 + 唯一失败策略（不另起第三处写盘）',
+          bool(hbody) and 'write_render_api_choice' in hbody
+          and 'should_rewrite_config_on_vk_failure' in hbody,
+          'body=%r' % ((hbody or '')[:240],))
+    check('D16 设置面板渲染后端下拉显示**生效值**（editor_launch.effective_render_api）',
+          'effective_render_api' in mw)
+    check('D17 设置面板的「不依赖 editor」段落无条件渲染（P0-1 另一半：editor 为 None 也可达）',
+          'if e is None:' in mw and '编辑器未就绪' in mw)
+
+
+# ============ E. 写盘闭环（P1-1 单层化） ============
+#
+# 目标不变量（本组逐条钉死）: 面板显示值 == 重启后实际生效值 == editor_backend_choice([])。
+# 修前缺陷（终审 agent-87 实测）: 面板写**引擎层**、脚本 API 写**游戏层**，而优先级是
+# 游戏层 > 引擎层 -> 面板显示引擎层值、生效值却是游戏层的值（面板显示 X 生效 Y），
+# 且播放器 VK 失败回退把游戏层写成 opengl 后面板永久显示 vulkan、改回无效。
+
+def _panel_write(api):
+    """设置面板写盘的**同一个**函数（_cmd_set_render_api 转调的唯一实现）。"""
+    fn = getattr(editor_launch, 'write_render_api_choice', None)
+    if not callable(fn):
+        return {'ok': False, 'error': 'hostenv.editor_launch.write_render_api_choice 不存在'}
+    try:
+        return fn(api) or {}
+    except Exception as e:
+        return {'ok': False, 'error': repr(e)}
+
+
+def _panel_shows():
+    """设置面板显示值 = 生效值（与面板同一个调用 effective_render_api）。"""
+    fn = getattr(editor_launch, 'effective_render_api', None)
+    if not callable(fn):
+        return None, None
+    try:
+        return fn()
+    except Exception as e:
+        print('[gate] 读生效值失败 (%r)' % (e,))
+        return None, None
+
+
+def _reset_layers():
+    """清两层 render_api（引擎层 delta + 游戏层用户文件），回到「都没写」态。"""
+    _clear_engine_settings()
+    try:
+        import game_settings
+        clear = getattr(game_settings, 'clear_value', None)
+        if callable(clear):
+            clear('render_api')
+        p = game_settings.user_path()
+        if os.path.isfile(p):
+            os.remove(p)
+    except Exception as e:
+        print('[gate] 清游戏层失败 (%r)' % (e,))
+
+
+def t_write_closure():
+    # 生效值 -> 编辑器二元决策的**独立硬编码**期望表（不复用被测实现表达式）
+    for written, expected_choice in (('opengl', 'gl'), ('vulkan', 'vulkan'), ('auto', 'vulkan')):
+        _reset_layers()
+        res = _panel_write(written)
+        check('E1 面板写 render_api=%s 走唯一写盘路径并返回 ok' % written,
+              bool(res.get('ok')), res)
+        eff, src = _panel_shows()
+        check('E2 面板显示值 == %s（显示的是生效值，不是引擎层单层值）' % written,
+              eff == written, 'eff=%r src=%r' % (eff, src))
+        got = guiloader.load_settings('loom').get('render_api')
+        check('E3 引擎层回读 == %s（设置面板写的就是这个键）' % written, got == written, got)
+        try:
+            api = run_player.resolve_backend(None)
+        except Exception as e:
+            api = repr(e)
+        check('E4 模拟重启后生效值（resolve_backend(None)）== %s' % written,
+              api == written, api)
+        check('E5 生效值 -> 编辑器决策 == %r（与 editor_backend_choice([]) 一致）'
+              % expected_choice,
+              editor_launch.editor_backend_choice([]) == expected_choice,
+              editor_launch.editor_backend_choice([]))
+    # ---- 闭环反例：游戏层覆盖键（播放器 VK 失败回退写的）不得让面板撒谎 ----
+    _reset_layers()
+    _cmd_settings_set('render_api', 'vulkan')       # 引擎层 vulkan（= 面板上次写的）
+    import game_settings
+    game_settings.write_render_api('opengl')        # 游戏层 opengl（run_player._persist_backend 同款）
+    eff, src = _panel_shows()
+    check('E6 游戏层有覆盖时面板显示生效值 opengl，且标注来源层 game',
+          eff == 'opengl' and src == 'game', 'eff=%r src=%r' % (eff, src))
+    res = _panel_write('vulkan')                    # 用户在面板改回 vulkan
+    eff2, src2 = _panel_shows()
+    check('E7 面板改回 vulkan 后生效值真为 vulkan（游戏层影子键被单层化写盘清掉）',
+          bool(res.get('ok')) and eff2 == 'vulkan',
+          'ok=%r err=%r eff=%r src=%r' % (res.get('ok'), res.get('error'), eff2, src2))
+    check('E8 游戏层覆盖键已不存在（不存在「面板显示 X、生效 Y」的组合）',
+          game_settings.read_render_api() is None,
+          'game=%r' % (game_settings.read_render_api(),))
+    check('E9 面板显示值 == 生效值 == 决策 三者闭环（同一输入同一可观察结果）',
+          eff2 == 'vulkan' and run_player.resolve_backend(None) == 'vulkan'
+          and editor_launch.editor_backend_choice([]) == 'vulkan',
+          'show=%r resolve=%r choice=%r'
+          % (eff2, run_player.resolve_backend(None), editor_launch.editor_backend_choice([])))
+    _reset_layers()
+
+
+# ============ F. auto 语义两端同义（P1-2） ============
+#
+# 播放器: resolve_backend(None)=='auto' -> run_backend 先试 VK, VkInitError 回退 GL, 不改写配置
+# 编辑器: T1 的启动期回退机制就位后同义 —— 先试 VK（backend='vulkan'），失败回退 GL 视口，
+#         同样不改写配置（Q1/Q7: auto 没有偏好可持久化）。
+
+def t_auto_semantics():
+    _reset_layers()
+    _cmd_settings_set('render_api', 'auto')
+    try:
+        player_api = run_player.resolve_backend(None)
+    except Exception as e:
+        player_api = repr(e)
+    check('F1 播放器侧：配置 auto 原样透传（resolve_backend(None) == "auto"）',
+          player_api == 'auto', player_api)
+    check('F2 编辑器侧：配置 auto -> 先试 VK（决策 vulkan），不再直接取保底 gl',
+          editor_launch.editor_backend_choice([]) == 'vulkan',
+          editor_launch.editor_backend_choice([]))
+    check('F3 两入口与唯一实现一致（auto -> vulkan）',
+          loom._editor_backend_choice([]) == 'vulkan'
+          and build_entry._editor_backend_choice([]) == 'vulkan',
+          (loom._editor_backend_choice([]), build_entry._editor_backend_choice([])))
+    pol = getattr(editor_launch, 'should_rewrite_config_on_vk_failure', None)
+    check('F4 VK 失败写盘策略单源存在（editor_launch.should_rewrite_config_on_vk_failure）',
+          callable(pol))
+    if callable(pol):
+        check('F5 auto 失败不改写配置（与播放器 Q1/Q7 同义：没有偏好可持久化）',
+              pol(False, 'auto') is False, pol(False, 'auto'))
+        check('F6 配置来的 vulkan 失败 -> 改写为 opengl（人类 2026-11-24 指令）',
+              pol(False, 'vulkan') is True, pol(False, 'vulkan'))
+        check('F7 显式 --backend vulkan 失败不改写（Q6 先例：显式选择不动用户配置）',
+              pol(True, 'vulkan') is False, pol(True, 'vulkan'))
+        check('F8 本来就是 opengl 的启动不会走到 VK 失败改写（策略对 opengl 恒 False）',
+              pol(False, 'opengl') is False, pol(False, 'opengl'))
+    else:
+        for _n in ('F5', 'F6', 'F7', 'F8'):
+            check('%s 失败写盘策略缺失（无法判定）' % _n, False)
+    _reset_layers()
 
 
 t_config_driven()
 t_explicit_override()
 t_editor_zero_logic()
 t_single_source()
+t_write_closure()
+t_auto_semantics()
 
 print('=' * 60)
 if _fails:

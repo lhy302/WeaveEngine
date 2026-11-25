@@ -105,11 +105,19 @@ _MSG_COLORS = {'ok': '#222222', 'err': '#c00000', 'dim': '#666666'}
 # LoomGUI — 主窗口 + 全部原生面板 (IEditorView 实现)
 # =====================================================================
 class LoomGUI(QMainWindow):
-    # S4（Q-B7-47-1 阶段 4）: backend='vulkan' 时视口用 VkViewport（显式 --backend 才走；
-    # 缺省 'gl' = 原路径一行不差）。
-    def __init__(self, scene_path=None, width=1280, height=800, backend='gl'):
+    # S4（Q-B7-47-1 阶段 4）: backend='vulkan' 时视口用 VkViewport（backend 为 vulkan
+    # 即走 —— 来源可为配置文件 render_api，也可为显式 --backend；Q-B7-60-1 后配置同样
+    # 驱动，且缺省配置就是 vulkan。缺省 'gl' = 原路径一行不差）。
+    def __init__(self, scene_path=None, width=1280, height=800, backend='gl',
+                 explicit=False):
         super().__init__()
         self.editor = None
+        # 2026-11-25 终审 P0-1（人类 2026-11-24 指令）: 本次 backend 是否来自**显式**
+        # --backend（argv 里给了值）。显式失败不改写用户配置（Q6 先例），但仍回退 GL +
+        # 可见提示；配置/默认来的 vulkan 失败则自动把配置改写成 opengl。
+        self._backend_explicit = bool(explicit)
+        # 本次启动 VK 装配失败的回退记录（dict | None）—— 可见提示与门都读它
+        self._vk_fallback = None
         self._scene_path = scene_path
         self._init_w, self._init_h = width, height
         self.setWindowTitle("Loom — 编辑器 (Qt)")
@@ -145,10 +153,27 @@ class LoomGUI(QMainWindow):
             print('[Qt] 远程/虚拟显示模式启用（离屏 GL readback）')
             self.viewport = RemoteViewport(self, scene_path, width, height)
         elif backend == 'vulkan':
-            # S4（Q-B7-47-1 阶段 4）: 显式 --backend vulkan 的编辑器走 VK 视口
-            # （QRenderWidget bitmap present；GL 路径分支原样保留，缺省零变化）
-            from editor.viewport.vk_viewport import VkViewport  # B4: vk_viewport 归位 editor/viewport/
-            self.viewport = VkViewport(self, scene_path, width, height)
+            # S4（Q-B7-47-1 阶段 4）: backend 为 vulkan（来源可为配置 render_api 或显式
+            # --backend）的编辑器走 VK 视口（QRenderWidget bitmap present；GL 路径分支
+            # 原样保留，缺省零变化）。
+            #
+            # 2026-11-25 终审 P0-1（人类 2026-11-24 指令「加编辑器启动时 VK 失败 → 自动
+            # 改写配置为 opengl + 提示」）: 先**探测** VK 可装配性，探测失败就不建
+            # VkViewport，直接建 GLViewport 并在 _build_central 之前完成（本次启动编辑器
+            # 可用）。为什么不是「建了 VkViewport 再销毁重建」见 vk_viewport.probe_vk_ready
+            # 的 docstring（VkViewport 的 wgpu 装配是延迟的，构造后 init_error 恒为 None）。
+            from editor.viewport import vk_viewport as _vk_vp
+            _vk_ok, _vk_reason, _vk_ready = _vk_vp.probe_vk_ready()
+            if _vk_ok:
+                self.viewport = _vk_vp.VkViewport(
+                    self, scene_path, width, height, vk_ready=_vk_ready,
+                    on_init_error=self._on_vk_late_init_error)
+            else:
+                # 本次回退 GL（启动期一次性选择，不是运行期热切换 —— 与裁决①不冲突）
+                self.viewport = GLViewport(self, scene_path, width, height)
+                self._vk_fallback = self._handle_vk_init_failure(
+                    _vk_reason, adapter_info=(_vk_ready or (None, None, {}))[2],
+                    can_swap=True)
         else:
             self.viewport = GLViewport(self, scene_path, width, height)
 
@@ -205,6 +230,97 @@ class LoomGUI(QMainWindow):
         # 焦点变化 -> 底部数值拖拽块显隐 (2026-08-22): 聚焦数值行显示,
         # 焦点离开检查器数值控件隐藏 (拖拽进行中不隐藏)
         QApplication.instance().focusChanged.connect(self._on_app_focus_changed)
+
+    # ---------------- 渲染后端装配失败（P0-1，人类 2026-11-24 指令） ----------------
+    def _on_vk_late_init_error(self, reason):
+        """VkViewport **延迟**装配失败的回调（启动期探测过了，真正装配仍失败）。
+
+        装配失败发生在事件循环启动后（QTimer.singleShot(0, _init_deferred)），此时
+        _build_central 已把视口装进布局 —— 不在这里销毁重建（Qt 风险高，见
+        editor/viewport/vk_viewport.probe_vk_ready 的 docstring），只做可见失败 +
+        按裁决改写配置；设置面板已无条件可达（P0-1 另一半），用户可据此改后端并重启。
+        """
+        if self._vk_fallback is None:
+            self._vk_fallback = self._handle_vk_init_failure(reason, can_swap=False)
+
+    def _handle_vk_init_failure(self, reason, adapter_info=None, can_swap=False):
+        """VK 装配失败的**唯一出口**（人类 2026-11-24 指令 + Q1/Q6/Q7 裁决）。
+
+        三件事，顺序固定:
+          ① 按**唯一判据**（hostenv.editor_launch.should_rewrite_config_on_vk_failure）
+             决定要不要把配置改写成 opengl；改写走**唯一写盘路径**
+             （hostenv.editor_launch.write_render_api_choice —— 与设置面板同一条，
+             不另起第三处写盘）；
+          ② 发**可见提示**（hostenv.backend_guard.show_blocking_dialog —— 播放器 VK 失败
+             用的同一份可见失败组件，规则 5.5；LOOM_NO_DIALOG=1 时只打印，与既有语义一致）；
+          ③ 记录本次回退（can_swap=True: 视口已在调用点换成 GLViewport，本次可用；
+             False: 视口装配失败，提示要求重启）。
+
+        返回 dict（reason / rewritten / effective / explicit / requested_api / shown /
+        can_swap / message / write_error），self._vk_fallback 与门都读它。
+        """
+        from hostenv.editor_launch import (should_rewrite_config_on_vk_failure,
+                                           write_render_api_choice)
+        explicit = bool(getattr(self, '_backend_explicit', False))
+        api_req = None
+        try:
+            import run_player
+            api_req = run_player.resolve_backend(None)
+        except Exception as e:
+            print('[VK] 读配置失败 (%r) —— 按「默认 vulkan」判断是否改写' % (e,))
+        rewrite = should_rewrite_config_on_vk_failure(explicit, api_req)
+        rewritten = False
+        eff, werr = None, None
+        if rewrite:
+            try:
+                res = write_render_api_choice('opengl')
+                rewritten = bool(res.get('ok'))
+                eff = res.get('effective')
+                werr = res.get('error')
+            except Exception as e:
+                werr = repr(e)
+        msg = self._vk_failure_message(reason, api_req, explicit, rewritten, werr,
+                                       can_swap)
+        print(msg)
+        shown = False
+        try:
+            from hostenv.backend_guard import show_blocking_dialog
+            shown = show_blocking_dialog('Vulkan 初始化失败', msg)
+        except Exception as e:
+            print('[VK] 弹窗失败 (%r) —— 仅打印原因' % (e,))
+        if not shown:
+            print('[VK] (未弹窗: 无 GUI 或 LOOM_NO_DIALOG=1 —— 原因见上面的 [VK] 行)')
+        return {'reason': reason, 'rewritten': rewritten, 'effective': eff,
+                'explicit': explicit, 'requested_api': api_req, 'shown': shown,
+                'can_swap': can_swap, 'message': msg, 'write_error': werr}
+
+    @staticmethod
+    def _vk_failure_message(reason, api_req, explicit, rewritten, werr, can_swap):
+        """VK 装配失败的可见提示文案 —— 必须同时说清三件事:
+        ① VK 初始化失败原因摘要；② 配置有没有被改成 opengl；③ 本次怎么办。"""
+        if can_swap:
+            lines = ['[VK] Vulkan 初始化失败，本次启动已回退到 OpenGL（需要 4.3 core）视口，'
+                     '编辑器可继续使用。']
+        else:
+            lines = ['[VK] Vulkan 初始化失败，视口装配未完成 —— 请按下面的提示处理后重启编辑器。']
+        lines.append('[VK] 失败原因: %s' % (reason,))
+        _req = str(api_req or '').strip().lower()
+        if explicit:
+            lines.append('[VK] 本次是显式 --backend vulkan：**未改写配置文件**（尊重显式选择）。'
+                         '如需永久改用 OpenGL，请在设置面板把渲染后端改为 OpenGL。')
+        elif _req == 'auto':
+            lines.append('[VK] 本次配置是 auto（先试 Vulkan、失败回退 OpenGL）：'
+                         '**未改写配置文件**（auto 本身没有偏好可持久化）。')
+        elif rewritten:
+            lines.append('[VK] 已把配置里的渲染后端改写为 opengl —— 下次启动直接走 OpenGL。')
+        else:
+            lines.append('[VK] 改写配置为 opengl **失败**%s —— 下次启动仍会先试 Vulkan，'
+                         '可在设置面板里手动改成 OpenGL。'
+                         % (('(%s)' % (werr,)) if werr else '',))
+        if not can_swap:
+            lines.append('[VK] 本次视口未能装配：请重启编辑器（或加 --backend opengl 启动）后继续。')
+        lines.append('[VK] 提示: 升级显卡驱动（需要 Vulkan 1.1+）可恢复 Vulkan 后端。')
+        return '\n'.join(lines)
 
     # ---------------- IEditorView 契约 ----------------
     def attach(self, controller):
@@ -646,6 +762,19 @@ class LoomGUI(QMainWindow):
             self.uitree.raise_()   # 从 tab 切到前台（与 console 同款行为）
         return show
 
+    def _notify_or_print(self, text, color=(240, 200, 90)):
+        """editor 在时走状态栏 toast，不在时降级为 print（P0-1: 视口装配失败时
+        editor 恒 None，设置面板的命令路径不能因此崩 —— Loom.exe 无控制台时这些
+        行仍有意义，因为设置面板本身已可达）。"""
+        e = self.editor
+        if e is not None:
+            try:
+                e._notify(text, color)
+                return
+            except Exception:
+                pass
+        print('[Qt] ' + str(text))
+
     def _invoke_cmd(self, cmd_name, args=None, quiet=False, notify_error=True):
         """GUI → EAI 命令统一入口（Q-B7-56-1 裁定①, 2026-11-22）。
 
@@ -671,7 +800,7 @@ class LoomGUI(QMainWindow):
         args = dict(args or {})
         fn = ac._COMMANDS.get(cmd_name)
         if fn is None:
-            self.editor._notify("UI 命令不存在: %s" % cmd_name, (235, 90, 90))
+            self._notify_or_print("UI 命令不存在: %s" % cmd_name, (235, 90, 90))
             return {'error': '命令不存在: %s' % cmd_name}
         try:
             ac._CMD_SCOPE.push('user')
@@ -680,11 +809,11 @@ class LoomGUI(QMainWindow):
             finally:
                 ac._CMD_SCOPE.pop()
         except Exception as e:
-            self.editor._notify("UI 操作异常: %r" % e, (235, 90, 90))
+            self._notify_or_print("UI 操作异常: %r" % e, (235, 90, 90))
             return {'error': repr(e)}
         if isinstance(r, dict) and 'error' in r:
             if notify_error:
-                self.editor._notify("UI 操作失败: %s" % r['error'], (235, 90, 90))
+                self._notify_or_print("UI 操作失败: %s" % r['error'], (235, 90, 90))
             return r
         if quiet:
             # 高频数值行: 日志/刷新延后会话收尾 (一次编辑 = 一条教学命令)
@@ -1530,23 +1659,32 @@ class LoomGUI(QMainWindow):
             e._notify("并行开关重启后生效", (240, 200, 90))
 
     def _cmd_set_render_api(self, index):
-        """渲染后端下拉框（Q-B7-60-1 裁定①②）: 设置写盘翻译成 settings_set 命令
-        （命令体 = guiloader load/save 同一入口，与 _cmd_set_parallel 同型）。
+        """渲染后端下拉框（Q-B7-60-1 裁定①② + 2026-11-25 终审 P1-1 单层化）。
 
         人类 2026-11-23 裁决「一个键全局消费」: 这里写的 render_api 既是播放/打包
         游戏的后端，也是**编辑器视口**的后端（编辑器侧读它走
         hostenv.editor_launch.editor_backend_choice -> run_player.resolve_backend）。
         裁决①「重启编辑器生效」: 不做视口热切换，故只落盘 + 提示重启，不重建视口。
+
+        P1-1（修前缺陷）: 面板原来只写**引擎层**，而解析链优先级是 游戏层 > 引擎层 ——
+        播放器 VK 失败回退把游戏层写成 opengl 后，面板显示 vulkan、生效却是 opengl，
+        且「改回」无效。现在写盘走**唯一写盘路径** write_render_api_choice（同一份函数
+        也被 VK 装配失败自动回退使用）: 引擎层写入 + 清游戏层覆盖键 + 复核生效值。
         """
         combo = getattr(self, '_render_api_combo', None)
         api = combo.itemData(index) if combo is not None else None
         if not api:
             return
-        self._invoke_cmd('settings_set', {'key': 'render_api', 'value': api})
-        e = self.editor
-        if e is not None:
-            e._notify("渲染后端已保存：编辑器视口与播放/打包游戏共用此键，"
-                      "重启编辑器/播放器后生效", (240, 200, 90))
+        from hostenv.editor_launch import write_render_api_choice
+        # invoke=self._invoke_cmd = 与设置面板同一条命令壳入口（settings_set）
+        res = write_render_api_choice(api, invoke=self._invoke_cmd)
+        if not res.get('ok'):
+            self._notify_or_print("渲染后端保存失败：%s" % (res.get('error'),),
+                                  (235, 90, 90))
+            return
+        self._notify_or_print(
+            "渲染后端已保存（生效值 %s）：编辑器视口与播放/打包游戏共用此键，"
+            "重启编辑器/播放器后生效" % (res.get('effective'),), (240, 200, 90))
 
     def _cmd_scene_name(self):
         e = self.editor
@@ -3247,9 +3385,19 @@ class LoomGUI(QMainWindow):
 
     # ---------------- 设置对话框 ----------------
     def _cmd_settings(self):
-        e = self.editor
-        if e is None:
-            return
+        """设置对话框。
+
+        2026-11-25 终审 P0-1（另一半）: **面板必须始终可达**。修前首行是
+        `e = self.editor; if e is None: return` —— 视口装配失败（VK 不可用机器）
+        时 self.editor 恒 None，对话框创建 0 次，用户连「把后端改成 OpenGL」这条
+        唯一逃生门都没有（只能 --backend opengl 或手改 json）。
+        现在按依赖切两段:
+          · 不依赖 editor 的段落（GUI 界面 / 保存目录 / 渲染后端下拉 —— 只用
+            guiloader + settings_set 命令壳）**无条件渲染**；
+          · 依赖 editor 的段落（网格/并行/帧率/移速/重力/逻辑帧/插值/帧缓冲/核心数/
+            插件）在 editor 为 None 时整段跳过，并显示一行「编辑器未就绪」说明。
+        """
+        e = self.editor          # 可能为 None（视口装配失败）—— 下面按依赖分段
         import guiloader
         s = guiloader.load_settings('loom')
         dlg = QDialog(self)
@@ -3264,6 +3412,15 @@ class LoomGUI(QMainWindow):
             row.setData(Qt.ItemDataRole.UserRole, g['id'])
             gui_list.addItem(row)
         lay.addWidget(gui_list)
+
+        def _on_gui(row):
+            """切 GUI（不依赖 editor: 只写设置.json）。P0-1: editor 为 None 也可用。"""
+            gid = row.data(Qt.ItemDataRole.UserRole)
+            if gid:
+                s['gui'] = gid
+                guiloader.save_settings('loom', s)
+                self._notify_or_print("已切换到「%s」，重启后生效" % gid, (240, 200, 90))
+        gui_list.itemClicked.connect(_on_gui)
         # 保存目录
         lay.addWidget(QLabel("保存目录"))
         dir_row = QWidget()
@@ -3279,11 +3436,68 @@ class LoomGUI(QMainWindow):
                 s['save_dir'] = d
                 guiloader.save_settings('loom', s)
                 dir_label.setText(d)
-                e._notify("保存目录已更改，重启后生效", (240, 200, 90))
+                self._notify_or_print("保存目录已更改，重启后生效", (240, 200, 90))
         b = QPushButton("更改…")
         b.clicked.connect(_choose_dir)
         h.addWidget(b)
         lay.addWidget(dir_row)
+        # ---- 渲染后端（不依赖 editor: 只用 guiloader + settings_set 命令壳）----
+        # Q-B7-60-1（人类 2026-11-23 裁决「一个键全局消费」）: 同一个 render_api 键既
+        # 决定**编辑器视口**后端，也决定播放/打包游戏的后端（编辑器读它走
+        # run_player.resolve_backend 同一条解析链）；玩家侧仍可 --backend /
+        # 游戏设置.json 自行覆盖，底层设置 API 留给开发者 UI。
+        # 裁决①: 重启编辑器生效，**不做视口热切换**。
+        # 2026-11-25 终审 P1-1（写盘单层化）: 选中项 = **生效值**
+        # （effective_render_api = 解析链最终结果），不再是引擎层单层值 —— 否则就是
+        # 「面板显示 X、生效 Y」（游戏层覆盖键压过引擎层）。生效值来自游戏层时在右侧
+        # 标注来源层，用户能看出「这个值是谁写的」。
+        api_row = QWidget()
+        ha = QHBoxLayout(api_row)
+        ha.setContentsMargins(0, 0, 0, 0)
+        ha.addWidget(QLabel("渲染后端（编辑器与播放共用，重启生效）"))
+        api_combo = QComboBox()
+        # 2026-11-06 R-05 (复核 B 指出): 下拉此前只有 vulkan/opengl, 设计文档 P5
+        # 明写的 auto(vk 失败自动回退 gl) 因此无法从 UI 选到; 设置里存成 auto 时
+        # 下拉还会错误地显示成 Vulkan。三项与 run_player.resolve_backend 的合法值
+        # 集合严格一致。
+        # P1-2（2026-11-25）: auto 两端同义 —— 先试 VK、失败回退 GL（编辑器侧由启动期
+        # 探测 + 回退实现），故「自动（Vulkan 失败回退 OpenGL）」这个文案对两端都成立。
+        try:
+            from hostenv.editor_launch import effective_render_api
+            _eff_api, _eff_src = effective_render_api()
+        except Exception as _ee:
+            print('[设置] 读生效渲染后端失败 (%r) -> 退回引擎层配置值' % (_ee,))
+            _eff_api, _eff_src = s.get('render_api', 'vulkan'), 'engine'
+        for i, (txt, aid) in enumerate((
+                ("自动（Vulkan 失败回退 OpenGL）", "auto"),
+                ("Vulkan（新，推荐）", "vulkan"),
+                ("OpenGL（保底）", "opengl"))):
+            api_combo.addItem(txt, aid)
+            if aid == _eff_api:
+                api_combo.setCurrentIndex(i)
+        api_combo.setToolTip(
+            "设置当前项目的渲染后端（以配置文件为准）。编辑器视口与播放/打包游戏共用此键；"
+            "修改后重启编辑器/播放器生效。--backend 命令行参数可临时覆盖本次启动。")
+        self._render_api_combo = api_combo
+        # Q-B7-56-2 裁定①: 面板写盘翻译成命令（唯一写盘路径内部走 settings_set 命令壳），
+        # 不再直写 guiloader。重启生效提示保留。
+        api_combo.currentIndexChanged.connect(self._cmd_set_render_api)
+        ha.addWidget(api_combo)
+        if _eff_src == 'game':
+            ha.addWidget(QLabel("（生效值来自 游戏设置.json 覆盖层）"))
+        lay.addWidget(api_row)
+        # ---- editor 为 None（视口装配失败）时: 以上三段照常可用，以下整段跳过 ----
+        if e is None:
+            lay.addWidget(QLabel(
+                "编辑器未就绪（视口装配失败）：以上 GUI 界面 / 保存目录 / 渲染后端"
+                "仍可修改；改成 OpenGL 后重启编辑器即可继续使用。"))
+            _btns0 = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+            _btns0.rejected.connect(dlg.reject)
+            _btns0.accepted.connect(dlg.accept)
+            lay.addWidget(_btns0)
+            dlg.exec()
+            return
+        # ---- 以下依赖 editor（网格/并行/帧率/移速/重力/逻辑帧/插值/帧缓冲/核心数/插件）----
         # 网格 / 并行 / 脚本核心数
         grid_chk = QCheckBox("无限网格（即时生效）")
         grid_chk.setChecked(bool(getattr(e, 'show_grid', True)))
@@ -3296,40 +3510,6 @@ class LoomGUI(QMainWindow):
         # Q-B7-56-2 裁定①: 设置写盘翻译成 settings_set 命令 (提示保留)
         par_chk.toggled.connect(self._cmd_set_parallel)
         lay.addWidget(par_chk)
-        # 渲染后端（Q-B7-60-1，人类 2026-11-23 裁决「一个键全局消费」）: 同一个
-        # render_api 键既决定**编辑器视口**后端，也决定播放/打包游戏的后端
-        # （编辑器读它走 run_player.resolve_backend 同一条解析链）；玩家侧仍可
-        # --backend / 游戏设置.json 自行覆盖，底层设置 API 留给开发者 UI。
-        # 裁决①: 重启编辑器生效，**不做视口热切换**（编辑器里 VK 装配失败可见报错，
-        # 不静默降级 GL）。
-        api_row = QWidget()
-        ha = QHBoxLayout(api_row)
-        ha.setContentsMargins(0, 0, 0, 0)
-        ha.addWidget(QLabel("渲染后端（编辑器与播放共用，重启生效）"))
-        api_combo = QComboBox()
-        # 2026-11-06 R-05 (复核 B 指出): 下拉此前只有 vulkan/opengl, 设计文档 P5
-        # 明写的 auto(vk 失败自动回退 gl) 因此无法从 UI 选到; 设置里存成 auto 时
-        # 下拉还会错误地显示成 Vulkan。三项与 run_player.resolve_backend 的合法值
-        # 集合严格一致。
-        # Q-B7-60-1: 选中项以配置文件为准（s.get('render_api')，与编辑器视口读的
-        # 是同一个键）；auto 在编辑器侧取保底 gl（编辑器不做运行期回退，见
-        # hostenv/editor_launch.editor_backend_choice 的 docstring）。
-        for i, (txt, aid) in enumerate((
-                ("自动（Vulkan 失败回退 OpenGL）", "auto"),
-                ("Vulkan（新，推荐）", "vulkan"),
-                ("OpenGL（保底）", "opengl"))):
-            api_combo.addItem(txt, aid)
-            if aid == s.get('render_api', 'vulkan'):
-                api_combo.setCurrentIndex(i)
-        api_combo.setToolTip(
-            "设置当前项目的渲染后端（以配置文件为准）。编辑器视口与播放/打包游戏共用此键；"
-            "修改后重启编辑器/播放器生效。--backend 命令行参数可临时覆盖本次启动。")
-        self._render_api_combo = api_combo
-        # Q-B7-60-1 裁定②: 写盘翻译成 settings_set 命令壳（与 _cmd_set_parallel 同型），
-        # 不再直写 guiloader（违反 Q-B7-56-2 裁定①）。重启生效提示保留。
-        api_combo.currentIndexChanged.connect(self._cmd_set_render_api)
-        ha.addWidget(api_combo)
-        lay.addWidget(api_row)
         # 帧率上限 (2026-08-19): 档位即时生效 (渲染定时器周期直接改)
         fps_row = QWidget()
         hf = QHBoxLayout(fps_row)
@@ -3681,13 +3861,6 @@ class LoomGUI(QMainWindow):
         btns.accepted.connect(dlg.accept)
         lay.addWidget(btns)
 
-        def _on_gui(row):
-            gid = row.data(Qt.ItemDataRole.UserRole)
-            if gid:
-                s['gui'] = gid
-                guiloader.save_settings('loom', s)
-                e._notify("已切换到「%s」，重启后生效" % gid, (240, 200, 90))
-        gui_list.itemClicked.connect(_on_gui)
         dlg.exec()
 
     # ---------------- 未保存询问 / 关闭 ----------------
@@ -3820,11 +3993,18 @@ def _confirm_core_plugins(win):
                 print("[插件] 「%s」信任记录写入失败" % info['id'])
 
 
-def run_loom_gui(scene_path=None, width=1280, height=800, backend='gl'):
+def run_loom_gui(scene_path=None, width=1280, height=800, backend='gl',
+                 explicit=False):
     """PySide6 编辑器入口 (Loom.py --ui qt 调用). QApplication + 主窗口 + 事件循环.
     支持 --auto-close N: N 秒后自动关闭 (冒烟测试用, 交互使用不要带).
-    S4: backend='vulkan' -> 编辑器视口走 VK（Loom.py 编辑器分支在 --backend 显式
-    为 vulkan 时传入；缺省 'gl' 与修前逐位一致）。"""
+    S4: backend='vulkan' -> 编辑器视口走 VK。backend 为 vulkan 的来源**两种**:
+    配置文件 render_api（Q-B7-60-1 后配置同样驱动，且缺省配置就是 vulkan）或
+    显式 --backend（Q-B7-60-1：显式仍是最高优先级）；缺省 'gl' 与修前逐位一致。
+
+    2026-11-25 终审 P0-1（人类 2026-11-24 指令「编辑器启动时 VK 失败 → 自动改写配置为
+    opengl + 提示」）: explicit=True 表示本次 backend 来自**显式** --backend —— 装配失败
+    时**不改写用户配置**（Q6 先例：显式选择不动配置），但仍给可见提示 + 本次回退 GL。
+    两个入口都传（run_player.parse_backend_arg(argv) is not None）。"""
     fmt = QSurfaceFormat()
     # 2026-11-09 A0 (D1=B): GL 地板 4.3 core（Qt 里请求不到时由各视口的版本门明确报错）
     fmt.setVersion(GL_MIN_MAJOR, GL_MIN_MINOR)
@@ -3857,7 +4037,8 @@ def run_loom_gui(scene_path=None, width=1280, height=800, backend='gl'):
             pass
 
     app = QApplication(sys.argv)
-    win = LoomGUI(scene_path=scene_path, width=width, height=height, backend=backend)
+    win = LoomGUI(scene_path=scene_path, width=width, height=height, backend=backend,
+                  explicit=explicit)
     # 2026-08-27 EAI: --agent 启动命令桥 (Http 127.0.0.1 + 端口文件) +
     # 主线程 QTimer 轮询命令队列 (与 UI 一致执行); Agent 经 /cmd /logs 驱动
     agent = None

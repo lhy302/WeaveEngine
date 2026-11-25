@@ -38,6 +38,52 @@ from editor.viewport.event_bridge import (
 )
 
 
+def _acquire_vk_device():
+    """请求 Vulkan 适配器 + 过 Vulkan 地板闸 + 建 device —— **唯一探测实现**。
+
+    2026-11-25 终审 P0-1（人类 2026-11-24 指令「编辑器启动时 VK 失败 → 自动改写配置为
+    opengl + 提示」）: 启动期探测与真正装配必须共用**同一份判据**（规则 5.5）——否则
+    探测说能装、装配又按另一套判据失败（或反之），用户看到的提示与实际行为对不上。
+
+    返回 (adapter, device, adapter_info)；失败原样抛出（VkBackendInitError / RuntimeError）。
+    """
+    import wgpu
+    adapter = wgpu.gpu.request_adapter_sync(power_preference='high-performance')
+    if adapter is None:
+        raise RuntimeError('无可用 Vulkan 适配器 (request_adapter_sync 返回 None)')
+    from hostenv.backend_guard import (adapter_info_dict, adapter_backend,
+                                       require_vulkan_api)
+    info = adapter_info_dict(adapter)
+    be = adapter_backend(info)
+    if be and be != 'vulkan':
+        raise RuntimeError('选中了非 Vulkan 后端 (%s)' % (be,))
+    require_vulkan_api('VK 编辑器视口', adapter_info=info)
+    device = adapter.request_device_sync()
+    return adapter, device, info
+
+
+def probe_vk_ready():
+    """启动期探测 VK 可装配性（**不建视口**，宿主据此决定走 VK 还是直接 GL）。
+
+    为什么用「先探测再建视口」而不是「建了 VkViewport 再销毁重建」（P0-1 修法选择）:
+      · VkViewport 的 wgpu 装配本来就是**延迟**的（QTimer.singleShot(0, _init_deferred)，
+        因为 VkEditorApp 需要 LoomGUI 构建完成后才安全）—— 构造之后立刻读 init_error
+        恒为 None，拿不到失败；
+      · 等延迟 init 失败再销毁/重建，_build_central 早已把死视口装进布局，替换要动布局、
+        已启动的渲染/刷新定时器与 rendercanvas 上下文，Qt 侧风险高且不可测。
+    所以采用「探测失败就不建 VkViewport」: 启动期一次性选择（**不是**热切换，与裁决①
+    「重启编辑器生效」不冲突），GL 视口在 _build_central 之前就位，本次启动编辑器可用。
+
+    返回 (ok, reason, ready):
+      ok=True  -> ready = (adapter, device, info)，交给 VkViewport(vk_ready=...) 复用；
+      ok=False -> reason = 失败原因文本（给可见提示用），ready=None。
+    """
+    try:
+        return True, None, _acquire_vk_device()
+    except Exception as e:
+        return False, (str(e) or repr(e)), None
+
+
 class VkViewport(_ViewportEventBridge, rq.QRenderWidget):
     """VK 编辑器视口：QRenderWidget(bitmap) + VkEditorApp。
 
@@ -49,12 +95,21 @@ class VkViewport(_ViewportEventBridge, rq.QRenderWidget):
     widget-FBO 缓存 / FPS 预画 blit / 频闪读回诊断三段）。
     """
 
-    def __init__(self, window, scene_path=None, width=1280, height=800):
+    def __init__(self, window, scene_path=None, width=1280, height=800,
+                 vk_ready=None, on_init_error=None):
         super().__init__(size=(max(64, int(width)), max(64, int(height))),
                          present_method='bitmap')
         self._window = window          # LoomGUI（IEditorView 宿主）
         self._scene_path = scene_path
         self._init_w, self._init_h = max(64, int(width)), max(64, int(height))
+        # 2026-11-25 终审 P0-1: 宿主可在启动期先 probe_vk_ready() 探测，把已就绪的
+        # (adapter, device, info) 传进来复用 —— 探测与装配共用 _acquire_vk_device 唯一实现，
+        # 不重复请求适配器/设备。None = 自己探测（旧调用面一字不变）。
+        self._vk_ready = vk_ready
+        # 延迟 init 失败时的宿主回调（可选）: 宿主据此给可见提示 + 改写配置。
+        # 启动期探测已覆盖绝大多数「VK 不可用」；本钩子兜住 device/上下文/EditorApp
+        # 装配期的残余失败，避免「失败无声」（Loom.exe 无控制台）。
+        self._on_init_error = on_init_error
         self.editor = None             # VkEditorApp（_init_deferred 里建）
         self.ctx = None                # rendercanvas wgpu 上下文（_vk_ctx 同一对象）
         self.init_error = None
@@ -72,20 +127,14 @@ class VkViewport(_ViewportEventBridge, rq.QRenderWidget):
     # ---------------- 初始化（wgpu 装配） ----------------
     def _init_deferred(self):
         try:
-            import wgpu
             # P6 顺序约束推荐侧：先建 wgpu device（本视口进程内随后没有任何
             # moderngl/GL 上下文创建，天然满足「先 wgpu 后 GL」）。
-            adapter = wgpu.gpu.request_adapter_sync(power_preference='high-performance')
-            if adapter is None:
-                raise RuntimeError('无可用 Vulkan 适配器 (request_adapter_sync 返回 None)')
-            from hostenv.backend_guard import (adapter_info_dict, adapter_backend,
-                                            require_vulkan_api)
-            _dev_info = adapter_info_dict(adapter)
-            _be = adapter_backend(_dev_info)
-            if _be and _be != 'vulkan':
-                raise RuntimeError('选中了非 Vulkan 后端 (%s)' % (_be,))
-            require_vulkan_api('VK 编辑器视口', adapter_info=_dev_info)
-            device = adapter.request_device_sync()
+            # 唯一探测实现在模块级 _acquire_vk_device（启动期 probe_vk_ready 同一份）；
+            # 宿主已探测过就把就绪三元组传进来复用，不再二次请求适配器/设备。
+            import wgpu                     # TextureUsage（下面 configure 用）
+            adapter, device, _dev_info = (self._vk_ready or (None, None, None))
+            if device is None:
+                adapter, device, _dev_info = _acquire_vk_device()
             self.ctx = self.get_context("wgpu")
             fmt = self.ctx.get_preferred_format(adapter)
             # 与 vk_player 同口径：显式请求非 srgb 8bit 格式（防二次伽马，双后端一致）。
@@ -111,6 +160,14 @@ class VkViewport(_ViewportEventBridge, rq.QRenderWidget):
             import traceback
             traceback.print_exc()
             self.init_error = repr(_e)
+            # 2026-11-25 终审 P0-1: 装配失败必须**可见**（Loom.exe 无控制台时 traceback
+            # 没人看得见）。宿主装了回调就交回宿主统一处理（弹窗 + 按裁决改写配置）。
+            cb = self._on_init_error
+            if callable(cb):
+                try:
+                    cb(self.init_error)
+                except Exception as _cb_e:
+                    print('[VkViewport] 宿主失败回调异常 (忽略): %r' % (_cb_e,))
 
     # ---------------- 帧驱动 ----------------
     def _draw_frame(self, *args, **kwargs):

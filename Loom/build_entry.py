@@ -527,8 +527,13 @@ if __name__ == "__main__":
                     sys.exit(_edit_plan['exit_code'])
                 if _edit_plan['engine'] == 'LoomGUI':
                     from gui.main_window import run_loom_gui
+                    # P0-1（2026-11-25）: explicit = argv 里真的给了 --backend 值
+                    # （run_player.parse_backend_arg 全仓唯一解析，不新增解析实现）。
+                    # 显式失败不改写用户配置，但仍给可见提示 + 本次回退 GL。
                     run_loom_gui(scene_path=open_scene,
-                                 backend=_edit_plan['backend'])
+                                 backend=_edit_plan['backend'],
+                                 explicit=(run_player.parse_backend_arg(sys.argv)
+                                           is not None))
                     sys.exit(0)
                 if _edit_plan['engine'] == 'VkEditorApp':
                     # 保留 VkEditorApp 装配点（Qt 宿主注入 device/present_format 时

@@ -281,6 +281,27 @@ def set_value(key, value, base_dir=None):
     return values
 
 
+def clear_value(key, base_dir=None):
+    """删除单个配置项（其它键保留，只动用户层 delta）。失败上抛。
+
+    返回 True = 删掉了这个键 / False = 本来就没有（无需写盘）。
+
+    2026-11-25 终审 P1-1（渲染后端写盘单层化）新增: 设置面板把 render_api 写进**引擎层**
+    之后，必须清掉**更高优先级**的**游戏层**覆盖键（游戏设置.json 的 render_api），
+    否则解析链仍被游戏层压住 —— 用户改了面板却「改了无效」（面板显示 X、生效 Y）。
+    只删这一个键，其它键一字不动（§4: 用户层是 delta，不是整份快照）。
+    """
+    p = user_path(base_dir)
+    values = _read_layer(p)
+    if key not in values:
+        return False
+    values.pop(key, None)
+    data = {"schema": SCHEMA, "game_id": game_id(), "origin": game_dir(),
+            "updated_at": time.strftime("%Y-%m-%d %H:%M:%S"), "values": values}
+    _atomic_write(p, data)
+    return True
+
+
 # ---------------- 鼠标锁定 ----------------
 
 def read_bool(key, default=False):

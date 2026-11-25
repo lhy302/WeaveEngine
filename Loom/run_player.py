@@ -188,6 +188,25 @@ def _write_game_layer(api):
         return False, repr(e)
 
 
+def clear_game_layer_render_api():
+    """删掉**游戏层** 游戏设置.json 的 render_api 覆盖键（编辑器面板写盘时清影子层）。
+
+    2026-11-25 终审 P1-1（写盘单层化）: 解析链优先级是 游戏层 > 引擎层，所以编辑器设置
+    面板把 render_api 写进引擎层之后，必须清掉游戏层覆盖键，否则「面板显示 X、生效 Y」
+    （播放器 VK 失败回退 _persist_backend 会把游戏层写成 opengl）。
+
+    与 _write_game_layer 同一条对称纪律（审计 P-02-09: 读侧写侧 base 必须一致）。
+    返回 (ok, 错误信息)；ok=True 表示解析链下次不会再被游戏层覆盖。
+    """
+    try:
+        import game_settings
+        _apply_settings_base()
+        game_settings.clear_value('render_api', base_dir=_SETTINGS_BASE)
+        return True, None
+    except Exception as e:
+        return False, repr(e)
+
+
 def _write_engine_layer(api):
     """写**引擎层** 设置.json（编辑器/开发环境的默认；尽力同步）。"""
     try:

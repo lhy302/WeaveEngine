@@ -464,7 +464,11 @@ if __name__ == "__main__":
                     sys.exit(_edit_plan['exit_code'])
                 if _edit_plan['engine'] == 'LoomGUI':
                     from gui.main_window import run_loom_gui
-                    run_loom_gui(scene_path=open_scene, backend=_edit_plan['backend'])
+                    # P0-1（2026-11-25）: explicit = argv 里真的给了 --backend 值
+                    # （薄转调 parse_backend_arg，不新增解析实现）。显式失败不改写配置。
+                    run_loom_gui(scene_path=open_scene,
+                                 backend=_edit_plan['backend'],
+                                 explicit=(_cli_backend(sys.argv) is not None))
                     sys.exit(0)
                 # 非 Qt 视图（--ui default/minimal）+ GL: 与 build_entry 同一装配。
                 from editor import EditorApp
