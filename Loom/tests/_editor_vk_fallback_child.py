@@ -205,6 +205,23 @@ def main():
           combo is not None and str(combo.currentData()) == _exp_combo,
           'currentData=%r' % (None if combo is None else combo.currentData(),))
 
+    # A10b: editor 为 None 时**真的能改后端**（逃生门可用，不只是「渲染出来」）
+    _target = 'vulkan' if str(None if combo is None else combo.currentData()) == 'opengl' \
+        else 'opengl'
+    try:
+        _idx = -1
+        for _i in range(combo.count() if combo is not None else 0):
+            if str(combo.itemData(_i)) == _target:
+                _idx = _i
+        combo.setCurrentIndex(_idx)      # 触发 currentIndexChanged -> _cmd_set_render_api
+        changed_err = None if _idx >= 0 else '下拉里没有 %r' % (_target,)
+    except Exception as e:
+        changed_err = repr(e)
+    cfg2 = guiloader.load_settings('loom').get('render_api')
+    check('A10b editor 为 None 时面板改渲染后端真的落盘（逃生门可用，不是只有个壳）',
+          changed_err is None and cfg2 == _target,
+          'render_api=%r target=%r err=%s' % (cfg2, _target, changed_err))
+
     # ---- 真建一次确认可用（回退后的 GL 视口）----
     win.show()
     t0 = time.perf_counter()

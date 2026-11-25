@@ -27,9 +27,15 @@
 配置写盘闭环（P1-1）与 auto 语义（P1-2）两组无窗口断言仍在
 test_editor_backend_config_parity.py 的 E/F 段（同一份被测实现，不重复起窗口）。
 
-修前红（2026-11-25，HEAD 14e2408 + 本门，实跑原文见交付报告）: A 组 1 PASS / 11 FAIL
-（面板 0 次、配置未改写、viewport 仍是 VkViewport）+ B 组 4 PASS / 6 FAIL（无提示、未回退）。
-修后全绿。
+修前红（2026-11-25，HEAD 14e2408 + 本门，实跑原文见交付报告）:
+  · A 组（配置来的 vulkan）**0 PASS / 15 FAIL** —— viewport 仍是 VkViewport、配置未改写、
+    提示 0 次、面板对话框创建 0 次（editor is None 首行 return）、GL 视口 90s 未就绪；
+  · B 组（显式 --backend vulkan）**3 PASS / 12 FAIL** —— 配置不变/未写盘三条修前即绿
+    （修前根本没有改写逻辑），其余同 A 组。
+修后 A/B 各 **16 PASS / 0 FAIL**（父门 4 条 PASS，EXIT 0）。
+注: 子探针的 A10b（editor 为 None 时面板改后端真的落盘）是**回归锁**不是修前红证据 ——
+修前面板的「写盘」本身是通的，坏的是「面板根本打不开」+「显示值不等于生效值」；
+A10b 锁的是「可达之后真的能用」，防止以后把面板做成只有个壳。
 """
 import json
 import os
@@ -46,7 +52,7 @@ _fails = []
 _pass_n = 0
 
 # 每组断言条数（子进程 verdict 里 pass_count 必须 >= 这个数，防止「少跑也绿」）
-_MIN_CHECKS = {'a': 12, 'b': 9}
+_MIN_CHECKS = {'a': 16, 'b': 16}
 
 
 def check(name, cond, detail=''):
