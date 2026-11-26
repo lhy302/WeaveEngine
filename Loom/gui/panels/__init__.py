@@ -13,6 +13,7 @@ __all__ = [
     'ActionsMixin',
     'ToolbarMixin',
     'HierarchyMixin',
+    'InspectorMixin',
     'GizmoMixin',
     'AssetMixin',
     'ConsoleMixin',
