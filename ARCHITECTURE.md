@@ -1,5 +1,7 @@
 # Loom 引擎结构图 v4（功能 + 文件 + 带关系标注的连线 + 验证体系）
 
+> 渲染要求：图 11/12 使用 mermaid 10.3+ 的 `box` 语法（GitHub 现行渲染端已支持）；自托管渲染端需 ≥10.3，否则该两图不渲染（回退：删 box 行保留 participant，事实零损失）。
+
 > ★★ **本文件是全仓库唯一的架构台账**（人类 2026-11-18 裁定）。
 > 原 AOCI 认知层已**彻底放弃**，架构认知统一以本文件的 Mermaid 图为准。
 > 人类原话：「纯文本形式的架构文档对人来说是一种认知负担……直接以 mermaid 图形式存在的架构图
@@ -260,7 +262,7 @@ flowchart LR
   subgraph PROD["⑤ 装配产物（GL 侧门面）"]
     G["GLEngine<br/>render/gl/engine.py 1651<br/>class GLEngine(EngineCore,<br/>ShadowMixin, HudMixin, RenderMixin,<br/>ModelGpuMixin, LightingMixin, GlfwWindowMixin)<br/>能力契约 grid_in_scene_pass=True（覆写）"]:::facade
   end
-  G -.->|拼装公共内核（两端共用 · 详见图 2a）| K
+  G ==>|拼装（继承）公共内核 · 两端共用（详见图 2a）| K
   G ==>|拼装| M3
   G ==>|拼装| M4
   G ==>|拼装| M5
@@ -961,7 +963,7 @@ sequenceDiagram
 | `components/game_object.py` | 455 | 场景物体 GameObject（M25 组件化容器）。 |
 | `components/transform.py` | 464 | TransformMixin：变换层次（世界矩阵/父链/包围盒；EngineCore 公共 mixin；model_world_matrix/world_rotation_matrix 增 CameraState 分支，B7-57）。 |
 | `components/raycast.py` | 336 | RaycastMixin：射线检测（物理 Culverin + 几何 AABB 兜底）。 |
-| `components/collision.py` | 262 | ★ 碰撞配对/事件派发共享实现（pairs:176 / dispatch:221；GL PhysicsMixin 与 VK driver:1039 调**同一个函数**）。 |
+| `components/collision.py` | 262 | ★ 碰撞配对/事件派发共享实现（pairs:176 / dispatch:221；GL PhysicsMixin 与 VK driver:1046（pairs）/ 1053（dispatch 转发）调**同一个函数**）。 |
 | `components/frame_components.py` | 149 | FrameComponentMixin：每帧组件推进（音频/动画/碰撞回调；update_audio/sync_audio_listener 共享实现）。 |
 | `components/model_data.py` | 109 | ModelDataMixin（模型数据；EngineCore 公共 mixin）。 |
 
