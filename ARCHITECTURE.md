@@ -1185,15 +1185,23 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-  subgraph GUIL["Qt 视图 gui/main_window.py 3940（B7-56-2 后）"]
-    G1["GUI 面板操作<br/>工具栏/菜单 · 层级树挂父/改名<br/>检查器数值行·组件开关·脚本/材质/资产增删<br/>相机预览/激活 · 资源面板按钮/双击 · TPS · Layer/Tag<br/>全走 _invoke_cmd:642"]:::gui
-    G2["豁免面（人类裁定豁免）<br/>鼠标拾取 / gizmo 拖拽<br/>右键轨道 / 滚轮 / WASDQE"]:::gui
+  subgraph GUIP["① GUI 面板层（gui/main_window.py 4129 · B7-56-2 后单一路径）"]
+    G1["GUI 面板操作<br/>工具栏/菜单 · 层级树挂父/改名<br/>检查器数值行·组件开关·脚本/材质/资产增删<br/>相机预览/激活 · 资源面板按钮/双击 · TPS · Layer/Tag<br/>全走 _invoke_cmd:778"]:::gui
     G3["命令行坞 F12 / 远程 HTTP / MCP<br/>ui/qt_console.py 187"]:::gui
   end
-  E["EAI 命令层<br/>agent_commands.py 4222 · 106 个命令<br/>_COMMANDS 唯一命令体"]:::eai
-  A["_EditorCore<br/>editor/core.py 3101 · 152 方法"]:::facade
-  U["UndoManager<br/>editor/undo/registry.py 364"]:::undo
-  G1 -->|_invoke_cmd<br/>直调命令函数 · user 作用域| E
+  subgraph EXEMPT["② 豁免面（人类裁定 · 保持直调）"]
+    G2["豁免面（人类裁定豁免）<br/>鼠标拾取 / gizmo 拖拽<br/>右键轨道 / 滚轮 / WASDQE"]:::gui
+  end
+  subgraph CMDDOM["③ 命令层（agent_commands · 唯一命令体）"]
+    E["EAI 命令层<br/>agent_commands.py 4222 · 106 个命令<br/>_COMMANDS 唯一命令体"]:::eai
+  end
+  subgraph KERN["④ 内核（editor/core · 后端无关）"]
+    A["_EditorCore<br/>editor/core.py 3101 · 152 方法"]:::facade
+  end
+  subgraph UNDODOM["⑤ 撤销栈（editor/undo/registry.py 364）"]
+    U["UndoManager<br/>editor/undo/registry.py 364"]:::undo
+  end
+  G1 -->|_invoke_cmd:778<br/>直调命令函数 · user 作用域| E
   G3 -->|dispatch<br/>缺省 agent 作用域| E
   E -->|命令体调同一批方法| A
   G2 -.->|绕过：连贯性操作豁免<br/>agent_commands.py:1436 原则| A
@@ -1206,13 +1214,13 @@ flowchart LR
 ```
 
 **读法**：B7-56-2 后 GUI 只剩**一条路径**——面板操作（检查器/组件/相机/资源面板/TPS/Tag **全部**命令化，豁免面见下）
-→ `main_window._invoke_cmd`（:642，直调命令函数并自带 user 作用域包裹，不经 dispatch）
+→ `main_window._invoke_cmd`（:778，直调命令函数并自带 user 作用域包裹，不经 dispatch）
 → EAI 命令层 → `_EditorCore` 方法；命令行坞 F12 / 远程 HTTP / MCP 走 `dispatch`（缺省 agent 作用域）。
 两条入口**共用同一批命令体**（`agent_commands._COMMANDS`，106 个）——GUI 点击 ≡ 命令行（门 A/F 组逐命令对拍）。
 
 **豁免面**（鼠标拾取 / gizmo 拖拽 / 右键轨道 / 滚轮 / WASDQE / 渲染循环 `e.render`/`_update_camera`/`_dispatch_*`/
 资源面板**拖拽落场景**、`_notify` 反馈与 `_selected`/`get_tps` 等读侧）按人类裁定**保持直调** `_EditorCore`：
-连贯性操作不进命令行（`agent_commands.py:1436` 用户定原则；GUI 命令壳注释 `main_window.py:645` 同款裁定）。
+连贯性操作不进命令行（`agent_commands.py:1436` 用户定原则；GUI 命令壳注释 `main_window.py:781` 同款裁定（实测 2026-11-26，修前行号 645 已漂移））。
 终审 P0-1 复扫（AST，门 D1 禁集 **62 名**，修前残留 41 处归零；agent-66 曾把修前残留命中数 41 误写为禁集
 规模，终审 F-68 更正）确认直调残留 = 0（豁免面之外）。
 
@@ -1230,7 +1238,7 @@ VK：`render/vk/driver.py:958`），实现来源分「公共」「各端」两�
 
 ```mermaid
 flowchart TB
-  subgraph SEG["一个逻辑帧的 8 段（两端段序一致）"]
+  subgraph SEQ["① 一个逻辑帧的 8 段（两端段序一致）"]
     S1["1 FixedUpdate 派发"]:::ok
     S2["2 脚本 update"]:::ok
     S3["3 动画"]:::ok
@@ -1239,15 +1247,27 @@ flowchart TB
     S6["6 逻辑帧 prep<br/>GL: AABB/光源VP/碰撞对<br/>VK: 碰撞对 + _refresh_play_frame_world"]:::ok
     S7["7 碰撞事件派发<br/>on_collision_* / on_trigger_*"]:::ok
     S8["8 插值翻页 + logic_gen bump"]:::ok
-    S1 --> S2 --> S3 --> S4 --> S5 --> S6 --> S7 --> S8
+    S1 -->|"时序：下一段"| S2
+    S2 -->|"时序：下一段"| S3
+    S3 -->|"时序：下一段"| S4
+    S4 -->|"时序：下一段"| S5
+    S5 -->|"时序：下一段"| S6
+    S6 -->|"时序：下一段"| S7
+    S7 -->|"时序：下一段"| S8
   end
-  I1["GL _logic_frame<br/>render/gl/engine.py:1153<br/>（pipe 开：动画→投递→音频并行<br/>pipe 关：动画→串行子步→音频）"]:::impl
-  I2["VK _logic_frame<br/>render/vk/driver.py:958"]:::impl
-  I3["★ EngineCore 公共实现<br/>core/engine_core.py<br/>_dispatch_fixed_update:792<br/>update_scripts:742<br/>LateUpdate:830"]:::contract
-  I4["★ 碰撞配对/派发共享<br/>components/collision.py<br/>pairs:176 / dispatch:221<br/>（GL PhysicsMixin 与 VK driver:1053<br/>调同一个函数）"]:::contract
-  I5["物理桥（两端同一份）<br/>physics/bridge.py 1395"]:::contract
-  I1 -.->|按 8 段顺序执行| SEG
-  I2 -.->|按 8 段顺序执行| SEG
+  subgraph GLIMPL["② GL 实现（render/gl/engine.py）"]
+    I1["GL _logic_frame<br/>render/gl/engine.py:1166<br/>（pipe 开：动画→投递→音频并行<br/>pipe 关：动画→串行子步→音频）"]:::impl
+  end
+  subgraph VKIMPL["③ VK 实现（render/vk/driver.py）"]
+    I2["VK _logic_frame<br/>render/vk/driver.py:958"]:::impl
+  end
+  subgraph COMMONIMPL["④ 公共实现（core/ + components/collision + physics/bridge）"]
+    I3["★ EngineCore 公共实现<br/>core/engine_core.py<br/>_dispatch_fixed_update:792<br/>update_scripts:742<br/>_dispatch_late_update:830"]:::contract
+    I4["★ 碰撞配对/派发共享<br/>components/collision.py<br/>pairs:176 / dispatch:221<br/>（GL PhysicsMixin 与 VK driver:1053<br/>调同一个函数）"]:::contract
+    I5["物理桥（两端同一份）<br/>physics/bridge.py 1395"]:::contract
+  end
+  I1 -.->|按 8 段顺序执行| SEQ
+  I2 -.->|按 8 段顺序执行| SEQ
   S1 -.->|唯一实现| I3
   S2 -.->|公共入口 + 各端 _update_scripts_impl| I3
   S5 -.->|共享实现 _lfc.update_audio| I3
@@ -1260,8 +1280,8 @@ flowchart TB
 
 | 段 | GL 实现 | VK 实现 | 状态 |
 |---|---|---|---|
-| FixedUpdate | `EngineCore._dispatch_fixed_update:778`（两端同一份） | 同左 | ✅ 一致 |
-| 脚本 update | `EngineCore.update_scripts:728` → `engine._update_scripts_impl` | 同一公共入口 → `driver._update_scripts_impl`（S4 起 VK 走公共 update_scripts） | ✅ 一致 |
+| FixedUpdate | `EngineCore._dispatch_fixed_update:792`（两端同一份） | 同左 | ✅ 一致 |
+| 脚本 update | `EngineCore.update_scripts:742` → `engine._update_scripts_impl` | 同一公共入口 → `driver._update_scripts_impl`（S4 起 VK 走公共 update_scripts） | ✅ 一致 |
 | 动画 | `components/frame_components.update_animations` | `_update_animations`（driver.py:1684） | ✅ 段序一致（实现各一，行为由 P6 门锁） |
 | 物理子步 | pipe 并行 或 串行 `_physics_frame` | `_step_physics`（driver.py:1426） | ✅ 同一 `physics/bridge` |
 | 音频 | `_lfc.update_audio` 共享实现 | 同一共享实现（driver.py:977） | ✅ B7-26 补齐；P4-4 补了**绑死模式**那条路径 |
@@ -1281,17 +1301,17 @@ flowchart TB
 
 ```mermaid
 flowchart TB
-  subgraph P1["① 普通插件 plugins/editor或player"]
+  subgraph P1["① 普通插件（plugins/<类别>/ · 受限沙箱扩展，只 3 个扩展点）"]
     P1a["plugin.json<br/>id/name/version/entry/min_engine/deps"]:::file
     P1b["entry.py register api<br/>只 3 个扩展点"]:::impl
     P1c["受限环境<br/>builtins/import 白名单 + AST 审查 + 代理壳"]:::contract
   end
-  subgraph P2["② 核心插件 core_plugins/类别/插件"]
+  subgraph P2["② 核心插件（core_plugins/<类别>/ · 全权 Python + 信任闸）"]
     P2a["plugin.json 多一个字段<br/>capability=render或physics或input…"]:::file
     P2b["entry.py register api<br/>全权 Python（等同引擎本体）"]:::impl
     P2c["信任闸：人工确认 + 全文件 SHA256 + 重启生效"]:::contract
   end
-  subgraph P3["③ C 核心组件 core_components/"]
+  subgraph P3["③ C 核心组件（core_components/ · 进程内 DLL + ABI v1.0）"]
     P3a["loom_module.h ABI v1.0"]:::contract
     P3b["module_loader 418 机械层<br/>+ module_registry 494 策略层"]:::impl
     P3c["official_manifest 37：官方件 SHA256<br/>编译进 exe，外部改不动"]:::contract
@@ -1318,14 +1338,20 @@ flowchart TB
 
 ```mermaid
 flowchart TB
-  CORE["L0 核心（唯一不可换）<br/>加载器 / 生命周期 / 事件总线 / 服务注册表 / API 契约"]:::core
-  REG["服务注册表<br/>provides / requires / api_version"]:::contract
-  M1["L1 场景契约模块<br/>scene.contract"]:::mod
-  M2["L1 渲染后端模块 GL<br/>EngineCore + 6 GL mixin"]:::mod
-  M3["L1 渲染后端模块 VK<br/>render/vk/driver + render/vk/renderer"]:::mod
-  M4["L1 物理模块<br/>physics/physics + physics/bridge"]:::mod
-  M5["L3 C 组件模块<br/>pipeline/physics/script/ckernels"]:::mod
-  U["用户替换目录<br/><modules>/<id>/ 放进即装"]:::user
+  subgraph COREL["① L0 核心（唯一不可换 · 加载/生命周期/事件/注册表/契约）"]
+    CORE["L0 核心（唯一不可换）<br/>加载器 / 生命周期 / 事件总线 / 服务注册表 / API 契约"]:::core
+    REG["服务注册表<br/>provides / requires / api_version"]:::contract
+  end
+  subgraph MODL["② L1/L3 可替换模块（放进注册表即装）"]
+    M1["L1 场景契约模块<br/>scene.contract"]:::mod
+    M2["L1 渲染后端模块 GL<br/>EngineCore + 6 GL mixin"]:::mod
+    M3["L1 渲染后端模块 VK<br/>render/vk/driver + render/vk/renderer"]:::mod
+    M4["L1 物理模块<br/>physics/physics + physics/bridge"]:::mod
+    M5["L3 C 组件模块<br/>pipeline/physics/script/ckernels"]:::mod
+  end
+  subgraph USERL["③ 用户替换目录"]
+    U["用户替换目录<br/><modules>/<id>/ 放进即装"]:::user
+  end
   CORE --> REG
   REG -->|装配| M1
   REG -->|装配| M2
@@ -1367,26 +1393,24 @@ flowchart TB
 
 ```mermaid
 flowchart TB
-  subgraph HOST["窗口宿主（VK 侧不是引擎建的）"]
+  subgraph ENG["① 引擎层（EngineCore 内核步 + render/vk/window.py + player.py 句柄解析）"]
+    K1["handle_key_event ①<br/>core/engine_core.py:155<br/>allow_fullscreen 判定 :181"]:::contract
+    W1["VkWindowMixin<br/>render/vk/window.py 273"]:::impl
+    W2["_set_fullscreen<br/>去边框 / 铺桌面 / 置顶"]:::impl
+    P1["_resolve_glfw_window<br/>注入句柄 → canvas._window<br/>+ glfw.get_window_size 验活"]:::impl
+  end
+  subgraph RC["② rendercanvas 层（VK 窗口宿主 · 不是引擎建的）"]
     R1["rendercanvas.GlfwRenderCanvas<br/>render/vk/player.py 创建"]:::external
     R2["canvas._window<br/>★ 私有 GLFW 句柄"]:::external
   end
-  subgraph RESOLVE["句柄解析（已有兜底）"]
-    P1["_resolve_glfw_window<br/>注入句柄 → canvas._window<br/>+ glfw.get_window_size 验活"]:::impl
-  end
-  subgraph ACT["窗口操作"]
-    W1["VkWindowMixin<br/>render/vk/window.py 273"]:::impl
-    W2["_set_fullscreen<br/>去边框 / 铺桌面 / 置顶"]:::impl
+  subgraph W32["③ Win32 层（SetWindowPos）"]
     W3["_place_fullscreen_window<br/>Win32 SetWindowPos + argtypes"]:::impl
-  end
-  subgraph KERN["内核 F11 步"]
-    K1["handle_key_event ①<br/>core/engine_core.py:141<br/>getattr allow_fullscreen"]:::contract
   end
   R1 -->|持有| R2
   R2 -->|经 P1 解析| P1
   P1 -->|注入 driver 窗口句柄| W1
-  W1 --> W2
-  W2 --> W3
+  W1 -->|进入全屏| W2
+  W2 -->|落 Win32 调用| W3
   K1 -->|allow_fullscreen=True 时调| W2
   classDef external fill:#fef3c7,stroke:#d97706,color:#78350f
   classDef impl fill:#dcfce7,stroke:#16a34a,color:#14532d
@@ -1424,7 +1448,7 @@ flowchart TB
 
 ```mermaid
 flowchart TB
-  subgraph FACES["被测的「用户可感知面」"]
+  subgraph FACES["① 被测的「用户可感知面」（P1~P7 七面）"]
     F1["P1 场景加载/切换<br/>加载失败语义 · 内容一致<br/>v8 迁移 · 相对路径"]:::ok
     F2["P2 鼠标锁定/光标<br/>状态位 · 策略闸门<br/>解锁链 · 增量结算"]:::ok
     F3["P3 UI 命中/焦点<br/>点击命中 · hover · 滚轮<br/>坐标系 · resize"]:::ok
@@ -1433,7 +1457,7 @@ flowchart TB
     F6["P6 暂停/单步<br/>冻结不跳变 · F10 恰好+1<br/>恢复无欠账 · 截图对拍"]:::ok
     F7["P7 编辑器播放态（S5）<br/>GL/VK 编辑器播放 vs 各自播放器<br/>四面逐项相等 · 4 时刻像素 · 叠加层"]:::ok
   end
-  subgraph GATES["门（run_all 自动收集；数字为实跑 PASS 数）"]
+  subgraph COREGATES["② 七面对拍门（run_all 自动收集；数字为实跑 PASS 数）"]
     G1["test_scene_load_parity 76<br/>+ test_scene_contract 48"]:::gate
     G2["test_mouse_lock_parity 62"]:::gate
     G3["test_ui_hit_parity 144"]:::gate
@@ -1441,6 +1465,8 @@ flowchart TB
     G5["test_camera_parity 195<br/>+ test_vk_camera_align 85"]:::gate
     G6["test_pause_parity 70"]:::gate
     G7["test_editor_play_parity 575<br/>test_editor_play_pixel_parity 17<br/>+S3/S4：vk_overlay 24 / vk_editor_smoke 16"]:::gate
+  end
+  subgraph ADDGATES["③ 增补门（B7-28~B7-60 批新增 · 同一回归框架 run_all）"]
     G8["B7-28/审核1-3/B7-54~60 增补门<br/>editor_wheel_semantics 20<br/>wheel_backend_semantics 31<br/>skybox_engine_parity 23<br/>entry_backend_parity 111（决策同源）<br/>gui_command_unification 225（GUI≡命令行）<br/>entry_execution_parity 57（执行面同源）<br/>camera_parent_serialization 28<br/>api_form_name_unification 21<br/>mouse_rel_ui_consumed_parity 45<br/>grid_occlusion（真窗口）/line_depth/line_degenerate 3 门<br/>editor_backend_config_parity 101（编辑器后端配置驱动）<br/>editor_vk_fallback_panel 55（VK 失败自动回退+面板可达）"]:::gate
   end
   F1 --> G1
