@@ -26,7 +26,7 @@ from .target import _find_all, _find, _find_model_by_name  # noqa: F401
 from .commit import _resolve, _Ambiguous, _no_target, _commit, _apply_fields  # noqa: F401
 from .undo_base import _undo_manager  # noqa: F401
 from .registry import (  # noqa: F401
-    LOG_RING, _LOG_LOCK, _COMMANDS, _CMDS_DESC,
+    LOG_RING, _LOG_LOCK, _LOG_SEQ, _COMMANDS, _CMDS_DESC,
     _CommandScope, _CMD_SCOPE, current_scope, log,
     log_since, last_log_seq, command, command_names,
     dispatch
@@ -161,6 +161,10 @@ _assert_command_contract()
 # 拆分前 agent_commands 是单模块, 测试/工具用 ac._auto_focus_enabled = 替身 猴补丁;
 # 包化后该名字的真身在 object_ops 模块里, 直接给包赋值不会影响调用点 —— 这里把赋值
 # 转发到真正定义它的子模块, 让 ac.X = 替身 与拆分前完全等价 (见 tests/test_editor_focus.py).
+# 补丁转发面 = _PATCH_HOME 里的名字（2026-11-26 终审 agent-101 C-2：明确登记）：
+# 拆分前单模块一切属性赋值都生效；拆分后**只有列在这里的名字**的包级赋值会转发到真身子模块。
+# 其他名字包级赋值只改包面（不影响 dispatch 等内部消费——内部一律经子模块真身）。
+# 新增被测试猴补丁的公开名时必须同步登记到这里。
 _PATCH_HOME = {'_auto_focus_enabled': _sys.modules['eai.object_ops']}
 
 
