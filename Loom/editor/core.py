@@ -126,8 +126,9 @@ def _editor_skybox_provider(engine, cmd):
 
 # ---- 能力域 mixin（Q-B7-38-1 第 9 批；纯搬迁，装配顺序 = 下方基类顺序）----
 from editor.core_commands import EditorUndoBridgeMixin
+from editor.core_viewport import EditorViewportMixin
 
-class _EditorCore(EngineCore, EditorUndoBridgeMixin):
+class _EditorCore(EngineCore, EditorUndoBridgeMixin, EditorViewportMixin):
     # S5（Q-B7-47-1 五阶段·阶段 5）：编辑器形状标记 —— 渲染帧尾的 LateUpdate 由本类
     # 共享的 editor.render 派发（GL 引擎的 advance_logic 从不派发 LateUpdate）。
     # VK 的 SceneDriver.advance_logic 会在渲染帧尾派发一次（VK 播放器形状没有渲染帧
@@ -593,25 +594,6 @@ class _EditorCore(EngineCore, EditorUndoBridgeMixin):
             self._gizmo_start_drag(axis, pp[0], pp[1])
         else:
             self._pick(pp[0], pp[1])
-
-    def _layout(self):
-        """6 元布局 (2026-08-14 晚: 左右/上下分隔条可拖 + 收起).
-        面板宽高由 self.panel_* 状态决定, 视图/交互层共读; 保证视口最小宽度."""
-        w, h = self.width, self.height
-        toolbar = (0, 0, w, 36)
-        status = (0, h - 24, w, 24)
-        # 左列上下分栏 (M24): 层级在上、资源浏览器在下 (对齐 Unity Project 窗口)
-        left_h = h - 60
-        max_side = max(24, (w - 120) // 2)   # 每侧最大宽, 保证视口 >= 120
-        lw = 24 if self.panel_left_collapsed else max(24, min(max_side, self.panel_left_w))
-        rw = 24 if self.panel_right_collapsed else max(24, min(max_side, self.panel_right_w))
-        hier_h = int(left_h * self.panel_hier_frac)
-        hier_h = max(30, min(left_h - 30, hier_h))
-        hierarchy = (0, 36, lw, hier_h)
-        resources = (0, 36 + hier_h, lw, left_h - hier_h)
-        inspector = (w - rw, 36, rw, left_h)
-        viewport = (lw, 36, w - lw - rw, left_h)
-        return toolbar, status, hierarchy, inspector, viewport, resources
 
     # ================ 工具栏 ================
     def _add_primitive(self, typ):
@@ -2499,17 +2481,6 @@ class _EditorCore(EngineCore, EditorUndoBridgeMixin):
         self._prof_add('mt_render_tail', _t)
         self._prof_add('mt_render_total', _t_render)
 
-    def grid_geometry(self):
-        """无限网格 (2026-08-14): 相机 XZ 为中心 (吸附整数格), 恒定步长, 远处淡出.
-        范围只随相机距离 (缩放) 变化, 不随抬头角度; 永不返回 None. 视图层调用."""
-        try:
-            from ui.grid import build_grid_lines
-            return build_grid_lines(
-                (self.camera.x, self.camera.y, self.camera.z),
-                cam_dist=getattr(self, 'camera_distance', None))
-        except Exception:
-            return None
-
     def _draw_selection_box(self):
         """选中对象 AABB 12 条棱 (亮黄), 关深度恒可见"""
         m = self._selected()
@@ -2585,11 +2556,6 @@ class _EditorCore(EngineCore, EditorUndoBridgeMixin):
         """窗口右上角关闭拦截: 有未保存改动先询问是否保存 (防丢, 逻辑在 controller).
         返回 True = 允许退出; False = 中止退出 (保存取消或失败)."""
         return self._confirm_unsaved()
-
-    def _in_viewport(self, pos):
-        vp = self._layout()[4]
-        return (vp[0] <= pos[0] < vp[0] + vp[2] and
-                vp[1] <= pos[1] < vp[1] + vp[3])
 
     # ================ 相机聚焦 (2026-11-07 C: Agent 操作必须看得见) ================
     FOCUS_DURATION = 0.18          # 平滑聚焦时长 (秒, 线性插值)
