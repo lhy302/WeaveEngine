@@ -91,6 +91,7 @@ from editor.viewport.event_bridge import (  # noqa: F401
 from gui.gl_viewport import GLViewport, _show_gl_floor_error        # noqa: F401
 from gui.remote_viewport import RemoteViewport                      # noqa: F401
 from gui.widgets import AssetListWidget, DraggableSpin, DragBlock   # noqa: F401
+from gui.panels.console_mixin import ConsoleMixin   # Q-B7-38-1 第 8 批（纯搬迁，按面板域拆 mixin）
 from gui.panels.asset_mixin import AssetMixin   # Q-B7-38-1 第 8 批（纯搬迁，按面板域拆 mixin）
 from gui.panels.gizmo_mixin import GizmoMixin   # Q-B7-38-1 第 8 批（纯搬迁，按面板域拆 mixin）
 from gui.panels.hierarchy_mixin import HierarchyMixin   # Q-B7-38-1 第 8 批（纯搬迁，按面板域拆 mixin）
@@ -116,6 +117,7 @@ class LoomGUI(CmdBridgeMixin,
               HierarchyMixin,
               GizmoMixin,
               AssetMixin,
+              ConsoleMixin,
               QMainWindow):
     # S4（Q-B7-47-1 阶段 4）: backend='vulkan' 时视口用 VkViewport（backend 为 vulkan
     # 即走 —— 来源可为配置文件 render_api，也可为显式 --backend；Q-B7-60-1 后配置同样
@@ -910,29 +912,6 @@ class LoomGUI(CmdBridgeMixin,
         """--agent 分支 / 测试: 绑定 AgentService (可视化钩子由服务侧 getattr 调用)."""
         self._agent_service = agent
         return agent
-
-    # ---------------- 命令行坞 (EAI P2①, 2026-08-27) ----------------
-    def _build_console(self):
-        """底部命令行坞: 输入 -> agent_commands.dispatch (与远程 EAI 同一张
-        命令表), 输出 = 命令结果 + 引擎日志环增量. 默认隐藏, 状态栏
-        [命令行] 按钮 / F12 开关 (视口面积不被默认占用)."""
-        from ui import qt_console
-        self.console = qt_console.ConsoleDock(self)
-        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.console)
-        self.console.resize(self.console.width(), 200)
-        self.console.hide()
-        # 坞被用户点 X 关闭时同步按钮态 (否则按钮显示"按下"但坞已关)
-        self.console.visibilityChanged.connect(
-            lambda vis: self._btn_console.setChecked(bool(vis)))
-
-    def _cmd_console(self, checked=None):
-        """[命令行] 按钮 / F12: 开关命令行坞 (打开时输入框自动获得焦点)."""
-        show = not self.console.isVisible() if checked is None else bool(checked)
-        self.console.setVisible(show)
-        self._btn_console.setChecked(show)
-        if show:
-            self.console.entry.setFocus()
-        return show
 
     # ---------------- 发布游戏 (Unity Build Settings 对齐, 2026-08-22) ----------------
     def _build_tool_cmd(self, extra_args):
@@ -3086,6 +3065,8 @@ def run_loom_gui(scene_path=None, width=1280, height=800, backend='gl',
 
 if __name__ == "__main__":
     run_loom_gui()
+
+
 
 
 
