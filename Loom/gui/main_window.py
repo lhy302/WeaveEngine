@@ -91,6 +91,7 @@ from editor.viewport.event_bridge import (  # noqa: F401
 from gui.gl_viewport import GLViewport, _show_gl_floor_error        # noqa: F401
 from gui.remote_viewport import RemoteViewport                      # noqa: F401
 from gui.widgets import AssetListWidget, DraggableSpin, DragBlock   # noqa: F401
+from gui.panels.asset_mixin import AssetMixin   # Q-B7-38-1 第 8 批（纯搬迁，按面板域拆 mixin）
 from gui.panels.gizmo_mixin import GizmoMixin   # Q-B7-38-1 第 8 批（纯搬迁，按面板域拆 mixin）
 from gui.panels.hierarchy_mixin import HierarchyMixin   # Q-B7-38-1 第 8 批（纯搬迁，按面板域拆 mixin）
 from gui.panels.toolbar_mixin import ToolbarMixin   # Q-B7-38-1 第 8 批（纯搬迁，按面板域拆 mixin）
@@ -114,6 +115,7 @@ class LoomGUI(CmdBridgeMixin,
               ToolbarMixin,
               HierarchyMixin,
               GizmoMixin,
+              AssetMixin,
               QMainWindow):
     # S4（Q-B7-47-1 阶段 4）: backend='vulkan' 时视口用 VkViewport（backend 为 vulkan
     # 即走 —— 来源可为配置文件 render_api，也可为显式 --backend；Q-B7-60-1 后配置同样
@@ -1203,67 +1205,6 @@ class LoomGUI(CmdBridgeMixin,
                     self._refresh_all()
         return super().eventFilter(obj, ev)
 
-    # ---------------- 资源面板 ----------------
-    def _rebuild_resources(self):
-        e = self.editor
-        rl = self.resources
-        rl.blockSignals(True)
-        rl.clear()
-        self._assets = []       # [(type, key), ...] 与行顺序对应
-        groups = {'mesh': ('网格', '□'), 'material': ('材质', '■'), 'prefab': ('Prefab', '◆')}
-        by = {'mesh': [], 'material': [], 'prefab': []}
-        for it in e._scan_assets():
-            by.setdefault(it.get('type'), []).append(it)
-        for gtype in ('mesh', 'material', 'prefab'):
-            name, mark = groups[gtype]
-            items = by[gtype]
-            head = QListWidgetItem("— %s (%d) —" % (name, len(items)))
-            head.setFlags(head.flags() & ~Qt.ItemFlag.ItemIsEnabled)
-            head.setForeground(QColor('#888888'))
-            rl.addItem(head)
-            for it in items:
-                disp = it.get('name') or os.path.basename(it.get('key', '?'))
-                row = QListWidgetItem("%s %s" % (mark, disp))
-                row.setData(Qt.ItemDataRole.UserRole, (it.get('type'), it.get('key')))
-                rl.addItem(row)
-                self._assets.append((it.get('type'), it.get('key')))
-        rl.blockSignals(False)
-
-    def _res_item_data(self, item):
-        if item is None:
-            return None
-        return item.data(Qt.ItemDataRole.UserRole)
-
-    def _res_double(self, item):
-        """双击: 放入场景 (视口中心)."""
-        e = self.editor
-        d = self._res_item_data(item)
-        if e is None or d is None:
-            return
-        # Q-B7-56-2 裁定①: 双击翻译成 asset_place 命令 (命令体 =
-        # e._asset_drop_to_scene(it, 视口中心), 同一入口; 拖拽落场景仍走鼠标豁免面)
-        self._invoke_cmd('asset_place', {'type': d[0], 'key': d[1]})
-        self._refresh_all()
-
-    def _cmd_apply_asset(self):
-        e = self.editor
-        if e is None or self._res_selected is None:
-            return
-        # Q-B7-56-2 裁定①: 应用材质资产翻译成 asset_apply 命令 (命令体 =
-        # e._apply_material_asset(it, m), 同一入口)
-        self._invoke_cmd('asset_apply', {'type': self._res_selected[0],
-                                         'key': self._res_selected[1]})
-        self._refresh_all()
-
-    def _cmd_place_asset(self):
-        e = self.editor
-        if e is None or self._res_selected is None:
-            return
-        # Q-B7-56-2 裁定①: 放入场景按钮翻译成 asset_place 命令 (同双击)
-        self._invoke_cmd('asset_place', {'type': self._res_selected[0],
-                                         'key': self._res_selected[1]})
-        self._refresh_all()
-
     # ---------------- 检查器 ----------------
     def _insp_target(self):
         """当前检查器目标 (含类型). ('obj'|'light'|'camera'|'ui', 对象)."""
@@ -2268,13 +2209,6 @@ class LoomGUI(CmdBridgeMixin,
             parts.append(('mats', [getattr(m, 'name', '') for m in mats]))
         return repr(parts)
 
-    def _res_digest(self, e):
-        """资源列表内容摘要 (资产 (type,key) 序列), 变化才重建列表."""
-        try:
-            return [(it.get('type'), it.get('key')) for it in e._scan_assets()]
-        except Exception:
-            return []
-
     def _sync_inspector_values(self, force=False):
         """同目标时同步 spinbox 当前值 (gizmo 拖拽等外部改动).
         spinbox 正在输入 (有焦点) 时跳过, 防值被写回干扰输入;
@@ -3152,6 +3086,8 @@ def run_loom_gui(scene_path=None, width=1280, height=800, backend='gl',
 
 if __name__ == "__main__":
     run_loom_gui()
+
+
 
 
 
