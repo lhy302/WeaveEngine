@@ -10,4 +10,5 @@ LoomGUI 在 gui/main_window.py 以 (…Mixin, QMainWindow) 装配混入；mixin 
 
 __all__ = [
     'CmdBridgeMixin',
+    'ActionsMixin',
 ]
