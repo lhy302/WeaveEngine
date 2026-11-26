@@ -17,6 +17,13 @@ from engine import (GLEngine, Point3D, LightState, CameraState, wrap_deg,
 from mathlib.matlib import (mat4_perspective, mat4_ortho, mat4_rotation, mat4_scale,
                     mat4_translation, mat4_view_yaw_pitch, decompose_euler)
 from editor.undo import (UndoManager, Command, StateCommand, AddObjectCommand,
+                  DeleteObjectCommand, ReparentCommand, DuplicateObjectCommand,
+                  PrefabPlaceCommand, snapshot as undo_snapshot,
+                  apply_snapshot,
+                  LightStateCommand, AddLightCommand, DeleteLightCommand,
+                  AddMaterialCommand, light_snapshot, apply_light_snapshot,
+                  CameraStateCommand, AddCameraCommand, DeleteCameraCommand,
+                  ReparentCameraCommand,
                   camera_snapshot, apply_camera_snapshot)
 
 class EditorGizmoMixin(object):

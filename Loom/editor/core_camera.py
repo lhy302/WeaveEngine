@@ -9,6 +9,7 @@ Q-B7-38-1 第 9 批（agent-99）：editor/core.py 按能力域拆分的**纯搬
 我不负责：开发者视角鼠标泵 _update_camera（core.py：def 唯一性门 + 滚轮公式/±1.55 文本门）。
 mixin 之间只经 self 互调（装配后同一个实例），互不 import。
 """
+from editor.core_commands import _CameraProjCommand, _OrbitViewCommand
 import math
 import time
 import sceneio
