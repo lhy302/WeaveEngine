@@ -13,4 +13,5 @@ __all__ = [
     'ActionsMixin',
     'ToolbarMixin',
     'HierarchyMixin',
+    'GizmoMixin',
 ]
