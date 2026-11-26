@@ -83,7 +83,7 @@
 > ③ `gui/main_window.py` 4129 行 → **1084 行 + `gui/panels/` 12 mixin 13 文件 3446 行**（commits b49a478…308049a）：`class LoomGUI(CmdBridgeMixin, …, SettingsMixin, QMainWindow)`:119 = 12 mixin + QMainWindow，131 方法 = main 23 + mixin 108；
 > ④ `editor/core.py` 3101 行 → **1172 行 + `editor/core_*.py` 11 域文件 2193 行**（commits 591d616…64a6025）：`class _EditorCore(EngineCore, …, EditorPlaybackMixin)`:139 —— **EngineCore 是第一个基类**（MRO 装配形状门锁 `VkEditorApp.__mro__[:3]` = VkEditorApp/_EditorCore/SceneDriver），10 个域 mixin 全在它之后；146 方法 = 搬走 129 + 留守 17。
 > **四个大文件 → 67 个域文件；全仓最大文件 4222 行（原 agent_commands.py）→ 2127 行（`render/vk/renderer.py`）**。
-> 图 1.1 / 4 / 7 / 8 / 11 / 13 / 15 / 19 相应更新；文件清单 171→**241 个 .py**（**67119 行**，口径不变 = `len(text.split('\n'))`；包 204 / 顶层平铺 22 / tests 门文件 15）；
+> 图 1.1 / 4 / 7 / 8 / 11 / 13 / 15 / 19 相应更新；文件清单 171→241→**242 个 .py**（**67258 行**，口径不变 = `len(text.split('\n'))`；包 204 / 顶层平铺 22 / tests 门文件 16）；
 > 验证体系新增三门（`test_ui_canvas_split` **19** / `test_gui_split` **65** / `test_editor_core_split` **41** = 125 条；本文件同步时在本机逐门单独实跑，三口全绿 / EXIT 0）+ run_all 汇总刷新（见 19.2）。
 > **缺口（如实标注）**：`eai/` 拆分**没有新增结构门**——靠既有 `test_eai_real` 190 条 + `test_agent_commands` 49 条兜底（同步时实测 190/49 PASS / 0 FAIL / EXIT 0）；而 ui/canvas、gui/panels、editor/core 三批各有专门结构门（19/65/41）。
 >
@@ -103,7 +103,7 @@
 | 顺序 | 图 | 回答什么问题 |
 |---|---|---|
 | **1** | [图 1 全景](#图-1-全景只画层不画文件) | 层与层之间对不对？入口→门面→子系统→契约→数据，有没有跨层直连？ |
-| **2** | [图 13 文件清单](#图-13-文件清单按功能簇归组241-个-py) | **241 个 .py 按功能簇归组** —— 哪个文件混了多个功能？哪个簇缺文件？ |
+| **2** | [图 13 文件清单](#图-13-文件清单按功能簇归组241-个-py) | **242 个 .py 按功能簇归组** —— 哪个文件混了多个功能？哪个簇缺文件？（2026-11-27 +1：tests/test_eai_split.py） |
 | **3** | [图 19 验证体系](#图-19-验证体系两端对拍门覆盖了哪些面--本轮最大产出) | 哪个面有门、哪个面没门（19.3 缺口表） |
 
 **其它常用**：
@@ -856,7 +856,7 @@ sequenceDiagram
 
 ---
 
-# 图 13 文件清单（按功能簇归组，241 个 .py）
+# 图 13 文件清单（按功能簇归组，242 个 .py）
 
 图上画不下的全量在这里 —— 这是「功能分布在哪几个文件」的表格版。行数 2026-11-26 实测（物理行；口径 = `len(text.split('\n'))`，与既有口径一致；终审 F-4 复算时把 2026-11-21 混用的三处行数——Loom.py / build_entry.py / 门文件——统一到同一口径）。
 **20 个包（assets / audio / build / components / core / core_components / eai / editor / gui / hostenv / kernels / mathlib / net / physics / plugin / render / scene / script / scripts / ui）共 204 文件 / 54718 行 + 顶层平铺 22 文件 / 6237 行 + tests 门文件 15 / 6164 行 = 241 文件 / 67119 行。**（Q-B7-38-1 三批拆分收口后 2026-11-26 全量实测，口径不变 = `len(text.split('\n'))`；历史：Q-B7-60-1 终审修复批同期 171 文件 / 65123 行）
@@ -1181,7 +1181,7 @@ sequenceDiagram
 | `tests/test_gui_split.py` | 262 | Q-B7-38-1 第 8 批：gui/panels 拆分结构门（**65 条 PASS（自报 64 项）**：A 12 mixin 行数防回潮 / B main_window 类体零残留（主类仍 LoomGUI、类体 23 方法）/ C 131 方法零丢失零新增 / D mixin 互不 import（只经 self）+ `__all__` 汇总导出 / E 禁集直调扫描覆盖 gui/panels（总数 0）/ F MRO = 12 mixin + QMainWindow 且 mixin 全在 QMainWindow 之前；同步时本机实跑 65 PASS / EXIT 0）。 |
 | `tests/test_editor_core_split.py` | 320 | Q-B7-38-1 第 9 批：editor/core 拆分结构门（**41 条**：A MRO 装配形状（EngineCore 第一基类 + `VkEditorApp.__mro__[:3]` = VkEditorApp/_EditorCore/SceneDriver）/ B 12 文件行数防回潮 / C core.py 类体零残留 + 留守 17 方法 + 2 类属性齐全（AST）/ D 146 方法零丢失（搬走 129 + 留守 17；类属性 11）/ E 编辑态零逻辑不回归（真跑 8 帧）/ F monkeypatch 面 16 名（STATE_FILE / frame_plan / apply_snapshot…）；同步时本机实跑 41 PASS / EXIT 0）。 |
 
-> **共 241 个文件**（20 包 204 + 顶层平铺 22 + tests 门文件 15）。行数为实测物理行，与 `git show HEAD` 状态逐文件一致（B7-56-2 后复测；终审 F-67 批对 3 个改动文件复测；Q-B7-60-1 终审修复批 2026-11-26 全量复测；**Q-B7-38-1 三批拆分收口后 2026-11-26 全量复算**——聚合 = 包目录逐文件求和（204 文件 / 54718 行）+ 顶层平铺 22 文件 / 6237 行 + tests 门文件 15 / 6164 行）。
+> **共 242 个文件**（20 包 204 + 顶层平铺 22 + tests 门文件 16）。行数为实测物理行，与 `git show HEAD` 状态逐文件一致（B7-56-2 后复测；终审 F-67 批对 3 个改动文件复测；Q-B7-60-1 终审修复批 2026-11-26 全量复测；**Q-B7-38-1 三批拆分收口后 2026-11-26 全量复算**——聚合 = 包目录逐文件求和（204 文件 / 54718 行）+ 顶层平铺 22 文件 / 6237 行 + tests 门文件 15 / 6164 行）。
 > ⚠ 表内有 **3 处跨簇重复登记**（同一文件在两个功能簇各占一行）：`core/engine_core.py`（B 组 + F 组）、`core/single_instance.py`（A 组 + F 组）、`build/build_game.py`（A 组 + T 组）——聚合计数按**唯一路径**去重，按表行直加会**多 3 行**；行不删（保簇结构完整）。
 > v3 的 97 文件清单里，`loom_types.py`→`core/primitives.py`、`loom_scene_*.py`→`scene/`、`editor.py`→`editor/`、
 > `ui/loom_gui.py`→`gui/`、`undo.py`→`editor/undo/`、`loom_components.py` 尾部→`audio/system.py` 等
