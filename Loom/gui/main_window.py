@@ -545,8 +545,7 @@ class LoomGUI(CmdBridgeMixin,
         if _t_tick:
             e._prof_add('mt_qt_tick', _t_tick)
 
-    # ---------------- 构建: 工具栏 ----------------
-
+# ---------------- 构建: 中央布局（层级/资源/视口/检查器） ----------------
     def _build_central(self):
         left = QWidget()
         lv = QVBoxLayout(left)
