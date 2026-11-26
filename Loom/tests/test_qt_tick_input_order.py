@@ -162,8 +162,31 @@ if disp:
     check('_dispatch_ui_mouse 调 ui.dispatch_mouse', 'dispatch_mouse' in disp)
 
 # 语法可用性: 两个文件都能正常 compile (防止注释搬动弄坏缩进)
-for rel in (os.path.join('gui', 'main_window.py'), os.path.join('gui', 'remote_viewport.py'), os.path.join('editor', 'core.py'), 'loom_ui.py',
-            'agent_commands.py', 'loom_mcp.py'):
+# 2026-11-26 Q-B7-38-1 第 7/8/9 批（拆分后路径跟随，防覆盖削弱）：
+#   · editor/core.py 拆出 11 个 editor/core_*.py 能力域文件；
+#   · loom_ui.py 拆出 6 个 ui/canvas/*.py + 24 行 shim；
+#   · gui/main_window.py 拆出 12 个 gui/panels/*.py mixin。
+# 这些新文件都在本元组里，语法检查才会真正覆盖它们（否则只编译 shim = 覆盖削弱）。
+for rel in (os.path.join('gui', 'main_window.py'),
+            *[os.path.join('gui', 'panels', f) for f in (
+                'cmd_bridge_mixin.py', 'actions_mixin.py', 'toolbar_mixin.py', 'hierarchy_mixin.py',
+                'gizmo_mixin.py', 'asset_mixin.py', 'console_mixin.py', 'publish_mixin.py',
+                'inspector_mixin.py', 'uitree_mixin.py', 'status_mixin.py', 'settings_mixin.py')],
+            os.path.join('gui', 'remote_viewport.py'),
+            os.path.join('editor', 'core.py'),
+            *[os.path.join('editor', f) for f in (
+                'core_contract.py', 'core_commands.py', 'core_viewport.py', 'core_selection.py',
+                'core_gizmo.py', 'core_camera.py', 'core_object.py', 'core_inspector.py',
+                'core_asset.py', 'core_scene.py', 'core_playback.py')],
+            'loom_ui.py',
+            *[os.path.join('ui', 'canvas', f) for f in (
+                '__init__.py', 'element.py', 'canvas.py', 'manager.py',
+                'widgets_basic.py', 'widgets_input.py', 'widgets_layout.py')],
+            'agent_commands.py',
+            # eai/ 包 37 文件：动态枚举（不硬列文件名 —— 列错会静默跳过且有假绿风险）
+            *[os.path.join('eai', f) for f in sorted(os.listdir(os.path.join(ROOT, 'eai')))
+              if f.endswith('.py')],
+            'loom_mcp.py'):
     try:
         compile(_read(rel), rel, 'exec')
         _fine = True
