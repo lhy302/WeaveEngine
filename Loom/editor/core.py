@@ -54,26 +54,13 @@ import sceneio
 import filedialog
 
 # ================ 文件对话框/默认保存目录 (M19) ================
-# B4: 本体拆到 editor/ 包后 __file__ = editor/core.py；APP_DIR 语义不变 = Loom 根
-# （STATE_FILE/DEFAULT_SAVE_DIR/_LEGACY_SAVE_DIR/assets 全部锚在 Loom/，逐位同拆前）。
-APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-# 2026-10-19 用户拍板 B2: 项目目录改名 "保存" -> "Projects"（Unity 习惯）
-# 兼容：首次启动时如果旧 "保存/" 存在且 "Projects/" 不存在，自动 rename
-DEFAULT_SAVE_DIR = os.path.join(APP_DIR, 'Projects')  # 默认项目文件夹 (未选过目录时)
-_LEGACY_SAVE_DIR = os.path.join(APP_DIR, '保存')
-STATE_FILE = os.path.join(APP_DIR, 'editor_state.json')  # 记忆上次保存目录
-
-
-def unique_default_name(directory, base, ext):
-    """默认文件名冲突时自动加数字: base -> base1 -> base2 ... (ext 含点, 如 '.json').
-    返回第一个不存在的文件名 (不含扩展名). base 若自带扩展名会被去掉."""
-    base = os.path.splitext((base or '场景').strip())[0] or '场景'
-    for i in range(1000):
-        name = base if i == 0 else '%s%d' % (base, i)
-        if not os.path.exists(os.path.join(directory, name + ext)):
-            return name
-    return base + '999'
-
+# Q-B7-38-1 第 9 批：常量/纯工具函数的**唯一真源**拆到 editor/core_contract.py
+# （契约/常量单点，规则 1 例外），本文件按名绑定 import —— editor.core.STATE_FILE /
+# DEFAULT_SAVE_DIR / _LEGACY_SAVE_DIR / APP_DIR / _SCENE_FILTER 的读与 monkeypatch
+# 语义逐位不变（消费点全在本模块的方法/函数里，patch editor.core.X 仍生效）。
+from editor.core_contract import (APP_DIR, DEFAULT_SAVE_DIR, _LEGACY_SAVE_DIR,
+                                  STATE_FILE, _SCENE_FILTER, _PREFAB_FILTER,
+                                  unique_default_name)
 
 def load_last_dir(state_file=None):
     """读上次保存目录 (不存在/失效返回 None). state_file=None 用当前模块
@@ -90,7 +77,6 @@ def load_last_dir(state_file=None):
         pass
     return None
 
-
 def save_last_dir(state_file, path):
     """记录用户这次保存/打开的目录, 下次默认优先打开这里.
     (2026-08-18) 同时记录 last_scene 完整路径 —— 无 --open 启动时自动恢复上次
@@ -105,7 +91,6 @@ def save_last_dir(state_file, path):
             json.dump({'last_dir': d, 'last_scene': path}, f, ensure_ascii=False)
     except Exception:
         pass
-
 
 def load_last_scene(state_file=None):
     """读上次保存/打开的场景完整路径 (不存在/失效返回 None). 旧 state 文件无
@@ -123,17 +108,11 @@ def load_last_scene(state_file=None):
         pass
     return None
 
-
 def initial_dir(last_dir):
     """保存/打开对话框的初始目录: 上次目录优先, 否则默认 'Projects' 文件夹."""
     if last_dir and os.path.isdir(last_dir):
         return last_dir
     return DEFAULT_SAVE_DIR
-
-
-_SCENE_FILTER = "场景文件 (*.json)\0*.json\0所有文件 (*.*)\0*.*\0"
-_PREFAB_FILTER = "Prefab 文件 (*.prefab)\0*.prefab\0所有文件 (*.*)\0*.*\0"
-
 
 class _CameraProjCommand(Command):
     """主相机投影（ortho / ortho_size / fov）改值命令（2026-11-08 批2, 裁决 D7=A）.
@@ -156,7 +135,6 @@ class _CameraProjCommand(Command):
 
     def undo(self):
         self.engine._apply_camera_proj(self.before)
-
 
 class _OrbitViewCommand(Command):
     """开发者轨道相机视角 (target/distance/yaw/pitch) 改值命令
@@ -182,14 +160,12 @@ class _OrbitViewCommand(Command):
     def undo(self):
         self.engine._apply_orbit_view(self.before)
 
-
 def _editor_skybox_provider(engine, cmd):
     """FramePlan 的 skybox 绘制源（编辑器版）：保持迁移前「失败每帧打印一行」的语义。"""
     try:
         engine._draw_skybox()
     except Exception as _e:
         print('[渲染] 天空盒绘制失败: %r' % (_e,))
-
 
 class _EditorCore(EngineCore):
     # S5（Q-B7-47-1 五阶段·阶段 5）：编辑器形状标记 —— 渲染帧尾的 LateUpdate 由本类
@@ -217,6 +193,25 @@ class _EditorCore(EngineCore):
     直落 GLEngine.__init__，GL 装配逐位不变。
     （VK 编辑器占位：S4 建 `VkEditorApp(_EditorCore, SceneDriver)`，本阶段不写实现。）
     """
+# 本文件（Q-B7-38-1 第 9 批，agent-99）已按能力域拆分：_EditorCore 的方法体
+# 分散在 editor/core_<域>.py 的 mixin（selection / gizmo / camera / object / inspector /
+# asset / scene / playback / viewport / commands），本文件只保留三件事——
+#
+#   ① 装配：class _EditorCore(EngineCore, <各域 mixin>) —— EngineCore 必须是**第一个**基类
+#      （引擎能力契约 grid_in_scene_pass 等来自它）；各域 mixin 排在其后，两个理由：
+#      (a) EngineCore 的能力属性不被任何 mixin 遮蔽（GLEngine 的 MRO 教训）；
+#      (b) VkEditorApp / EditorApp 的 MRO 前三位保持不变
+#          （VkEditorApp → _EditorCore → SceneDriver / EditorApp → _EditorCore → GLEngine）。
+#   ② 模块级常量与工具函数（文件对话框记忆 M19）：APP_DIR / DEFAULT_SAVE_DIR /
+#      _LEGACY_SAVE_DIR / STATE_FILE / _SCENE_FILTER / unique_default_name / load_last_dir /
+#      save_last_dir / load_last_scene / initial_dir —— 它们是**仓内 monkeypatch 目标**
+#      （tests 直接写 editor.core.STATE_FILE / .DEFAULT_SAVE_DIR / .save_last_dir /
+#      .apply_snapshot / .frame_plan），消费点必须在**本模块全局**里解析，故定义留在本文件
+#      （常量本体唯一真源在 editor/core_contract.py，本文件按名绑定 import）。
+#   ③ 测试源码契约锁定的成员（不可迁移；逐条理由见 KEEP 表 / 下方注释）：render /
+#      _prepare_main_pass / _after_pass_prof / toggle_play / _save_scene / _load_scene /
+#      choose_* / _update_camera / _dispatch_ui_mouse / _draw_selection_box /
+#      on_key_event / on_text_input / on_quit_request / _init_editor_state。
 
     def _seed_scene(self):
         """默认场景: 地面平面 + 立方体 + 球体 (尺寸对齐 Unity 默认: 10/1/0.5)"""
@@ -338,10 +333,15 @@ class _EditorCore(EngineCore):
 
     # ================ gizmo (M9 平移 / M10 旋转) ================
     _GIZMO_AXES = {'X': (1, 0, 0), 'Y': (0, 1, 0), 'Z': (0, 0, 1)}
+
     _GIZMO_COLORS = {'X': (0.9, 0.2, 0.2), 'Y': (0.2, 0.9, 0.2), 'Z': (0.25, 0.4, 0.9)}
+
     _GIZMO_LEN = 1.5
+
     _GIZMO_RAD = 1.5
+
     _GIZMO_SEGS = 48
+
     _GIZMO_HIT_PX = 10.0
 
     def _camera_forward(self):
@@ -634,7 +634,6 @@ class _EditorCore(EngineCore):
         else:
             self._pick(pp[0], pp[1])
 
-
     def _layout(self):
         """6 元布局 (2026-08-14 晚: 左右/上下分隔条可拖 + 收起).
         面板宽高由 self.panel_* 状态决定, 视图/交互层共读; 保证视口最小宽度."""
@@ -655,7 +654,6 @@ class _EditorCore(EngineCore):
         return toolbar, status, hierarchy, inspector, viewport, resources
 
     # ================ 工具栏 ================
-
     def _add_primitive(self, typ):
         """添加基元物体 (可撤销).
 
@@ -805,7 +803,6 @@ class _EditorCore(EngineCore):
         return engine.world_position(t)
 
     # ================ 层级面板 (树形 + 拖拽挂父, M14) ================
-
     def _hierarchy_rows(self):
         """场景树扁平化: [(depth, model), ...] DFS 前序, 只从根开始"""
         rows = []
@@ -817,7 +814,6 @@ class _EditorCore(EngineCore):
             if m.parent is None:
                 walk(m, 0)
         return rows
-
 
     def _camera_dict(self):
         """当前场景相机（写场景文件用）。
@@ -1471,7 +1467,6 @@ class _EditorCore(EngineCore):
     # 列出 assets/ 下的网格/材质/Prefab, 点选预览, 拖到视口/物体上复用 (像 Unity Project 窗口).
     # 数据流: _scan_assets 只列文件名 (不逐帧读 JSON); 选中/拖放时 _asset_data 惰性读.
     # 跨文件引用统一走 guid: 材质资产带 guid, 应用时 _find_material 命中即共享复用.
-
     _BUILTIN_MESHES = (
         ('cube', '立方体', {}),
         ('sphere', '球体', {'radius': 1.0, 'stacks': 14, 'slices': 28}),
@@ -1538,7 +1533,6 @@ class _EditorCore(EngineCore):
             if (it['type'], it['key']) == key:
                 return it
         return None
-
 
     def _mouse_to_ground(self, px, py):
         """鼠标像素 -> 射线与地面 (y=0) 交点. 射线平行地面时回退原点."""
@@ -1738,7 +1732,6 @@ class _EditorCore(EngineCore):
     # UI (IEditorView) 所有"会改变引擎状态"的写操作都走这里 —— 内部统一处理撤销,
     # 面板不直接 push undo. 三种对象 (物体/光源/摄像机) 各配 edit_*(拖拽)/commit_*(单次)
     # 两个入口 + rename_*(名称失焦提交).
-
     def set_gizmo_mode(self, mode):
         """切换 gizmo 模式 (translate/rotate)."""
         if self.gizmo_mode != mode:
@@ -2616,7 +2609,6 @@ class _EditorCore(EngineCore):
     # 2026-10-18 选项1: EditorApp 不再覆写 run()。原 pygame 编辑器路径（--ui default/minimal）
     # 已随 pygame 窗口剥离删除，Qt 编辑器由宿主 paintGL 驱动，从不进入基类 loom_render.run()。
     # 若未来有人直接调 EditorApp().run()，走基类：因 _external_ctx=True 立即 return（行为一致）。
-
     def on_key_event(self, ev):
         """吞掉 GUI 输入框按键 + 旧引擎快捷键 (编辑器模式). 返回 True = 已消费."""
         if ev.type in (pygame.KEYDOWN, pygame.KEYUP):
@@ -2678,6 +2670,7 @@ class _EditorCore(EngineCore):
 
     # ================ 相机聚焦 (2026-11-07 C: Agent 操作必须看得见) ================
     FOCUS_DURATION = 0.18          # 平滑聚焦时长 (秒, 线性插值)
+
     FOCUS_DISTANCE_FACTOR = 2.6    # camera_distance = 包围球半径 * 系数
 
     def _focus_aabb(self, index):
@@ -2952,7 +2945,6 @@ class _EditorCore(EngineCore):
     # （逐行未改，规则 5.5 同源不同步：EditorApp 与 VkEditorApp 都只调这一份装配）。
     # 前置：宿主引擎的 __init__ 已跑完（GL=GLEngine.__init__ / VK=SceneDriver.__init__），
     # width/height/_external_ctx 等宿主字段由各装配点先行置好。
-
     def _init_editor_state(self, scene_path=None, view=None):
         """编辑器状态装配（后端无关唯一实现；GL/VK 共用，见上方段注释）。"""
         self.allow_fullscreen = False   # 编辑器禁 F11 全屏 (只留最大化+自由缩放; 2026-08-17)
