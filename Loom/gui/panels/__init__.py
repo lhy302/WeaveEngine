@@ -18,4 +18,5 @@ __all__ = [
     'AssetMixin',
     'ConsoleMixin',
     'PublishMixin',
+    'UitreeMixin',
 ]
