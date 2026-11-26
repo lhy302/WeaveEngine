@@ -447,7 +447,11 @@ def section_a():
     check("A4 SceneDriver 装配 VK 叠加层（公开 overlay_scope/draw_lines 两端同名）",
           all(hasattr(SD.SceneDriver, n) for n in ("overlay_scope", "draw_lines")))
     src_ed = _read(os.path.join("editor", "core.py"))
-    src_gui = _read(os.path.join("gui", "main_window.py"))
+    # Q-B7-38-1 第 8 批（2026-11-26）：视口叠加的 gizmo/光源相机图标辅助已按面板域
+    # 纯搬迁到 gui/panels/gizmo_mixin.py（LoomGUI mixin 装配）。A5b 判据一字不动，
+    # 仅读取源改为 main_window.py + gizmo_mixin.py 合并文本（路径跟随，强度不降）。
+    src_gui = (_read(os.path.join("gui", "main_window.py")) + "\n"
+               + _read(os.path.join("gui", "panels", "gizmo_mixin.py")))
     check("A5a editor._draw_selection_box 走 overlay_scope（不直接摸 ctx.scope）",
           "with self.overlay_scope(framebuffer=self._screen_fb(), enable_only=0):" in src_ed
           and "self.ctx.scope" not in src_ed)

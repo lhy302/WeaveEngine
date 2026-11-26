@@ -189,6 +189,11 @@ def main():
 
     # ---- ① 设置面板仍可达（P0-1 另一半）----
     import gui.main_window as mw
+    # Q-B7-38-1 第 8 批（2026-11-26）：设置面板段已按面板域纯搬迁到
+    # gui/panels/settings_mixin.py（LoomGUI mixin 装配）。对话框类名在该模块内自带
+    # import 绑定，故 QDialog 打桩需**同时**打到实际解析模块；断言判据
+    # 一字不动（仍要求「创建 1 次 + exec 1 次」）。
+    import gui.panels.settings_mixin as _set_mixin
 
     class _RecDialog(mw.QDialog):
         made = []
@@ -203,7 +208,9 @@ def main():
             return 0
 
     _orig_dialog = mw.QDialog
+    _orig_dialog_set = _set_mixin.QDialog
     mw.QDialog = _RecDialog
+    _set_mixin.QDialog = _RecDialog      # 设置面板本尊所在模块（见上方路径跟随说明）
     try:
         win._cmd_settings()
         dlg_err = None
@@ -211,6 +218,7 @@ def main():
         dlg_err = repr(e)
     finally:
         mw.QDialog = _orig_dialog
+        _set_mixin.QDialog = _orig_dialog_set
     check('A9 视口装配失败（editor is None）时设置面板仍能创建对话框',
           len(_RecDialog.made) == 1 and _RecDialog.exec_calls[0] == 1,
           'made=%d exec=%d err=%s editor=%r'
