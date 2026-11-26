@@ -602,20 +602,34 @@ flowchart TB
 
 ```mermaid
 flowchart LR
-  ED["EditorApp<br/>editor/app.py 32（B4 装配壳）<br/>= _EditorCore + GLEngine"]:::facade
-  GE["GLEngine<br/>render/gl/engine.py 1651"]:::facade
-  COR["★ _EditorCore<br/>editor/core.py 3101 · 152 方法<br/>编辑器能力唯一实现（后端无关）"]:::contract
-  V["Qt 视图<br/>gui/main_window.py 4129<br/>（B4 拆自 ui/loom_gui.py 4339）"]:::file
-  U["撤销/重做<br/>editor/undo/ 6 文件 1469 行<br/>registry 364 + cmd_object 400<br/>+ cmd_scene 395 + cmd_camera 148<br/>+ cmd_light 117"]:::file
-  EAI["EAI 命令面<br/>agent_commands.py 4222<br/>106 个 @command"]:::entry
-  FD["文件对话框<br/>filedialog.py 295"]:::file
-  PW["播放窗口<br/>loom_player_window.py 308"]:::file
-  S["场景 I/O<br/>sceneio.py 97（薄门面）<br/>→ scene/ 按域拆分"]:::file
-  VKE["VkEditorApp<br/>editor/vk_app.py 161<br/>= _EditorCore + SceneDriver<br/>+ _VkGlStateShim"]:::facade
-  SDV["SceneDriver<br/>render/vk/driver.py 2110"]:::facade
-  VKV["VkViewport<br/>editor/viewport/vk_viewport.py 224<br/>（B6 建，B4 归位；probe_vk_ready 启动期探测）"]:::file
-  EB["★ 事件桥唯一实现<br/>editor/viewport/event_bridge.py 210<br/>GL/Remote/VK 三端共用基类"]:::contract
-  LPV["render/vk/pass_vk.py 552<br/>VkLineBatch / overlay_scope<br/>VkFrameExecutor（同一份 plan）"]:::contract
+  subgraph QT["① Qt 视图（gui/ + 顶层窗口/对话框 · 面板与窗口壳）"]
+    V["Qt 视图<br/>gui/main_window.py 4129<br/>（B4 拆自 ui/loom_gui.py 4339）"]:::file
+    FD["文件对话框<br/>filedialog.py 295"]:::file
+    PW["播放窗口<br/>loom_player_window.py 308"]:::file
+  end
+  subgraph CMD["② 命令层（agent_commands · 唯一命令体）"]
+    EAI["EAI 命令面<br/>agent_commands.py 4222<br/>106 个 @command"]:::entry
+  end
+  subgraph KERN["③ 编辑器内核（editor/core · 后端无关唯一实现）"]
+    COR["★ _EditorCore<br/>editor/core.py 3101 · 152 方法<br/>编辑器能力唯一实现（后端无关）"]:::contract
+  end
+  subgraph UNDODOM["④ 撤销（editor/undo/ · 6 文件 1469 行）"]
+    U["撤销/重做<br/>editor/undo/ 6 文件 1469 行<br/>registry 364 + cmd_object 400<br/>+ cmd_scene 395 + cmd_camera 148<br/>+ cmd_light 117"]:::file
+  end
+  subgraph APPDOM["⑤ 两端编辑器 App（装配壳）"]
+    ED["EditorApp<br/>editor/app.py 32（B4 装配壳）<br/>= _EditorCore + GLEngine"]:::facade
+    VKE["VkEditorApp<br/>editor/vk_app.py 161<br/>= _EditorCore + SceneDriver<br/>+ _VkGlStateShim"]:::facade
+  end
+  subgraph ENGINEDOM["⑥ 引擎后端（GL/VK 门面 + VK 视口 + 事件桥 + 叠加层）"]
+    GE["GLEngine<br/>render/gl/engine.py 1651"]:::facade
+    SDV["SceneDriver<br/>render/vk/driver.py 2110"]:::facade
+    VKV["VkViewport<br/>editor/viewport/vk_viewport.py 224<br/>（B6 建，B4 归位；probe_vk_ready 启动期探测）"]:::file
+    EB["★ 事件桥唯一实现<br/>editor/viewport/event_bridge.py 210<br/>GL/Remote/VK 三端共用基类"]:::contract
+    LPV["render/vk/pass_vk.py 552<br/>VkLineBatch / overlay_scope<br/>VkFrameExecutor（同一份 plan）"]:::contract
+  end
+  subgraph SCENEDOM["⑦ 场景 I/O（sceneio 薄门面 → scene/）"]
+    S["场景 I/O<br/>sceneio.py 97（薄门面）<br/>→ scene/ 按域拆分"]:::file
+  end
   ED ==>|继承| GE
   ED ==>|继承| COR
   VKE ==>|继承| COR
@@ -638,7 +652,7 @@ flowchart LR
 ```
 
 > GL 编辑器与 VK 编辑器的**播放组件同源**：相机策略 / 挂父相机重应用 / LateUpdate 派发 /
-> 逻辑位姿矩阵刷新（_refresh_play_frame_world，EngineCore:742 唯一实现）/ 进出播放（toggle_play）都是同一份函数对象；
+> 逻辑位姿矩阵刷新（_refresh_play_frame_world，EngineCore:756 唯一实现）/ 进出播放（toggle_play）都是同一份函数对象；
 > 对拍门 = `test_editor_play_parity`（575 条，四面：GL编辑器播放/GL播放器/VK编辑器播放/VK播放器）+
 > `test_editor_play_pixel_parity`（17 条，4 时刻逐像素 MAE=0.0）。
 
@@ -648,14 +662,22 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-  T["默认值层（只读）<br/>guiloader.py DEFAULTS<br/>game_settings.py 默认值<br/>Loom/输入配置.default.json"]:::external
-  U["用户层（可写）<br/>%LOCALAPPDATA%/Loom/"]:::external
-  P["hostenv/userpaths.py 142<br/>唯一收口点"]:::contract
-  G1["guiloader.py 340<br/>引擎设置"]:::file
-  G2["game_settings.py 436<br/>游戏设置"]:::file
-  C0["四入口（B7-54 同源）<br/>Loom.py · build_entry.py 586<br/>game_player.py · run_player.__main__"]:::entry
-  R1["run_player.py 513<br/>parse_backend_arg:133（--backend 解析唯一实现）<br/>resolve_backend:152 读 render_api"]:::entry
-  R2["render/gl/engine.py / render/vk/driver.py<br/>读 logic_fps / interp_mode"]:::impl
+  subgraph TMPL["① 模板/默认值层（只读 · 出厂基线）"]
+    T["默认值层（只读）<br/>guiloader.py DEFAULT_SETTINGS:38<br/>game_settings.py 默认值<br/>Loom/输入配置.default.json"]:::external
+  end
+  subgraph USERL["② 用户层（%LOCALAPPDATA%/Loom/ 可写 · 路径唯一收口）"]
+    U["用户层（可写）<br/>%LOCALAPPDATA%/Loom/"]:::external
+    P["hostenv/userpaths.py 142<br/>唯一收口点"]:::contract
+  end
+  subgraph CFG["③ 引擎配置读取（guiloader + game_settings）"]
+    G1["guiloader.py 340<br/>引擎设置"]:::file
+    G2["game_settings.py 436<br/>游戏设置"]:::file
+  end
+  subgraph CONS["④ 消费方（四入口 + run_player + 引擎读侧）"]
+    C0["四入口（B7-54 同源）<br/>Loom.py · build_entry.py 586<br/>game_player.py · run_player.__main__"]:::entry
+    R1["run_player.py 513<br/>parse_backend_arg:133（--backend 解析唯一实现）<br/>resolve_backend:152 读 render_api"]:::entry
+    R2["render/gl/engine.py / render/vk/driver.py<br/>读 logic_fps / interp_mode"]:::impl
+  end
   T -->|delta 覆盖| U
   U -->|路径由它算| P
   G1 -->|读| P
@@ -677,20 +699,30 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-  B1["tools/build_engine.py<br/>dev/release 两档<br/>三件产物构建器"]:::tool
-  BG["build/build_game.py 507<br/>--build-runtime（Nuitka 参数拼接）"]:::tool
-  B2["tools/build_shaders.py<br/>GLSL→SPIR-V"]:::tool
-  P1["tools/package_engine_compiled.py"]:::tool
-  P2["tools/package_engine.py"]:::tool
-  V1["tools/verify_pkg_vs_head.py"]:::tool
-  V2["tools/smoke.py"]:::tool
-  V3["tools/check_binary_hygiene.py"]:::tool
-  R1["tools/release_github.py"]:::tool
-  R2["tools/package_hub.py"]:::tool
-  O1["三件产物 exe<br/>engine / builder / player_runtime<br/>（dev 与 release 物理分开）"]:::external
-  O2["compiled 打包产物"]:::external
-  O3["GitHub release"]:::external
-  O4["Hub 安装<br/><根>/<版本>/"]:::external
+  subgraph BUILD["① 构建工具（tools/ · 三件产物编译 + GLSL→SPIR-V）"]
+    B1["tools/build_engine.py<br/>dev/release 两档<br/>三件产物构建器"]:::tool
+    B2["tools/build_shaders.py<br/>GLSL→SPIR-V"]:::tool
+  end
+  subgraph PACK["② 打包（build/build_game + tools/package_*）"]
+    BG["build/build_game.py 507<br/>--build-runtime（Nuitka 参数拼接）"]:::tool
+    P1["tools/package_engine_compiled.py"]:::tool
+    P2["tools/package_engine.py"]:::tool
+  end
+  subgraph VERIFY["③ 验证（tools/ · 对拍/冒烟/卫生）"]
+    V1["tools/verify_pkg_vs_head.py"]:::tool
+    V2["tools/smoke.py"]:::tool
+    V3["tools/check_binary_hygiene.py"]:::tool
+  end
+  subgraph REL["④ 发布（tools/release_* → 产物去向）"]
+    R1["tools/release_github.py"]:::tool
+    R2["tools/package_hub.py"]:::tool
+  end
+  subgraph OUT["⑤ 产物（dist/ + GitHub release + Hub 安装）"]
+    O1["三件产物 exe<br/>engine / builder / player_runtime<br/>（dev 与 release 物理分开）"]:::external
+    O2["compiled 打包产物"]:::external
+    O3["GitHub release"]:::external
+    O4["Hub 安装<br/><根>/<版本>/"]:::external
+  end
   B1 -->|产出| O1
   BG -->|运行时档间接调 Nuitka| B1
   B2 -->|GLSL→SPIR-V| O1
@@ -719,14 +751,20 @@ flowchart LR
 ```mermaid
 sequenceDiagram
   autonumber
-  participant U as 用户
-  participant ED as editor/core.py
-  participant SIO as sceneio.py（薄门面）<br/>scene/io.py
-  participant PREP as sceneio.prepare<br/>（= gate + migrate，唯一入口）
-  participant AP as scene_from_dict 装配<br/>（scene/io.py 357）
-  participant VP as render/vk/player.py 901
-  participant SD as render/vk/driver.py 2110
-  participant BM as build_* 装配
+  box rgb(237,233,254) 入口（编辑器 GL 面）
+    participant U as 用户
+    participant ED as editor/core.py
+  end
+  box rgb(255,237,213) 契约层（sceneio 门面 · prepare 唯一入口）
+    participant SIO as sceneio.py（薄门面）<br/>scene/io.py
+    participant PREP as sceneio.prepare<br/>（= gate + migrate，唯一入口）
+    participant AP as scene_from_dict 装配<br/>（scene/io.py 357）
+  end
+  box rgb(220,252,231) VK 侧（render/vk）
+    participant VP as render/vk/player.py 901
+    participant SD as render/vk/driver.py 2110
+    participant BM as build_* 装配
+  end
   U->>ED: 打开场景文件
   ED->>SIO: json.load 读 dict
   ED->>PREP: sceneio.prepare(data)（editor/core.py:1246，清空旧场景**之前**）
@@ -754,11 +792,15 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
   autonumber
-  participant L as render/gl/render.py run()（限帧 120）
-  participant PL as render/contract/frame_plan.frame_plan()
-  participant X as render/gl/pass_gl.execute()
-  participant D as 绘制源(main/sky/shadow/post)
-  participant U as render/contract/scene_ubo
+  box rgb(220,252,231) GL 执行（render/gl）
+    participant L as render/gl/render.py run()（限帧 120）
+    participant X as render/gl/pass_gl.execute()
+    participant D as 绘制源(main/sky/shadow/post)
+  end
+  box rgb(255,237,213) 契约层（render/contract）
+    participant PL as render/contract/frame_plan.frame_plan()
+    participant U as render/contract/scene_ubo
+  end
   L->>L: _handle_events / 相机
   L->>PL: frame_plan(include_shadow=...)
   PL-->>L: FramePlan（同参数命中缓存则复用）
@@ -773,11 +815,15 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
   autonumber
-  participant W as render/vk/player GLFW 循环
-  participant R as render/vk/renderer.draw_frame()
-  participant PL as render/contract/frame_plan.frame_plan()
-  participant P as 各 pass 的 wgpu 管线
-  participant U as render/contract/scene_ubo
+  box rgb(220,252,231) VK 执行（render/vk）
+    participant W as render/vk/player GLFW 循环
+    participant R as render/vk/renderer.draw_frame()
+    participant P as 各 pass 的 wgpu 管线
+  end
+  box rgb(255,237,213) 契约层（render/contract）
+    participant PL as render/contract/frame_plan.frame_plan()
+    participant U as render/contract/scene_ubo
+  end
   W->>R: draw_frame()
   R->>PL: frame_plan(...)（render/vk/renderer.py:1745）
   PL-->>R: 同一份 FramePlan
@@ -1060,14 +1106,30 @@ flowchart LR
   E["render/gl/engine.py<br/>1651 行 / 30 方法<br/>50 imports"]:::hub
   M["EngineCore 10 共享 mixin<br/>（公共部分已上移，见图 2a）"]:::impl
   P["39 个本项目 import<br/>（渲染/数据/调度/工具）"]:::file
-  D1["A 装配/骨架<br/>2 方法 · 433 行"]:::dom
-  D2["B 帧调度/时钟<br/>8 方法 · 335 行"]:::dom
-  D3["C 脚本生命周期分发<br/>4 方法 · 235 行"]:::dom
-  D4["D 即时模式图元绘制<br/>4 方法 · 171 行"]:::dom
-  D5["E 输入/鼠标锁/键位<br/>5 方法 · 131 行"]:::dom
-  D6["F 渲染后端 API<br/>4 方法 · 44 行"]:::dom
-  D7["G 天空盒复位<br/>2 方法 · 24 行"]:::dom
-  D8["H 退出清理<br/>1 方法 · 44 行"]:::dom
+  subgraph DA["域 A · 装配/骨架"]
+    D1["A 装配/骨架<br/>2 方法 · 433 行"]:::dom
+  end
+  subgraph DB["域 B · 帧调度/时钟"]
+    D2["B 帧调度/时钟<br/>8 方法 · 335 行"]:::dom
+  end
+  subgraph DC["域 C · 脚本生命周期分发"]
+    D3["C 脚本生命周期分发<br/>4 方法 · 235 行"]:::dom
+  end
+  subgraph DD["域 D · 即时模式图元绘制"]
+    D4["D 即时模式图元绘制<br/>4 方法 · 171 行"]:::dom
+  end
+  subgraph DE["域 E · 输入/鼠标锁/键位"]
+    D5["E 输入/鼠标锁/键位<br/>5 方法 · 131 行"]:::dom
+  end
+  subgraph DF["域 F · 渲染后端 API"]
+    D6["F 渲染后端 API<br/>4 方法 · 44 行"]:::dom
+  end
+  subgraph DG["域 G · 天空盒复位"]
+    D7["G 天空盒复位<br/>2 方法 · 24 行"]:::dom
+  end
+  subgraph DH["域 H · 退出清理"]
+    D8["H 退出清理<br/>1 方法 · 44 行"]:::dom
+  end
   E ==>|拼装（GL 侧 6 mixin + EngineCore）| M
   E -->|import| P
   E -->|包含| D1
@@ -1088,13 +1150,13 @@ flowchart LR
 
 | 域 | 方法 | 行数 | 说明 |
 |---|---|---|---|
-| A 装配/骨架 | 2 | **433** | `__init__` 420 行（L222-641）：窗口/GL/阴影/材质/相机/输入/UI/脚本/并行池…一次装完；+ `_build_hud_quad` 13 |
+| A 装配/骨架 | 2 | **433** | `__init__` 419 行（L231-649，实测 2026-11-26）：窗口/GL/阴影/材质/相机/输入/UI/脚本/并行池…一次装完；+ `_build_hud_quad` 13 |
 | B 帧调度/时钟 | 8 | **335** | `advance_logic`(94) `_logic_frame`(97) `_logic_prep`(51) `_clock_advance`(47) `_framebuf_prefetch`(19) `_ensure_split`(11) `_pipe_post`(10) `_physics_frame`(6) |
-| C 脚本生命周期分发 | 4 | **235** | `_update_scripts_impl`(152，由 EngineCore.update_scripts:728 公共入口回调) + `_run_scripts`(24) + `_dispatch_application_quit`(31) + `_dispatch_visibility_changed`(28)；update_scripts / update_audio / LateUpdate 公共版在 EngineCore |
+| C 脚本生命周期分发 | 4 | **235** | `_update_scripts_impl`(152，由 EngineCore.update_scripts:742 公共入口回调) + `_run_scripts`(24) + `_dispatch_application_quit`(31) + `_dispatch_visibility_changed`(28)；update_scripts / update_audio / LateUpdate 公共版在 EngineCore |
 | D 即时模式图元绘制 | 4 | 171 | `draw_lines`(68+69 行域) 世界折线（四边形扩宽数学在 `mathlib/line_geometry.py`）、`draw_screen_lines`(40+41) / `draw_screen_polygon`(55) 屏幕图元、`_px_to_ndc`(6) |
 | E 输入/鼠标锁/键位 | 5 | 131 | `_poll_mouse_unlock_key`(64) 引擎独占解锁键、`poll_unlock`(21)、`set_action_binding`(30)、`get_action_bindings`(8)、`_warn_unlock_poll_unavailable`(8) |
 | F 渲染后端 API | 4 | 44 | `request_game_exit`(11) / `get_render_api`(4) / `get_saved_render_api`(8) / `set_render_api`(21)（写游戏配置） |
-| G 天空盒复位 | 2 | 24 | `reset_sky_state`(13) 哨兵复位、`_warn_sky_once`(11)；`effective_skybox` 相机级优先已上移 EngineCore:854 |
+| G 天空盒复位 | 2 | 24 | `reset_sky_state`(13) 哨兵复位、`_warn_sky_once`(11)；`effective_skybox` 相机级优先已上移 EngineCore:868 |
 | H 退出清理 | 1 | 44 | `_stop_parallel`(44) |
 | — | **30** | **1417** | 模块级另有 5 个函数（GC 冻结机制 `gc_play_enter`/`gc_play_exit`/`engine_gc_frozen`/`_gc_enabled` + `_unlock_poll_warn`） |
 
