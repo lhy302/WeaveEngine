@@ -545,21 +545,27 @@ def t_single_source():
           shape_ok, shape_detail)
 
     # ---- 设置面板（T2）----
-    mw = open(os.path.join(ROOT, 'gui', 'main_window.py'), encoding='utf-8').read()
+    # Q-B7-38-1 第 8 批（2026-11-26）：设置段已按面板域纯搬迁到
+    # gui/panels/settings_mixin.py（LoomGUI mixin 装配）。D9~D17 判据一字不动，
+    # 仅读取源改为 main_window.py + settings_mixin.py 两文件合并文本（路径跟随，
+    # 断言强度不降：找不到标签/出现旧文案仍然照常判红）。
+    mw_text = (open(os.path.join(ROOT, 'gui', 'main_window.py'), encoding='utf-8').read()
+                + '\n'                + open(os.path.join(ROOT, 'gui', 'panels', 'settings_mixin.py'),
+                       encoding='utf-8').read())
     check('D9 设置面板标签改为「渲染后端（编辑器与播放共用，重启生效）」',
-          '渲染后端（编辑器与播放共用，重启生效）' in mw
-          and '播放器渲染 API（默认）' not in mw)
+          '渲染后端（编辑器与播放共用，重启生效）' in mw_text
+          and '播放器渲染 API（默认）' not in mw_text)
     check('D10 tooltip 说明「以配置文件为准 / 编辑器与播放打包共用 / 重启生效 / --backend 可临时覆盖」',
-          '设置当前项目的渲染后端（以配置文件为准）' in mw
-          and '修改后重启编辑器/播放器生效' in mw
-          and '--backend 命令行参数可临时覆盖本次启动' in mw)
+          '设置当前项目的渲染后端（以配置文件为准）' in mw_text
+          and '修改后重启编辑器/播放器生效' in mw_text
+          and '--backend 命令行参数可临时覆盖本次启动' in mw_text)
     check('D11 旧文案「编辑器固定 OpenGL」已从设置面板移除',
-          '编辑器固定 OpenGL' not in mw)
+          '编辑器固定 OpenGL' not in mw_text)
     # P1-1 单层化（2026-11-25）后：写盘实现搬到唯一写盘路径 write_render_api_choice
     # （hostenv/editor_launch.py），面板只转调它。D12 判据随之迁移，强度不降反升 ——
     # 原来只锁「面板函数体里有 settings_set 字样」，现在同时锁「面板真转调唯一实现」+
     # 「唯一实现体内确实走 settings_set 命令壳与 render_api 键」。
-    body = _func_body_src(mw, '_cmd_set_render_api')
+    body = _func_body_src(mw_text, '_cmd_set_render_api')
     check('D12 下拉框写盘转调唯一写盘路径（write_render_api_choice，面板与 VK 失败回退同一份）',
           bool(body) and 'write_render_api_choice' in body,
           'body=%r' % ((body or '')[:200],))
@@ -569,20 +575,20 @@ def t_single_source():
           bool(_wbody) and 'settings_set' in _wbody and 'render_api' in _wbody,
           'body=%r' % ((_wbody or '')[:200],))
     check('D13 下拉框 currentIndexChanged 接到 _cmd_set_render_api（不再直写 guiloader）',
-          'currentIndexChanged.connect(self._cmd_set_render_api)' in mw)
+          'currentIndexChanged.connect(self._cmd_set_render_api)' in mw_text)
     check('D14 旧直写 lambda（s.__setitem__(\'render_api\'）已删',
-          "s.__setitem__('render_api'" not in mw)
+          "s.__setitem__('render_api'" not in mw_text)
     # ---- VK 装配失败处理（P0-1）的单源结构：写盘走同一份、失败策略走同一份 ----
-    hbody = _func_body_src(mw, '_handle_vk_init_failure')
+    hbody = _func_body_src(mw_text, '_handle_vk_init_failure')
     check('D15 VK 装配失败处理（P0-1）唯一实现在 gui/main_window._handle_vk_init_failure，'
           '且转调唯一写盘路径 + 唯一失败策略（不另起第三处写盘）',
           bool(hbody) and 'write_render_api_choice' in hbody
           and 'should_rewrite_config_on_vk_failure' in hbody,
           'body=%r' % ((hbody or '')[:240],))
     check('D16 设置面板渲染后端下拉显示**生效值**（editor_launch.effective_render_api）',
-          'effective_render_api' in mw)
+          'effective_render_api' in mw_text)
     check('D17 设置面板的「不依赖 editor」段落无条件渲染（P0-1 另一半：editor 为 None 也可达）',
-          'if e is None:' in mw and '编辑器未就绪' in mw)
+          'if e is None:' in mw_text and '编辑器未就绪' in mw_text)
 
 
 # ============ E. 写盘闭环（P1-1 单层化） ============
