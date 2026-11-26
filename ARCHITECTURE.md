@@ -242,21 +242,31 @@ flowchart TB
 
 ```mermaid
 flowchart LR
-  G["GLEngine<br/>render/gl/engine.py 1651<br/>class GLEngine(EngineCore,<br/>ShadowMixin, HudMixin, RenderMixin,<br/>ModelGpuMixin, LightingMixin, GlfwWindowMixin)<br/>能力契约 grid_in_scene_pass=True（覆写）"]:::facade
-  K["★ EngineCore（公共内核）<br/>core/engine_core.py 1130<br/>10 个共享 mixin —— 见图 2a"]:::contract
-  M1["ShadowMixin<br/>render/gl/shadow.py 118"]:::impl
-  M2["HudMixin<br/>render/gl/hud.py 318"]:::impl
-  M3["RenderMixin<br/>render/gl/render.py 1498<br/>（含 PresentHealth 上屏健康计数唯一实现）"]:::impl
-  M4["ModelGpuMixin<br/>render/gl/model_gpu.py 307"]:::impl
-  M5["LightingMixin<br/>render/gl/lighting.py 748"]:::impl
-  M6["GlfwWindowMixin<br/>render/gl/window.py 716"]:::impl
-  G ==>|拼装| K
-  G ==>|拼装| M1
-  G ==>|拼装| M2
+  subgraph CORE["① 公共内核（core/ · 两端共用）"]
+    K["★ EngineCore（公共内核）<br/>core/engine_core.py 1130<br/>10 个共享 mixin —— 见图 2a"]:::contract
+  end
+  subgraph RENDOM["② GL 渲染域（render/gl/ · 绘制与模型 GPU 资源）"]
+    M3["RenderMixin<br/>render/gl/render.py 1498<br/>（含 PresentHealth 上屏健康计数唯一实现）"]:::impl
+    M4["ModelGpuMixin<br/>render/gl/model_gpu.py 307"]:::impl
+  end
+  subgraph LIGHTDOM["③ GL 光照/阴影域（render/gl/ · 光源上传与阴影 VP）"]
+    M5["LightingMixin<br/>render/gl/lighting.py 748"]:::impl
+    M1["ShadowMixin<br/>render/gl/shadow.py 118"]:::impl
+  end
+  subgraph WINDOM["④ GL 窗口/HUD 域（render/gl/ · GLFW 窗口与叠加文字）"]
+    M6["GlfwWindowMixin<br/>render/gl/window.py 716"]:::impl
+    M2["HudMixin<br/>render/gl/hud.py 318"]:::impl
+  end
+  subgraph PROD["⑤ 装配产物（GL 侧门面）"]
+    G["GLEngine<br/>render/gl/engine.py 1651<br/>class GLEngine(EngineCore,<br/>ShadowMixin, HudMixin, RenderMixin,<br/>ModelGpuMixin, LightingMixin, GlfwWindowMixin)<br/>能力契约 grid_in_scene_pass=True（覆写）"]:::facade
+  end
+  G -.->|拼装公共内核（两端共用 · 详见图 2a）| K
   G ==>|拼装| M3
   G ==>|拼装| M4
   G ==>|拼装| M5
+  G ==>|拼装| M1
   G ==>|拼装| M6
+  G ==>|拼装| M2
   classDef facade fill:#ede9fe,stroke:#7c3aed,color:#4c1d95
   classDef impl fill:#dcfce7,stroke:#16a34a,color:#14532d
   classDef contract fill:#ffedd5,stroke:#ea580c,color:#7c2d12
@@ -270,16 +280,26 @@ flowchart LR
 ```mermaid
 flowchart LR
   K["★ EngineCore<br/>core/engine_core.py 1130<br/>（GLEngine 与 SceneDriver 的公共基类）<br/>能力契约 grid_in_scene_pass=False<br/>（GL 覆写 True = 网格画进场景 pass，Q-B7-53-1）"]:::contract
-  S1["TransformMixin<br/>components/transform.py 464"]:::impl
-  S2["PhysicsMixin<br/>physics/physics.py 925"]:::impl
-  S3["InputMixin<br/>loom_input.py 631"]:::impl
-  S4["CameraMixin<br/>loom_camera.py 286"]:::impl
-  S5["FrameComponentMixin<br/>components/frame_components.py 149<br/>（音频/动画/碰撞回调推进）"]:::impl
-  S6["ProfilerMixin<br/>core/profiler.py 90"]:::impl
-  S7["LogicThreadMixin<br/>loom_logic_thread.py 148"]:::impl
-  S8["RaycastMixin<br/>components/raycast.py 336"]:::impl
-  S9["SceneQueryMixin<br/>scene/query.py 111<br/>（Layer·Tag / 查找 / SendMessage）"]:::impl
-  S10["ModelDataMixin<br/>components/model_data.py 109"]:::impl
+  subgraph SCENEDOM["① 场景域（physics/ + scene/ · 物理推进与场景查询）"]
+    S2["PhysicsMixin<br/>physics/physics.py 925"]:::impl
+    S9["SceneQueryMixin<br/>scene/query.py 111<br/>（Layer·Tag / 查找 / SendMessage）"]:::impl
+  end
+  subgraph INPDOM["② 输入/相机域（loom_input + loom_camera）"]
+    S3["InputMixin<br/>loom_input.py 631"]:::impl
+    S4["CameraMixin<br/>loom_camera.py 286"]:::impl
+  end
+  subgraph FRAMEDOM["③ 帧与时钟域（loom_logic_thread + components/frame_components）"]
+    S7["LogicThreadMixin<br/>loom_logic_thread.py 148"]:::impl
+    S5["FrameComponentMixin<br/>components/frame_components.py 149<br/>（音频/动画/碰撞回调推进）"]:::impl
+  end
+  subgraph COMPDOM["④ 组件域（components/ · 变换/射线/模型数据）"]
+    S1["TransformMixin<br/>components/transform.py 464"]:::impl
+    S8["RaycastMixin<br/>components/raycast.py 336"]:::impl
+    S10["ModelDataMixin<br/>components/model_data.py 109"]:::impl
+  end
+  subgraph PERFDOM["⑤ 性能域（core/ · 插桩）"]
+    S6["ProfilerMixin<br/>core/profiler.py 90"]:::impl
+  end
   K ==>|拼装| S1
   K ==>|拼装| S2
   K ==>|拼装| S3
@@ -305,12 +325,20 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-  S["SceneDriver<br/>render/vk/driver.py 2110<br/>class SceneDriver(VkWindowMixin,<br/>VkEditorRenderMixin, EngineCore)　L488"]:::facade
-  K["EngineCore<br/>core/engine_core.py 1130<br/>★后端无关的公共内核"]:::contract
-  W["VkWindowMixin<br/>render/vk/window.py 273<br/>★F11 假全屏（去边框/铺桌面/置顶）"]:::impl
-  V["VkEditorRenderMixin<br/>render/vk/pass_vk.py 552<br/>VkLineBatch L92 / VkFrameExecutor L226<br/>overlay_scope 与 GL 同签名（S3）"]:::impl
-  R["VkRenderer<br/>render/vk/renderer.py 2127"]:::impl
-  S ==>|拼装| K
+  subgraph KERN["① 公共内核（core/ · 后端无关）"]
+    K["EngineCore<br/>core/engine_core.py 1130<br/>★后端无关的公共内核"]:::contract
+  end
+  subgraph WDOM["② VK 窗口域（render/vk/window.py · F11 假全屏）"]
+    W["VkWindowMixin<br/>render/vk/window.py 273<br/>★F11 假全屏（去边框/铺桌面/置顶）"]:::impl
+  end
+  subgraph RDOM["③ VK 渲染执行域（pass_vk + renderer）"]
+    V["VkEditorRenderMixin<br/>render/vk/pass_vk.py 552<br/>VkLineBatch L92 / VkFrameExecutor L226<br/>overlay_scope 与 GL 同签名（S3）"]:::impl
+    R["VkRenderer<br/>render/vk/renderer.py 2127"]:::impl
+  end
+  subgraph PROD["④ 装配产物（VK 侧门面）"]
+    S["SceneDriver<br/>render/vk/driver.py 2110<br/>class SceneDriver(VkWindowMixin,<br/>VkEditorRenderMixin, EngineCore)　L488"]:::facade
+  end
+  S ==>|拼装（公共内核，两端同权）| K
   S ==>|拼装| W
   S ==>|拼装| V
   V -->|VkFrameExecutor 转 draw_frame| R
@@ -339,20 +367,28 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-  R1["主循环 run()<br/>限帧 120"]:::impl
-  F1["render/gl/render.py<br/>1498 行"]:::file
-  R2["帧描述 frame_plan()"]:::contract
-  F2["render/contract/frame_plan.py<br/>270 行（同参数命中缓存复用）"]:::file
-  R3["执行器 execute(plan)"]:::impl
-  F3["render/gl/pass_gl.py<br/>255 行"]:::file
-  R3b["VK 执行器 draw_frame(plan)"]:::impl
-  F3b["render/vk/pass_vk.py<br/>552 行（VkFrameExecutor）"]:::file
-  R4["各 pass 绘制源<br/>主pass / 天空 / 阴影 / 后处理"]:::impl
-  F4["render/gl/post_gl.py 215<br/>render/gl/shadow.py 118"]:::file
-  R5["UBO 打包 pack_arrays"]:::contract
-  F5["render/contract/scene_ubo.py<br/>177 行（352 float 场景块）"]:::file
-  R6["着色器源码 + 宏"]:::contract
-  F6["render/contract/shaders.py 145<br/>shaders/ 26 文件（GLSL+SPIR-V）"]:::file
+  subgraph MAIN["① 主循环（render/gl/render.py · 帧循环）"]
+    R1["主循环 run()<br/>限帧 120"]:::impl
+    F1["render/gl/render.py<br/>1498 行"]:::file
+  end
+  subgraph CONTRACT["② 契约层（render/contract/ · 两端消费同一份）"]
+    R2["帧描述 frame_plan()"]:::contract
+    F2["render/contract/frame_plan.py<br/>270 行（同参数命中缓存复用）"]:::file
+    R5["UBO 打包 pack_arrays"]:::contract
+    F5["render/contract/scene_ubo.py<br/>177 行（352 float 场景块）"]:::file
+    R6["着色器源码 + 宏"]:::contract
+    F6["render/contract/shaders.py 145<br/>shaders/ 27 文件（GLSL+SPIR-V，实测 2026-11-26）"]:::file
+  end
+  subgraph GLEXE["③ GL 执行层（pass_gl + 各 pass 绘制源）"]
+    R3["执行器 execute(plan)"]:::impl
+    F3["render/gl/pass_gl.py<br/>255 行"]:::file
+    R4["各 pass 绘制源<br/>主pass / 天空 / 阴影 / 后处理"]:::impl
+    F4["render/gl/post_gl.py 215<br/>render/gl/shadow.py 118"]:::file
+  end
+  subgraph VKEXE["④ VK 执行层（pass_vk）"]
+    R3b["VK 执行器 draw_frame(plan)"]:::impl
+    F3b["render/vk/pass_vk.py<br/>552 行（VkFrameExecutor）"]:::file
+  end
   R1 -->|实现于| F1
   R1 -->|调用| R2
   R2 -->|实现于| F2
@@ -364,9 +400,9 @@ flowchart LR
   R5 -->|实现于| F5
   R3 -->|取源码+宏| R6
   R6 -->|实现于| F6
-  F2 -.->|被 VK 也复用| R3b
   R1 -->|VK 播放器调用| R3b
   R3b -->|实现于| F3b
+  F2 -.->|被 VK 也复用| R3b
   F2 -.->|消费同一份 frame_plan| R3b
   classDef impl fill:#dcfce7,stroke:#16a34a,color:#14532d
   classDef contract fill:#ffedd5,stroke:#ea580c,color:#7c2d12
@@ -383,19 +419,27 @@ flowchart LR
 
 ```mermaid
 flowchart TB
-  E1["编辑器打开<br/>editor/core.py:1246"]:::entry
-  E2["GL 播放器<br/>render/gl/model_gpu.py:270"]:::entry
-  E3["VK 播放器 / 打包游戏<br/>render/vk/driver.py:731"]:::entry
-  E4["EAI 命令<br/>agent_commands.py:599"]:::entry
-  C["★ 场景契约唯一入口<br/>scene/contract.py 296<br/>prepare(data)"]:::contract
-  G1["gate(data)<br/>版本闸门"]:::contract
-  G2["migrate(data)<br/>v1..v11 → v12"]:::contract
-  A1["scene_from_dict<br/>GL 装配入口"]:::facade
-  A2["build_scene_from_data<br/>VK 装配入口"]:::facade
-  F1["sceneio.py 97（薄门面）<br/>→ scene/io.py 357 装配"]:::file
-  F2["assets/assets.py"]:::file
-  F3["components/components.py 1016<br/>components/game_object.py 455"]:::file
-  F4["render/gl/model_gpu.py 307<br/>render/gl/lighting.py 748"]:::file
+  subgraph ENTRY["① 入口与契约（4 条打开路径 → scene/contract.py 唯一入口 prepare）"]
+    E1["编辑器打开<br/>editor/core.py:1246"]:::entry
+    E2["GL 播放器<br/>render/gl/model_gpu.py:270"]:::entry
+    E3["VK 播放器 / 打包游戏<br/>render/vk/driver.py:731"]:::entry
+    E4["EAI 命令<br/>agent_commands.py:599"]:::entry
+    C["★ 场景契约唯一入口<br/>scene/contract.py 296<br/>prepare(data)"]:::contract
+    G1["gate(data)<br/>版本闸门"]:::contract
+    G2["migrate(data)<br/>v1..v11 → v12"]:::contract
+  end
+  subgraph PARSE["② 场景解析（sceneio 薄门面 → scene/ 装配）"]
+    A1["scene_from_dict<br/>GL 装配入口"]:::facade
+    A2["build_scene_from_data<br/>VK 装配入口"]:::facade
+    F1["sceneio.py 97（薄门面）<br/>→ scene/io.py 357 装配"]:::file
+  end
+  subgraph ASSET["③ 资产（assets/）"]
+    F2["assets/assets.py"]:::file
+  end
+  subgraph LAND["④ 落地（引擎装配 · 物体/组件/GPU 资源/灯光）"]
+    F3["components/components.py 1016<br/>components/game_object.py 455"]:::file
+    F4["render/gl/model_gpu.py 307<br/>render/gl/lighting.py 748"]:::file
+  end
   E1 -->|清空旧场景之前| C
   E2 -->|任何状态变更之前| C
   E3 -->|任何状态变更之前| C
@@ -431,16 +475,24 @@ flowchart TB
 
 ```mermaid
 flowchart LR
-  P["<项目根>/Assets/assets.json"]:::external
-  A["资产库解析<br/>assets/assets.py 1198"]:::file
-  I["★ guid 唯一真源<br/>scene/identity.py 42<br/>new_guid / derived_guid"]:::contract
-  S["场景里只写引用<br/>materials[].guid"]:::contract
-  M["材质<br/>assets/material.py 137"]:::file
-  T["贴图<br/>assets/texture.py 250"]:::file
-  C["环境图/天空盒<br/>assets/cubemap.py 239"]:::file
-  G["网格<br/>mathlib/mesh.py 409"]:::file
-  U1["GL 装配<br/>scene/material._apply_materials:216<br/>（sceneio 门面同名）"]:::impl
-  U2["VK 装配<br/>render/vk/driver.build_materials:225"]:::impl
+  subgraph SRC["① guid 唯一真源（scene/identity.py · 全仓 uuid4 只许 1 处）"]
+    I["★ guid 唯一真源<br/>scene/identity.py 42<br/>new_guid / derived_guid"]:::contract
+  end
+  subgraph LIB["② 导入与落盘（assets/ + mathlib/mesh · assets.json ↔ 定义文件）"]
+    P["<项目根>/Assets/assets.json"]:::external
+    A["资产库解析<br/>assets/assets.py 1198"]:::file
+    M["材质<br/>assets/material.py 137"]:::file
+    T["贴图<br/>assets/texture.py 250"]:::file
+    C["环境图/天空盒<br/>assets/cubemap.py 239"]:::file
+    G["网格<br/>mathlib/mesh.py 409"]:::file
+  end
+  subgraph REF["③ 场景只写引用（materials[].guid）"]
+    S["场景里只写引用<br/>materials[].guid"]:::contract
+  end
+  subgraph USE["④ 引擎装配（两端按 guid 消费）"]
+    U1["GL 装配<br/>scene/material._apply_materials:216<br/>（sceneio 门面同名）"]:::impl
+    U2["VK 装配<br/>render/vk/driver.build_materials:225"]:::impl
+  end
   P -->|读| A
   I -.->|发放/派生| A
   A -->|guid → 定义| S
@@ -465,18 +517,24 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-  PY1["几何/光照 VP 快路径<br/>kernels/pipeline_glue.py 565"]:::impl
-  PY2["物理<br/>physics/physics.py 925"]:::impl
-  PY3["物理桥（独立层）<br/>physics/bridge.py 1395"]:::impl
-  PY4["脚本<br/>script/scripts.py 838"]:::impl
-  PY5["数值内核<br/>kernels/fastpath.py 638"]:::impl
-  C1["core_components/pipeline/<br/>loom_pipeline.c"]:::file
-  C2["core_components/physics/<br/>loom_physics.c"]:::file
-  C3["core_components/script/<br/>loom_script.c + Lua 5.4"]:::file
-  C4["ckernels/<br/>loom_kernels.c (AVX2)"]:::file
-  L["core_components/module_loader.py 418<br/>ABI 机械层"]:::contract
-  R["core_components/module_registry.py 494<br/>槽位/回退策略"]:::contract
-  H["official_manifest.py 37<br/>boot_check.py 112<br/>官方件 SHA256 出厂基准"]:::contract
+  subgraph PY["① Python 侧（调用方 · 几何/物理/脚本/数值四域）"]
+    PY1["几何/光照 VP 快路径<br/>kernels/pipeline_glue.py 565"]:::impl
+    PY2["物理<br/>physics/physics.py 925"]:::impl
+    PY3["物理桥（独立层）<br/>physics/bridge.py 1395"]:::impl
+    PY4["脚本<br/>script/scripts.py 838"]:::impl
+    PY5["数值内核<br/>kernels/fastpath.py 638"]:::impl
+  end
+  subgraph CSIDE["② C 侧（core_components/ + ckernels/ · 进程内 DLL）"]
+    C1["core_components/pipeline/<br/>loom_pipeline.c"]:::file
+    C2["core_components/physics/<br/>loom_physics.c"]:::file
+    C3["core_components/script/<br/>loom_script.c + Lua 5.4"]:::file
+    C4["ckernels/<br/>loom_kernels.c (AVX2)"]:::file
+  end
+  subgraph BRIDGE["③ 桥接（ABI 机械层 / 槽位策略 / 出厂校验）"]
+    L["core_components/module_loader.py 418<br/>ABI 机械层"]:::contract
+    R["core_components/module_registry.py 494<br/>槽位/回退策略"]:::contract
+    H["core_components/official_manifest.py 37<br/>boot_check.py 112<br/>官方件 SHA256 出厂基准"]:::contract
+  end
   PY1 -->|ctypes 直调| C1
   PY2 -->|经 physics/glue.py 134| C2
   PY3 -->|Culverin/Jolt 桥| C2
@@ -498,16 +556,24 @@ flowchart LR
 
 ```mermaid
 flowchart TB
-  D["UI 数据模型<br/>loom_ui.py 1728（15 类）"]:::file
-  S1["★ 滚轮消费判据<br/>loom_ui_input.py 67"]:::contract
-  S2["★ UI 画布尺寸同步<br/>loom_ui_resize.py 100"]:::contract
-  P1["GL 屏幕空间<br/>render/gl/engine.py draw_screen_lines:730<br/>draw_screen_polygon:771"]:::impl
-  P2["GL 世界 Canvas<br/>render/gl/render.py world pass"]:::impl
-  P3["VK 屏幕 + 世界<br/>render/vk/ui.py 937<br/>VkUIEngine/VkUIPipeline/VkWorldUIPipeline"]:::impl
-  E1["编辑器派发<br/>editor/core.py:526 _dispatch_ui_mouse"]:::entry
-  E2["GL 播放器派发<br/>runtime.py:246 _dispatch_ui_mouse"]:::entry
-  E3["VK 派发<br/>render/vk/ui.py:785 UIInputBridge"]:::entry
-  F["字体/字形<br/>loom_font.py 207"]:::file
+  subgraph MODEL["① 数据模型与契约（loom_ui* + loom_font · 一套模型）"]
+    D["UI 数据模型<br/>loom_ui.py 1728（15 类）"]:::file
+    S1["★ 滚轮消费判据<br/>loom_ui_input.py 67"]:::contract
+    S2["★ UI 画布尺寸同步<br/>loom_ui_resize.py 100"]:::contract
+    F["字体/字形<br/>loom_font.py 207"]:::file
+  end
+  subgraph GLPAINT["② 画法一 · GL（屏幕空间 + 世界 Canvas）"]
+    P1["GL 屏幕空间<br/>render/gl/engine.py draw_screen_lines:743<br/>draw_screen_polygon:784"]:::impl
+    P2["GL 世界 Canvas<br/>render/gl/render.py world pass"]:::impl
+  end
+  subgraph VKPAINT["③ 画法二 · VK（屏幕 + 世界）"]
+    P3["VK 屏幕 + 世界<br/>render/vk/ui.py 937<br/>VkUIEngine/VkUIPipeline/VkWorldUIPipeline"]:::impl
+  end
+  subgraph DISPATCH["④ 派发入口（编辑器 + 两端播放器 → 同一模型）"]
+    E1["编辑器派发<br/>editor/core.py:526 _dispatch_ui_mouse"]:::entry
+    E2["GL 播放器派发<br/>runtime.py:246 _dispatch_ui_mouse"]:::entry
+    E3["VK 派发<br/>render/vk/ui.py:792 UIInputBridge"]:::entry
+  end
   D -->|被画| P1
   D -->|被画| P2
   D -->|被画| P3
