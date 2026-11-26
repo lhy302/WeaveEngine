@@ -76,6 +76,17 @@
 
 > **Q-B7-60-1 终审修复批同步（2026-11-26，HEAD 6258ff1，代码 commit a33817f + 78d21e1 + dac1f44 + 485aafb + 6258ff1）**：编辑器 **VK 失败自动回退**——backend=vulkan（配置或显式）启动时先探测（`editor/viewport/vk_viewport.probe_vk_ready:65`，与延迟 init 共用唯一实现 `_acquire_vk_device`），失败不建 VkViewport、本次回退 GL 视口 + 可见提示（`show_blocking_dialog`，`LOOM_NO_DIALOG=1` 降级 print）；配置来源的 vulkan **自动改写配置为 opengl**（唯一写盘路径 `hostenv.editor_launch.write_render_api_choice:164`），显式 `--backend vulkan` 不改写配置；auto 两端同义（先试 VK 失败回退 GL，不改写配置）。设置面板**无条件可达**（`_cmd_settings` 两段式，editor 未就绪时 GUI 界面/保存目录/渲染后端下拉仍渲染）；渲染后端**写盘单层化**（面板显示值=生效值，唯一写盘路径）。图 1 / 1.1 / 8 / 9 / 13 / 19 相应更新；文件清单 169→**171 个 .py**（**65123 行**，口径不变）；新增门 test_editor_vk_fallback_panel 55 条（修前红 15 FAIL）+ test_editor_backend_config_parity 69→101 + test_entry_backend_parity 111→112；run_all 171 文件 / 6497 PASS / 0 FAIL / EXIT 0（lead 实跑，HEAD 6258ff1；含子探针独立 LOOM_USER_ROOT 污染修复 6258ff1）。
 
+> **Q-B7-38-1 三批大文件拆分同步（2026-11-26，HEAD adb899f；lead 已复核 worktree clean；run_all = 175 文件 / 6623 PASS 行 / 0 FAIL / EXIT 0）**：
+> 四个超大文件按「一个功能一个文件」**纯搬迁**落地（零行为变化，旧导入名一律留兼容 shim）——
+> ① `agent_commands.py` 4222 行 → **`eai/` 包 36 文件 4712 行**（commit e72b96c）：`agent_commands.py` 现为 **25 行 sys.modules 兼容 shim**（`agent_commands is eai`），`_COMMANDS` 106 条逐字锁在 `eai/__init__.py:149`（计数断言与名单同处）；
+> ② `loom_ui.py` 1728 行 → **`ui/canvas/` 包 7 文件 1828 行**（commit 8d42499）：`loom_ui.py` 现为 **24 行 shim**（`loom_ui is ui.canvas`，15 类双路导入同一对象）；
+> ③ `gui/main_window.py` 4129 行 → **1084 行 + `gui/panels/` 12 mixin 13 文件 3446 行**（commits b49a478…308049a）：`class LoomGUI(CmdBridgeMixin, …, SettingsMixin, QMainWindow)`:119 = 12 mixin + QMainWindow，131 方法 = main 23 + mixin 108；
+> ④ `editor/core.py` 3101 行 → **1172 行 + `editor/core_*.py` 11 域文件 2193 行**（commits 591d616…64a6025）：`class _EditorCore(EngineCore, …, EditorPlaybackMixin)`:139 —— **EngineCore 是第一个基类**（MRO 装配形状门锁 `VkEditorApp.__mro__[:3]` = VkEditorApp/_EditorCore/SceneDriver），10 个域 mixin 全在它之后；146 方法 = 搬走 129 + 留守 17。
+> **四个大文件 → 67 个域文件；全仓最大文件 4222 行（原 agent_commands.py）→ 2127 行（`render/vk/renderer.py`）**。
+> 图 1.1 / 4 / 7 / 8 / 11 / 13 / 15 / 19 相应更新；文件清单 171→**241 个 .py**（**67119 行**，口径不变 = `len(text.split('\n'))`；包 204 / 顶层平铺 22 / tests 门文件 15）；
+> 验证体系新增三门（`test_ui_canvas_split` **19** / `test_gui_split` **65** / `test_editor_core_split` **41** = 125 条；本文件同步时在本机逐门单独实跑，三口全绿 / EXIT 0）+ run_all 汇总刷新（见 19.2）。
+> **缺口（如实标注）**：`eai/` 拆分**没有新增结构门**——靠既有 `test_eai_real` 190 条 + `test_agent_commands` 49 条兜底（同步时实测 190/49 PASS / 0 FAIL / EXIT 0）；而 ui/canvas、gui/panels、editor/core 三批各有专门结构门（19/65/41）。
+>
 > 相对 v1 的三个改动：**① 拆成多张小图**（一张图超过 ~15 个节点必然乱，这是 mermaid 的排版极限，不是画法问题）；
 > **② 节点里放进真实文件**，功能与文件之间用 `实现于` 连线；**③ 每条线上写清关系**（调用 / 拼装 / 共享契约 / import）。
 > 颜色按角色区分，同一张图里看颜色就知道哪个是门面、哪个是契约、哪个是文件。
@@ -92,7 +103,7 @@
 | 顺序 | 图 | 回答什么问题 |
 |---|---|---|
 | **1** | [图 1 全景](#图-1-全景只画层不画文件) | 层与层之间对不对？入口→门面→子系统→契约→数据，有没有跨层直连？ |
-| **2** | [图 13 文件清单](#图-13-文件清单按功能簇归组171-个-py) | **171 个 .py 按功能簇归组** —— 哪个文件混了多个功能？哪个簇缺文件？ |
+| **2** | [图 13 文件清单](#图-13-文件清单按功能簇归组241-个-py) | **241 个 .py 按功能簇归组** —— 哪个文件混了多个功能？哪个簇缺文件？ |
 | **3** | [图 19 验证体系](#图-19-验证体系两端对拍门覆盖了哪些面--本轮最大产出) | 哪个面有门、哪个面没门（19.3 缺口表） |
 
 **其它常用**：
@@ -222,14 +233,14 @@ flowchart TB
 
 | 场景 | 能选后端吗 | 依据 | 环境不支持时 |
 |---|---|---|---|
-| **编辑器**（`Loom.py` / `Loom.exe`） | **能，以配置文件为准**（Q-B7-60-1）：`render_api` 决定编辑视口后端 + 播放后端（一个键全局消费）；`--backend` 命令行显式最高优先级。`vulkan` → `VkEditorApp(_EditorCore, SceneDriver)`（`--ui qt` 下是 LoomGUI + `editor/viewport/vk_viewport.VkViewport`，QRenderWidget bitmap present）；`opengl` → `EditorApp(_EditorCore, GLEngine)`；`auto` → 决策为 vulkan **先试 VK**，启动期探测失败自动回退 GL 视口且不改写配置（P1-2 两端同义，与播放器 Q1/Q7=A 一致） | `hostenv/editor_launch.py::editor_backend_choice:52` **唯一实现**（`Loom.py:108-121` / `build_entry.py:113-123` 只薄转调；无显式时转调 `run_player.resolve_backend(None)`，与播放器同一解析链；门 `test_editor_backend_config_parity` 101 条 + `test_entry_backend_parity` A④/C1 同源） | **启动时先探测**（`editor/viewport/vk_viewport.probe_vk_ready:65`，与延迟 init 共用唯一实现 `_acquire_vk_device`）；失败不建 VkViewport，**本次启动直接回退 GL 视口** + 可见提示（`show_blocking_dialog`，`LOOM_NO_DIALOG=1` 降级 print，main_window `_handle_vk_init_failure:246`）。配置来源的 vulkan → **自动改写配置为 opengl**（唯一写盘路径 `hostenv.editor_launch.write_render_api_choice:164` = 引擎层 settings_set + 清游戏层覆盖键）；显式 `--backend vulkan` → 不改写配置（Q6 先例），同样回退 + 提示。设置面板**无条件可达**（`_cmd_settings` 两段式，editor 未就绪时 GUI 界面/保存目录/渲染后端下拉照常渲染） |
-| 编辑器里点「播放」 | **不能**。就在编辑器自己的视口后端里跑（GL 或 VK，播放组件同源） | `gui/main_window.py:1480` → `_invoke_cmd('play')` → `editor.toggle_play` 只置 `is_playing`，不起外部播放器 | 同上 |
+| **编辑器**（`Loom.py` / `Loom.exe`） | **能，以配置文件为准**（Q-B7-60-1）：`render_api` 决定编辑视口后端 + 播放后端（一个键全局消费）；`--backend` 命令行显式最高优先级。`vulkan` → `VkEditorApp(_EditorCore, SceneDriver)`（`--ui qt` 下是 LoomGUI + `editor/viewport/vk_viewport.VkViewport`，QRenderWidget bitmap present）；`opengl` → `EditorApp(_EditorCore, GLEngine)`；`auto` → 决策为 vulkan **先试 VK**，启动期探测失败自动回退 GL 视口且不改写配置（P1-2 两端同义，与播放器 Q1/Q7=A 一致） | `hostenv/editor_launch.py::editor_backend_choice:52` **唯一实现**（`Loom.py:108-121` / `build_entry.py:113-123` 只薄转调；无显式时转调 `run_player.resolve_backend(None)`，与播放器同一解析链；门 `test_editor_backend_config_parity` 101 条 + `test_entry_backend_parity` A④/C1 同源） | **启动时先探测**（`editor/viewport/vk_viewport.probe_vk_ready:65`，与延迟 init 共用唯一实现 `_acquire_vk_device`）；失败不建 VkViewport，**本次启动直接回退 GL 视口** + 可见提示（`show_blocking_dialog`，`LOOM_NO_DIALOG=1` 降级 print，`gui/main_window.py:270` `_handle_vk_init_failure`）。配置来源的 vulkan → **自动改写配置为 opengl**（唯一写盘路径 `hostenv.editor_launch.write_render_api_choice:164` = 引擎层 settings_set + 清游戏层覆盖键）；显式 `--backend vulkan` → 不改写配置（Q6 先例），同样回退 + 提示。设置面板**无条件可达**（`_cmd_settings` 两段式，editor 未就绪时 GUI 界面/保存目录/渲染后端下拉照常渲染） |
+| 编辑器里点「播放」 | **不能**。就在编辑器自己的视口后端里跑（GL 或 VK，播放组件同源） | `gui/panels/actions_mixin.py:22`（`_cmd_play`）→ `_invoke_cmd('play')` → `editor.toggle_play:386` 只置 `is_playing`，不起外部播放器 | 同上 |
 | 独立播放器（`--run`） | **能**：`--backend` > 游戏设置 > 引擎设置 > 默认 vulkan | `run_player.resolve_backend:152` | `auto`：VK 初始化失败 → 诊断+落配置+**同进程转 GL**（`run_player.py:434-470`、`_persist_backend:224`）；显式 `--backend vulkan` 失败只报错不改配置 |
 | 打包游戏（`game_player.py`） | **能**：同播放器一套逻辑（复用 run_player，`:170` 调同一 resolve_backend） | `game_player.py:170` | 同播放器 |
 | 运行期失败（VK 渲染循环内崩） | — | `VkRunError` | **不回退**：打印原因后非零退出（`run_player.py:438-439`） |
 | **运行环境屏幕不可见（远程/无头）** | **env 接管，不手选**：`LOOM_REMOTE_MODE` 三态 off / on / auto（auto = 上屏健康监视失败才转远程） | 三态收口**唯一实现** = `hostenv/remote_launch.py`（151 行；Loom.py / build_entry.py 四个播放分支全走同一 `launch_player`，Q-B7-55-1） | 编辑器面：`--ui minimal/default` + vulkan → 两入口同一条可见报错 EXIT 1（唯一决策 `hostenv/editor_launch.py`，不静默降级 GL） |
 
-> 编辑器里那个下拉框（`gui/main_window.py:3444-3492`，B4 后归位；原 `ui/loom_gui.py`）在 **Q-B7-60-1（2026-11-23 人类裁决）
+> 编辑器里那个下拉框（`gui/panels/settings_mixin.py:111-135`，写盘 `_cmd_set_render_api:520`；B4 后归位，Q-B7-38-1 起随设置面板搬入 mixin；原 `ui/loom_gui.py`）在 **Q-B7-60-1（2026-11-23 人类裁决）
 > 之后是「编辑器与播放共用的项目后端设置」**：同一个键 `render_api` 既决定编辑视口后端，也决定播放/打包游戏的后端
 > （编辑器读它走 `hostenv.editor_launch.editor_backend_choice` → `run_player.resolve_backend(None)` 同一条解析链）。
 > 标签已改为「渲染后端（编辑器与播放共用，重启生效）」，tooltip 写明「以配置文件为准 / 编辑器视口与播放打包共用 /
@@ -422,10 +433,10 @@ flowchart LR
 ```mermaid
 flowchart TB
   subgraph ENTRY["① 入口与契约（4 条打开路径 → scene/contract.py 唯一入口 prepare）"]
-    E1["编辑器打开<br/>editor/core.py:1246"]:::entry
+    E1["编辑器打开<br/>editor/core.py:327（_load_scene:298 内）"]:::entry
     E2["GL 播放器<br/>render/gl/model_gpu.py:270"]:::entry
     E3["VK 播放器 / 打包游戏<br/>render/vk/driver.py:731"]:::entry
-    E4["EAI 命令<br/>agent_commands.py:599"]:::entry
+    E4["EAI 命令<br/>eai/scene_ops.py:78"]:::entry
     C["★ 场景契约唯一入口<br/>scene/contract.py 296<br/>prepare(data)"]:::contract
     G1["gate(data)<br/>版本闸门"]:::contract
     G2["migrate(data)<br/>v1..v11 → v12"]:::contract
@@ -559,7 +570,7 @@ flowchart LR
 ```mermaid
 flowchart TB
   subgraph MODEL["① 数据模型与契约（loom_ui* + loom_font · 一套模型）"]
-    D["UI 数据模型<br/>loom_ui.py 1728（15 类）"]:::file
+    D["UI 数据模型<br/>loom_ui.py 24 行 shim → ui/canvas/ 7 文件<br/>（15 类 · 1828 行）"]:::file
     S1["★ 滚轮消费判据<br/>loom_ui_input.py 67"]:::contract
     S2["★ UI 画布尺寸同步<br/>loom_ui_resize.py 100"]:::contract
     F["字体/字形<br/>loom_font.py 207"]:::file
@@ -572,7 +583,7 @@ flowchart TB
     P3["VK 屏幕 + 世界<br/>render/vk/ui.py 937<br/>VkUIEngine/VkUIPipeline/VkWorldUIPipeline"]:::impl
   end
   subgraph DISPATCH["④ 派发入口（编辑器 + 两端播放器 → 同一模型）"]
-    E1["编辑器派发<br/>editor/core.py:526 _dispatch_ui_mouse"]:::entry
+    E1["编辑器派发<br/>editor/core.py:185 _dispatch_ui_mouse"]:::entry
     E2["GL 播放器派发<br/>runtime.py:246 _dispatch_ui_mouse"]:::entry
     E3["VK 派发<br/>render/vk/ui.py:792 UIInputBridge"]:::entry
   end
@@ -600,20 +611,21 @@ flowchart TB
 
 ---
 
-# 图 8 编辑器（一个门面 + 附属域）
+# 图 8 编辑器（Qt 视图层 + 命令层 + 内核 + 撤销栈）
 
 ```mermaid
 flowchart LR
-  subgraph QT["① Qt 视图（gui/ + 顶层窗口/对话框 · 面板与窗口壳）"]
-    V["Qt 视图<br/>gui/main_window.py 4129<br/>（B4 拆自 ui/loom_gui.py 4339）"]:::file
-    FD["文件对话框<br/>filedialog.py 295"]:::file
-    PW["播放窗口<br/>loom_player_window.py 308"]:::file
+  subgraph QT["① Qt 视图层（gui/ · 主窗口壳 + gui/panels 12 mixin）"]
+    V["Qt 视图 · 主窗口壳<br/>gui/main_window.py 1084<br/>class LoomGUI(CmdBridgeMixin, …, SettingsMixin,<br/>QMainWindow):119 = 12 mixin + QMainWindow<br/>（B4 拆自 ui/loom_gui.py 4339）"]:::file
+    P["gui/panels/ 12 mixin（13 文件 3446 行）<br/>cmd_bridge 195 / actions 215 / toolbar 169 / hierarchy 288<br/>/ gizmo 231 / asset 96 / console 42 / publish 151<br/>/ inspector 902 / uitree 290 / status 284 / settings 558"]:::file
+    AFX["附属窗口壳<br/>filedialog.py 295（原生文件对话框）<br/>loom_player_window.py 308（玩家模式远程兼容窗口）"]:::file
+    LU["UI 数据模型 shim<br/>loom_ui.py 24 → ui/canvas/ 7 文件 1828 行（15 类）"]:::file
   end
-  subgraph CMD["② 命令层（agent_commands · 唯一命令体）"]
-    EAI["EAI 命令面<br/>agent_commands.py 4222<br/>106 个 @command"]:::entry
+  subgraph CMD["② 命令层（eai/ 包 · 唯一命令体）"]
+    EAI["EAI 命令面<br/>eai/ 包 36 文件 4712 行 · 106 个 @command<br/>agent_commands.py 25 行兼容 shim → eai/"]:::entry
   end
-  subgraph KERN["③ 编辑器内核（editor/core · 后端无关唯一实现）"]
-    COR["★ _EditorCore<br/>editor/core.py 3101 · 152 方法<br/>编辑器能力唯一实现（后端无关）"]:::contract
+  subgraph KERN["③ 编辑器内核（editor/core_*.py 11 域 · 后端无关唯一实现）"]
+    COR["★ _EditorCore(EngineCore, 10 域 mixin):139<br/>editor/core.py 1172（★ 装配 + 契约锁定层，非薄 shim）<br/>+ editor/core_*.py 11 域 2193 行：contract 38 / viewport 50 /<br/>selection 147 / gizmo 328 / camera 249 / object 267 / inspector 351 /<br/>asset 360 / scene 214 / playback 90 / commands 99<br/>· 146 方法（搬走 129 + 留守 17）"]:::contract
   end
   subgraph UNDODOM["④ 撤销（editor/undo/ · 6 文件 1469 行）"]
     U["撤销/重做<br/>editor/undo/ 6 文件 1469 行<br/>registry 364 + cmd_object 400<br/>+ cmd_scene 395 + cmd_camera 148<br/>+ cmd_light 117"]:::file
@@ -639,20 +651,27 @@ flowchart LR
   VKE -->|由宿主装配| VKV
   VKV -->|继承事件桥| EB
   ED -->|通知/刷新| V
-  V -->|面板操作全走 _invoke_cmd| EAI
+  V ==>|拼装 12 Mixin + QMainWindow| P
+  P -.->|UI 树 / Canvas UI 模型| LU
+  V -->|面板操作全走 _invoke_cmd（gui/panels/cmd_bridge_mixin.py:32）| EAI
   ED -->|叠加层原语| LPV
   VKE -->|叠加层原语/帧执行| LPV
-  ED -->|记录命令| U
+  ED -->|记录命令 · undo.push 37 处| U
   EAI -->|命令体调编辑器方法| ED
-  ED -->|打开/保存| FD
+  ED -->|打开/保存| AFX
+  AFX -->|嵌入式渲染（loom_player_window）| GE
   ED -->|读/写场景| S
-  PW -->|嵌入式渲染| GE
   classDef entry fill:#dbeafe,stroke:#2563eb,color:#1e3a8a
   classDef facade fill:#ede9fe,stroke:#7c3aed,color:#4c1d95
   classDef file fill:#f1f5f9,stroke:#64748b,color:#334155
   classDef contract fill:#ffedd5,stroke:#ea580c,color:#7c2d12
 ```
 
+> **Q-B7-38-1 拆分后本图按四层重画**（节点行数 2026-11-26 实测）：① Qt 视图层 —— `gui/main_window.py` 1084 只剩装配壳
+> （`class LoomGUI(…12 Mixin, QMainWindow)`:119，类体 23 方法；`_handle_vk_init_failure:270`、`run_loom_gui:927` 留守），
+> 面板方法本体在 `gui/panels/` 12 mixin（131 方法 = main 23 + mixin 108，门 test_gui_split 65 条锁 MRO/零丢失/零残留）；
+> ② 命令层 —— `eai/` 包 36 文件 4712 行 · 106 命令，`agent_commands.py` 25 行兼容 shim（`agent_commands is eai`，`_EXPECTED_COMMANDS` 106 条逐字锁）；
+> ③ 内核 —— `editor/core.py` 1172 是**装配 + 契约锁定层**而非薄 shim（`class _EditorCore(EngineCore, 10 域 mixin)`:139，**EngineCore 必须是第一个基类**——MRO 门锁 `VkEditorApp.__mro__[:3]`；留守 17 方法 + 16 个 monkeypatch 名；146 方法 = 搬走 129 + 留守 17，门 test_editor_core_split 41 条）；④ 撤销栈 —— `editor/undo/` 未动。`loom_ui.py` 24 行 shim → `ui/canvas/` 7 文件（15 类，门 test_ui_canvas_split 19 条）。
 > GL 编辑器与 VK 编辑器的**播放组件同源**：相机策略 / 挂父相机重应用 / LateUpdate 派发 /
 > 逻辑位姿矩阵刷新（_refresh_play_frame_world，EngineCore:756 唯一实现）/ 进出播放（toggle_play）都是同一份函数对象；
 > 对拍门 = `test_editor_play_parity`（575 条，四面：GL编辑器播放/GL播放器/VK编辑器播放/VK播放器）+
@@ -769,7 +788,7 @@ sequenceDiagram
   end
   U->>ED: 打开场景文件
   ED->>SIO: json.load 读 dict
-  ED->>PREP: sceneio.prepare(data)（editor/core.py:1246，清空旧场景**之前**）
+  ED->>PREP: sceneio.prepare(data)（editor/core.py:327 / _load_scene:298，清空旧场景**之前**）
   PREP->>PREP: gate（版本闸门，内嵌于 migrate 唯一一处）
   PREP-->>ED: SceneVersionError 则拒绝加载并**保留当前场景**
   PREP-->>ED: 已规范化 dict（版本抬到 12）
@@ -837,10 +856,10 @@ sequenceDiagram
 
 ---
 
-# 图 13 文件清单（按功能簇归组，171 个 .py）
+# 图 13 文件清单（按功能簇归组，241 个 .py）
 
-图上画不下的全量在这里 —— 这是「功能分布在哪几个文件」的表格版。行数 2026-11-26 实测（物理行；口径 = `len(text.split('\n'))`，与包内 135 文件既有口径一致；终审 F-4 复算时把 2026-11-21 混用的三处行数——Loom.py / build_entry.py / 门文件——统一到同一口径）。
-**20 个包共 137 文件 / 47513 行 + 顶层平铺 22 文件 / 12138 行 + tests 门文件 12 / 5472 行 = 171 文件 / 65123 行。**（Q-B7-60-1 终审修复批 2026-11-26 实测，口径不变 = `len(text.split('\n'))`）
+图上画不下的全量在这里 —— 这是「功能分布在哪几个文件」的表格版。行数 2026-11-26 实测（物理行；口径 = `len(text.split('\n'))`，与既有口径一致；终审 F-4 复算时把 2026-11-21 混用的三处行数——Loom.py / build_entry.py / 门文件——统一到同一口径）。
+**20 个包（assets / audio / build / components / core / core_components / eai / editor / gui / hostenv / kernels / mathlib / net / physics / plugin / render / scene / script / scripts / ui）共 204 文件 / 54718 行 + 顶层平铺 22 文件 / 6237 行 + tests 门文件 15 / 6164 行 = 241 文件 / 67119 行。**（Q-B7-38-1 三批拆分收口后 2026-11-26 全量实测，口径不变 = `len(text.split('\n'))`；历史：Q-B7-60-1 终审修复批同期 171 文件 / 65123 行）
 
 ### A 入口层（顶层平铺）
 | 文件 | 行数 | 职责 |
@@ -910,10 +929,21 @@ sequenceDiagram
 | `core/log.py` | 37 | 启动日志开关（2026-10-19）。 |
 | `core/single_instance.py` | 96 | Loom 编辑器单实例锁。 |
 
-### G editor/（编辑器，13 文件 / 5191 行）
+### G editor/（编辑器，24 文件 / 5512 行；Q-B7-38-1 第 9 批后 13→24）
 | 文件 | 行数 | 职责 |
 |---|---|---|
-| `editor/core.py` | 3101 | _EditorCore（`class _EditorCore(EngineCore)`:194，编辑器能力唯一实现 + 文件对话框记忆/场景读写：prepare:1246、_dispatch_ui_mouse:526、toggle_play:2116、undo.push 37 处）。 |
+| `editor/core.py` | 1172 | ★ **装配 + 契约锁定层**（非薄 shim）：`class _EditorCore(EngineCore, EditorUndoBridgeMixin, EditorViewportMixin, EditorSelectionMixin, EditorGizmoMixin, EditorCameraMixin, EditorObjectMixin, EditorInspectorMixin, EditorAssetMixin, EditorSceneIOMixin, EditorPlaybackMixin)`:139 —— **EngineCore 必须是第一个基类**（MRO 门锁 `VkEditorApp.__mro__[:3]` = VkEditorApp/_EditorCore/SceneDriver），10 个域 mixin 全在其后；留守 17 方法 + 2 类属性（`_render_dispatches_late`/`_editor_shape`）+ 16 个名字的 monkeypatch 面（STATE_FILE / frame_plan / apply_snapshot …，门 F1 钉住）；场景读写 `_load_scene:298`（prepare:327）/`_save_scene:225`、`_dispatch_ui_mouse:185`、`toggle_play:386`；undo.push 37 处已随域搬进 mixin。 |
+| `editor/core_contract.py` | 38 | 编辑器常量/纯工具函数单点（契约层）：文件对话框记忆常量真源（core.py 按名 import 绑定）。 |
+| `editor/core_commands.py` | 99 | 撤销命令桥：把编辑操作封装成 undo 命令并入栈。 |
+| `editor/core_viewport.py` | 50 | 编辑器视口：6 元布局计算 / 视口内判定 / 无限网格线几何。 |
+| `editor/core_selection.py` | 147 | 拾取与选择态：世界/屏幕投影、射线、AABB 命中、选中读写与下标钳制。 |
+| `editor/core_gizmo.py` | 328 | gizmo：轴向基与圆环几何、屏幕命中、拖拽平面求交、拖拽应用与起拖、每帧更新、模式切换（`_GIZMO_*` 6 个类常量）。 |
+| `editor/core_camera.py` | 249 | 相机视图状态：投影三件套、轨道视角命令、场景相机应用、相机深度、聚焦动画（`FOCUS_*` 类属性）。 |
+| `editor/core_object.py` | 267 | 场景对象增删与层级：基元与 obj 导入、光源/相机增删、复制删除、显隐、新建材质、挂父摘父、层级树、种子场景。 |
+| `editor/core_inspector.py` | 351 | 属性面板字段命令：变换/光源/相机字段、改名校验与通知、碰撞与触发、刚体、音频、动画、脚本、Prefab 解链、相机预览与 FOV 锁、俯仰角限制。 |
+| `editor/core_asset.py` | 360 | 项目资产库：项目根与资产上下文定位、导入、扫描、资产数据面、查找、拖放落场景、材质与网格资产落盘、Prefab 保存与实例化（`_BUILTIN_MESHES`）。 |
+| `editor/core_scene.py` | 214 | 场景文档与快照：场景摘要、脏判定、标记已保存、保存三入口、未保存确认、新建与打开命令、相机字典、天空盒生效解析。 |
+| `editor/core_playback.py` | 90 | 播放态辅助：播放期渲染/逻辑矩阵刷新、退出播放原子化（失败回滚 + 一次告警）。 |
 | `editor/app.py` | 32 | EditorApp(_EditorCore, GLEngine) GL 装配入口（B4 拆，纯装配壳）。 |
 | `editor/vk_app.py` | 161 | VkEditorApp(_EditorCore, SceneDriver) VK 装配 + _VkGlStateShim:153（S4 建，B4 归位）。 |
 | `editor/undo/registry.py` | 364 | UndoManager（撤销/重做栈 + agent 批次租约 + 命令作用域支持）。 |
@@ -927,10 +957,23 @@ sequenceDiagram
 | `editor/viewport/__init__.py` | 13 | viewport 包。 |
 | `editor/__init__.py` | 38 | editor 包门面（re-export EditorApp 等，`from editor import EditorApp` 一行不改）。 |
 
-### H gui/（Qt 视图，7 文件 / 5190 行；B4 新建）
+### H gui/（Qt 视图，20 文件 / 5772 行；B4 新建，Q-B7-38-1 第 8 批后 7→20）
 | 文件 | 行数 | 职责 |
 |---|---|---|
-| `gui/main_window.py` | 4129 | LoomGUI 主窗口（工具栏/层级/检查器/资源浏览器/控制台坞全部面板方法，131 个方法）+ run_loom_gui 入口 + 「渲染后端（编辑器与播放共用，重启生效）」下拉 :3444-3492（Q-B7-60-1 终审 P1-1 单层化：面板显示值 = 生效值（resolve_backend(None) 解析链），写盘走唯一路径 `hostenv.editor_launch.write_render_api_choice`；`_handle_vk_init_failure:246` = VK 装配失败启动期自动回退 + 可见提示 + 配置来源自动改写 opengl；`_cmd_settings:3387` 两段式——不依赖 editor 的段落（GUI 界面/保存目录/渲染后端下拉）无条件渲染，editor 未就绪时其余段落跳过并提示「编辑器未就绪」；B4 拆自 ui/loom_gui.py 4339；B7-56 后面板操作全走 _invoke_cmd:778，B7-56-2 扫尾后检查器/组件/相机/资源面板/TPS/Tag 残留直调也全部命令化）。 |
+| `gui/main_window.py` | 1084 | LoomGUI 主窗口**装配壳**：`class LoomGUI(CmdBridgeMixin, ActionsMixin, ToolbarMixin, HierarchyMixin, GizmoMixin, AssetMixin, ConsoleMixin, PublishMixin, InspectorMixin, UitreeMixin, StatusMixin, SettingsMixin, QMainWindow)`:119（12 mixin 全排在 QMainWindow 之前，131 方法 = main 23 + mixin 108）+ `_handle_vk_init_failure:270`（VK 装配失败启动期自动回退 + 可见提示 + 配置来源自动改写 opengl）+ `run_loom_gui` 入口:927；B4 拆自 ui/loom_gui.py 4339；B7-56 后面板操作全走 _invoke_cmd（现住 gui/panels/cmd_bridge_mixin.py:32），B7-56-2 扫尾后检查器/组件/相机/资源面板/TPS/Tag 残留直调也全部命令化；面板方法本体已按域搬进 gui/panels/（Q-B7-38-1 纯搬迁，类体残留 0）。 |
+| `gui/panels/cmd_bridge_mixin.py` | 195 | 命令桥（共享前置）：GUI → EAI 命令统一翻译入口 `_invoke_cmd:32`（user 作用域；连贯性豁免裁定注释 :35）+ 数值行编辑会话批 + 结果 toast。 |
+| `gui/panels/actions_mixin.py` | 215 | 工具栏/菜单/快捷键动作命令壳（`_cmd_play:18` → `_invoke_cmd('play'):22`，TPS 按钮复位为 GUI 自身反馈）。 |
+| `gui/panels/toolbar_mixin.py` | 169 | 主工具栏构建 + 插件菜单注入区。 |
+| `gui/panels/hierarchy_mixin.py` | 288 | 层级树面板（树构建/右键菜单/拖拽挂父/重命名）。 |
+| `gui/panels/gizmo_mixin.py` | 231 | 视口叠加绘制（gizmo / 光源相机图标 / 朝向）。 |
+| `gui/panels/asset_mixin.py` | 96 | 资源浏览器面板（资产列表/预览/应用/放入场景）。 |
+| `gui/panels/console_mixin.py` | 42 | 底部命令行坞（EAI 命令行输入/输出）。 |
+| `gui/panels/publish_mixin.py` | 151 | 发布游戏（Unity Build Settings 对齐）。 |
+| `gui/panels/inspector_mixin.py` | 902 | 检查器面板（对象/光源/相机属性面板 + 数值行拖拽会话）。 |
+| `gui/panels/uitree_mixin.py` | 290 | 底部 UI 树坞（Canvas UI 可视化编辑器面板）。 |
+| `gui/panels/status_mixin.py` | 284 | 状态栏 + EAI 可视化（Agent 进度/红点/批次租约）。 |
+| `gui/panels/settings_mixin.py` | 558 | 设置对话框：「渲染后端（编辑器与播放共用，重启生效）」下拉 :111-135（Q-B7-60-1 终审 P1-1 单层化：面板显示值 = 生效值（resolve_backend(None) 解析链），写盘走唯一路径 `hostenv.editor_launch.write_render_api_choice`，命令壳 `_cmd_set_render_api:520`）+ `_cmd_settings:41` 两段式（不依赖 editor 的段落无条件渲染，editor 未就绪时其余段落跳过并提示「编辑器未就绪」）。 |
+| `gui/panels/__init__.py` | 25 | panels 包：`__all__` 汇总导出 12 个 mixin 类。 |
 | `gui/gl_viewport.py` | 227 | GLViewport（_ViewportEventBridge + QOpenGLWidget，只保留 GL 生命周期四方法）。 |
 | `gui/remote_viewport.py` | 246 | RemoteViewport（离屏 GL readback 兜底；事件桥同源）。 |
 | `gui/widgets/widgets.py` | 138 | 自定义控件：AssetListWidget / DraggableSpin / DragBlock。 |
@@ -1024,7 +1067,7 @@ sequenceDiagram
 | `core_components/boot_check.py` | 112 | 启动自检：官方件 SHA256 出厂基准校验（A1）。 |
 | `core_components/official_manifest.py` | 37 | 官方件出厂哈希基准（编译进 exe，外部改不动）。 |
 
-### R ui/（UI 层遗留 + 契约，8 文件 / 872 行）
+### R ui/（UI 层 + Canvas 数据模型包 + 契约，15 文件 / 2705 行；Q-B7-38-1 第 7 批后 8→15）
 | 文件 | 行数 | 职责 |
 |---|---|---|
 | `ui/loom_gui.py` | 22 | **薄门面（B4）**：sys.modules 别名 → gui/main_window.py（保仓外旧名）。 |
@@ -1035,8 +1078,15 @@ sequenceDiagram
 | `ui/grid.py` | 104 | 无限网格纯几何。 |
 | `ui/editor_ui.py` | 67 | IEditorView 契约：Loom 编辑器 UI 接口标准。 |
 | `ui/__init__.py` | 11 | Loom 编辑器 UI 层。 |
+| `ui/canvas/element.py` | 259 | UI 元素基类 UIElement（树结构 / 布局 / 命中）。 |
+| `ui/canvas/canvas.py` | 44 | 单个 UI 画布 Canvas（screen / world）。 |
+| `ui/canvas/manager.py` | 538 | 多 Canvas 容器 UIManager + 脚本事件派发子域（`_ACTIVE_ENGINE`/`_fire_binding`）+ 键码表。 |
+| `ui/canvas/widgets_basic.py` | 232 | 基础可视控件（Shape / Panel / Text / Image）。 |
+| `ui/canvas/widgets_input.py` | 520 | 交互输入控件（Button / Slider / Toggle / InputField / Dropdown）。 |
+| `ui/canvas/widgets_layout.py` | 173 | 布局控件（ScrollView / ProgressBar / GridLayout）。 |
+| `ui/canvas/__init__.py` | 62 | canvas 包门面（re-export 15 类；`loom_ui is ui.canvas` 的 shim 换身目标）。 |
 
-### S hostenv/（宿主环境，6 文件 / 985 行）
+### S hostenv/（宿主环境，6 文件 / 1095 行 = 表内 5 域文件 1060 + `__init__.py` 35）
 | 文件 | 行数 | 职责 |
 |---|---|---|
 | `hostenv/crash_reporter.py` | 295 | Loom 崩溃落盘（dbghelp Minidump + 场景自动备份）。 |
@@ -1057,9 +1107,9 @@ sequenceDiagram
 ### U 顶层平铺（其余，与入口/门面外的域文件）
 | 文件 | 行数 | 职责 |
 |---|---|---|
-| `agent_commands.py` | 4222 | Engine Agent 接口 EAI（106 个 @command；HTTP 面 + dispatch(scope) + agent 批次租约；GUI 命令壳共用 _COMMANDS（B7-56；B7-56-2 增 logic_pause/logic_step/register_tag 薄壳 + collider/rigidbody 扩参 + cmd_script_var 撤销修正）；scene_load 走 prepare:599）。 |
+| `agent_commands.py` | 25 | **兼容 shim（Q-B7-38-1 第 6 批）**：`sys.modules['agent_commands'] = eai`（`agent_commands is eai`，猴补丁语义不变）；原 4222 行单文件已按域拆进 eai/ 包（36 文件，见 W 组）；新代码请直接 `import eai`。 |
 | `loom_mcp.py` | 993 | MCP 服务面（EAI 的 MCP 封装）。 |
-| `loom_ui.py` | 1728 | Canvas/UI 系统数据模型与布局（15 类：UIElement/Canvas/UIManager/Shape/Panel/Text/Image/Button/Slider/Toggle/ProgressBar/ScrollView/InputField/Dropdown/GridLayout）。 |
+| `loom_ui.py` | 24 | **兼容 shim（Q-B7-38-1 第 7 批）**：`sys.modules['loom_ui'] = ui.canvas`（`loom_ui is ui.canvas`）；原 1728 行 / 15 类已按域拆进 ui/canvas/ 包（见 R 组）；新代码请直接 `import ui.canvas`。 |
 | `loom_input.py` | 631 | InputMixin：按键映射与输入动作层（M30b；UNLOCK_ACTION 引擎独占解锁动作）。 |
 | `game_settings.py` | 436 | 单游戏设置（与 Unity PlayerPrefs / UE GameUserSettings 对齐）。 |
 | `guiloader.py` | 340 | Loom / LoomHub 可插拔 GUI 加载器（DEFAULTS 含 render_api 默认 vulkan :47）。 |
@@ -1072,13 +1122,53 @@ sequenceDiagram
 | `loom_ui_resize.py` | 100 | ★ UI 画布尺寸同步唯一实现（Q-B7-41-1）。 |
 | `undo.py`（顶层） | 21 | **薄门面（B4）**：sys.modules 别名 → editor/undo（保仓外 `import undo` 旧名）。 |
 
+### W eai/（EAI 命令层包，36 文件 / 4712 行；Q-B7-38-1 第 6 批拆自 agent_commands.py 4222 行，纯搬迁）
+| 文件 | 行数 | 职责 |
+|---|---|---|
+| `eai/__init__.py` | 178 | eai 包门面：re-export 全部命令 + `_EXPECTED_COMMANDS` **106 条逐字锁**（计数断言 :149，缺/多即 ImportError）。 |
+| `eai/registry.py` | 154 | 命令注册表与派发：`_COMMANDS`/`_CMDS_DESC`、@command 装饰器、dispatch、命令作用域栈（`_CommandScope`；user/agent 语义注释 :23）、统一日志环。 |
+| `eai/helpers.py` | 152 | 命令参数归一助手（bool/float/颜色/向量分字段写）。 |
+| `eai/whitelist.py` | 88 | Agent 写路径白名单（项目/系统临时目录等；realpath 防 junction）。 |
+| `eai/target.py` | 51 | 命令目标寻址（共享前置：按 name/guid 找物体/模型/资源 + 歧义拒绝）。 |
+| `eai/commit.py` | 84 | 通用目标解析与一步撤销提交（共享前置；「连贯操作双链原则」注释 :14）。 |
+| `eai/inspector.py` | 233 | 检查器读回与通用写入命令（engine_metrics / inspect / set_transform / set_visible…）。 |
+| `eai/undo_base.py` | 20 | 撤销管理器取用（共享前置）。 |
+| `eai/undo_ops.py` | 117 | 撤销与 Agent 批次命令（undo / redo / agent_batch_*）。 |
+| `eai/scene_ops.py` | 88 | 场景命令（scene_new / scene_save / scene_load；scene_load 走 prepare:78，先回版本错误再加载）。 |
+| `eai/object_ops.py` | 183 | 对象命令（object_add / object_list / object_select / object_rename…）。 |
+| `eai/app_ops.py` | 137 | 应用级命令（quit / status / screenshot…）。 |
+| `eai/view_ops.py` | 109 | 视图与播放命令（view_focus / gizmo / play / logic_pause / logic_step）。 |
+| `eai/light_ops.py` | 51 | 灯光命令（light_add / light_set）。 |
+| `eai/camera_ops.py` | 173 | 相机命令（camera_add / camera_active / camera_move / camera_look / camera_proj…；**连贯性操作豁免**原则注释 :16——右键滑动视角/拖拽一律不进命令行）。 |
+| `eai/keybind_ops.py` | 41 | 键位命令（key_binding 查询/写盘）。 |
+| `eai/render_backend_ops.py` | 20 | 渲染后端配置命令（render_api 查询/写盘）。 |
+| `eai/skybox_ops.py` | 221 | 天空盒命令（skybox_set / skybox_clear / skybox_get + 来源判定）。 |
+| `eai/material_ops.py` | 257 | 材质命令（materials / set_material / material_new / set_texture / set_pbr…）。 |
+| `eai/physics_ops.py` | 146 | 物理命令（collider / rigidbody / physics_simulate）。 |
+| `eai/audio_ops.py` | 108 | 音频命令（audio / set_audio_3d / get_audio_3d）。 |
+| `eai/animator_ops.py` | 77 | 动画命令。 |
+| `eai/script_ops.py` | 146 | 脚本命令（script_add / script_remove / script_reload / script_var…）。 |
+| `eai/hierarchy_ops.py` | 44 | 层级关系命令（reparent / 挂摘父 / 树重命名）。 |
+| `eai/prefab_ops.py` | 55 | 导入与 Prefab 命令（import_obj / prefab_save / prefab_place / prefab_unlink）。 |
+| `eai/asset_ops.py` | 280 | 资产库命令（assets / asset_apply / asset_place / asset_save / asset_import…）。 |
+| `eai/layer_tag_ops.py` | 103 | 层级/标签命令（set_layer / set_tag / register_tag / list_layers…）。 |
+| `eai/ui_common.py` | 47 | UI 命令共享前置（Canvas 定位 / UI 编辑撤销包裹）。 |
+| `eai/ui_canvas_ops.py` | 96 | UI Canvas 命令（ui_canvas_add / ui_canvas_set）。 |
+| `eai/ui_element_ops.py` | 516 | UI 元素命令（ui_add / ui_set / ui_remove / ui_list / ui_reparent / ui_move_child…）。 |
+| `eai/ui_event_ops.py` | 74 | UI 声明式事件命令（ui_bind_event / ui_unbind_event）。 |
+| `eai/query_ops.py` | 136 | 查询/射线命令（raycast / raycast_all / raycast_screen / find_by_name…）。 |
+| `eai/settings_ops.py` | 58 | 编辑器设置命令（settings_get / settings_set，写引擎层 settings.json）。 |
+| `eai/http_ops.py` | 52 | HTTP 命令（http_get / http_post_json / http_request）。 |
+| `eai/plugin_ops.py` | 44 | 插件命令（plugins / plugin_button 等插件扩展点）。 |
+| `eai/service.py` | 373 | EAI 服务（.agent_port.json 端口文件 + HTTP 服务循环）。 |
+
 ### V tests/（对拍门文件，只单列入台账的新增门）
 | 文件 | 行数 | 职责 |
 |---|---|---|
 | `tests/test_editor_vk_fallback_panel.py` | 142 | Q-B7-60-1 终审修复批：VK 失败自动回退 + 面板可达门（55 checks，**真窗口父子进程**：子探针 `tests/_editor_vk_fallback_child.py` 独立 LOOM_USER_ROOT 起 GL+VK 真窗口；A 面板无条件可达（editor 为 None 时 GUI 界面/保存目录/渲染后端下拉仍渲染）/ B 显式 `--backend vulkan` 失败不改写配置只回退+提示 / C 写盘闭环（配置来源 vulkan → 自动改写 opengl 且面板显示值=生效值）；修前红 15 FAIL）。 |
-| `tests/_editor_vk_fallback_child.py` | 272 | 子进程探针（上门父进程拉起，**run_all 不收**；强制独立 LOOM_USER_ROOT 防共享 root 污染，6258ff1）。 |
+| `tests/_editor_vk_fallback_child.py` | 280 | 子进程探针（上门父进程拉起，**run_all 不收**；强制独立 LOOM_USER_ROOT 防共享 root 污染，6258ff1）。 |
 | `tests/test_entry_backend_parity.py` | 415 | B7-54 四入口后端选择同源门（112 条断言：A 四入口决策一致（A④/A④b 编辑器面双方真调用各自入口决策函数，终审 F-2）/ B 解析单源 grep 级 + Loom.py 源码结构断言（终审 F-2）/ C build_entry 决策可达；修前红留痕 089677f + F-2 修前红 27 条 2026-11-22）。Q-B7-60-1 期望同步 2 处（A④ expected_edit 与 C1 缺省：从「恒 gl」升级为「读配置 / `resolve_backend(None)` 同源」，判据强度不降，修前红 3 FAIL = A④×2 + C1×1；断言数终审修复批 111→**112**（A④/C1 期望改手写表 `_EDITOR_EXPECT`）。 |
-| `tests/test_editor_backend_config_parity.py` | 734 | Q-B7-60-1：编辑器渲染后端配置驱动门（终审修复批扩到 **101** checks（+32：D12b/D15/D16/D17 + E/F 段——写盘单层化 / 面板可达 / auto 同义）。原有（69 checks：A 配置驱动——引擎层 `render_api` 三态 × 无 argv，配置写入走真实 settings_set 命令壳，两入口决策一致且 = 期望 / B 显式覆盖——`--backend` 仍显式最高优先级 / C 编辑态零逻辑回归锁 13 条——真调用 `advance_logic`，编辑态逻辑步 0、alpha==0、脚本 update 触发点 0，各带播放态对照组防空转 / D 结构单源 + 设置面板——决策实现全仓恰 1 份、两入口真调用同一实现（monkeypatch 计数）、标签/tooltip/settings_set 命令壳就位；修前红 17 FAIL = A 组 3 + B 组 3 + D 组 11））。 |
+| `tests/test_editor_backend_config_parity.py` | 740 | Q-B7-60-1：编辑器渲染后端配置驱动门（终审修复批扩到 **101** checks（+32：D12b/D15/D16/D17 + E/F 段——写盘单层化 / 面板可达 / auto 同义）。原有（69 checks：A 配置驱动——引擎层 `render_api` 三态 × 无 argv，配置写入走真实 settings_set 命令壳，两入口决策一致且 = 期望 / B 显式覆盖——`--backend` 仍显式最高优先级 / C 编辑态零逻辑回归锁 13 条——真调用 `advance_logic`，编辑态逻辑步 0、alpha==0、脚本 update 触发点 0，各带播放态对照组防空转 / D 结构单源 + 设置面板——决策实现全仓恰 1 份、两入口真调用同一实现（monkeypatch 计数）、标签/tooltip/settings_set 命令壳就位；修前红 17 FAIL = A 组 3 + B 组 3 + D 组 11））。 |
 | `tests/test_gui_command_unification.py` | 1518 | B7-56 + B7-56-2 + 终审 F-67 GUI 全量命令化门（实跑 225 条：A GUI≡命令行 43 / B 批作用域 17 / C 相机裁定 19 / D 结构 6 / E 相机父链 23 / F 扫尾命令化等价 107（含 F9 碰撞器 enabled 不变量 22）/ G 新命令 JVM 对拍 8 / H 拒批 toast 文案 2）。 |
 | `tests/test_entry_execution_parity.py` | 592 | B7-55：入口执行面同源门（57 条：A 远程四态——LOOM_REMOTE_MODE 三态在 Loom.py/build_entry 四播放分支同走 hostenv.remote_launch.launch_player / B --ui×backend——minimal+vulkan 两入口同一条可见报错 EXIT 1 / C 结构唯一）。 |
 | `tests/test_camera_parent_serialization.py` | 369 | B7-57：相机父链序列化门（28 条：id_map 纳相机 guid / 防环整次拒绝 / 孤儿父脱根+告警；scene.camera._link_camera_parents is driver.link_camera_parents）。 |
@@ -1087,8 +1177,11 @@ sequenceDiagram
 | `tests/test_grid_occlusion_parity.py` | 167 | B7-53：网格遮挡真窗口像素对拍（子进程隔离探针：GL/VK 各 8 条 + 父门 13 条；根因1 角点 z 互换 / 根因2 GL 网格画进场景 pass）。 |
 | `tests/test_line_depth_plane.py` | 162 | B7-53：粗线四边形角点 z / 深度平面门（6 条：扩宽输出配恒等 VP 逐像素插值深度 == 地面真实深度）。 |
 | `tests/test_line_degenerate_segment_parity.py` | 189 | B7-53-3：expand_segment 门（13 条：语义等价非逐位 + 退化段判据 1e-9 两端同源，修前内联实现留痕）。 |
+| `tests/test_ui_canvas_split.py` | 96 | Q-B7-38-1 第 7 批：ui/canvas 拆分结构门（**19 条**：A loom_ui.py 兼容 shim（<40 行 / 无 class / sys.modules 换身）/ B 15 类双路导入同一对象 / C 7 文件行数防回潮 / D 模块级可变状态经 shim 改写落到真身（_fire_binding / _ACTIVE_ENGINE 值转发）；同步时本机实跑 19 PASS / EXIT 0）。 |
+| `tests/test_gui_split.py` | 262 | Q-B7-38-1 第 8 批：gui/panels 拆分结构门（**65 条 PASS（自报 64 项）**：A 12 mixin 行数防回潮 / B main_window 类体零残留（主类仍 LoomGUI、类体 23 方法）/ C 131 方法零丢失零新增 / D mixin 互不 import（只经 self）+ `__all__` 汇总导出 / E 禁集直调扫描覆盖 gui/panels（总数 0）/ F MRO = 12 mixin + QMainWindow 且 mixin 全在 QMainWindow 之前；同步时本机实跑 65 PASS / EXIT 0）。 |
+| `tests/test_editor_core_split.py` | 320 | Q-B7-38-1 第 9 批：editor/core 拆分结构门（**41 条**：A MRO 装配形状（EngineCore 第一基类 + `VkEditorApp.__mro__[:3]` = VkEditorApp/_EditorCore/SceneDriver）/ B 12 文件行数防回潮 / C core.py 类体零残留 + 留守 17 方法 + 2 类属性齐全（AST）/ D 146 方法零丢失（搬走 129 + 留守 17；类属性 11）/ E 编辑态零逻辑不回归（真跑 8 帧）/ F monkeypatch 面 16 名（STATE_FILE / frame_plan / apply_snapshot…）；同步时本机实跑 41 PASS / EXIT 0）。 |
 
-> **共 171 个文件**（20 包 137 + 顶层平铺 22 + tests 门文件 12）。行数为实测物理行，与 `git show HEAD` 状态逐文件一致（B7-56-2 后复测；终审 F-67 批对 3 个改动文件复测；Q-B7-60-1 终审修复批 2026-11-26 全量复测）。
+> **共 241 个文件**（20 包 204 + 顶层平铺 22 + tests 门文件 15）。行数为实测物理行，与 `git show HEAD` 状态逐文件一致（B7-56-2 后复测；终审 F-67 批对 3 个改动文件复测；Q-B7-60-1 终审修复批 2026-11-26 全量复测；**Q-B7-38-1 三批拆分收口后 2026-11-26 全量复算**——聚合 = 包目录逐文件求和（204 文件 / 54718 行）+ 顶层平铺 22 文件 / 6237 行 + tests 门文件 15 / 6164 行）。
 > ⚠ 表内有 **3 处跨簇重复登记**（同一文件在两个功能簇各占一行）：`core/engine_core.py`（B 组 + F 组）、`core/single_instance.py`（A 组 + F 组）、`build/build_game.py`（A 组 + T 组）——聚合计数按**唯一路径**去重，按表行直加会**多 3 行**；行不删（保簇结构完整）。
 > v3 的 97 文件清单里，`loom_types.py`→`core/primitives.py`、`loom_scene_*.py`→`scene/`、`editor.py`→`editor/`、
 > `ui/loom_gui.py`→`gui/`、`undo.py`→`editor/undo/`、`loom_components.py` 尾部→`audio/system.py` 等
@@ -1187,26 +1280,26 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-  subgraph GUIP["① GUI 面板层（gui/main_window.py 4129 · B7-56-2 后单一路径）"]
-    G1["GUI 面板操作<br/>工具栏/菜单 · 层级树挂父/改名<br/>检查器数值行·组件开关·脚本/材质/资产增删<br/>相机预览/激活 · 资源面板按钮/双击 · TPS · Layer/Tag<br/>全走 _invoke_cmd:778"]:::gui
+  subgraph GUIP["① GUI 面板层（gui/main_window.py 1084 + gui/panels/ 12 mixin · B7-56-2 后单一路径）"]
+    G1["GUI 面板操作<br/>工具栏/菜单 · 层级树挂父/改名<br/>检查器数值行·组件开关·脚本/材质/资产增删<br/>相机预览/激活 · 资源面板按钮/双击 · TPS · Layer/Tag<br/>全走 _invoke_cmd（gui/panels/cmd_bridge_mixin.py:32）"]:::gui
     G3["命令行坞 F12 / 远程 HTTP / MCP<br/>ui/qt_console.py 187"]:::gui
   end
   subgraph EXEMPT["② 豁免面（人类裁定 · 保持直调）"]
     G2["豁免面（人类裁定豁免）<br/>鼠标拾取 / gizmo 拖拽<br/>右键轨道 / 滚轮 / WASDQE"]:::gui
   end
-  subgraph CMDDOM["③ 命令层（agent_commands · 唯一命令体）"]
-    E["EAI 命令层<br/>agent_commands.py 4222 · 106 个命令<br/>_COMMANDS 唯一命令体"]:::eai
+  subgraph CMDDOM["③ 命令层（eai/ 包 · 唯一命令体）"]
+    E["EAI 命令层<br/>eai/ 包 36 文件 4712 行 · 106 个命令<br/>agent_commands.py 25 行兼容 shim<br/>_COMMANDS 唯一命令体（eai/registry.py）"]:::eai
   end
-  subgraph KERN["④ 内核（editor/core · 后端无关）"]
-    A["_EditorCore<br/>editor/core.py 3101 · 152 方法"]:::facade
+  subgraph KERN["④ 内核（editor/core + core_*.py 11 域 · 后端无关）"]
+    A["_EditorCore(EngineCore, 10 域 mixin)<br/>editor/core.py 1172（装配+契约锁定）<br/>+ editor/core_*.py 11 域 2193 行 · 146 方法"]:::facade
   end
   subgraph UNDODOM["⑤ 撤销栈（editor/undo/registry.py 364）"]
     U["UndoManager<br/>editor/undo/registry.py 364"]:::undo
   end
-  G1 -->|_invoke_cmd:778<br/>直调命令函数 · user 作用域| E
+  G1 -->|_invoke_cmd（cmd_bridge_mixin.py:32）<br/>直调命令函数 · user 作用域| E
   G3 -->|dispatch<br/>缺省 agent 作用域| E
   E -->|命令体调同一批方法| A
-  G2 -.->|绕过：连贯性操作豁免<br/>agent_commands.py:1436 原则| A
+  G2 -.->|绕过：连贯性操作豁免<br/>eai/camera_ops.py:16 原则| A
   A -->|undo.push（37 处）| U
   E -.->|GUI 点击=user 进撤销栈不进批<br/>F12/远程=agent 批作用域（D10=A）| U
   classDef gui fill:#dbeafe,stroke:#2563eb,color:#1e3a8a
@@ -1216,18 +1309,18 @@ flowchart LR
 ```
 
 **读法**：B7-56-2 后 GUI 只剩**一条路径**——面板操作（检查器/组件/相机/资源面板/TPS/Tag **全部**命令化，豁免面见下）
-→ `main_window._invoke_cmd`（:778，直调命令函数并自带 user 作用域包裹，不经 dispatch）
-→ EAI 命令层 → `_EditorCore` 方法；命令行坞 F12 / 远程 HTTP / MCP 走 `dispatch`（缺省 agent 作用域）。
-两条入口**共用同一批命令体**（`agent_commands._COMMANDS`，106 个）——GUI 点击 ≡ 命令行（门 A/F 组逐命令对拍）。
+→ `LoomGUI._invoke_cmd`（现住 gui/panels/cmd_bridge_mixin.py:32，直调命令函数并自带 user 作用域包裹，不经 dispatch）
+→ EAI 命令层（eai/ 包 36 文件 · 106 命令；agent_commands.py 为 25 行兼容 shim）→ `_EditorCore` 方法；命令行坞 F12 / 远程 HTTP / MCP 走 `dispatch`（缺省 agent 作用域）。
+两条入口**共用同一批命令体**（`eai._COMMANDS`，106 个；`agent_commands._COMMANDS` 经 shim 指同一对象）——GUI 点击 ≡ 命令行（门 A/F 组逐命令对拍）。
 
 **豁免面**（鼠标拾取 / gizmo 拖拽 / 右键轨道 / 滚轮 / WASDQE / 渲染循环 `e.render`/`_update_camera`/`_dispatch_*`/
 资源面板**拖拽落场景**、`_notify` 反馈与 `_selected`/`get_tps` 等读侧）按人类裁定**保持直调** `_EditorCore`：
-连贯性操作不进命令行（`agent_commands.py:1436` 用户定原则；GUI 命令壳注释 `main_window.py:781` 同款裁定（实测 2026-11-26，修前行号 645 已漂移））。
+连贯性操作不进命令行（`eai/camera_ops.py:16` 用户定原则，Q-B7-38-1 前住 agent_commands.py:1436；GUI 命令壳注释 `gui/panels/cmd_bridge_mixin.py:35` 同款裁定，实测 2026-11-26；修前行号 645 已漂移）。
 终审 P0-1 复扫（AST，门 D1 禁集 **62 名**，修前残留 41 处归零；agent-66 曾把修前残留命中数 41 误写为禁集
 规模，终审 F-68 更正）确认直调残留 = 0（豁免面之外）。
 
-**撤销栈语义照实**：两条入口最终都经方法内 `undo.push()`（37 处）进同一个撤销栈——「撤销效果」统一；
-「作用域」由 scope 参数区分（`agent_commands.py:51` 命令作用域注释）：**GUI 点击 = user 作用域**（进撤销栈、**不进** agent 批、不续租）；
+**撤销栈语义照实**：两条入口最终都经方法内 `undo.push()`（37 处——域拆分后分布在 core_asset 4 / core_camera 2 / core_gizmo 3 / core_inspector 14 / core_object 14）进同一个撤销栈——「撤销效果」统一；
+「作用域」由 scope 参数区分（`eai/registry.py:23` 命令作用域注释）：**GUI 点击 = user 作用域**（进撤销栈、**不进** agent 批、不续租）；
 **F12/远程 = agent 批作用域**（批次只吸命令产生的写命令，裁决 D10=A 保持）。
 GUI 点击会写**等价命令日志**（教学）；检查器数值写从「不进撤销」变为**每条自带一步撤销**。
 
@@ -1445,6 +1538,11 @@ flowchart TB
 > （test_editor_backend_config_parity；修前红 17 FAIL = A 组 3 + B 组 3 + D 组 11）；test_entry_backend_parity 期望同步 2 处（A④ / C1），
 > 断言数终审修复批 111→**112**。run_all 汇总数字本批未重测（仍为上一批实测值，待全量实测后补）。
 > Q-B7-60-1 终审修复批（2026-11-26，HEAD 6258ff1）：新增 test_editor_vk_fallback_panel **55** 条（真窗口父子进程，修前红 15 FAIL）；test_editor_backend_config_parity 69→**101**、test_entry_backend_parity 111→**112**；run_all 全量重测 **172 文件 / 6498 PASS 行 / 0 FAIL / EXIT 0**（终审 agent-91 两遍复跑一致，详见 19.2）。
+> Q-B7-38-1 三批大文件拆分（2026-11-26，HEAD adb899f）：agent_commands → eai/（36 文件）、loom_ui → ui/canvas/（7 文件）、
+> main_window → gui/panels/（12 mixin）、editor/core → core_*.py（11 域）落地；新增**结构门**三批各一：
+> test_ui_canvas_split **19** / test_gui_split **65** / test_editor_core_split **41**（合计 **125** 条；本文件同步时逐门单独实跑，三口全绿 / EXIT 0）；
+> run_all 汇总刷新为 **175 文件 / 6623 PASS 行 / 0 FAIL / EXIT 0**（lead 实跑；文件数经收集规则独立复核 = 174 个 test_*.py + test_integration.py）。
+> **缺口如实标注**：eai/ 拆分**没有新增结构门**——靠既有 test_eai_real **190** 条 + test_agent_commands **49** 条兜底（两门在本文件同步时实跑 190/49 PASS、0 FAIL、EXIT 0），eai/ 的文件级防回潮断言暂缺。
 
 ## 19.1 七面对拍门 + 增补门（全绿）
 
@@ -1469,7 +1567,7 @@ flowchart TB
     G7["test_editor_play_parity 575<br/>test_editor_play_pixel_parity 17<br/>+S3/S4：vk_overlay 24 / vk_editor_smoke 16"]:::gate
   end
   subgraph ADDGATES["③ 增补门（B7-28~B7-60 批新增 · 同一回归框架 run_all）"]
-    G8["B7-28/审核1-3/B7-54~60 增补门<br/>editor_wheel_semantics 20<br/>wheel_backend_semantics 31<br/>skybox_engine_parity 23<br/>entry_backend_parity 111（决策同源）<br/>gui_command_unification 225（GUI≡命令行）<br/>entry_execution_parity 57（执行面同源）<br/>camera_parent_serialization 28<br/>api_form_name_unification 21<br/>mouse_rel_ui_consumed_parity 45<br/>grid_occlusion（真窗口）/line_depth/line_degenerate 3 门<br/>editor_backend_config_parity 101（编辑器后端配置驱动）<br/>editor_vk_fallback_panel 55（VK 失败自动回退+面板可达）"]:::gate
+    G8["B7-28/审核1-3/B7-54~60 增补门<br/>editor_wheel_semantics 20<br/>wheel_backend_semantics 31<br/>skybox_engine_parity 23<br/>entry_backend_parity 111（决策同源）<br/>gui_command_unification 225（GUI≡命令行）<br/>entry_execution_parity 57（执行面同源）<br/>camera_parent_serialization 28<br/>api_form_name_unification 21<br/>mouse_rel_ui_consumed_parity 45<br/>grid_occlusion（真窗口）/line_depth/line_degenerate 3 门<br/>editor_backend_config_parity 101（编辑器后端配置驱动）<br/>editor_vk_fallback_panel 55（VK 失败自动回退+面板可达）<br/>ui_canvas_split 19 / gui_split 65 / editor_core_split 41（Q-B7-38-1 结构拆分门）"]:::gate
   end
   F1 --> G1
   F2 --> G2
@@ -1486,7 +1584,7 @@ flowchart TB
 
 ## 19.2 全部对拍/回归门（实测数字）
 
-> run_all 汇总：**172 文件 / 6498 PASS 行 / 0 FAIL / EXIT 0**（2026-11-26 终审 agent-91 两遍复跑实测，HEAD 6258ff1，Q-B7-60-1 终审修复批落地后；PASS 计数口径**含文件尾汇总行**——终审 F-74 标注不变。历史实测：2026-11-24 为 171 文件 / 6411 PASS，HEAD 23f2853；2026-11-22~23 为 ~170 文件 / 6341~6342 PASS，HEAD 01ca8a9）。
+> run_all 汇总：**175 文件 / 6623 PASS 行 / 0 FAIL / EXIT 0**（2026-11-26 lead 实跑，HEAD adb899f，Q-B7-38-1 三批拆分落地后；PASS 计数口径**含文件尾汇总行**——终审 F-74 标注不变。历史实测：2026-11-26（Q-B7-60-1 终审修复批）172 文件 / 6498 PASS，HEAD 6258ff1，终审 agent-91 两遍复跑；2026-11-24 为 171 文件 / 6411 PASS，HEAD 23f2853；2026-11-22~23 为 ~170 文件 / 6341~6342 PASS，HEAD 01ca8a9）。
 
 | 门 | 断言数（实测） | 覆盖什么 |
 |---|---|---|
@@ -1527,6 +1625,9 @@ flowchart TB
 | `test_line_depth_plane` | 6 | B7-53：粗线四边形角点 z / 深度平面（扩宽输出配恒等 VP，逐像素插值深度 == 地面真实深度，偏差 ≤1e-3） |
 | `test_line_degenerate_segment_parity` | 13 | B7-53-3：expand_segment 语义等价非逐位（角点分量差 ≤1e-12）+ 退化段判据 1e-9 两端同源（修前 VK 内联 1e-6 留痕） |
 | `test_hub_update` | 106 | B7-29：Hub 假绿根因封堵（非守护 Timer os._exit(0) 绕过 threading._shutdown→atexit；threading._register_atexit + os._exit 包装两条保险）+ is_program_files 修复（env 缺失兜底 / 8.3 短名 / %VAR% / 边界） |
+| `test_ui_canvas_split` | 19 | Q-B7-38-1：ui/canvas 拆分结构门（loom_ui shim 换身 / 15 类双路同一对象 / 7 文件行数防回潮 / 模块级可变状态经 shim 落真身） |
+| `test_gui_split` | 65 | Q-B7-38-1：gui/panels 拆分结构门（12 mixin 行数防回潮 / main_window 类体零残留（23 方法）/ 131 方法零丢失零新增 / mixin 互不 import / 禁集直调 = 0 / MRO = 12 mixin + QMainWindow 且 mixin 全在前；自报 64 项） |
+| `test_editor_core_split` | 41 | Q-B7-38-1：editor/core 拆分结构门（MRO 装配形状（EngineCore 第一基类 + VkEditorApp.__mro__[:3]）/ 12 文件行数防回潮 / core.py 类体零残留 + 留守 17 方法 + 2 类属性 / 146 方法零丢失（搬走 129 + 留守 17）/ 编辑态零逻辑不回归（真跑 8 帧）/ monkeypatch 面 16 名） |
 
 ## 19.3 ★ 还没有对拍门的面（缺口，按优先级）
 
