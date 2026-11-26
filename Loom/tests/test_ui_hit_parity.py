@@ -76,7 +76,7 @@ GLEngine.__init__ render/gl/engine.py:401-404 建、VK 由 SceneDriver.__init__ 
 
 结构断言改名防护（B7-16 复查 P0-1 教训）：结构段用**递归**扫描定位生产文件（排除
 tests/ 与 __pycache__/_tmp），并同时覆盖**当前名与历史名** ——
-  · 命中测试只许在 loom_ui.py（当前名 hit_test / _hit_screen；历史名/可能拷贝名
+  · 命中测试只许在 ui/canvas/element.py + ui/canvas/manager.py（当前名 hit_test / _hit_screen；历史名/可能拷贝名
     _hit_test、hit_test_screen 一律不许出现在别的生产文件里）；
   · scene_driver 里 2026-10-18 被淘汰的 _DriverUI 空壳不得复活（历史名）；
   · 命中入口 _dispatch_ui_mouse 只许在 runtime.py（GL 播放器）与 editor.py（编辑器）里，
@@ -242,6 +242,8 @@ def _prod_py_files():
     return out
 
 
+_HIT_HOMES = ('ui/canvas/element.py', 'ui/canvas/manager.py')                # Q-B7-38-1 第7批: 命中实现搬进 ui/canvas/ 包 (原 loom_ui.py)
+                # 仅元素基类 UIElement.hit_test + 容器 UIManager.hit_test/_hit_screen。
 def _grep_prod(needle):
     """在生产 .py 里找 needle，返回 [(相对路径, 行号), ...]。"""
     hits = []
@@ -270,12 +272,12 @@ src_has('render/vk/driver.py', '_DriverUI(', False,
         '历史空壳 _DriverUI 不得被实例化（注释提及不算，代码用法才算）')
 # ② 命中测试只有一份实现（当前名 hit_test / _hit_screen）
 _hit_defs = [h for h in _grep_prod('def hit_test')] + [h for h in _grep_prod('def _hit_screen')]
-_offenders = sorted({p for (p, _ln) in _hit_defs if p != 'loom_ui.py'})
+_offenders = sorted({p for (p, _ln) in _hit_defs if p not in _HIT_HOMES})
 check('结构：命中测试只由 loom_ui.py 实现（其它生产文件 0 处 def hit_test/_hit_screen）',
       not _offenders, '越界实现: %s' % _offenders)
 check('结构：loom_ui.py 里恰好三处命中定义（UIElement.hit_test + UIManager.hit_test + '
       'UIManager._hit_screen 的内部规则）',
-      len([1 for (p, _l) in _hit_defs if p == 'loom_ui.py']) == 3, _hit_defs)
+      len([1 for (p, _l) in _hit_defs if p in _HIT_HOMES]) == 3, _hit_defs)
 # 历史名 / 可能拷贝名：别的文件里不许出现命中测试的改名副本
 for _hist in ('def _hit_test(', 'def hit_test_screen(', 'def _hit_test_screen('):
     _h = _grep_prod(_hist)
