@@ -575,7 +575,12 @@ def t_path_confinement():
 # ============ ⑮ A1: 清空 = 恢复默认蓝天（不是"没有天空盒"） ============
 def t_clear_means_default():
     print('---- 15) A1: skybox_clear = 恢复默认蓝天（+ #000000 才是黑） ----')
-    src = open(os.path.join(ROOT, 'agent_commands.py'), encoding='utf-8').read()
+    # 2026-11-26 Q-B7-38-1 第 6 批（路径跟随）：命令帮助文本已随 skybox 命令搬进
+    # eai/skybox_ops.py，agent_commands.py 只剩 sys.modules 兼容 shim。
+    # 谓词一字未改（仍查 '恢复默认蓝天' 与 '#000000'），只把读取源扩到两文件合并文本。
+    src = (open(os.path.join(ROOT, 'agent_commands.py'), encoding='utf-8').read()
+           + "\n"
+           + open(os.path.join(ROOT, 'eai', 'skybox_ops.py'), encoding='utf-8').read())
     check('命令帮助写明"清空 = 恢复默认蓝天"',
           '恢复**默认蓝天盒**' in src or '恢复默认蓝天' in src)
     check('命令帮助给出黑天空的显式方式（solid_color=#000000）',
