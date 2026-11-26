@@ -132,49 +132,52 @@
 
 ```mermaid
 flowchart TB
-  subgraph EDENT["编辑器入口（后端决策 hostenv.editor_launch.editor_backend_choice，Q-B7-60-1；与播放同一条解析链）"]
-    A1["Loom.py 493<br/>源码入口"]:::entry
-    A2["build_entry.py 586<br/>编译入口"]:::entry
+  subgraph ENTRY["① 入口层（根目录四文件 · 后端开关唯一在 run_player）"]
+    E1["Loom.py 493<br/>源码入口"]:::entry
+    E2["build_entry.py 586<br/>编译入口"]:::entry
+    E3["run_player.py 513<br/>parse_backend_arg:133（唯一解析）<br/>resolve_backend:152"]:::entry
+    E4["game_player.py 305<br/>打包游戏（复用 run_player）"]:::entry
   end
-  subgraph PLENT["播放器入口（两条腿，可切）"]
-    A3["run_player.py 513<br/>parse_backend_arg:133（唯一解析）<br/>resolve_backend:152"]:::entry
-    A4["game_player.py 305<br/>打包游戏（复用 run_player）"]:::entry
-    A5["render/vk/player.py 901<br/>VK 窗口循环"]:::entry
-    A6["editor/vk_app.py 161<br/>VkEditorApp（编辑器 VK 面；Q-B7-60-1 起缺省走它）"]:::entry
+  subgraph GLONLY["② GL 专用（render/gl/ + runtime.py）"]
+    G1["GLEngine<br/>render/gl/engine.py 1651<br/>= EngineCore + 6 个 GL mixin"]:::facade
+    G2["6 个 GL mixin（GL 专用实现，合并列名）<br/>Render 1498 / Lighting 748<br/>/ Window 716 / Hud 318…"]:::impl
+    G3["runtime.PlayerApp<br/>GL 窗口循环（独立播放器）"]:::entry
   end
-  subgraph FACADE["门面（形状不同）"]
-    B1["GLEngine<br/>render/gl/engine.py 1651<br/>= EngineCore + 6 个 GL mixin"]:::facade
-    B2["SceneDriver<br/>render/vk/driver.py 2110<br/>= EngineCore + VkWindowMixin<br/>+ VkEditorRenderMixin"]:::facade
-    B0["★ EngineCore<br/>core/engine_core.py 1130<br/>10 个共享 mixin 的公共内核"]:::contract
+  subgraph VKONLY["③ VK 专用（render/vk/ + editor/vk_app.py）"]
+    V3["render/vk/player.py 901<br/>VK 窗口循环（独立播放器）"]:::entry
+    V1["SceneDriver<br/>render/vk/driver.py 2110<br/>= EngineCore + VkWindowMixin<br/>+ VkEditorRenderMixin"]:::facade
+    V2["VkRenderer<br/>render/vk/renderer.py 2127"]:::impl
+    V4["VkEditorApp / VkViewport<br/>editor/vk_app.py 161<br/>编辑器 VK 面（Q-B7-60-1 起缺省走它）"]:::facade
   end
-  subgraph IMPL["子系统 / 渲染器"]
-    C1["6 个 GL mixin<br/>Render 1498 / Lighting 748<br/>/ Window 716 / Hud 318…"]:::impl
-    C2["VkRenderer<br/>render/vk/renderer.py 2127"]:::impl
+  subgraph COMMON["④ 公共（core/ + render/contract/ · 两端共用）"]
+    K1["★ EngineCore<br/>core/engine_core.py 1130<br/>10 个共享 mixin 的公共内核"]:::contract
+    K2["_EditorCore<br/>播放组件同源中间基类<br/>（GL 侧 EditorApp 与 VK 侧 VkEditorApp 共用）"]:::contract
+    K3["render/contract/<br/>frame_plan 270 · scene_ubo 177<br/>渲染契约（两端消费同一份）"]:::contract
   end
-  subgraph DATA["场景 / 资产 / 渲染契约"]
-    D1["sceneio.py 97（薄门面）<br/>→ scene/ 14 文件<br/>唯一入口 prepare = scene/contract.py 296"]:::file
-    D2["assets/assets.py 1198"]:::file
-    D3["render/contract/<br/>frame_plan 270 · scene_ubo 177"]:::contract
+  subgraph SCENE["⑤ 场景 / 资产（sceneio → scene/ · assets）"]
+    S1["sceneio.py 97（薄门面）<br/>→ scene/ 14 文件（唯一入口 prepare = scene/contract.py 296）<br/>→ assets/assets.py 1198 解析资产"]:::file
   end
-  A1 -->|gl 分支 → EditorApp| B1
-  A2 -->|gl 分支 → EditorApp| B1
-  A1 -->|编辑视口后端 editor_backend_choice| A3
-  A2 -->|编辑视口后端 editor_backend_choice| A3
-  A4 -->|复用后端选择| A3
-  A3 -->|opengl 分支经 runtime.PlayerApp| B1
-  A3 -->|vulkan 分支| A5
-  A5 -->|创建| B2
-  A3 -.->|vulkan → 编辑器面 VkEditorApp / VkViewport| A6
-  A6 -->|装配| B2
-  B1 ==>|拼装| C1
-  B2 -->|使用| C2
-  B1 ==>|公共内核| B0
-  B2 ==>|公共内核| B0
-  B1 -->|加载场景经 prepare| D1
-  B2 -->|加载场景经 prepare| D1
-  D1 -->|解析资产| D2
-  C1 -.->|按 plan 执行| D3
-  C2 -.->|消费同一份 plan| D3
+  E1 -->|按 resolve_backend 决策分叉：gl 分支 → EditorApp| G1
+  E2 -->|按 resolve_backend 决策分叉：gl 分支 → EditorApp| G1
+  E1 -->|编辑视口后端 editor_backend_choice| E3
+  E2 -->|编辑视口后端 editor_backend_choice| E3
+  E4 -->|复用后端选择| E3
+  E3 -->|resolve_backend：opengl → runtime.PlayerApp| G3
+  E3 -->|resolve_backend：vulkan| V3
+  E3 -.->|resolve_backend：vulkan → 编辑器面 VkEditorApp / VkViewport| V4
+  G3 -->|创建| G1
+  G1 ==>|拼装| G2
+  V3 -->|创建| V1
+  V1 -->|使用| V2
+  V4 -->|装配| V1
+  G1 ==>|公共内核| K1
+  V1 ==>|公共内核| K1
+  G1 -.->|GL 侧 EditorApp 装配：播放组件同源（S5 门 575 条）| K2
+  V4 -.->|播放组件同源（S5 门 575 条）| K2
+  G2 -.->|按 plan 执行| K3
+  V2 -.->|消费同一份 plan| K3
+  G1 -->|加载场景经 prepare| S1
+  V1 -->|加载场景经 prepare| S1
   classDef entry fill:#dbeafe,stroke:#2563eb,color:#1e3a8a
   classDef facade fill:#ede9fe,stroke:#7c3aed,color:#4c1d95
   classDef impl fill:#dcfce7,stroke:#16a34a,color:#14532d
@@ -182,21 +185,36 @@ flowchart TB
   classDef file fill:#f1f5f9,stroke:#64748b,color:#334155
 ```
 
-> **读法**：B7-54 后编辑器与编译入口的后端选择**同走一份** `run_player.resolve_backend`（--backend 解析也收敛为
-> `run_player.parse_backend_arg:133` 全仓唯一实现）；**Q-B7-60-1 起编辑器视口后端也由这条链决定** —— 唯一实现
-> `hostenv/editor_launch.editor_backend_choice:52`（显式 `--backend` > 配置 `render_api` > 默认；无显式时直接转调
-> `run_player.resolve_backend(None)`）：`vulkan` → `VkEditorApp(_EditorCore, SceneDriver)`（真窗口双视口，editor/vk_app.py 161 行；
-> `--ui qt` 下是 LoomGUI + `editor/viewport/vk_viewport.VkViewport`），`opengl` → GL（`EditorApp(_EditorCore, GLEngine)`，
-> editor/app.py 32 行装配壳）；`auto` 与播放器**同义**（终审 P1-2：映射成 vulkan 先试 VK）；**VK 装不上 = 启动期自动回退**——
-> 先探测（`vk_viewport.probe_vk_ready:65`，与延迟 init 共用唯一实现 `_acquire_vk_device`），失败不建 VkViewport、本次直接建 GLViewport
-> + 可见提示（配置来源的 vulkan 自动改写配置为 opengl，显式 `--backend vulkan` 不改写，见 1.1）；`guiloader` 缺省 `render_api=vulkan`，
-> 故编辑器**缺省走 VK 视口**（修前缺省 GL）；
-> `build_entry.py` 四分支全部经 run_player 后端选择（播放分支 `run_backend` 链路，default/minimal 分支 VK 决策可达）；
-> 播放器入口经 run_player 分叉到 GL（runtime.PlayerApp）或 VK（render/vk/player → SceneDriver）。
-> 编辑器与播放器的播放组件是**同一份**（_EditorCore 中间基类 + 主 pass 相机/挂父相机/LateUpdate/
-> _refresh_play_frame_world 共享实现，「同源不同步」规则 5.5，S5 对拍门 575 条全绿）。
-> Q-B7-55-1 后两个入口的**执行面**也同源：LOOM_REMOTE_MODE 三态收口唯一实现 `hostenv.remote_launch`（launch_player），
-> --ui × --backend 装配决策唯一实现 `hostenv.editor_launch`（--ui minimal/default + vulkan → 两入口同一条可见报错 EXIT 1）。
+> **读法（框 = 功能大类归属，色 = 角色见上方图例；本次只换分组方式，图例色系不改）**：五个大框按「哪端专用」分割，
+> 归属与目录一一对应——
+> ① **入口层**：根目录四文件。后端开关**唯一**在 `run_player`：`parse_backend_arg:133`（--backend 解析全仓唯一实现）+
+> `resolve_backend:152`。B7-54 后编辑器与编译入口同走这一份（`Loom.py` / `build_entry.py` 薄转调，--backend 解析不再各写一套）；
+> **Q-B7-60-1 起编辑器视口后端也由这条链决定**——唯一实现 `hostenv/editor_launch.editor_backend_choice:52`
+> （显式 `--backend` > 配置 `render_api` > 默认；无显式时直接转调 `run_player.resolve_backend(None)`，与播放器同一解析链）。
+> ② **GL 专用**（render/gl/ + runtime.py）：编辑器 GL 面 = `EditorApp(_EditorCore, GLEngine)`（editor/app.py 32 行装配壳，
+> 图中不单列、由 ④② 两条虚线表达）；独立播放器 = `runtime.PlayerApp` → `GLEngine`（render/gl/engine.py 1651，
+> = EngineCore + 6 个 GL mixin：Render 1498 / Lighting 748 / Window 716 / Hud 318…，图中合并成一个节点）。
+> ③ **VK 专用**（render/vk/ + editor/vk_app.py）：独立播放器 = `vk/player.py`（901）→ `SceneDriver`
+> （render/vk/driver.py 2110，= EngineCore + VkWindowMixin + VkEditorRenderMixin）→ `VkRenderer`（2127）；
+> 编辑器面 = `VkEditorApp / VkViewport`（editor/vk_app.py 161，Q-B7-60-1 起缺省走它；--ui qt 下是 LoomGUI +
+> `editor/viewport/vk_viewport.VkViewport`）装配 SceneDriver。
+> ④ **公共**（core/ + render/contract/）：★EngineCore（core/engine_core.py 1130，10 个共享 mixin 的公共内核）被两端
+> `==>` 拼装；`_EditorCore` 是**播放组件同源所在**（GL 侧 EditorApp 与 VK 侧 VkEditorApp 共用，虚线；中间基类 +
+> 主 pass 相机/挂父相机/LateUpdate/_refresh_play_frame_world 共享实现，「同源不同步」规则 5.5，S5 对拍门 575 条全绿）；
+> `frame_plan / scene_ubo`（render/contract/，270 · 177）是渲染契约——GL mixin 按 plan 执行、VkRenderer 消费**同一份** plan。
+> ⑤ **场景/资产**：`sceneio`（97 薄门面）→ scene/ 14 文件（唯一入口 prepare = scene/contract.py 296）→
+> `assets/assets.py` 1198 解析资产；GLEngine 与 SceneDriver 都「加载场景经 prepare」。
+> **分叉细节**：`vulkan` → `VkEditorApp(_EditorCore, SceneDriver)`；`opengl` → GL；`auto` 与播放器**同义**
+> （终审 P1-2：映射成 vulkan 先试 VK）；**VK 装不上 = 启动期自动回退**——先探测（`vk_viewport.probe_vk_ready:65`，
+> 与延迟 init 共用唯一实现 `_acquire_vk_device`），失败不建 VkViewport、本次直接建 GLViewport + 可见提示
+> （配置来源的 vulkan 自动改写配置为 opengl，显式 `--backend vulkan` 不改写，见 1.1）；`guiloader` 缺省
+> `render_api=vulkan`，故编辑器**缺省走 VK 视口**（修前缺省 GL）；`build_entry.py` 四分支全部经 run_player 后端选择
+> （播放分支 `run_backend` 链路，default/minimal 分支 VK 决策可达）；播放器入口经 run_player 分叉到 GL
+> （runtime.PlayerApp）或 VK（render/vk/player → SceneDriver）。
+> **编辑态/播放态语义（本图不画，记两条）**：编辑态零逻辑（editor.toggle_play 只置 `is_playing`，不起外部播放器）；
+> 播放态同源之外，两个入口的**执行面**也同源：Q-B7-55-1 后 `LOOM_REMOTE_MODE` 三态收口唯一实现
+> `hostenv.remote_launch`（launch_player），--ui × --backend 装配决策唯一实现 `hostenv.editor_launch`
+> （--ui minimal/default + vulkan → 两入口同一条可见报错 EXIT 1）。
 
 ## 图 1.1 谁能选后端、不能选时怎么办（这张表比图更说明问题）
 
