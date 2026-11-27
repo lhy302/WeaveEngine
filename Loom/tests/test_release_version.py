@@ -107,15 +107,18 @@ def t_engine_version_consistency():
           pe.load_version() == src, pe.load_version())
     check("release_github 缺省引擎版本 = 源码元数据版本",
           rg.ENGINE_VERSION == src, rg.ENGINE_VERSION)
-    # 2026-11-10 Q-PKG-4: 源码包/编译包分开命名，不再同名覆盖
-    _engine_zip_names = {
-        'Loom-%s.zip' % src,
-        'Loom-%s-source.zip' % src,
-        'Loom-%s-compiled.zip' % src,
-    }
-    check("zip 包名 = Loom-<version>[-source|-compiled].zip",
-          os.path.basename(rg.engine_zip()) in _engine_zip_names,
-          os.path.basename(rg.engine_zip()))
+    # 2026-11-27 人类裁决：源码包只做内部测试用，发布资产只认编译包（不做任何回退）
+    _ez = os.path.basename(rg.engine_zip())
+    check("发布资产 = Loom-<version>-compiled.zip（源码包不得当发布资产）",
+          _ez == 'Loom-%s-compiled.zip' % src, _ez)
+    import inspect as _inspect
+    _ez_src = _inspect.getsource(rg.engine_zip)
+    check("engine_zip 不回退源码包 / 旧命名（源码里不得出现 source 兜底）",
+          "'source'" not in _ez_src and 'source.zip' not in _ez_src,
+          '源码含 source 兜底' if "'source'" in _ez_src else '')
+    check("缺编译包 -> 前置检查失败（零远端写），而不是回退源码包",
+          rg.require_assets([('engine', rg.engine_zip())]) == (
+              os.path.isfile(rg.engine_zip())), rg.engine_zip())
     check("release tag 由同一版本派生 (engine-v<version>)",
           'engine-v%s' % rg.ENGINE_VERSION == 'engine-v%s' % src,
           'engine-v%s' % rg.ENGINE_VERSION)

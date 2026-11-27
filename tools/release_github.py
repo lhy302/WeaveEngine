@@ -66,17 +66,16 @@ HUB_VERSION = resolve_version('LOOM_HUB_VERSION',
 
 
 def engine_zip():
-    """引擎发布资产: 优先编译包（主发布物），其次源码包，最后兼容历史命名。
+    """引擎发布资产 = **只认编译包**（`Loom-<ver>-compiled.zip`）。
 
-    2026-11-10 Q-PKG-4: 两种包改成 Loom-<ver>-compiled.zip / Loom-<ver>-source.zip，
-    不再互相覆盖；发布按这个顺序找，找不到再回退旧名（旧包仍可发）。
+    人类裁决 2026-11-27：「源码包只做内部测试用，只要编译包挂着就行了」。
+    因此这里**不做任何回退**：源码包不再当发布资产，历史命名 `Loom-<ver>.zip` 也不再兜底 ——
+    缺编译包就让前置检查（require_assets）在**任何远端写操作之前**报错退出，
+    免得哪天编译包丢了、却把 342 MB 的源码包悄悄发出去。
+    （历史：2026-11-10 Q-PKG-4 曾按 compiled → source → 旧名 依次兜底。）
     """
     dist = os.path.join(ROOT, 'tools', 'dist')
-    for kind in ('compiled', 'source'):
-        p = os.path.join(dist, 'Loom-%s-%s.zip' % (ENGINE_VERSION, kind))
-        if os.path.isfile(p):
-            return p
-    return os.path.join(dist, 'Loom-%s.zip' % ENGINE_VERSION)
+    return os.path.join(dist, 'Loom-%s-compiled.zip' % ENGINE_VERSION)
 
 
 def hub_setup():
