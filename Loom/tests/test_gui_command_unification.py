@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """test_gui_command_unification.py — Q-B7-56-1: GUI 操作全量命令化 + 相机命令进撤销栈
 (2026-11-22, 全无头 offscreen Qt)。
 
@@ -82,7 +82,7 @@ sys.path.insert(0, ROOT)
 os.chdir(ROOT)
 # 无头 Qt: LoomGUI.__new__ 不跑 __init__ (不需要真窗口), 走纯 Python 方法路径.
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
-os.environ.setdefault('LOOM_NO_DIALOG', '1')
+os.environ['LOOM_NO_DIALOG'] = '1'
 os.environ.setdefault('LOOM_NO_PARALLEL', '1')
 
 from PySide6.QtWidgets import QApplication  # noqa: E402

@@ -52,7 +52,7 @@ import tempfile as _tempfile_gate
 
 _os_gate.environ.setdefault('LOOM_USER_ROOT',
                             _tempfile_gate.mkdtemp(prefix='loom_test_userroot_b755_'))
-_os_gate.environ.setdefault('LOOM_NO_DIALOG', '1')
+_os_gate.environ['LOOM_NO_DIALOG'] = '1'
 
 
 class _FailGateStream:

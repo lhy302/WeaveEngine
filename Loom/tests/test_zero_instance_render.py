@@ -79,7 +79,7 @@ for _p in (ROOT, os.path.join(ROOT, 'tools'), os.path.join(ROOT, 'Loom'),
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-os.environ.setdefault('LOOM_NO_DIALOG', '1')
+os.environ['LOOM_NO_DIALOG'] = '1'
 
 import test_ab_gl_vk as AB   # noqa: E402  复用离屏渲染夹具（GL 走 EditorApp.render 生产路径）
 

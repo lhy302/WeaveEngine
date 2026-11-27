@@ -90,7 +90,7 @@ sys.path.insert(0, ROOT)
 os.chdir(ROOT)
 os.environ.setdefault('LOOM_NO_PARALLEL', '1')
 os.environ['LOOM_NO_SAVE_MIGRATE'] = '1'
-os.environ.setdefault('LOOM_NO_DIALOG', '1')
+os.environ['LOOM_NO_DIALOG'] = '1'
 os.environ['LOOM_NO_PHYSICS'] = '1'
 os.environ['LOOM_LOGIC_SYNC'] = '1'
 os.environ.setdefault('LOOM_USER_ROOT', tempfile.mkdtemp(prefix='loom_s5_pixel_userroot_'))

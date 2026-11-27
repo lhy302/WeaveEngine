@@ -73,7 +73,7 @@ import uuid
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)                    # Loom/
 sys.path.insert(0, ROOT)
-os.environ.setdefault('LOOM_NO_DIALOG', '1')
+os.environ['LOOM_NO_DIALOG'] = '1'
 os.environ.setdefault('LOOM_NO_PARALLEL', '1')
 os.environ.setdefault('LOOM_NO_PHYSICS', '1')
 os.environ.setdefault('LOOM_USER_ROOT', tempfile.mkdtemp(prefix='loom_qb757_ser_'))

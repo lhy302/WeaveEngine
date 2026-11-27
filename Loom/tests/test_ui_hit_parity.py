@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """test_ui_hit_parity.py — P3 面「UI 命中与焦点」两端对拍门（真窗口，2026-11-18）。
 
 人类判据（docs/guides/开发要求_后端API一致_JVM模型.md 唯一上位判据）：
@@ -172,7 +172,7 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 os.environ['LOOM_NO_SAVE_MIGRATE'] = '1'
 os.environ['LOOM_NO_PARALLEL'] = '1'
-os.environ.setdefault('LOOM_NO_DIALOG', '1')
+os.environ['LOOM_NO_DIALOG'] = '1'
 
 import glfw                                                      # noqa: E402
 import pygame                                                    # noqa: E402

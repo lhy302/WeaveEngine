@@ -22,7 +22,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
-os.environ.setdefault("LOOM_NO_DIALOG", "1")
+os.environ['LOOM_NO_DIALOG'] = '1'
 
 ok = True
 

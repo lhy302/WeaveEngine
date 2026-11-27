@@ -94,7 +94,7 @@ import tempfile as _tempfile_gate
 # 契约 §8: 跑测试不得污染 %LOCALAPPDATA%，也不得在仓库里留文件。
 _os_gate.environ.setdefault('LOOM_USER_ROOT',
                             _tempfile_gate.mkdtemp(prefix='loom_test_userroot_b754_'))
-_os_gate.environ.setdefault('LOOM_NO_DIALOG', '1')
+_os_gate.environ['LOOM_NO_DIALOG'] = '1'
 
 
 class _FailGateStream:

@@ -82,7 +82,7 @@ import tempfile as _tempfile_gate
 
 _os_gate.environ.setdefault('LOOM_USER_ROOT',
                             _tempfile_gate.mkdtemp(prefix='loom_test_userroot_b760_'))
-_os_gate.environ.setdefault('LOOM_NO_DIALOG', '1')
+_os_gate.environ['LOOM_NO_DIALOG'] = '1'
 
 # D 组要 ast.parse 全仓 .py（含历史文件里的非法转义序列）：SyntaxWarning 属噪音，
 # 不改变 AST 结论，这里静音以免污染门输出。

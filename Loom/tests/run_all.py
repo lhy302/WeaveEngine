@@ -23,7 +23,14 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 import tempfile as _tf_iso
 os.environ.setdefault('LOOM_USER_ROOT', _tf_iso.mkdtemp(prefix='loom_tests_userroot_'))
 # 2026-11-11: 全量回归里任何子进程都不得弹阻塞对话框（会把弹窗弹到用户桌面并卡住管道）
-os.environ.setdefault('LOOM_NO_DIALOG', '1')
+# 2026-11-27 (人类反馈：测试窗口不会自动关闭): 强制赋值而非 setdefault —— 外部环境
+# 把 LOOM_NO_DIALOG 污染成 0 时，setdefault 救不回来（实测：污染成 0 时 MessageBoxW
+# 模态会阻塞 200s+ 必须人工点掉）；同时给「万一仍有弹窗」加自动关闭兜底。
+os.environ['LOOM_NO_DIALOG'] = '1'
+os.environ.setdefault('LOOM_DIALOG_AUTO_CLOSE_MS', '8000')
+# 2026-11-27: 子进程 stdout 是 GBK 管道时，'✅' 等字符会让测试假红（实测
+# test_editor_core_split / test_mouse_lock_parity 两条）；统一 UTF-8。
+os.environ.setdefault('PYTHONIOENCODING', 'utf-8')
 
 files = [f for f in sorted(glob.glob(os.path.join(HERE, "test_*.py")))
          if os.path.basename(f) != "test_integration.py"]

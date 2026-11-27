@@ -88,7 +88,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)                 # Loom/
 sys.path.insert(0, ROOT)
-os.environ.setdefault('LOOM_NO_DIALOG', '1')
+os.environ['LOOM_NO_DIALOG'] = '1'
 os.environ.setdefault('LOOM_NO_PARALLEL', '1')
 
 import scene.contract as C                   # noqa: E402  B2: 原 loom_scene_contract.py 归位 scene/

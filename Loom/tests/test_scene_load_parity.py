@@ -119,7 +119,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)                 # Loom/
 sys.path.insert(0, ROOT)
 os.environ.setdefault('LOOM_NO_PARALLEL', '1')
-os.environ.setdefault('LOOM_NO_DIALOG', '1')
+os.environ['LOOM_NO_DIALOG'] = '1'
 os.environ.setdefault('LOOM_NO_SAVE_MIGRATE', '1')
 # 配置隔离到临时用户根（run_all 也这么做；单独跑时同样不许写真实 %LOCALAPPDATA%\Loom）
 os.environ.setdefault('LOOM_USER_ROOT', tempfile.mkdtemp(prefix='loom_p1_userroot_'))
