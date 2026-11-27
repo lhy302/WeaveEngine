@@ -397,7 +397,15 @@ def build_runtime(mode, cfg, info):
     # 运行时由 build_game.py 间接调 Nuitka：版本资源旗标用换行分隔的环境变量传下去
     # （build_game.py 只把这些行拼接进自己的 Nuitka 命令行，打包逻辑零改动）。
     env['LOOM_BUILD_VER_FLAGS'] = '\n'.join(_ver_flags('runtime', info.get('version')))
-    cmd = [sys.executable, os.path.join(LOOM, 'build', 'build_game.py'), '--build-runtime']
+    # B7-29（2026-11-27）修复（终审 agent-107 P0-1）：原来以**脚本方式**调用
+    #   python <LOOM>/build/build_game.py --build-runtime
+    # → sys.path[0] = <LOOM>/build，"Loom" 不在 sys.path，而目录重构 B6 批
+    #   (1ea2ae5) 把 build_game.py 的 import 改成了包绝对路径 'build.game_pack'
+    # → ModuleNotFoundError: No module named 'build'（官方一键构建 runtime 步骤必败）。
+    # 改为**模块方式** -m build.build_game 且 cwd=LOOM（LOOM 成为 sys.path[0]），
+    # 包绝对 import 自然可解析；不需要 PYTHONPATH 注入（也避免 vcvars 回灌把
+    # 含中文的 PYTHONPATH 打成 mojibake 那个坑）。
+    cmd = [sys.executable, '-m', 'build.build_game', '--build-runtime']
     secs = _run(cmd, cwd=LOOM, env=env)
     _assert_meta(dist, '运行时 dist')
     exe = os.path.join(dist, 'MyGame.exe')

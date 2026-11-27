@@ -530,6 +530,9 @@ if __name__ == "__main__":
                     # P0-1（2026-11-25）: explicit = argv 里真的给了 --backend 值
                     # （run_player.parse_backend_arg 全仓唯一解析，不新增解析实现）。
                     # 显式失败不改写用户配置，但仍给可见提示 + 本次回退 GL。
+                    # B7-29（2026-11-27）修复：此前这里裸用 run_player.（未 import），
+                    # 源码与编译产物 --ui qt 默认分支都会 NameError（终审 agent-107 P0-2）。
+                    import run_player
                     run_loom_gui(scene_path=open_scene,
                                  backend=_edit_plan['backend'],
                                  explicit=(run_player.parse_backend_arg(sys.argv)
