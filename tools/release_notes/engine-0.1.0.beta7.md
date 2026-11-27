@@ -117,7 +117,6 @@ beta7 不是功能版。人类 2026-11-18 裁定原文：「beta7 是对所有�
 | 产物 | 字节 | 显示大小 | sha256 |
 |---|---|---|---|
 | `Loom-0.1.0.beta7-compiled.zip` | 145852556 | 139.10 MB | `4c866ea1822e4d3b53d016b136e90855c5e149d4c94afec44c1087dbfeb82faa` |
-| `Loom-0.1.0.beta7-source.zip` | 359299507 | 342.65 MB | `67acafcd870909efe066bbbc4d0beeae62592d50738eec188bf3d0acd81128ca` |
 | `LoomHub-0.1.5-Setup.exe` | 25668225 | 24.48 MB | `516516fc9c3eaac80fafc36ab33fdf566338e6722e2ed106d879e32902ca3de6` |
 
 - 三件同日同 HEAD 产出（`git_head=be45eb7c7599`、`git_dirty=false`），dist 目录磁盘占用：编辑器 152.5 MB、构建器 onedir 79.3 MB（其中 `build_game.exe` 27.02 MB）、运行时 144.2 MB。
@@ -127,6 +126,7 @@ beta7 不是功能版。人类 2026-11-18 裁定原文：「beta7 是对所有�
 ## 八、发布记录
 
 - tag：`engine-v0.1.0.beta7`；Hub：`hub-v0.1.5`。Release 标记：引擎 **prerelease**、Hub 正式版。
+- **发布资产只挂编译包**：源码包 `Loom-0.1.0.beta7-source.zip`（342.65 MB / `67acafcd870909efe066bbbc4d0beeae62592d50738eec188bf3d0acd81128ca`）**仅内部测试与包=代码对拍用**，不作为 Release 资产。
 - 发布门：`tools/release_github.py all` 默认先跑全套 `Loom/tests/run_all.py`（本版 179 个文件），非零即中止且零远端写操作。
 - 包内 `git_head=be45eb7c7599` 与 tag 之间只隔 tools/docs/tests 的提交（不触 `Loom/` 产品代码），故「包 = 代码」仍成立（与 beta6 补丁版同一处理口径）。
 
