@@ -27,6 +27,10 @@ VK_MIN_API_MINOR = 1
 
 # 弹窗开关：测试/无头环境设 LOOM_NO_DIALOG=1（MessageBoxW 会阻塞等点击）
 ENV_NO_DIALOG = 'LOOM_NO_DIALOG'
+# 可选自动关闭（人类 2026-11-27 反馈：无人值守跑测试时不得留下必须人工点的窗口）：
+# 设了毫秒数就起一个守护线程，到点给本进程自己弹出的对话框发 WM_CLOSE。
+# **不设时行为与既有一字不差**（真实用户照旧必须看、必须点）。
+ENV_DIALOG_AUTO_CLOSE_MS = 'LOOM_DIALOG_AUTO_CLOSE_MS'
 
 
 class VkBackendInitError(RuntimeError):
@@ -226,11 +230,78 @@ def require_vulkan_api(where='Vulkan 渲染', adapter_info=None):
     return ver
 
 
+def _maybe_arm_dialog_auto_close(title):
+    """LOOM_DIALOG_AUTO_CLOSE_MS 设了毫秒数时，起守护线程到点关掉本进程的弹窗。
+
+    只为无人值守环境（测试/流水线）服务：**不设时什么都不做**，真实用户照旧
+    必须看到并手动点掉。定位方式：枚举**本进程**的可见 #32770 对话框（标题
+    匹配）-> PostMessage WM_CLOSE（MessageBox 通道的「取消」即关窗； MessageBoxW
+    会返回非 0 值，上层照常拿到「已弹出」）。
+    """
+    import threading
+    raw = os.environ.get(ENV_DIALOG_AUTO_CLOSE_MS, '')
+    if not raw:
+        return
+    try:
+        ms = int(raw)
+    except ValueError:
+        print('[backend] 忽略非法 %s=%r（须为整数毫秒）' % (ENV_DIALOG_AUTO_CLOSE_MS, raw))
+        return
+    if ms <= 0:
+        print('[backend] 忽略非正 %s=%r' % (ENV_DIALOG_AUTO_CLOSE_MS, raw))
+        return
+
+    def _close_later():
+        import time
+        time.sleep(ms / 1000.0)
+        try:
+            user32 = ctypes.windll.user32
+            import ctypes.wintypes as wt
+            me = os.getpid()
+            hits = []
+
+            def _cb(hwnd, _l):
+                try:
+                    if not user32.IsWindowVisible(hwnd):
+                        return True
+                    cls = ctypes.create_unicode_buffer(64)
+                    user32.GetClassNameW(hwnd, cls, 64)
+                    if cls.value != '#32770':
+                        return True
+                    pid = wt.DWORD()
+                    user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+                    if pid.value != me:
+                        return True
+                    buf = ctypes.create_unicode_buffer(512)
+                    user32.GetWindowTextW(hwnd, buf, 512)
+                    if title and buf.value != title:
+                        return True
+                    hits.append(hwnd)
+                except Exception:
+                    pass
+                return True
+
+            user32.EnumWindows(
+                ctypes.WINFUNCTYPE(ctypes.c_bool, wt.HWND, wt.LPARAM)(_cb), 0)
+            for hwnd in hits:
+                user32.PostMessageW(hwnd, 0x0010, 0, 0)   # WM_CLOSE
+            if hits:
+                print('[backend] %d ms 后自动关闭弹窗 %r（%s）'
+                      % (ms, title, ENV_DIALOG_AUTO_CLOSE_MS))
+        except Exception as e:
+            print('[backend] 自动关闭线程失败 (%r)' % (e,))
+
+    threading.Thread(target=_close_later, daemon=True).start()
+
+
 def show_blocking_dialog(title, text):
     """阻塞式原生错误框（Windows；禁用/非 Windows 返回 False，只留日志）。
 
     为什么不用 Qt：这条路径可能在 Qt 起来之前（VK 初始化在 run_vk 内）就触发，
     再拉一个 QApplication 会把「换个后端」变成「起半个 GUI」。user32 足够且零依赖。
+
+    可选自动关闭：LOOM_DIALOG_AUTO_CLOSE_MS=<毫秒> 时，弹出到点自动关（无人值守
+    环境用）；**不设时行为与既有一字不差**（真实用户照旧必须看、必须点）。
     """
     if os.environ.get(ENV_NO_DIALOG):
         return False
@@ -241,6 +312,7 @@ def show_blocking_dialog(title, text):
         fn.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint]
         fn.restype = ctypes.c_int
         MB_OK, MB_ICONERROR, MB_TOPMOST, MB_SETFOREGROUND = 0x0, 0x10, 0x40000, 0x10000
+        _maybe_arm_dialog_auto_close(title)
         rez = fn(None, text, title, MB_OK | MB_ICONERROR | MB_TOPMOST | MB_SETFOREGROUND)
         # P3②: MessageBoxW 返回 0 表示没弹出来（无桌面/被拒绝）—— 不能谎报已弹。
         return bool(rez)
