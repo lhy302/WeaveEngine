@@ -106,7 +106,7 @@ beta7 不是功能版。人类 2026-11-18 裁定原文：「beta7 是对所有�
 
 ## 六、验证体系（本版真实数字）
 
-- `Loom/tests/run_all.py` 收集 **179 个**测试文件（本版新增 8 个门：四个拆分结构门 + 残留窗口两门 + 打包排除表门 + eai 拆分结构门）。
+- `Loom/tests/run_all.py` 收集 **179 个**测试文件（本版新增 7 个门：四个拆分结构门（eai_split / ui_canvas_split / gui_split / editor_core_split）+ 残留窗口两门 + 打包排除表门）。
 - 新增门：`test_eai_split` 11 / `test_ui_canvas_split` 19 / `test_gui_split` 65 / `test_editor_core_split` 41（结构拆分）、`test_no_stray_windows` 12 / `test_backend_dialog_autoclose` 11（残留窗口）、`test_package_excludes_no_engine_package` 7。
 - **残留窗口清零**：以前跑测试会弹出不自动关闭的窗口等人手点（实测某模态框阻塞 213.7s / 283.8s 直到人工关闭）。现在测试套件可**完全无人值守**跑完：`LOOM_NO_DIALOG` 在 33 个测试文件里强制置 1（不再 `setdefault`，外部环境污染不再破防）、`backend_guard` 新增**可选**弹窗自动关闭 `LOOM_DIALOG_AUTO_CLOSE_MS=<毫秒>`（不设时产品行为不变，真实用户照旧必须看弹窗）、子探针优雅关窗 + 有界 watchdog、父门 `finally` 收尸。
 - 像素门：A/B 场景 26 个，MAE 与既有基线逐值一致（**没有移动任何基线**）。
@@ -120,9 +120,9 @@ beta7 不是功能版。人类 2026-11-18 裁定原文：「beta7 是对所有�
 | `Loom-0.1.0.beta7-source.zip` | 359299507 | 342.65 MB | `67acafcd870909efe066bbbc4d0beeae62592d50738eec188bf3d0acd81128ca` |
 | `LoomHub-0.1.5-Setup.exe` | 25668225 | 24.48 MB | `516516fc9c3eaac80fafc36ab33fdf566338e6722e2ed106d879e32902ca3de6` |
 
-- 三件同日同 HEAD 产出（`git_head=be45eb7c7599`、`git_dirty=false`）：编辑器 dist 152.5 MB、构建器 onedir 79.3 MB（`build_game.exe` 27.02 MB）、运行时 dist 144.2 MB。
+- 三件同日同 HEAD 产出（`git_head=be45eb7c7599`、`git_dirty=false`），dist 目录磁盘占用：编辑器 152.5 MB、构建器 onedir 79.3 MB（其中 `build_game.exe` 27.02 MB）、运行时 144.2 MB。
 - 冒烟三件分别盖章（`--stamp` 只盖本次真跑过的）：`smoke_passed_at=2026-11-27 13:43:52` > `built_at=2026-11-27 13:27:36`，**7/7 全 PASS**，耗时 7.9s（预算 60s）。读数：models=126、fps 93.0、tps 30.23；构建器 `--help` exit=0；运行时最小启动 exit=1（无游戏包，属预期）。
-- 包=代码对拍：`py -3.13 tools/verify_pkg_vs_head.py --version 0.1.0.beta7 <source.zip> <compiled.zip>` **EXIT=0** —— source 包内引擎 .py **226 / HEAD 226**、内容不一致 **0**、包多出 **0**、包缺失 **0**；compiled `git_head` 与 HEAD 相等、`git_dirty=False`。
+- 包=代码对拍：`py -3.13 tools/verify_pkg_vs_head.py --version 0.1.0.beta7 <source.zip> <compiled.zip>` **EXIT=0** —— source 包内引擎 .py **226 / HEAD 226**、内容不一致 **0**、包多出 **0**、包缺失 **0**；compiled `git_head=be45eb7c7599`、`git_dirty=False` —— 该点与 tag 之间只隔 tools/docs/tests 提交（不触 `Loom/` 产品代码），对拍脚本判「引擎等价（HEAD 仅改非 `Loom/` 文件）」= OK，不是逐字相等。
 
 ## 八、发布记录
 
