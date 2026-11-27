@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """test_mouse_lock_parity.py — P2 面「鼠标锁定与光标捕获」两端对拍门（真窗口，2026-11-18）。
 
 人类判据（docs/guides/开发要求_后端API一致_JVM模型.md 唯一上位判据）：

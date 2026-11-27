@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """test_gui_command_unification.py — Q-B7-56-1: GUI 操作全量命令化 + 相机命令进撤销栈
 (2026-11-22, 全无头 offscreen Qt)。
 
