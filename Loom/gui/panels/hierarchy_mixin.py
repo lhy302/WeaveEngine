@@ -283,4 +283,4 @@ class HierarchyMixin:
                 # 2026-08-22: 补 fov_locked —— 层级相机行 [锁/开] 标识, 检查器
                 # "玩家可调"点击后层级树也要刷新 (旧 digest 只有 (id,name) 永不重建)
                 + [(id(c), c.name, c.fov_locked) for c in e.cameras]
-                + [e.selected_index, e.selected_light_index, e.selected_camera_index])
+                + [e.selected_index, e.selected_light_index, e.selected_camera_index])

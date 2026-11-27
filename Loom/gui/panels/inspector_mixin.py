@@ -897,4 +897,4 @@ class InspectorMixin:
         if self._dragblock.is_dragging():
             return
         if new is None or not new in self._spins.values():
-            self._dragblock.hide_target()
+            self._dragblock.hide_target()

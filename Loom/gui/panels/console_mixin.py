@@ -37,4 +37,4 @@ class ConsoleMixin:
         self._btn_console.setChecked(show)
         if show:
             self.console.entry.setFocus()
-        return show
+        return show

@@ -553,4 +553,4 @@ class SettingsMixin:
                                           'value': bool(on)})
         e = self.editor
         if e is not None:
-            e._notify("并行开关重启后生效", (240, 200, 90))
+            e._notify("并行开关重启后生效", (240, 200, 90))

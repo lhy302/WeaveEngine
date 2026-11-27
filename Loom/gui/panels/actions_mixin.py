@@ -210,4 +210,4 @@ class ActionsMixin:
         if self.editor is not None:
             # Q-B7-56-1 裁定①: 放 Prefab 实例翻译成 prefab_place 命令
             self._invoke_cmd('prefab_place')
-            self._refresh_all()
+            self._refresh_all()

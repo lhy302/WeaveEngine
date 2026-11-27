@@ -146,4 +146,4 @@ class PublishMixin:
                 os.startfile(out)
         except Exception:
             pass
-        self._pub_proc = None
+        self._pub_proc = None

@@ -285,4 +285,4 @@ class UitreeMixin:
         if ci is None:
             return
         payload = {'canvas': ci, field: value}
-        self._invoke_ui_cmd('ui_canvas_set', **payload)
+        self._invoke_ui_cmd('ui_canvas_set', **payload)

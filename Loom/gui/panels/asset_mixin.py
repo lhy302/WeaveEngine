@@ -91,4 +91,4 @@ class AssetMixin:
         try:
             return [(it.get('type'), it.get('key')) for it in e._scan_assets()]
         except Exception:
-            return []
+            return []

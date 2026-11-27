@@ -226,4 +226,4 @@ class GizmoMixin:
                     pass
                 # 2026-08-22: 相机朝向线/锥/roll 箭头恒可见 (同 gizmo A11 修复)
                 with ctl.overlay_scope(framebuffer=ctl._screen_fb(), enable_only=0):
-                    ctl.draw_lines(lines, cols)
+                    ctl.draw_lines(lines, cols)

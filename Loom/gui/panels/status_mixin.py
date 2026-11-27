@@ -279,4 +279,4 @@ class StatusMixin:
     def _bind_agent_service(self, agent):
         """--agent 分支 / 测试: 绑定 AgentService (可视化钩子由服务侧 getattr 调用)."""
         self._agent_service = agent
-        return agent
+        return agent

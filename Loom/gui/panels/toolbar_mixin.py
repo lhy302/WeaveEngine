@@ -164,4 +164,4 @@ class ToolbarMixin:
         b.setAutoRaise(True)
         b.clicked.connect(lambda: fn())
         tb.addWidget(b)
-        return b
+        return b
