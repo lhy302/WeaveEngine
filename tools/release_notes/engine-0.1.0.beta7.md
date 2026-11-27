@@ -120,7 +120,7 @@ beta7 不是功能版。人类 2026-11-18 裁定原文：「beta7 是对所有�
 | `Loom-0.1.0.beta7-source.zip` | 359299507 | 342.65 MB | `67acafcd870909efe066bbbc4d0beeae62592d50738eec188bf3d0acd81128ca` |
 | `LoomHub-0.1.5-Setup.exe` | 25668225 | 24.48 MB | `516516fc9c3eaac80fafc36ab33fdf566338e6722e2ed106d879e32902ca3de6` |
 
-- 三件同日同 HEAD 产出（`git_head=be45eb7c7599`、`git_dirty=false`）：编辑器 dist 149.9 MB、构建器 onedir（`build_game.exe` 27.02 MB）、运行时 dist 143.4 MB。
+- 三件同日同 HEAD 产出（`git_head=be45eb7c7599`、`git_dirty=false`）：编辑器 dist 152.5 MB、构建器 onedir 79.3 MB（`build_game.exe` 27.02 MB）、运行时 dist 144.2 MB。
 - 冒烟三件分别盖章（`--stamp` 只盖本次真跑过的）：`smoke_passed_at=2026-11-27 13:43:52` > `built_at=2026-11-27 13:27:36`，**7/7 全 PASS**，耗时 7.9s（预算 60s）。读数：models=126、fps 93.0、tps 30.23；构建器 `--help` exit=0；运行时最小启动 exit=1（无游戏包，属预期）。
 - 包=代码对拍：`py -3.13 tools/verify_pkg_vs_head.py --version 0.1.0.beta7 <source.zip> <compiled.zip>` **EXIT=0** —— source 包内引擎 .py **226 / HEAD 226**、内容不一致 **0**、包多出 **0**、包缺失 **0**；compiled `git_head` 与 HEAD 相等、`git_dirty=False`。
 
