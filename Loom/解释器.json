@@ -1,6 +1,6 @@
 {
   "name": "Loom",
-  "version": "0.1.0.beta6",
+  "version": "0.1.0.beta7",
   "python_version": "3.13.15",
   "main": "Loom.py",
   "main_exe": "Loom.exe",
