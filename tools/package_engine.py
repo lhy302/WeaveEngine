@@ -26,8 +26,13 @@ DIST_DIR = os.path.join(ROOT, 'tools', 'dist')
 META_PATH = os.path.join(ENGINE_DIR, '解释器.json')
 
 # player_runtime 由 make_zip 显式预置 (只拷 game_player.dist, 排除 .build 中间产物)
+# 2026-11-27 修复（beta7 发布门拦下）：小写 'assets' 从排除表移除 —— 这个条目是
+# 「排除用户游戏的资产目录」时代写的；B6 目录重构后引擎自己的 Loom/assets/（资产身份
+# 层包，5 个 .py）撞名，整个引擎包被打包器吃掉，源码包装出来的引擎 import 即崩。
+# 用户工程约定目录仍排除（大写 Assets / Projects / 保存 / 发布）；防回潮门
+# Loom/tests/test_package_excludes_no_engine_package.py 锁「排除表 ∩ 引擎包 = 空」。
 EXCLUDE_DIRS = {'tests', '保存', 'Projects', '__pycache__', '.pytest_cache',
-                'assets', 'Assets', 'player_runtime', '发布'}
+                'Assets', 'player_runtime', '发布'}
 EXCLUDE_EXTS = {'.pyc', '.pyo', '.log', '.tmp'}
 EXCLUDE_FILES = {'解释器.json.bak'}
 
