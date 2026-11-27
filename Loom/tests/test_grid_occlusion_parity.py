@@ -76,29 +76,40 @@ def run_child(backend):
     except OSError:
         pass
     env = dict(os.environ)
-    env.setdefault("LOOM_NO_DIALOG", "1")
+    # 2026-11-27 人类反馈（漏窗/需人工点）：强制赋值（不 setdefault，防外部污染成 0）
+    env["LOOM_NO_DIALOG"] = "1"
+    env.setdefault("LOOM_DIALOG_AUTO_CLOSE_MS", "8000")
     env.setdefault("PYTHONUNBUFFERED", "1")
     print("---- 子进程 %s: %s ----" % (backend, os.path.basename(CHILD)))
     proc = subprocess.Popen([sys.executable, CHILD, backend, verdict_path],
                             env=env, cwd=ROOT)
-    deadline = time.monotonic() + 240
-    v = None
-    while time.monotonic() < deadline:
-        try:
-            with open(verdict_path, encoding="utf-8") as f:
-                v = json.load(f)
-            break
-        except (OSError, ValueError):
-            if proc.poll() is not None and v is None:
+    # 2026-11-27 人类反馈：离开本函数前必须 kill + wait 收掉子进程（真窗口存活期 =
+    # 进程存活期；父门只认 verdict 就收口，窗口残留是子进程的）。
+    try:
+        deadline = time.monotonic() + 240
+        v = None
+        while time.monotonic() < deadline:
+            try:
+                with open(verdict_path, encoding="utf-8") as f:
+                    v = json.load(f)
                 break
-            time.sleep(1.0)
-    child_rc = proc.poll()
-    if v is None and time.monotonic() >= deadline:
+            except (OSError, ValueError):
+                if proc.poll() is not None and v is None:
+                    break
+                time.sleep(1.0)
+        child_rc = proc.poll()
+        if v is None and time.monotonic() >= deadline:
+            print("FAIL %s 子进程超时 240s（无 verdict，已硬杀）" % backend)
+    finally:
         try:
-            proc.kill()
+            if proc.poll() is None:
+                proc.kill()
         except Exception:
             pass
-        print("FAIL %s 子进程超时 240s（无 verdict，已硬杀）" % backend)
+        try:
+            proc.wait(timeout=5)
+        except Exception:
+            pass
     if v is None:
         try:
             with open(verdict_path, encoding="utf-8") as f:

@@ -38,11 +38,31 @@ _VERDICT_PATH = (sys.argv[2] if len(sys.argv) > 2 else os.path.join(
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)          # 子进程住在 tests/，引擎根 = Loom/
 sys.path.insert(0, ROOT)
-os.environ.setdefault('LOOM_NO_DIALOG', '1')
+os.environ['LOOM_NO_DIALOG'] = '1'
 os.environ['LOOM_USER_ROOT'] = tempfile.mkdtemp(prefix='loom_vkfallback_')   # 强制覆盖：绝不写共享 root（2026-11-26 污染修复）
 os.environ.setdefault('LOOM_NO_PARALLEL', '1')
 os.environ['LOOM_NO_SAVE_MIGRATE'] = '1'
 os.environ.setdefault('QT_ENABLE_HIGHDPI_SCALING', '1')
+
+def _arm_unattended_watchdog(seconds):
+    """无人值守兜底（2026-11-27 人类反馈：测试不得留下要人点的窗口）。
+
+    任何阻塞路径（意外弹出的模态框 / 驱动卡死 / GL 就绪等待死循环）都不许把本
+    进程及其真窗口留在桌面上等人点 —— 到点进程级硬退出（窗口随进程销毁）。
+    正常路径末尾的 os._exit 更早发生，此定时器只是最后防线。
+    """
+    import threading
+
+    def _bail():
+        try:
+            print('[child] watchdog %ds 到点硬退（流程未正常收口）' % seconds,
+                  flush=True)
+        except Exception:
+            pass
+        os._exit(4)
+
+    threading.Timer(seconds, _bail).start()
+
 
 _fails = []
 _pass_n = 0
@@ -68,6 +88,7 @@ def _write_verdict():
 
 
 def main():
+    _arm_unattended_watchdog(200)
     import guiloader
     import run_player
     import hostenv.backend_guard as bg
@@ -268,6 +289,26 @@ def main():
         time.sleep(0.01)
     check('A13 回退后编辑器跑 20 帧无异常', win.editor is not None,
           'editor=%r' % (win.editor is not None,))
+
+    # ---- 优雅关窗兜底（2026-11-27 人类反馈）----
+    # os._exit 已保证窗口随进程销毁；但若进程在驱动 teardown 卡住数分钟（历史实测），
+    # 窗口会一直留在桌面上。先优雅关掉：mark_saved + 抑制「是否保存」三态框
+    # （测试态不走人机确认）+ QTimer 关窗 + 有界泵等 isVisible()=False。
+    try:
+        if win.editor is not None:
+            win.editor.mark_saved()
+        win._suppress_confirm = True
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(0, win.close)
+        _t_close = time.perf_counter()
+        while win.isVisible() and time.perf_counter() - _t_close < 10:
+            app.processEvents()
+            time.sleep(0.01)
+        print('[child] 关窗 %s (耗时 %.1fs)' % (
+              'OK' if not win.isVisible() else '超时(转 os._exit)',
+              time.perf_counter() - _t_close), flush=True)
+    except Exception as _ce:
+        print('[child] 优雅关窗异常 (转 os._exit): %r' % (_ce,), flush=True)
 
     _write_verdict()
     print('---- mode=%s: %d PASS / %d FAIL ----' % (MODE, _pass_n, len(_fails)))

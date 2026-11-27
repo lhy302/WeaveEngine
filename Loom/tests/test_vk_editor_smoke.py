@@ -48,6 +48,8 @@ def main():
     env = dict(os.environ)
     env.setdefault('LOOM_NO_DIALOG', '1')
     env.setdefault('WGPU_BACKEND_TYPE', 'Vulkan')
+    # 2026-11-27 人类反馈：测试不得留下要人点的窗口 —— 弹窗自动关闭兜底（见 run_all 注释）
+    env.setdefault('LOOM_DIALOG_AUTO_CLOSE_MS', '8000')
     env.setdefault('PYTHONUNBUFFERED', '1')
     # 父门透传子进程 stdout（PASS/FAIL 明细进 run_all 日志）。
     # ★不等子进程退出：Qt+wgpu 真窗口进程的收尾会卡在驱动 teardown（僵尸数分钟，
@@ -56,24 +58,34 @@ def main():
     import time as _time
     proc = subprocess.Popen([sys.executable, CHILD, verdict_path],
                             env=env, cwd=ROOT)
-    _deadline = _time.monotonic() + 180
-    v = None
-    while _time.monotonic() < _deadline:
+    # 2026-11-27 (人类反馈：漏窗): 父门只认 verdict 就收口，但**离开前必须收掉子进程**
+    # —— 否则驱动 teardown 卡住期间，子进程的真窗口会留在桌面上等人点。
+    # kill 是尽力而为（TerminateProcess 触发窗口销毁），wait 有界 5s（卡住就放弃）。
+    try:
+        _deadline = _time.monotonic() + 180
+        v = None
+        while _time.monotonic() < _deadline:
+            try:
+                with open(verdict_path, encoding='utf-8') as f:
+                    v = json.load(f)
+                break                  # 子进程判定已落盘（进程本身可能仍在僵尸收尾）
+            except (OSError, ValueError):
+                if proc.poll() is not None and v is None:
+                    break              # 子进程先退了且无 verdict -> 按 FAIL 走
+                _time.sleep(1.0)
+        child_rc = proc.poll()
+        if v is None and _time.monotonic() >= _deadline:
+            print('FAIL 冒烟子进程超时 180s（无 verdict，已硬杀）')
+    finally:
         try:
-            with open(verdict_path, encoding='utf-8') as f:
-                v = json.load(f)
-            break                      # 子进程判定已落盘（进程本身可能仍在僵尸收尾）
-        except (OSError, ValueError):
-            if proc.poll() is not None and v is None:
-                break                  # 子进程先退了且无 verdict -> 按 FAIL 走
-            _time.sleep(1.0)
-    child_rc = proc.poll()
-    if v is None and _time.monotonic() >= _deadline:
-        try:
-            proc.kill()                # 不 wait：僵尸收尾可能卡住，父门不被拖住
+            if proc.poll() is None:
+                proc.kill()
         except Exception:
             pass
-        print('FAIL 冒烟子进程超时 180s（无 verdict，已硬杀）')
+        try:
+            proc.wait(timeout=5)
+        except Exception:
+            pass
     v = None
     try:
         with open(verdict_path, encoding='utf-8') as f:

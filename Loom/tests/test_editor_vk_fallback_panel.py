@@ -70,6 +70,24 @@ def check(name, cond, detail=''):
         _fails.append(name)
 
 
+def _reap_child(proc, mode):
+    """kill + wait(timeout)：保证父门退出时子进程（及其真窗口）已不在了。
+
+    为什么 kill 之后再 wait：子女是直连显示器的真窗口进程，驱动 teardown 可能卡住
+    （历史实测：进程变僵尸数分钟），此时 wait 会一起挂住。kill 是尽力而为，wait 有
+    界（5s）失败就放弃 —— 但窗口已随 TerminateProcess 进入销毁流程。
+    """
+    try:
+        if proc.poll() is None:
+            proc.kill()
+    except Exception:
+        pass
+    try:
+        proc.wait(timeout=5)
+    except Exception:
+        pass
+
+
 def run_child(mode):
     verdict_path = os.path.join(tempfile.gettempdir(),
                                 'editor_vk_fallback_%s_verdict.json' % mode)
@@ -89,24 +107,27 @@ def run_child(mode):
     print('---- 子进程 mode=%s: %s ----' % (mode, os.path.basename(CHILD)))
     proc = subprocess.Popen([sys.executable, CHILD, mode, verdict_path],
                             env=env, cwd=ROOT)
-    deadline = time.monotonic() + 240
-    v = None
-    while time.monotonic() < deadline:
-        try:
-            with open(verdict_path, encoding='utf-8') as f:
-                v = json.load(f)
-            break
-        except (OSError, ValueError):
-            if proc.poll() is not None and v is None:
+    # 2026-11-27 (人类反馈：测试不得留下要人点的窗口): 无论走哪条分支，离开本函数
+    # 前都必须 kill + wait —— 子进程的真窗口存活期 = 进程存活期，父门只认 verdict
+    # 就收口（不等退出），残留的是**子进程窗口**（实测：驱动 teardown 卡住时窗口
+    # 会在桌面上留数秒到数分钟）。kill 后再 wait(timeout) 收尸，超时不再纠缠。
+    try:
+        deadline = time.monotonic() + 240
+        v = None
+        while time.monotonic() < deadline:
+            try:
+                with open(verdict_path, encoding='utf-8') as f:
+                    v = json.load(f)
                 break
-            time.sleep(1.0)
-    child_rc = proc.poll()
-    if v is None and time.monotonic() >= deadline:
-        try:
-            proc.kill()
-        except Exception:
-            pass
-        print('FAIL mode=%s 子进程超时 240s（无 verdict，已硬杀）' % mode)
+            except (OSError, ValueError):
+                if proc.poll() is not None and v is None:
+                    break
+                time.sleep(1.0)
+        child_rc = proc.poll()
+        if v is None and time.monotonic() >= deadline:
+            print('FAIL mode=%s 子进程超时 240s（无 verdict，已硬杀）' % mode)
+    finally:
+        _reap_child(proc, mode)
     if v is None:
         try:
             with open(verdict_path, encoding='utf-8') as f:

@@ -32,9 +32,30 @@ ROOT = os.path.dirname(HERE)          # 引擎根 = Loom/
 BASE = ROOT
 sys.path.insert(0, BASE)
 os.chdir(BASE)
-os.environ.setdefault('LOOM_NO_DIALOG', '1')
+os.environ['LOOM_NO_DIALOG'] = '1'
 os.environ.setdefault('LOOM_NO_SAVE_MIGRATE', '1')
 os.environ.setdefault('LOOM_NO_PARALLEL', '1')
+
+def _arm_unattended_watchdog(seconds):
+    """无人值守兜底（2026-11-27 人类反馈：测试不得留下要人点的窗口）。
+
+    任何阻塞路径都不许把本进程及其真窗口留在桌面上等人点 —— 到点进程级硬退出
+    （窗口随进程销毁）。正常路径末尾的 os._exit 更早发生，此定时器只是最后防线。
+    """
+    import threading
+
+    def _bail():
+        try:
+            print('[child] watchdog %ds 到点硬退（流程未正常收口）' % seconds,
+                  flush=True)
+        except Exception:
+            pass
+        os._exit(4)
+
+    threading.Timer(seconds, _bail).start()
+
+
+_arm_unattended_watchdog(200)
 
 BACKEND = (sys.argv[1] if len(sys.argv) > 1 else 'gl').lower()
 VERDICT = sys.argv[2] if len(sys.argv) > 2 else os.path.join(
@@ -194,6 +215,25 @@ def cpu_gates():
         _guard('vk B3 编辑态画网格（视图叠加层取 grid_geometry）', _b3_vk)
 
 
+def _close_gracefully(app, win):
+    """优雅关窗（try/finally 兜底；失败/超时由模块末尾的 os._exit 进程级收口）。"""
+    try:
+        if win.editor is not None:
+            win.editor.mark_saved()
+        win._suppress_confirm = True
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(0, win.close)
+        t0 = time.perf_counter()
+        while win.isVisible() and time.perf_counter() - t0 < 10:
+            app.processEvents()
+            time.sleep(0.01)
+        print('[child] 关窗 %s (耗时 %.1fs)' % (
+              'OK' if not win.isVisible() else '超时(转 os._exit)',
+              time.perf_counter() - t0), flush=True)
+    except Exception as _ce:
+        print('[child] 优雅关窗异常 (转 os._exit): %r' % (_ce,), flush=True)
+
+
 def main():
     from PySide6.QtWidgets import QApplication
     from PySide6.QtGui import QImage
@@ -205,7 +245,17 @@ def main():
     win = lg.LoomGUI(scene_path=None, width=900, height=640,
                      backend=('vulkan' if BACKEND == 'vk' else 'gl'))
     win.show()
+    # 2026-11-27（人类反馈：测试不得留下要人点的窗口）：无论走哪条分支（含早退、
+    # 判据异常），离开 main 前都优雅关窗 —— mark_saved + 抑制「是否保存」三态框
+    # （测试态不走人机确认）+ QTimer 关窗 + 有界泵；末尾 os._exit 兜底。
+    try:
+        _main_body(app, win, QImage)
+    finally:
+        _close_gracefully(app, win)
 
+
+def _main_body(app, win, QImage):
+    """真窗口判据段（原 main 主体，逐字保留；异常由模块级 try 收口）。"""
     def ready():
         vp = win.viewport
         if BACKEND == 'vk':
@@ -312,4 +362,3 @@ sys.stdout.flush()
 # Qt + wgpu 真窗口进程收尾会非确定性卡在驱动 teardown（test_vk_editor_smoke 同款
 # 已知问题），判定已落盘 -> 直接硬退，父门只认 verdict 文件。
 os._exit(0 if verdict['ok'] else 1)
-

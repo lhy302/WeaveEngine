@@ -60,7 +60,7 @@ def _enforce_fail_exit_code():
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)          # 子进程住在 tests/，引擎根 = Loom/
 sys.path.insert(0, ROOT)
-os.environ.setdefault('LOOM_NO_DIALOG', '1')
+os.environ['LOOM_NO_DIALOG'] = '1'
 os.environ.setdefault('LOOM_NO_PARALLEL', '1')
 os.environ['LOOM_NO_SAVE_MIGRATE'] = '1'
 os.environ.setdefault('WGPU_BACKEND_TYPE', 'Vulkan')
@@ -97,6 +97,31 @@ def check(name, cond, detail=""):
 
 
 # ============================ A. 结构段（无窗口） ============================
+
+
+def _arm_unattended_watchdog(seconds):
+    """无人值守兜底（2026-11-27 人类反馈：测试不得留下要人点的窗口）。
+
+    任何阻塞路径（意外模态框 / rendercanvas 调度器挂住 / 驱动卡死）都不许把本
+    进程及其真窗口留在桌面上等人点 —— 到点进程级硬退出（窗口随进程销毁）。
+    正常路径末尾的 TerminateProcess 更早发生，此定时器只是最后防线。
+    """
+    import os as _os
+    import threading
+
+    def _bail():
+        try:
+            print('[child] watchdog %ds 到点硬退（流程未正常收口）' % seconds,
+                  flush=True)
+        except Exception:
+            pass
+        _os._exit(4)
+
+    threading.Timer(seconds, _bail).start()
+
+
+_arm_unattended_watchdog(150)
+
 
 def section_a():
     print('=== A. 结构：装配形状 / 同源唯一实现 ===')
